@@ -47,6 +47,7 @@ use super::{
     CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::CompactionTask;
+use crate::hummock::compaction::in_progress_compaction::InProgressCompactInfo;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -61,6 +62,7 @@ pub struct CompactionSelectorContext<'a> {
     pub developer_config: Arc<CompactionDeveloperConfig>,
     pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     pub state_table_info: &'a HummockVersionStateTableInfo,
+    pub in_progress_compactions: &'a [InProgressCompactInfo],
 }
 
 pub trait CompactionSelector: Sync + Send {

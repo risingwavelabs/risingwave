@@ -23,7 +23,13 @@ use risingwave_pb::hummock::level_handler::RunningCompactTask;
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
+    /// Input SSTs that are already selected by running compaction tasks.
+    ///
+    /// This is an input-side pending index for picker checks. Full running task
+    /// metadata is stored in `Compaction::compact_task_assignment`.
     compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
+    /// A lightweight summary used to persist and restore `compacting_files`, and
+    /// to report pending input task metrics.
     pending_tasks: Vec<RunningCompactTask>,
 }
 

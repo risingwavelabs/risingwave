@@ -15,6 +15,7 @@
 #![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
 
 pub mod compaction_config;
+pub(crate) mod in_progress_compaction;
 mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
@@ -38,6 +39,7 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
+use self::in_progress_compaction::InProgressCompactInfo;
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
 use super::GroupStateValidator;
 use crate::MetaOpts;
@@ -110,6 +112,7 @@ impl CompactStatus {
         developer_config: Arc<CompactionDeveloperConfig>,
         table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
         state_table_info: &HummockVersionStateTableInfo,
+        in_progress_compactions: &[InProgressCompactInfo],
     ) -> Option<CompactionTask> {
         let selector_context = CompactionSelectorContext {
             group,
@@ -121,6 +124,7 @@ impl CompactStatus {
             developer_config: developer_config.clone(),
             table_watermarks,
             state_table_info,
+            in_progress_compactions,
         };
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -146,6 +150,7 @@ impl CompactStatus {
                         developer_config,
                         table_watermarks,
                         state_table_info,
+                        in_progress_compactions,
                     };
                     return EmergencySelector::default().pick_compaction(task_id, selector_context);
                 }

@@ -426,6 +426,7 @@ pub fn compaction_selector_context<'a>(
         developer_config,
         table_watermarks,
         state_table_info,
+        in_progress_compactions: &[],
     }
 }
 
