@@ -24,13 +24,14 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_dml::dml_manager::DmlManagerRef;
+use risingwave_dml::{TableDmlHandleRef, WriteHandle};
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 
 /// [`UpdateExecutor`] implements table update with values from its child executor and given
@@ -127,32 +128,179 @@ impl Executor for UpdateExecutor {
                 old_exprs,
                 new_exprs,
                 chunk_size,
-                schema,
-                identity,
+                schema: _,
+                identity: _,
                 returning,
                 txn_id,
                 session_id,
                 upsert,
                 wait_for_persistence,
             } = *self;
-            let executor = Box::new(UpdateExecutor {
-                table_id,
-                table_version_id,
-                dml_manager,
-                child: wrap_push_executor(child, context.clone()),
+
+            let table_dml_handle = dml_manager.table_dml_handle(table_id, table_version_id)?;
+
+            let data_types = table_dml_handle
+                .column_descs()
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect_vec();
+
+            assert_eq!(
+                data_types,
+                new_exprs.iter().map(|e| e.return_type()).collect_vec(),
+                "bad update schema"
+            );
+            assert_eq!(
+                data_types,
+                old_exprs.iter().map(|e| e.return_type()).collect_vec(),
+                "bad update schema"
+            );
+
+            let mut write_handle = table_dml_handle.write_handle(session_id, txn_id)?;
+            write_handle.begin()?;
+
+            let mut state = UpdatePushState {
+                table_dml_handle,
+                write_handle: Some(write_handle),
                 old_exprs,
                 new_exprs,
-                chunk_size,
-                schema,
-                identity,
+                builder: StreamChunkBuilder::new(chunk_size, data_types),
                 returning,
-                txn_id,
-                session_id,
                 upsert,
                 wait_for_persistence,
-            });
+                rows_updated: 0,
+                downstream_finished: false,
+            };
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            {
+                let mut child_sink = UpdateChildSink {
+                    state: &mut state,
+                    sink,
+                };
+                child.execute_push(context, &mut child_sink).await?;
+            }
+
+            state.finish(sink).await
+        }
+        .boxed()
+    }
+}
+
+struct UpdatePushState {
+    table_dml_handle: TableDmlHandleRef,
+    write_handle: Option<WriteHandle>,
+    old_exprs: Vec<BoxedExpression>,
+    new_exprs: Vec<BoxedExpression>,
+    builder: StreamChunkBuilder,
+    returning: bool,
+    upsert: bool,
+    wait_for_persistence: bool,
+    rows_updated: usize,
+    downstream_finished: bool,
+}
+
+impl UpdatePushState {
+    async fn write_txn_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        if cfg!(debug_assertions) {
+            self.table_dml_handle.check_chunk_schema(&chunk);
+        }
+        self.write_handle
+            .as_mut()
+            .unwrap()
+            .write_chunk(chunk)
+            .await?;
+        Ok(())
+    }
+
+    async fn consume_input_chunk(
+        &mut self,
+        input: DataChunk,
+        sink: &mut dyn PushSink,
+    ) -> Result<()> {
+        let old_data_chunk = {
+            let mut columns = Vec::with_capacity(self.old_exprs.len());
+            for expr in &self.old_exprs {
+                let column = expr.eval(&input).await?;
+                columns.push(column);
+            }
+
+            DataChunk::new(columns, input.visibility().clone())
+        };
+
+        let updated_data_chunk = {
+            let mut columns = Vec::with_capacity(self.new_exprs.len());
+            for expr in &self.new_exprs {
+                let column = expr.eval(&input).await?;
+                columns.push(column);
+            }
+
+            DataChunk::new(columns, input.visibility().clone())
+        };
+
+        if self.returning && !self.downstream_finished {
+            self.downstream_finished |= sink.push(updated_data_chunk.clone()).await?.is_finished();
+        }
+
+        for (row_delete, row_insert) in
+            (old_data_chunk.rows()).zip_eq_debug(updated_data_chunk.rows())
+        {
+            self.rows_updated += 1;
+            if row_delete == row_insert {
+                continue;
+            }
+            let chunk = if self.upsert {
+                self.builder.append_record(Record::Insert {
+                    new_row: row_insert,
+                })
+            } else {
+                self.builder.append_record(Record::Update {
+                    old_row: row_delete,
+                    new_row: row_insert,
+                })
+            };
+
+            if let Some(chunk) = chunk {
+                self.write_txn_data(chunk).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if let Some(chunk) = self.builder.take() {
+            self.write_txn_data(chunk).await?;
+        }
+
+        let write_handle = self.write_handle.take().unwrap();
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
+
+        if !self.returning && !self.downstream_finished {
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
+            array_builder.append(Some(self.rows_updated as i64));
+
+            let array = array_builder.finish();
+            let ret_chunk = DataChunk::new(vec![array.into_ref()], 1);
+            self.downstream_finished |= sink.push(ret_chunk).await?.is_finished();
+        }
+
+        sink.finish().await
+    }
+}
+
+struct UpdateChildSink<'a, 's> {
+    state: &'a mut UpdatePushState,
+    sink: &'s mut dyn PushSink,
+}
+
+impl PushSink for UpdateChildSink<'_, '_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk, self.sink).await?;
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }

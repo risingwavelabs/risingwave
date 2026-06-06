@@ -25,12 +25,13 @@ use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
+use risingwave_dml::{TableDmlHandleRef, WriteHandle};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 
 /// [`DeleteExecutor`] implements table deletion with values from its child executor.
@@ -120,31 +121,151 @@ impl Executor for DeleteExecutor {
                 dml_manager,
                 child,
                 chunk_size,
-                schema,
-                identity,
+                schema: _,
+                identity: _,
                 returning,
                 txn_id,
                 session_id,
                 upsert,
                 wait_for_persistence,
             } = *self;
-            let executor = Box::new(DeleteExecutor {
-                table_id,
-                table_version_id,
+
+            let pk_indices: HashSet<_> = pk_indices.into_iter().collect();
+            let data_types = child.schema().data_types();
+            let table_dml_handle = dml_manager.table_dml_handle(table_id, table_version_id)?;
+            assert_eq!(
+                table_dml_handle
+                    .column_descs()
+                    .iter()
+                    .filter_map(|c| (!c.is_generated()).then_some(c.data_type.clone()))
+                    .collect_vec(),
+                child.schema().data_types(),
+                "bad delete schema"
+            );
+            let mut write_handle = table_dml_handle.write_handle(session_id, txn_id)?;
+            write_handle.begin()?;
+
+            let mut state = DeletePushState {
                 pk_indices,
-                dml_manager,
-                child: wrap_push_executor(child, context.clone()),
-                chunk_size,
-                schema,
-                identity,
+                table_dml_handle,
+                write_handle: Some(write_handle),
+                builder: DataChunkBuilder::new(data_types, chunk_size),
                 returning,
-                txn_id,
-                session_id,
                 upsert,
                 wait_for_persistence,
-            });
+                rows_deleted: 0,
+                downstream_finished: false,
+            };
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            {
+                let mut child_sink = DeleteChildSink {
+                    state: &mut state,
+                    sink,
+                };
+                child.execute_push(context, &mut child_sink).await?;
+            }
+
+            state.finish(sink).await
+        }
+        .boxed()
+    }
+}
+
+struct DeletePushState {
+    pk_indices: HashSet<usize>,
+    table_dml_handle: TableDmlHandleRef,
+    write_handle: Option<WriteHandle>,
+    builder: DataChunkBuilder,
+    returning: bool,
+    upsert: bool,
+    wait_for_persistence: bool,
+    rows_deleted: usize,
+    downstream_finished: bool,
+}
+
+impl DeletePushState {
+    async fn write_txn_data(&mut self, chunk: DataChunk) -> Result<usize> {
+        let cap = chunk.capacity();
+        let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
+
+        #[cfg(debug_assertions)]
+        self.table_dml_handle.check_chunk_schema(&stream_chunk);
+
+        let cardinality = stream_chunk.cardinality();
+        self.write_handle
+            .as_mut()
+            .unwrap()
+            .write_chunk(stream_chunk)
+            .await?;
+
+        Ok(cardinality)
+    }
+
+    async fn consume_input_chunk(
+        &mut self,
+        mut data_chunk: DataChunk,
+        sink: &mut dyn PushSink,
+    ) -> Result<()> {
+        if self.returning && !self.downstream_finished {
+            self.downstream_finished |= sink.push(data_chunk.clone()).await?.is_finished();
+        }
+        if self.upsert {
+            let (cols, vis) = data_chunk.into_parts();
+            let cap = vis.len();
+            let mut new_cols = Vec::with_capacity(cols.len());
+            for (i, col) in cols.into_iter().enumerate() {
+                if self.pk_indices.contains(&i) {
+                    new_cols.push(col);
+                } else {
+                    let mut builder = col.create_builder(cap);
+                    builder.append_n_null(cap);
+                    new_cols.push(builder.finish().into());
+                }
+            }
+            data_chunk = DataChunk::new(new_cols, vis);
+        }
+        let chunks = self.builder.append_chunk(data_chunk).collect_vec();
+        for chunk in chunks {
+            self.rows_deleted += self.write_txn_data(chunk).await?;
+        }
+        Ok(())
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if let Some(chunk) = self.builder.consume_all() {
+            self.rows_deleted += self.write_txn_data(chunk).await?;
+        }
+
+        let write_handle = self.write_handle.take().unwrap();
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
+
+        if !self.returning && !self.downstream_finished {
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
+            array_builder.append(Some(self.rows_deleted as i64));
+
+            let array = array_builder.finish();
+            let ret_chunk = DataChunk::new(vec![array.into_ref()], 1);
+            self.downstream_finished |= sink.push(ret_chunk).await?.is_finished();
+        }
+
+        sink.finish().await
+    }
+}
+
+struct DeleteChildSink<'a, 's> {
+    state: &'a mut DeletePushState,
+    sink: &'s mut dyn PushSink,
+}
+
+impl PushSink for DeleteChildSink<'_, '_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk, self.sink).await?;
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }

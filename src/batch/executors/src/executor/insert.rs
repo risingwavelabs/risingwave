@@ -25,6 +25,7 @@ use risingwave_common::catalog::{Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
+use risingwave_dml::{TableDmlHandleRef, WriteHandle};
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::IndexAndExpr;
@@ -32,7 +33,7 @@ use risingwave_pb::plan_common::IndexAndExpr;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 
 /// [`InsertExecutor`] implements table insertion with values from its child executor.
@@ -117,8 +118,8 @@ impl Executor for InsertExecutor {
                 dml_manager,
                 child,
                 chunk_size,
-                schema,
-                identity,
+                schema: _,
+                identity: _,
                 column_indices,
                 sorted_default_columns,
                 row_id_index,
@@ -127,24 +128,154 @@ impl Executor for InsertExecutor {
                 session_id,
                 wait_for_persistence,
             } = *self;
-            let executor = Box::new(InsertExecutor {
-                table_id,
-                table_version_id,
-                dml_manager,
-                child: wrap_push_executor(child, context.clone()),
-                chunk_size,
-                schema,
-                identity,
+            let data_types = child.schema().data_types();
+            let table_dml_handle = dml_manager.table_dml_handle(table_id, table_version_id)?;
+            let mut write_handle = table_dml_handle.write_handle(session_id, txn_id)?;
+            write_handle.begin()?;
+
+            let mut state = InsertPushState {
+                table_dml_handle,
+                write_handle: Some(write_handle),
+                builder: DataChunkBuilder::new(data_types, chunk_size),
                 column_indices,
                 sorted_default_columns,
                 row_id_index,
                 returning,
-                txn_id,
-                session_id,
                 wait_for_persistence,
-            });
+                rows_inserted: 0,
+                downstream_finished: false,
+            };
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            {
+                let mut child_sink = InsertChildSink {
+                    state: &mut state,
+                    sink,
+                };
+                child.execute_push(context, &mut child_sink).await?;
+            }
+
+            state.finish(sink).await
+        }
+        .boxed()
+    }
+}
+
+struct InsertPushState {
+    table_dml_handle: TableDmlHandleRef,
+    write_handle: Option<WriteHandle>,
+    builder: DataChunkBuilder,
+    column_indices: Vec<usize>,
+    sorted_default_columns: Vec<(usize, BoxedExpression)>,
+    row_id_index: Option<usize>,
+    returning: bool,
+    wait_for_persistence: bool,
+    rows_inserted: usize,
+    downstream_finished: bool,
+}
+
+impl InsertPushState {
+    async fn write_txn_data(&mut self, chunk: DataChunk) -> Result<DataChunk> {
+        let cap = chunk.capacity();
+        let (mut columns, vis) = chunk.into_parts();
+
+        let dummy_chunk = DataChunk::new_dummy(cap);
+
+        let mut ordered_columns = self
+            .column_indices
+            .iter()
+            .enumerate()
+            .map(|(i, idx)| (*idx, columns[i].clone()))
+            .collect_vec();
+
+        ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
+
+        for (idx, expr) in &self.sorted_default_columns {
+            let column = expr.eval(&dummy_chunk).await?;
+            ordered_columns.push((*idx, column));
+        }
+
+        ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
+        columns = ordered_columns
+            .into_iter()
+            .map(|(_, column)| column)
+            .collect_vec();
+
+        let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
+
+        if let Some(row_id_index) = self.row_id_index {
+            let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
+            columns.insert(row_id_index, Arc::new(row_id_col.into()))
+        }
+
+        let stream_chunk = StreamChunk::with_visibility(vec![Op::Insert; cap], columns, vis);
+
+        #[cfg(debug_assertions)]
+        self.table_dml_handle.check_chunk_schema(&stream_chunk);
+
+        self.write_handle
+            .as_mut()
+            .unwrap()
+            .write_chunk(stream_chunk)
+            .await?;
+
+        Ok(returning_chunk)
+    }
+
+    async fn consume_input_chunk(
+        &mut self,
+        data_chunk: DataChunk,
+        sink: &mut dyn PushSink,
+    ) -> Result<()> {
+        let chunks = self.builder.append_chunk(data_chunk).collect_vec();
+        for chunk in chunks {
+            let chunk = self.write_txn_data(chunk).await?;
+            self.rows_inserted += chunk.cardinality();
+            if self.returning && !self.downstream_finished {
+                self.downstream_finished |= sink.push(chunk).await?.is_finished();
+            }
+        }
+        Ok(())
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if let Some(chunk) = self.builder.consume_all() {
+            let chunk = self.write_txn_data(chunk).await?;
+            self.rows_inserted += chunk.cardinality();
+            if self.returning && !self.downstream_finished {
+                self.downstream_finished |= sink.push(chunk).await?.is_finished();
+            }
+        }
+
+        let write_handle = self.write_handle.take().unwrap();
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
+
+        if !self.returning && !self.downstream_finished {
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
+            array_builder.append(Some(self.rows_inserted as i64));
+
+            let array = array_builder.finish();
+            let ret_chunk = DataChunk::new(vec![Arc::new(array.into())], 1);
+            self.downstream_finished |= sink.push(ret_chunk).await?.is_finished();
+        }
+
+        sink.finish().await
+    }
+}
+
+struct InsertChildSink<'a, 's> {
+    state: &'a mut InsertPushState,
+    sink: &'s mut dyn PushSink,
+}
+
+impl PushSink for InsertChildSink<'_, '_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk, self.sink).await?;
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }
