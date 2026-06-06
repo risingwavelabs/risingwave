@@ -27,7 +27,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 
 pub struct HopWindowExecutor {
@@ -148,26 +148,105 @@ impl Executor for HopWindowExecutor {
         async move {
             let HopWindowExecutor {
                 child,
-                identity,
-                schema,
+                identity: _,
+                schema: _,
                 window_slide,
                 window_size,
                 window_start_exprs,
                 window_end_exprs,
                 output_indices,
             } = *self;
-            let executor = Box::new(HopWindowExecutor {
-                child: wrap_push_executor(child, context.clone()),
-                identity,
-                schema,
-                window_slide,
-                window_size,
+
+            let units = window_size
+                .exact_div(&window_slide)
+                .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_size {} cannot be divided by window_slide {}",
+                        window_size, window_slide
+                    )
+                    .into(),
+                })?
+                .get();
+
+            let window_start_col_index = child.schema().len();
+            let window_end_col_index = child.schema().len() + 1;
+            let mut child_sink = HopWindowChildSink {
+                units,
+                window_start_col_index,
+                window_end_col_index,
                 window_start_exprs,
                 window_end_exprs,
                 output_indices,
-            });
+                sink,
+                downstream_finished: false,
+            };
+            child.execute_push(context, &mut child_sink).await?;
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            sink.finish().await
+        }
+        .boxed()
+    }
+}
+
+struct HopWindowChildSink<'a> {
+    units: usize,
+    window_start_col_index: usize,
+    window_end_col_index: usize,
+    window_start_exprs: Vec<BoxedExpression>,
+    window_end_exprs: Vec<BoxedExpression>,
+    output_indices: Vec<usize>,
+    sink: &'a mut dyn PushSink,
+    downstream_finished: bool,
+}
+
+impl PushSink for HopWindowChildSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.downstream_finished {
+                return Ok(PushStatus::Finished);
+            }
+
+            let data_chunk = data_chunk.compact_vis();
+            let len = data_chunk.cardinality();
+            for i in 0..self.units {
+                let window_start_col = if self.output_indices.contains(&self.window_start_col_index)
+                {
+                    Some(self.window_start_exprs[i].eval(&data_chunk).await?)
+                } else {
+                    None
+                };
+                let window_end_col = if self.output_indices.contains(&self.window_end_col_index) {
+                    Some(self.window_end_exprs[i].eval(&data_chunk).await?)
+                } else {
+                    None
+                };
+                let new_cols = self
+                    .output_indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        if idx < self.window_start_col_index {
+                            Some(data_chunk.column_at(idx).clone())
+                        } else if idx == self.window_start_col_index {
+                            Some(window_start_col.clone().unwrap())
+                        } else if idx == self.window_end_col_index {
+                            Some(window_end_col.clone().unwrap())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec();
+                self.downstream_finished |= self
+                    .sink
+                    .push(DataChunk::new(new_cols, len))
+                    .await?
+                    .is_finished();
+                if self.downstream_finished {
+                    return Ok(PushStatus::Finished);
+                }
+            }
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }

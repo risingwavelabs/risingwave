@@ -28,7 +28,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 use crate::task::ShutdownToken;
 
@@ -115,24 +115,188 @@ impl Executor for SortAggExecutor {
                 aggs,
                 group_key,
                 child,
-                schema,
-                identity,
+                schema: _,
+                identity: _,
                 output_size_limit,
                 shutdown_rx,
             } = *self;
-            let executor = Box::new(SortAggExecutor {
-                aggs,
-                group_key,
-                child: wrap_push_executor(child, context.clone()),
-                schema,
-                identity,
-                output_size_limit,
-                shutdown_rx,
-            });
+            let mut state = SortAggPushState::new(aggs, group_key, output_size_limit, shutdown_rx)?;
+            let mut child_sink = SortAggChildSink {
+                state: &mut state,
+                sink,
+            };
+            child.execute_push(context, &mut child_sink).await?;
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            state.finish(sink).await
         }
         .boxed()
+    }
+}
+
+struct SortAggPushState {
+    aggs: Vec<BoxedAggregateFunction>,
+    group_key: Vec<BoxedExpression>,
+    output_size_limit: usize,
+    shutdown_rx: ShutdownToken,
+    left_capacity: usize,
+    agg_states: Vec<AggregateState>,
+    group_builders: Vec<ArrayBuilderImpl>,
+    agg_builders: Vec<ArrayBuilderImpl>,
+    curr_group: Option<Vec<risingwave_common::types::Datum>>,
+    downstream_finished: bool,
+}
+
+impl SortAggPushState {
+    fn new(
+        aggs: Vec<BoxedAggregateFunction>,
+        group_key: Vec<BoxedExpression>,
+        output_size_limit: usize,
+        shutdown_rx: ShutdownToken,
+    ) -> Result<Self> {
+        let agg_states = aggs.iter().map(|agg| agg.create_state()).try_collect()?;
+        let (group_builders, agg_builders) = SortAggExecutor::create_builders(&group_key, &aggs);
+        let curr_group = if group_key.is_empty() {
+            Some(Vec::new())
+        } else {
+            None
+        };
+        Ok(Self {
+            aggs,
+            group_key,
+            output_size_limit,
+            shutdown_rx,
+            left_capacity: output_size_limit,
+            agg_states,
+            group_builders,
+            agg_builders,
+            curr_group,
+            downstream_finished: false,
+        })
+    }
+
+    async fn flush_current_group(
+        &mut self,
+        group: Vec<risingwave_common::types::Datum>,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        self.group_builders
+            .iter_mut()
+            .zip_eq_fast(group.into_iter())
+            .for_each(|(builder, datum)| {
+                builder.append(datum);
+            });
+        SortAggExecutor::output_agg_states(
+            &self.aggs,
+            &mut self.agg_states,
+            &mut self.agg_builders,
+        )
+        .await?;
+        self.left_capacity -= 1;
+
+        if self.left_capacity == 0 {
+            let group_builders = std::mem::take(&mut self.group_builders);
+            let agg_builders = std::mem::take(&mut self.agg_builders);
+            let output = DataChunk::new(
+                group_builders
+                    .into_iter()
+                    .chain(agg_builders)
+                    .map(|b| b.finish().into())
+                    .collect(),
+                self.output_size_limit,
+            );
+            let status = sink.push(output).await?;
+            self.downstream_finished |= status.is_finished();
+            (self.group_builders, self.agg_builders) =
+                SortAggExecutor::create_builders(&self.group_key, &self.aggs);
+            self.left_capacity = self.output_size_limit;
+            return Ok(status);
+        }
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn consume_input_chunk(
+        &mut self,
+        child_chunk: DataChunk,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        if self.downstream_finished {
+            return Ok(PushStatus::Finished);
+        }
+
+        let child_chunk = StreamChunk::from(child_chunk.compact_vis());
+        let mut group_columns = Vec::with_capacity(self.group_key.len());
+        for expr in &mut self.group_key {
+            self.shutdown_rx.check()?;
+            let result = expr.eval(&child_chunk).await?;
+            group_columns.push(result);
+        }
+
+        let groups = if group_columns.is_empty() {
+            EqGroups::single_with_len(child_chunk.cardinality())
+        } else {
+            let groups: Vec<_> = group_columns
+                .iter()
+                .map(|col| EqGroups::detect(col))
+                .try_collect()?;
+            EqGroups::intersect(&groups)
+        };
+
+        for range in groups.ranges() {
+            self.shutdown_rx.check()?;
+            let group: Vec<_> = group_columns
+                .iter()
+                .map(|col| col.datum_at(range.start))
+                .collect();
+
+            if self.curr_group.as_ref() != Some(&group)
+                && let Some(group) = self.curr_group.replace(group)
+                && self.flush_current_group(group, sink).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+
+            SortAggExecutor::update_agg_states(
+                &self.aggs,
+                &mut self.agg_states,
+                &child_chunk,
+                range,
+            )
+            .await?;
+        }
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if !self.downstream_finished
+            && let Some(group) = self.curr_group.take()
+        {
+            self.flush_current_group(group, sink).await?;
+
+            let cardinality = self.output_size_limit - self.left_capacity;
+            if cardinality > 0 {
+                let output = DataChunk::new(
+                    self.group_builders
+                        .into_iter()
+                        .chain(self.agg_builders)
+                        .map(|b| b.finish().into())
+                        .collect(),
+                    cardinality,
+                );
+                self.downstream_finished |= sink.push(output).await?.is_finished();
+            }
+        }
+        sink.finish().await
+    }
+}
+
+struct SortAggChildSink<'a, 's> {
+    state: &'a mut SortAggPushState,
+    sink: &'s mut dyn PushSink,
+}
+
+impl PushSink for SortAggChildSink<'_, '_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move { self.state.consume_input_chunk(chunk, self.sink).await }.boxed()
     }
 }
 

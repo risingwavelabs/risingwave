@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures::future::{BoxFuture, FutureExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -28,7 +28,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 use crate::error::{BatchError, Result};
 use crate::task::ShutdownToken;
@@ -125,21 +125,119 @@ impl Executor for SortOverWindowExecutor {
             let SortOverWindowExecutor {
                 child,
                 schema,
-                identity,
+                identity: _,
                 shutdown_rx,
                 inner,
             } = *self;
-            let executor = Box::new(SortOverWindowExecutor {
-                child: wrap_push_executor(child, context.clone()),
-                schema,
-                identity,
-                shutdown_rx,
-                inner,
-            });
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            let mut state = SortOverWindowPushState::new(schema, shutdown_rx, inner);
+            let mut child_sink = SortOverWindowChildSink {
+                state: &mut state,
+                sink,
+            };
+            child.execute_push(context, &mut child_sink).await?;
+
+            state.finish(sink).await
         }
         .boxed()
+    }
+}
+
+struct SortOverWindowPushState {
+    shutdown_rx: ShutdownToken,
+    inner: ExecutorInner,
+    chunk_builder: DataChunkBuilder,
+    curr_part_key: Option<OwnedRow>,
+    curr_part_rows: Vec<OwnedRow>,
+    downstream_finished: bool,
+}
+
+impl SortOverWindowPushState {
+    fn new(schema: Schema, shutdown_rx: ShutdownToken, inner: ExecutorInner) -> Self {
+        let chunk_builder = DataChunkBuilder::new(schema.data_types(), inner.chunk_size);
+        Self {
+            shutdown_rx,
+            inner,
+            chunk_builder,
+            curr_part_key: None,
+            curr_part_rows: Vec::new(),
+            downstream_finished: false,
+        }
+    }
+
+    async fn flush_partition(&mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if self.downstream_finished || self.curr_part_rows.is_empty() {
+            return Ok(if self.downstream_finished {
+                PushStatus::Finished
+            } else {
+                PushStatus::NeedMoreInput
+            });
+        }
+
+        #[for_await]
+        for output_chunk in SortOverWindowExecutor::gen_output_for_partition(
+            &self.inner,
+            &mut self.curr_part_rows,
+            &mut self.chunk_builder,
+        ) {
+            let output_chunk = output_chunk?;
+            let status = sink.push(output_chunk).await?;
+            self.downstream_finished |= status.is_finished();
+            if self.downstream_finished {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        assert!(
+            self.curr_part_rows.is_empty(),
+            "all rows should be consumed"
+        );
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn consume_input_chunk(
+        &mut self,
+        chunk: DataChunk,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        if self.downstream_finished {
+            return Ok(PushStatus::Finished);
+        }
+
+        self.shutdown_rx.check()?;
+        for row in chunk.rows() {
+            let part_key = self.inner.get_partition_key(row);
+            if Some(&part_key) != self.curr_part_key.as_ref() {
+                if self.flush_partition(sink).await?.is_finished() {
+                    return Ok(PushStatus::Finished);
+                }
+                self.curr_part_key = Some(part_key);
+            }
+            self.curr_part_rows.push(row.to_owned_row());
+        }
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if !self.downstream_finished {
+            self.flush_partition(sink).await?;
+        }
+        if !self.downstream_finished
+            && let Some(output_chunk) = self.chunk_builder.consume_all()
+        {
+            self.downstream_finished |= sink.push(output_chunk).await?.is_finished();
+        }
+        sink.finish().await
+    }
+}
+
+struct SortOverWindowChildSink<'a, 's> {
+    state: &'a mut SortOverWindowPushState,
+    sink: &'s mut dyn PushSink,
+}
+
+impl PushSink for SortOverWindowChildSink<'_, '_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move { self.state.consume_input_chunk(chunk, self.sink).await }.boxed()
     }
 }
 
