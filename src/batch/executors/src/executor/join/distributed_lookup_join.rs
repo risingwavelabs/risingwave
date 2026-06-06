@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::mem::swap;
 
 use anyhow::anyhow;
+use futures::future::BoxFuture;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_batch::task::ShutdownToken;
@@ -41,7 +42,7 @@ use crate::error::Result;
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
-    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
+    ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase, PushContext, PushSink, PushStatus,
 };
 
 /// Distributed Lookup Join Executor.
@@ -68,6 +69,14 @@ impl<K: HashKey, S: StateStore> Executor for DistributedLookupJoinExecutor<K, S>
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         Box::new(self.base).do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        Box::new(self.base).execute_push(context, sink)
     }
 }
 

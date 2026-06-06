@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -46,7 +47,7 @@ use super::AsOfDesc;
 use crate::error::Result;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
-    ExecutorBuilder, JoinType, LookupJoinBase,
+    ExecutorBuilder, JoinType, LookupJoinBase, PushContext, PushSink, PushStatus,
 };
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
@@ -270,6 +271,14 @@ impl<K: HashKey, B: LookupExecutorBuilder> Executor for LocalLookupJoinExecutor<
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         Box::new(self.base).do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        Box::new(self.base).execute_push(context, sink)
     }
 }
 
@@ -507,7 +516,9 @@ mod tests {
     use crate::executor::test_utils::{
         FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
-    use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::executor::{
+        BoxedExecutor, PushContext, SortExecutor, WrapStreamExecutor, execute_push_as_pull,
+    };
     use crate::local_lookup_join::LocalLookupJoinExecutorArgs;
     use crate::monitor::BatchSpillMetrics;
     use crate::task::ShutdownToken;
@@ -625,6 +636,26 @@ mod tests {
         diff_executor_output(order_by_executor, Box::new(expected_mock_exec)).await;
     }
 
+    async fn do_push_test(
+        join_type: JoinType,
+        condition: Option<BoxedExpression>,
+        null_safe: bool,
+        expected: DataChunk,
+    ) {
+        let lookup_join_executor = create_lookup_join_executor(join_type, condition, null_safe);
+        let order_by_executor = create_order_by_executor(lookup_join_executor);
+        let schema = order_by_executor.schema().clone();
+        let push_stream = execute_push_as_pull(
+            order_by_executor,
+            PushContext::new(ShutdownToken::empty()),
+            CHUNK_SIZE,
+        );
+        let push_output = Box::new(WrapStreamExecutor::new(schema.clone(), push_stream));
+        let mut expected_mock_exec = MockExecutor::new(schema);
+        expected_mock_exec.add(expected);
+        diff_executor_output(push_output, Box::new(expected_mock_exec)).await;
+    }
+
     #[tokio::test]
     async fn test_inner_join() {
         let expected = DataChunk::from_pretty(
@@ -641,6 +672,24 @@ mod tests {
         );
 
         do_test(JoinType::Inner, None, false, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_inner_join_push() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 5.5 2 5.5
+             2 5.5 2 4.4
+             2 8.4 2 5.5
+             2 8.4 2 4.4
+             5 4.1 5 2.3
+             5 4.1 5 3.7
+             5 9.1 5 2.3
+             5 9.1 5 3.7",
+        );
+
+        do_push_test(JoinType::Inner, None, false, expected).await;
     }
 
     #[tokio::test]

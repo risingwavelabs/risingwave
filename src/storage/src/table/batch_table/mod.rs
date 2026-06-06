@@ -45,7 +45,7 @@ use risingwave_pb::batch_plan::{PbScanRange, scan_range};
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 mod vector_index_reader;
-pub use vector_index_reader::VectorIndexReader;
+pub use vector_index_reader::{VectorIndexReader, VectorIndexSnapshot};
 
 use crate::StateStore;
 use crate::error::{StorageError, StorageResult};

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use futures::future::{BoxFuture, FutureExt};
 use futures::pin_mut;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
@@ -22,10 +23,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_storage::table::batch_table::VectorIndexReader;
+use risingwave_storage::table::batch_table::{VectorIndexReader, VectorIndexSnapshot};
 use risingwave_storage::{StateStore, dispatch_state_store};
 
-use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use super::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
+};
 use crate::error::{BatchError, Result};
 
 pub struct VectorIndexNearestExecutor<S: StateStore> {
@@ -94,6 +98,32 @@ impl<S: StateStore> Executor for VectorIndexNearestExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute().boxed()
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                query_epoch,
+                input,
+                vector_column_idx,
+                reader,
+                ..
+            } = *self;
+
+            let read_snapshot = reader.new_snapshot(query_epoch.into()).await?;
+            let mut sink = VectorIndexNearestSink {
+                read_snapshot,
+                vector_column_idx,
+                sink,
+            };
+
+            input.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
 }
 
 impl<S: StateStore> VectorIndexNearestExecutor<S> {
@@ -116,5 +146,28 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
                 .query_expand_chunk(chunk, vector_column_idx)
                 .await?;
         }
+    }
+}
+
+struct VectorIndexNearestSink<'a, 'r, S: StateStore> {
+    read_snapshot: VectorIndexSnapshot<'r, S>,
+    vector_column_idx: usize,
+    sink: &'a mut dyn PushSink,
+}
+
+impl<S: StateStore> PushSink for VectorIndexNearestSink<'_, '_, S> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let chunk = self
+                .read_snapshot
+                .query_expand_chunk(chunk, self.vector_column_idx)
+                .await?;
+            self.sink.push(chunk).await
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        self.sink.finish()
     }
 }

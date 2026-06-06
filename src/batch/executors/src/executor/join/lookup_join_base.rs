@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -34,7 +35,8 @@ use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams, HashJoinExecutor,
-    JoinHashMap, JoinType, LookupExecutorBuilder, RowId, utils,
+    JoinHashMap, JoinType, LookupExecutorBuilder, PushContext, PushSink, PushStatus, RowId,
+    execute_pull_stream_as_push, utils, wrap_push_executor,
 };
 use crate::task::ShutdownToken;
 
@@ -65,6 +67,61 @@ pub struct LookupJoinBase<K, B: LookupExecutorBuilder> {
 const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
 
 impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
+    pub fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
+        async move {
+            let LookupJoinBase {
+                join_type,
+                condition,
+                outer_side_input,
+                outer_side_data_types,
+                outer_side_key_idxs,
+                inner_side_builder,
+                inner_side_key_types,
+                inner_side_key_idxs,
+                null_safe,
+                lookup_prefix_len,
+                chunk_builder,
+                schema,
+                output_indices,
+                chunk_size,
+                asof_desc,
+                identity,
+                shutdown_rx,
+                mem_ctx,
+                _phantom,
+            } = *self;
+
+            let executor = Box::new(Self {
+                join_type,
+                condition,
+                outer_side_input: wrap_push_executor(outer_side_input, context.clone()),
+                outer_side_data_types,
+                outer_side_key_idxs,
+                inner_side_builder,
+                inner_side_key_types,
+                inner_side_key_idxs,
+                null_safe,
+                lookup_prefix_len,
+                chunk_builder,
+                schema,
+                output_indices,
+                chunk_size,
+                asof_desc,
+                identity,
+                shutdown_rx,
+                mem_ctx,
+                _phantom,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
+    }
+
     /// High level Execution flow:
     /// Repeat 1-3:
     ///   1. Read N rows from outer side input and send keys to inner side builder after

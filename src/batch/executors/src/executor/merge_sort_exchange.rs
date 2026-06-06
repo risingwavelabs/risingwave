@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -25,7 +26,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
-    Executor, ExecutorBuilder, MergeSortExecutor, WrapStreamExecutor,
+    Executor, ExecutorBuilder, MergeSortExecutor, PushContext, PushSink, PushStatus,
+    WrapStreamExecutor,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -86,13 +88,24 @@ impl<CS: 'static + Send + CreateSource> Executor for MergeSortExchangeExecutorIm
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let merge_sort_executor = self.into_merge_sort_executor().await?;
+            merge_sort_executor.execute_push(context, sink).await
+        }
+        .boxed()
+    }
 }
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `self.chunk_size`. It is possible that the chunk's size is smaller than the
 /// `self.chunk_size` as the executor runs out of input from `sources`.
 impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn do_execute(self: Box<Self>) {
+    async fn into_merge_sort_executor(self: Box<Self>) -> Result<Box<MergeSortExecutor>> {
         let mut sources: Vec<BoxedExecutor> = vec![];
         for source_idx in 0..self.proto_sources.len() {
             let new_source = self.source_creators[source_idx]
@@ -105,14 +118,19 @@ impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
             )));
         }
 
-        let merge_sort_executor = Box::new(MergeSortExecutor::new(
+        Ok(Box::new(MergeSortExecutor::new(
             sources,
             self.column_orders.clone(),
             self.schema,
             format!("MergeSortExecutor{}", &self.task_id.task_id),
             self.chunk_size,
             self.mem_ctx,
-        ));
+        )))
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    async fn do_execute(self: Box<Self>) {
+        let merge_sort_executor = self.into_merge_sort_executor().await?;
 
         #[for_await]
         for chunk in merge_sort_executor.execute() {
@@ -178,7 +196,8 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{FakeCreateSource, FakeExchangeSource};
-    use crate::task::ComputeNodeContext;
+    use crate::executor::{PushContext, execute_push_as_pull};
+    use crate::task::{ComputeNodeContext, ShutdownToken};
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -219,6 +238,64 @@ mod tests {
         ));
 
         let mut stream = executor.execute();
+        let res = stream.next().await;
+        assert!(res.is_some());
+        if let Some(res) = res {
+            let res = res.unwrap();
+            assert_eq!(res.capacity(), 3 * num_sources);
+            let col0 = res.column_at(0);
+            assert_eq!(col0.as_int32().value_at(0), Some(1));
+            assert_eq!(col0.as_int32().value_at(1), Some(1));
+            assert_eq!(col0.as_int32().value_at(2), Some(2));
+            assert_eq!(col0.as_int32().value_at(3), Some(2));
+            assert_eq!(col0.as_int32().value_at(4), Some(3));
+            assert_eq!(col0.as_int32().value_at(5), Some(3));
+        }
+        let res = stream.next().await;
+        assert!(res.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_exchange_multiple_sources_push() {
+        let chunk = DataChunk::from_pretty(
+            "i
+                     1
+                     2
+                     3",
+        );
+        let fake_exchange_source = FakeExchangeSource::new(vec![Some(chunk)]);
+        let fake_create_source = FakeCreateSource::new(fake_exchange_source);
+
+        let mut proto_sources: Vec<PbExchangeSource> = vec![];
+        let mut source_creators = vec![];
+        let num_sources = 2;
+        for _ in 0..num_sources {
+            proto_sources.push(PbExchangeSource::default());
+            source_creators.push(fake_create_source.clone());
+        }
+        let column_orders = Arc::new(vec![ColumnOrder {
+            column_index: 0,
+            order_type: OrderType::ascending(),
+        }]);
+
+        let executor = Box::new(MergeSortExchangeExecutorImpl::<FakeCreateSource>::new(
+            ComputeNodeContext::for_test(),
+            column_orders,
+            proto_sources,
+            source_creators,
+            Schema {
+                fields: vec![Field::unnamed(DataType::Int32)],
+            },
+            TaskId::default(),
+            "MergeSortExchangeExecutor2".to_owned(),
+            CHUNK_SIZE,
+        ));
+
+        let mut stream = execute_push_as_pull(
+            executor,
+            PushContext::new(ShutdownToken::empty()),
+            CHUNK_SIZE,
+        );
         let res = stream.next().await;
         assert!(res.is_some());
         if let Some(res) = res {
