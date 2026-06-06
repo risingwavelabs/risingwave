@@ -12,11 +12,11 @@ SELECT id, SUM(value) as total FROM test_table GROUP BY id;
 skipif parallel
 skipif madsim
 system ok
-fragment_id=$(psql -h $SLT_HOST -p $SLT_PORT -d $SLT_DB -U root -tAc "SELECT fragment_id
+fragment_id=$(psql -h $SLT_HOST -p $SLT_PORT -d $__DATABASE__ -U root -tAc "SELECT fragment_id
 FROM rw_catalog.rw_fragments
 WHERE table_id = (SELECT id FROM rw_catalog.rw_tables WHERE name = 'test_table')
 AND flags @> ARRAY['MVIEW'];")
-psql_validate.py --debug --db dev --sql "DESCRIBE FRAGMENT $fragment_id" \
+psql_validate.py --debug --db $__DATABASE__ --sql "DESCRIBE FRAGMENT $fragment_id" \
 --expected 'Fragment % (Table %)
 Distribution Type: %
 Parallelism: %

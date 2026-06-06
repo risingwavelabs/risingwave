@@ -56,6 +56,9 @@ use tracing::{Instrument, debug, error, warn};
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::{FragmentId, TableId};
+use crate::expr::function_impl::context::{
+    AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
+};
 use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::distributed::QueryMessage;
@@ -677,7 +680,14 @@ impl StageRunner {
 
         let shutdown_rx0 = shutdown_rx.clone();
 
-        let result = expr_context_scope(expr_context, async {
+        let catalog_reader = self.ctx.session().env().catalog_reader().clone();
+        let user_info_reader = self.ctx.session().env().user_info_reader().clone();
+        let auth_context = self.ctx.session().auth_context();
+        let db_name = self.ctx.session().database();
+        let search_path = self.ctx.session().config().search_path();
+        let meta_client = self.ctx.session().env().meta_client_ref();
+
+        let exec = async {
             let executor = executor.build().await?;
             let mut sink = RootStagePushSink {
                 sender: result_tx.clone(),
@@ -691,8 +701,15 @@ impl StageRunner {
                 }
             }
             Ok(())
-        })
-        .await;
+        };
+        let exec = async { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
+        let exec = async { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
+        let exec = async { DB_NAME::scope(db_name, exec).await }.boxed();
+        let exec = async { SEARCH_PATH::scope(search_path, exec).await }.boxed();
+        let exec = async { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
+        let exec = async { META_CLIENT::scope(meta_client, exec).await }.boxed();
+
+        let result = expr_context_scope(expr_context, exec).await;
 
         if let Err(err) = &result {
             // If we encountered error when executing root stage locally, we have to notify the result fetcher, which is

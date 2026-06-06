@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
+use risingwave_expr::expr_context::{capture_expr_context, expr_context_scope};
 use tokio::sync::{Mutex, mpsc};
 
 use super::{BoxedDataChunkStream, BoxedExecutor};
@@ -418,7 +419,7 @@ async fn execute_pull_stream_as_push_parallel(
 }
 
 struct ChannelPushSink {
-    sender: tokio::sync::mpsc::Sender<Result<DataChunk>>,
+    sender: mpsc::Sender<Result<DataChunk>>,
 }
 
 impl PushSink for ChannelPushSink {
@@ -437,14 +438,22 @@ impl PushSink for ChannelPushSink {
 /// Adapter used while pull consumers are migrated to consume push pipelines directly.
 #[try_stream(boxed, ok = DataChunk, error = BatchError)]
 pub async fn execute_push_as_pull(executor: BoxedExecutor, context: PushContext, buffer: usize) {
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(buffer.max(1));
+    let (sender, mut receiver) = mpsc::channel(buffer.max(1));
     let mut sink = ChannelPushSink {
         sender: sender.clone(),
     };
+    let expr_context = capture_expr_context().ok();
 
     tokio::spawn(async move {
-        if let Err(error) = executor.execute_push(context, &mut sink).await {
-            let _ = sender.send(Err(error)).await;
+        let exec = async move {
+            if let Err(error) = executor.execute_push(context, &mut sink).await {
+                let _ = sender.send(Err(error)).await;
+            }
+        };
+        if let Some(expr_context) = expr_context {
+            expr_context_scope(expr_context, exec).await;
+        } else {
+            exec.await;
         }
     });
 
