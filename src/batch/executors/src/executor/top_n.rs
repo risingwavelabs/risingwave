@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
@@ -29,6 +30,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
+    execute_push_as_pull,
 };
 
 /// Top-N Executor
@@ -114,6 +117,42 @@ impl Executor for TopNExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let TopNExecutor {
+                child,
+                column_orders,
+                offset,
+                limit,
+                with_ties,
+                schema: _,
+                identity,
+                chunk_size,
+                mem_ctx,
+            } = *self;
+            let child_schema = child.schema().clone();
+            let child_stream =
+                execute_push_as_pull(child, context.clone(), context.morsel_budget());
+            let executor = Box::new(TopNExecutor::new(
+                Box::new(WrapStreamExecutor::new(child_schema, child_stream)),
+                column_orders,
+                offset,
+                limit,
+                with_ties,
+                identity,
+                chunk_size,
+                mem_ctx,
+            ));
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

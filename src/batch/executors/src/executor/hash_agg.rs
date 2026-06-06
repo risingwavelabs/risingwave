@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
@@ -40,7 +41,8 @@ use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    WrapStreamExecutor,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
+    execute_push_as_pull,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::SpillBackend::Disk;
@@ -285,6 +287,59 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let HashAggExecutor {
+                aggs,
+                group_key_columns,
+                group_key_types,
+                schema,
+                child,
+                init_agg_state_executor,
+                identity,
+                chunk_size,
+                mem_context,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+                shutdown_rx,
+                _phantom: _,
+            } = *self;
+            let child_schema = child.schema().clone();
+            let child_stream =
+                execute_push_as_pull(child, context.clone(), context.morsel_budget());
+            let child = Box::new(WrapStreamExecutor::new(child_schema, child_stream));
+            let init_agg_state_executor = init_agg_state_executor.map(|executor| {
+                let schema = executor.schema().clone();
+                let stream =
+                    execute_push_as_pull(executor, context.clone(), context.morsel_budget());
+                Box::new(WrapStreamExecutor::new(schema, stream)) as BoxedExecutor
+            });
+            let executor = Box::new(HashAggExecutor::<K>::new_inner(
+                aggs,
+                group_key_columns,
+                group_key_types,
+                schema,
+                child,
+                init_agg_state_executor,
+                identity,
+                chunk_size,
+                mem_context,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+                shutdown_rx,
+            ));
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

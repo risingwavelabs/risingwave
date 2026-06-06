@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -31,7 +32,8 @@ use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    WrapStreamExecutor,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
+    execute_push_as_pull,
 };
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
@@ -72,6 +74,42 @@ impl Executor for SortExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let SortExecutor {
+                child,
+                column_orders,
+                identity,
+                schema: _,
+                chunk_size,
+                mem_context,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+            } = *self;
+            let child_schema = child.schema().clone();
+            let child_stream =
+                execute_push_as_pull(child, context.clone(), context.morsel_budget());
+            let executor = Box::new(SortExecutor::new_inner(
+                Box::new(WrapStreamExecutor::new(child_schema, child_stream)),
+                column_orders,
+                identity,
+                chunk_size,
+                mem_context,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+            ));
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

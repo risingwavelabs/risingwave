@@ -19,6 +19,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -40,7 +41,8 @@ use super::{AsOfDesc, AsOfInequalityType, ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    WrapStreamExecutor,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
+    execute_push_as_pull,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
@@ -109,6 +111,63 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let HashJoinExecutor {
+                join_type,
+                original_schema: _,
+                schema: _,
+                output_indices,
+                probe_side_source,
+                build_side_source,
+                probe_key_idxs,
+                build_key_idxs,
+                cond,
+                null_matched,
+                identity,
+                chunk_size,
+                asof_desc,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+                shutdown_rx,
+                mem_ctx,
+                _phantom: _,
+            } = *self;
+            let probe_schema = probe_side_source.schema().clone();
+            let build_schema = build_side_source.schema().clone();
+            let probe_stream =
+                execute_push_as_pull(probe_side_source, context.clone(), context.morsel_budget());
+            let build_stream =
+                execute_push_as_pull(build_side_source, context.clone(), context.morsel_budget());
+            let executor = Box::new(HashJoinExecutor::<K>::new_inner(
+                join_type,
+                output_indices,
+                Box::new(WrapStreamExecutor::new(probe_schema, probe_stream)),
+                Box::new(WrapStreamExecutor::new(build_schema, build_stream)),
+                probe_key_idxs,
+                build_key_idxs,
+                null_matched,
+                cond,
+                identity,
+                chunk_size,
+                asof_desc,
+                spill_backend,
+                spill_metrics,
+                memory_upper_bound,
+                shutdown_rx,
+                mem_ctx,
+            ));
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 
