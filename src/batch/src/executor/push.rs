@@ -109,6 +109,46 @@ pub trait PushSink: Send {
     }
 }
 
+/// Forwards chunks to another sink but suppresses `finish`.
+///
+/// This is used by parent operators that execute multiple child push pipelines
+/// and must finalize their downstream sink only after all children have run.
+pub struct ForwardingNoFinishSink<'a> {
+    sink: &'a mut dyn PushSink,
+    finished: bool,
+}
+
+impl<'a> ForwardingNoFinishSink<'a> {
+    pub fn new(sink: &'a mut dyn PushSink) -> Self {
+        Self {
+            sink,
+            finished: false,
+        }
+    }
+}
+
+impl PushSink for ForwardingNoFinishSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let status = self.sink.push(chunk).await?;
+            self.finished |= status.is_finished();
+            Ok(status)
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.finished {
+                Ok(PushStatus::Finished)
+            } else {
+                Ok(PushStatus::NeedMoreInput)
+            }
+        }
+        .boxed()
+    }
+}
+
 /// A chunk-sized scheduling unit.
 #[derive(Debug)]
 pub struct Morsel {

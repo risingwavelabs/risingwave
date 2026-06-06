@@ -16,12 +16,13 @@ use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, PushContext, PushSink,
-    PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushStatus,
 };
 
 pub struct MaxOneRowExecutor {
@@ -93,13 +94,40 @@ impl Executor for MaxOneRowExecutor {
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
-            let MaxOneRowExecutor { child, identity } = *self;
-            let executor = Box::new(MaxOneRowExecutor {
-                child: wrap_push_executor(child, context.clone()),
-                identity,
-            });
+            let data_types = self.child.schema().data_types();
+            let mut child_sink = MaxOneRowChildSink {
+                data_types,
+                result: None,
+            };
+            self.child.execute_push(context, &mut child_sink).await?;
 
-            execute_pull_stream_as_push(executor.execute(), context, sink).await
+            if let Some(result) = child_sink.result
+                && sink.push(result).await?.is_finished()
+            {
+                return sink.finish().await;
+            }
+            sink.finish().await
+        }
+        .boxed()
+    }
+}
+
+struct MaxOneRowChildSink {
+    data_types: Vec<DataType>,
+    result: Option<DataChunk>,
+}
+
+impl PushSink for MaxOneRowChildSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            for row in chunk.rows() {
+                if self.result.is_some() {
+                    bail!("Scalar subquery produced more than one row.");
+                } else {
+                    self.result = Some(DataChunk::from_rows(&[row], &self.data_types));
+                }
+            }
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }

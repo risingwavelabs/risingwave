@@ -36,7 +36,7 @@ use super::top_n::{HeapElem, TopNHeap};
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    PushContext, PushSink, PushStatus,
 };
 
 /// Group Top-N Executor
@@ -168,7 +168,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
     }
 }
 
-impl<K: HashKey> Executor for GroupTopNExecutor<K> {
+impl<K: HashKey + Send + Sync> Executor for GroupTopNExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -195,26 +195,130 @@ impl<K: HashKey> Executor for GroupTopNExecutor<K> {
                 group_key,
                 with_ties,
                 schema,
-                identity,
+                identity: _,
                 chunk_size,
                 mem_ctx,
                 _phantom: _,
             } = *self;
-            let executor = Box::new(GroupTopNExecutor::<K> {
-                child: wrap_push_executor(child, context.clone()),
+
+            if limit == 0 {
+                return sink.finish().await;
+            }
+
+            let mut state = GroupTopNPushState::<K>::new(
                 column_orders,
                 offset,
                 limit,
                 group_key,
                 with_ties,
                 schema,
-                identity,
                 chunk_size,
                 mem_ctx,
-                _phantom: PhantomData,
-            });
+            );
+            let mut child_sink = GroupTopNChildSink { state: &mut state };
+            child.execute_push(context, &mut child_sink).await?;
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            state.finish(sink).await
+        }
+        .boxed()
+    }
+}
+
+struct GroupTopNPushState<K: HashKey> {
+    column_orders: Vec<ColumnOrder>,
+    offset: usize,
+    limit: usize,
+    group_key: Vec<usize>,
+    with_ties: bool,
+    schema: Schema,
+    chunk_size: usize,
+    mem_ctx: MemoryContext,
+    groups: HashMap<K, TopNHeap, PrecomputedBuildHasher, MonitoredGlobalAlloc>,
+}
+
+impl<K: HashKey> GroupTopNPushState<K> {
+    fn new(
+        column_orders: Vec<ColumnOrder>,
+        offset: usize,
+        limit: usize,
+        group_key: Vec<usize>,
+        with_ties: bool,
+        schema: Schema,
+        chunk_size: usize,
+        mem_ctx: MemoryContext,
+    ) -> Self {
+        let groups =
+            HashMap::<K, TopNHeap, PrecomputedBuildHasher, MonitoredGlobalAlloc>::with_hasher_in(
+                PrecomputedBuildHasher,
+                mem_ctx.global_allocator(),
+            );
+        Self {
+            column_orders,
+            offset,
+            limit,
+            group_key,
+            with_ties,
+            schema,
+            chunk_size,
+            mem_ctx,
+            groups,
+        }
+    }
+
+    fn consume_input_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        let chunk = Arc::new(chunk);
+        let keys = K::build_many(self.group_key.as_slice(), &chunk);
+
+        for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
+            .into_iter()
+            .zip_eq_fast(keys.into_iter())
+            .enumerate()
+            .filter_by_bitmap(chunk.visibility())
+        {
+            let heap = self.groups.entry(key).or_insert_with(|| {
+                TopNHeap::new(
+                    self.limit,
+                    self.offset,
+                    self.with_ties,
+                    self.mem_ctx.clone(),
+                )
+            });
+            heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
+        }
+        Ok(())
+    }
+
+    async fn finish(mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
+        for (_, h) in &mut self.groups {
+            let mut heap = TopNHeap::empty();
+            swap(&mut heap, h);
+            for ele in heap.dump() {
+                if let Some(spilled) = chunk_builder.append_one_row(ele.row())
+                    && sink.push(spilled).await?.is_finished()
+                {
+                    return sink.finish().await;
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all()
+            && sink.push(spilled).await?.is_finished()
+        {
+            return sink.finish().await;
+        }
+        sink.finish().await
+    }
+}
+
+struct GroupTopNChildSink<'a, K: HashKey> {
+    state: &'a mut GroupTopNPushState<K>,
+}
+
+impl<K: HashKey + Send + Sync> PushSink for GroupTopNChildSink<'_, K> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk)?;
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }

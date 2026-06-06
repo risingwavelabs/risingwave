@@ -24,7 +24,7 @@ use rw_futures_util::select_all;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+    ForwardingNoFinishSink, PushContext, PushSink, PushStatus,
 };
 
 pub struct UnionExecutor {
@@ -51,14 +51,14 @@ impl Executor for UnionExecutor {
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
-            let UnionExecutor { inputs, identity } = *self;
-            let inputs = inputs
-                .into_iter()
-                .map(|input| wrap_push_executor(input, context.clone()))
-                .collect_vec();
-            let executor = Box::new(UnionExecutor { inputs, identity });
-
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            for input in self.inputs {
+                let mut child_sink = ForwardingNoFinishSink::new(sink);
+                let status = input.execute_push(context.clone(), &mut child_sink).await?;
+                if status.is_finished() {
+                    return sink.finish().await;
+                }
+            }
+            sink.finish().await
         }
         .boxed()
     }
