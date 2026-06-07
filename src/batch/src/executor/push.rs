@@ -328,6 +328,73 @@ pub trait BatchPipelineOperatorFactory: Send + Sync {
     fn create(&self) -> Box<dyn BatchPipelineOperator>;
 }
 
+/// Applies a driver-style operator chain to chunks produced by an executor
+/// that is not yet a native morsel source.
+pub struct PipelineOperatorPushSink<'a> {
+    operators: Vec<Box<dyn BatchPipelineOperator>>,
+    downstream: &'a mut dyn PushSink,
+}
+
+impl<'a> PipelineOperatorPushSink<'a> {
+    pub fn new(
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        downstream: &'a mut dyn PushSink,
+    ) -> Self {
+        Self {
+            operators,
+            downstream,
+        }
+    }
+}
+
+impl PushSink for PipelineOperatorPushSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let output = MorselPipelineDriver::<StreamMorselSource>::run_operators_from(
+                &mut self.operators,
+                0,
+                vec![chunk],
+            )
+            .await?;
+            let status = MorselPipelineDriver::<StreamMorselSource>::push_outputs(
+                output.chunks,
+                self.downstream,
+            )
+            .await?;
+            if status.is_finished() || output.status.is_finished() {
+                Ok(PushStatus::Finished)
+            } else {
+                Ok(PushStatus::NeedMoreInput)
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            for operator_idx in 0..self.operators.len() {
+                let output = self.operators[operator_idx].finish().await?;
+                let output = MorselPipelineDriver::<StreamMorselSource>::run_operators_from(
+                    &mut self.operators,
+                    operator_idx + 1,
+                    output.chunks,
+                )
+                .await?;
+                let status = MorselPipelineDriver::<StreamMorselSource>::push_outputs(
+                    output.chunks,
+                    self.downstream,
+                )
+                .await?;
+                if status.is_finished() || output.status.is_finished() {
+                    return self.downstream.finish().await;
+                }
+            }
+            self.downstream.finish().await
+        }
+        .boxed()
+    }
+}
+
 pub struct StreamMorselSource {
     stream: BoxedDataChunkStream,
     next_sequence: u64,
@@ -424,7 +491,7 @@ where
         sink.finish().await
     }
 
-    async fn run_operators_from(
+    pub(crate) async fn run_operators_from(
         operators: &mut [Box<dyn BatchPipelineOperator>],
         start: usize,
         mut chunks: Vec<DataChunk>,
@@ -448,7 +515,10 @@ where
         Ok(PipelineOperatorOutput::new(chunks, status))
     }
 
-    async fn push_outputs(chunks: Vec<DataChunk>, sink: &mut dyn PushSink) -> Result<PushStatus> {
+    pub(crate) async fn push_outputs(
+        chunks: Vec<DataChunk>,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
         for chunk in chunks {
             if sink.push(chunk).await?.is_finished() {
                 return Ok(PushStatus::Finished);
@@ -654,10 +724,26 @@ pub async fn push_chunk_stream(
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
+    push_chunk_stream_with_operators(stream, vec![], context, sink).await
+}
+
+/// Drives a stream-backed source through a driver-owned operator chain.
+pub async fn push_chunk_stream_with_operators(
+    stream: BoxedDataChunkStream,
+    operators: Vec<Box<dyn BatchPipelineOperator>>,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus> {
     let source = StreamMorselSource::new(stream);
-    ParallelMorselPipelineDriver::source_only(source, context)
-        .execute(sink)
-        .await
+    if operators.is_empty() {
+        ParallelMorselPipelineDriver::source_only(source, context)
+            .execute(sink)
+            .await
+    } else {
+        MorselPipelineDriver::new(source, operators, context)
+            .execute(sink)
+            .await
+    }
 }
 
 /// Test-only adapter for validating the old pull-to-push bridge behavior.

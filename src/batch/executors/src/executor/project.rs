@@ -24,8 +24,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink, PushStatus,
 };
 
 pub struct ProjectExecutor {
@@ -53,23 +53,38 @@ impl Executor for ProjectExecutor {
         context: PushContext,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        self.execute_push_with_operators(context, vec![], downstream)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        mut operators: Vec<Box<dyn BatchPipelineOperator>>,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
             let Self { expr, child, .. } = *self;
-            let expr: Arc<[Box<dyn Expression>]> = expr.into();
-            let mut sink = ProjectPushSink { expr, downstream };
-            child.execute_push(context, &mut sink).await
+            let mut pipeline_operators = Vec::with_capacity(operators.len() + 1);
+            pipeline_operators.push(Box::new(ProjectPipelineOperator { expr: expr.into() })
+                as Box<dyn BatchPipelineOperator>);
+            pipeline_operators.append(&mut operators);
+            child
+                .execute_push_with_operators(context, pipeline_operators, downstream)
+                .await
         }
         .boxed()
     }
 }
 
-struct ProjectPushSink<'a> {
+struct ProjectPipelineOperator {
     expr: Arc<[Box<dyn Expression>]>,
-    downstream: &'a mut dyn PushSink,
 }
 
-impl PushSink for ProjectPushSink<'_> {
-    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+impl BatchPipelineOperator for ProjectPipelineOperator {
+    fn execute<'a>(
+        &'a mut self,
+        data_chunk: DataChunk,
+    ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
         async move {
             let arrays = {
                 let expr_futs = self.expr.iter().map(|expr| expr.eval(&data_chunk));
@@ -79,13 +94,9 @@ impl PushSink for ProjectPushSink<'_> {
                     .try_collect()?
             };
             let (_, vis) = data_chunk.into_parts();
-            self.downstream.push(DataChunk::new(arrays, vis)).await
+            Ok(PipelineOperatorOutput::one(DataChunk::new(arrays, vis)))
         }
         .boxed()
-    }
-
-    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
-        self.downstream.finish()
     }
 }
 
@@ -152,11 +163,13 @@ mod tests {
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{InputRefExpression, LiteralExpression, build_from_pretty};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{PushContext, PushSink, PushStatus, ValuesExecutor};
+    use crate::executor::{
+        FilterExecutor, LimitExecutor, PushContext, PushSink, PushStatus, ValuesExecutor,
+    };
     use crate::task::ShutdownToken;
     use crate::*;
 
@@ -273,6 +286,60 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(1), Some(2), Some(33333), Some(4), Some(5)]
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_linear_push_pipeline_executor_chain() -> Result<()> {
+        let rows = (0..6)
+            .map(|value| {
+                vec![
+                    Box::new(LiteralExpression::new(DataType::Int32, Some(value.into())))
+                        as BoxedExpression,
+                ]
+            })
+            .collect();
+        let values_executor: BoxedExecutor = Box::new(ValuesExecutor::new(
+            rows,
+            schema_unnamed!(DataType::Int32),
+            "ValuesExecutor".to_owned(),
+            2,
+        ));
+
+        let filter_executor: BoxedExecutor = Box::new(FilterExecutor::new(
+            build_from_pretty("(greater_than:boolean $0:int4 1:int4)"),
+            values_executor,
+            "FilterExecutor".to_owned(),
+            2,
+        ));
+
+        let project_expr =
+            vec![Box::new(InputRefExpression::new(DataType::Int32, 0)) as BoxedExpression];
+        let project_executor: BoxedExecutor = Box::new(ProjectExecutor {
+            expr: project_expr,
+            child: filter_executor,
+            schema: schema_unnamed!(DataType::Int32),
+            identity: "ProjectExecutor".to_owned(),
+        });
+
+        let limit_executor = Box::new(LimitExecutor::new(
+            project_executor,
+            2,
+            1,
+            "LimitExecutor".to_owned(),
+        ));
+        let mut sink = CollectSink { chunks: vec![] };
+
+        limit_executor
+            .execute_push(PushContext::new(ShutdownToken::empty()), &mut sink)
+            .await?;
+
+        let values = sink
+            .chunks
+            .iter()
+            .flat_map(|chunk| chunk.column_at(0).as_int32().iter())
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![Some(3), Some(4)]);
         Ok(())
     }
 

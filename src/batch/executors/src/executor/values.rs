@@ -25,8 +25,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, Morsel, MorselPipelineDriver, MorselSource, PushContext, PushSink, PushStatus,
 };
 
 /// [`ValuesExecutor`] implements Values executor.
@@ -68,42 +68,84 @@ impl Executor for ValuesExecutor {
     }
 
     fn execute_push<'a>(
-        mut self: Box<Self>,
+        self: Box<Self>,
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        self.execute_push_with_operators(context, vec![], sink)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
-            if !self.rows.is_empty() {
-                let cardinality = self.rows.len();
-                ensure!(cardinality > 0);
+            let Self {
+                rows,
+                schema,
+                chunk_size,
+                ..
+            } = *self;
+            let source = ValuesMorselSource {
+                rows,
+                schema,
+                chunk_size,
+                next_sequence: 0,
+            };
+            MorselPipelineDriver::new(source, operators, context)
+                .execute(sink)
+                .await
+        }
+        .boxed()
+    }
+}
 
-                while !self.rows.is_empty() {
-                    context.check_shutdown()?;
-                    // We need a one row chunk rather than an empty chunk because constant
-                    // expression's eval result is same size as input chunk cardinality.
-                    let one_row_chunk = DataChunk::new_dummy(1);
+struct ValuesMorselSource {
+    rows: vec::IntoIter<Vec<BoxedExpression>>,
+    schema: Schema,
+    chunk_size: usize,
+    next_sequence: u64,
+}
 
-                    let chunk_size = self.chunk_size.min(self.rows.len());
-                    let mut array_builders = self.schema.create_array_builders(chunk_size);
-                    for row in self.rows.by_ref().take(chunk_size) {
-                        for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
-                            let out = expr.eval(&one_row_chunk).await?;
-                            builder.append_array(&out);
-                        }
-                    }
+impl MorselSource for ValuesMorselSource {
+    fn next_morsel<'a>(
+        &'a mut self,
+        context: &'a PushContext,
+    ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+        async move {
+            context.check_shutdown()?;
+            if self.rows.is_empty() {
+                return Ok(None);
+            }
+            let cardinality = self.rows.len();
+            ensure!(cardinality > 0);
 
-                    let columns: Vec<_> = array_builders
-                        .into_iter()
-                        .map(|b| b.finish().into())
-                        .collect();
+            // We need a one row chunk rather than an empty chunk because constant
+            // expression's eval result is same size as input chunk cardinality.
+            let one_row_chunk = DataChunk::new_dummy(1);
 
-                    let chunk = DataChunk::new(columns, chunk_size);
-                    if sink.push(chunk).await?.is_finished() {
-                        return sink.finish().await;
-                    }
+            let chunk_size = self.chunk_size.min(self.rows.len());
+            let mut array_builders = self.schema.create_array_builders(chunk_size);
+            for row in self.rows.by_ref().take(chunk_size) {
+                for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
+                    let out = expr.eval(&one_row_chunk).await?;
+                    builder.append_array(&out);
                 }
             }
-            sink.finish().await
+
+            let columns: Vec<_> = array_builders
+                .into_iter()
+                .map(|b| b.finish().into())
+                .collect();
+
+            let sequence = self.next_sequence;
+            self.next_sequence += 1;
+            Ok(Some(Morsel::new(
+                sequence,
+                DataChunk::new(columns, chunk_size),
+            )))
         }
         .boxed()
     }

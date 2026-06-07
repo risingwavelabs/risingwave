@@ -23,7 +23,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_recursion::async_recursion;
 pub use fast_insert::*;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, FutureExt};
 use futures::stream::BoxStream;
 pub use managed::*;
 pub use push::*;
@@ -65,6 +65,25 @@ pub trait Executor: Send + 'static {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>>;
+
+    /// Executes this executor while applying a driver-owned linear operator
+    /// chain to every output chunk before it reaches `sink`.
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if operators.is_empty() {
+                self.execute_push(context, sink).await
+            } else {
+                let mut pipeline_sink = PipelineOperatorPushSink::new(operators, sink);
+                self.execute_push(context, &mut pipeline_sink).await
+            }
+        }
+        .boxed()
+    }
 }
 
 impl std::fmt::Debug for BoxedExecutor {

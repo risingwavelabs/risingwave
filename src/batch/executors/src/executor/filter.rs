@@ -17,14 +17,15 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_expr::expr::{BoxedExpression, build_batch_expr_from_prost};
+use risingwave_expr::expr::{BoxedExpression, Expression, build_batch_expr_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink, PushStatus,
 };
 
 pub struct FilterExecutor {
@@ -52,6 +53,15 @@ impl Executor for FilterExecutor {
         context: PushContext,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        self.execute_push_with_operators(context, vec![], downstream)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        mut operators: Vec<Box<dyn BatchPipelineOperator>>,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
             let Self {
                 expr,
@@ -59,39 +69,53 @@ impl Executor for FilterExecutor {
                 chunk_size,
                 ..
             } = *self;
-            let mut sink = FilterPushSink {
+            let mut pipeline_operators = Vec::with_capacity(operators.len() + 1);
+            pipeline_operators.push(Box::new(FilterPipelineOperator::new(
                 expr,
-                downstream,
-                data_chunk_builder: DataChunkBuilder::new(child.schema().data_types(), chunk_size),
-            };
-            child.execute_push(context, &mut sink).await
+                child.schema().data_types(),
+                chunk_size,
+            )) as Box<dyn BatchPipelineOperator>);
+            pipeline_operators.append(&mut operators);
+            child
+                .execute_push_with_operators(context, pipeline_operators, downstream)
+                .await
         }
         .boxed()
     }
 }
 
-struct FilterPushSink<'a> {
-    expr: BoxedExpression,
-    downstream: &'a mut dyn PushSink,
+struct FilterPipelineOperator {
+    expr: Box<dyn Expression>,
     data_chunk_builder: DataChunkBuilder,
 }
 
-impl PushSink for FilterPushSink<'_> {
-    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+impl FilterPipelineOperator {
+    fn new(expr: BoxedExpression, data_types: Vec<DataType>, chunk_size: usize) -> Self {
+        Self {
+            expr,
+            data_chunk_builder: DataChunkBuilder::new(data_types, chunk_size),
+        }
+    }
+}
+
+impl BatchPipelineOperator for FilterPipelineOperator {
+    fn execute<'a>(
+        &'a mut self,
+        data_chunk: DataChunk,
+    ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
         async move {
             let data_chunk = data_chunk.compact_vis();
             let vis_array = self.expr.eval(&data_chunk).await?;
 
             if let Bool(vis) = vis_array.as_ref() {
-                for data_chunk in self
+                let chunks = self
                     .data_chunk_builder
                     .append_chunk(data_chunk.with_visibility(vis.to_bitmap()))
-                {
-                    if self.downstream.push(data_chunk).await?.is_finished() {
-                        return Ok(PushStatus::Finished);
-                    }
-                }
-                Ok(PushStatus::NeedMoreInput)
+                    .collect();
+                Ok(PipelineOperatorOutput::new(
+                    chunks,
+                    PushStatus::NeedMoreInput,
+                ))
             } else {
                 bail!("Filter can only receive bool array");
             }
@@ -99,14 +123,12 @@ impl PushSink for FilterPushSink<'_> {
         .boxed()
     }
 
-    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
         async move {
-            if let Some(data_chunk) = self.data_chunk_builder.consume_all()
-                && self.downstream.push(data_chunk).await?.is_finished()
-            {
-                return Ok(PushStatus::Finished);
-            }
-            self.downstream.finish().await
+            Ok(PipelineOperatorOutput::new(
+                self.data_chunk_builder.consume_all().into_iter().collect(),
+                PushStatus::NeedMoreInput,
+            ))
         }
         .boxed()
     }

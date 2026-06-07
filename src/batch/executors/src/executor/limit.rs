@@ -24,8 +24,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink, PushStatus,
 };
 
 /// Limit executor.
@@ -137,6 +137,15 @@ impl Executor for LimitExecutor {
         context: PushContext,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        self.execute_push_with_operators(context, vec![], downstream)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        mut operators: Vec<Box<dyn BatchPipelineOperator>>,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
             let Self {
                 child,
@@ -148,38 +157,43 @@ impl Executor for LimitExecutor {
                 return downstream.finish().await;
             }
 
-            let mut sink = LimitPushSink {
-                downstream,
+            let mut pipeline_operators = Vec::with_capacity(operators.len() + 1);
+            pipeline_operators.push(Box::new(LimitPipelineOperator {
                 limit,
                 offset,
                 skipped: 0,
                 returned: 0,
-            };
-            child.execute_push(context, &mut sink).await
+            }) as Box<dyn BatchPipelineOperator>);
+            pipeline_operators.append(&mut operators);
+            child
+                .execute_push_with_operators(context, pipeline_operators, downstream)
+                .await
         }
         .boxed()
     }
 }
 
-struct LimitPushSink<'a> {
-    downstream: &'a mut dyn PushSink,
+struct LimitPipelineOperator {
     limit: usize,
     offset: usize,
     skipped: usize,
     returned: usize,
 }
 
-impl PushSink for LimitPushSink<'_> {
-    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+impl BatchPipelineOperator for LimitPipelineOperator {
+    fn execute<'a>(
+        &'a mut self,
+        data_chunk: DataChunk,
+    ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
         async move {
             if self.returned == self.limit {
-                return Ok(PushStatus::Finished);
+                return Ok(PipelineOperatorOutput::finished(vec![]));
             }
 
             let cardinality = data_chunk.cardinality();
             if cardinality + self.skipped <= self.offset {
                 self.skipped += cardinality;
-                return Ok(PushStatus::NeedMoreInput);
+                return Ok(PipelineOperatorOutput::empty());
             }
 
             let output = if self.skipped == self.offset && cardinality + self.returned <= self.limit
@@ -214,18 +228,13 @@ impl PushSink for LimitPushSink<'_> {
                     .compact_vis()
             };
 
-            let downstream_status = self.downstream.push(output).await?;
-            if self.returned == self.limit || downstream_status.is_finished() {
-                Ok(PushStatus::Finished)
+            if self.returned == self.limit {
+                Ok(PipelineOperatorOutput::finished(vec![output]))
             } else {
-                Ok(PushStatus::NeedMoreInput)
+                Ok(PipelineOperatorOutput::one(output))
             }
         }
         .boxed()
-    }
-
-    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
-        self.downstream.finish()
     }
 }
 
