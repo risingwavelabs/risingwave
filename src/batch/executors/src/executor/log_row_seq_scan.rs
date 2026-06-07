@@ -39,7 +39,7 @@ use super::{
 };
 use crate::build_scan_range_from_pb;
 use crate::error::{BatchError, Result};
-use crate::executor::{PushContext, PushSink, PushStatus, execute_pull_stream_as_push};
+use crate::executor::{PushContext, PushSink, PushStatus, push_chunk_stream};
 use crate::monitor::BatchMetrics;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -185,7 +185,7 @@ impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
+        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

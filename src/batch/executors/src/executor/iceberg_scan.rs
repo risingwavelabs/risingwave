@@ -31,7 +31,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
-use crate::executor::{Executor, PushContext, PushSink, PushStatus, execute_pull_stream_as_push};
+use crate::executor::{Executor, PushContext, PushSink, PushStatus, push_chunk_stream};
 use crate::monitor::BatchMetrics;
 
 pub struct IcebergScanExecutor {
@@ -63,7 +63,7 @@ impl Executor for IcebergScanExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
-        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
+        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

@@ -36,7 +36,7 @@ use super::Executor;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, PushContext, PushSink, PushStatus,
-    execute_pull_stream_as_push,
+    push_chunk_stream,
 };
 
 pub struct SourceExecutor {
@@ -149,7 +149,7 @@ impl Executor for SourceExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
+        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

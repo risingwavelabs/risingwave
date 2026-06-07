@@ -22,7 +22,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push,
+    PushContext, PushSink, PushStatus, push_chunk_stream,
 };
 
 pub struct SysRowSeqScanExecutor {
@@ -111,7 +111,7 @@ impl Executor for SysRowSeqScanExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        execute_pull_stream_as_push(self.do_execute(), context, sink).boxed()
+        push_chunk_stream(self.do_execute(), context, sink).boxed()
     }
 }
 

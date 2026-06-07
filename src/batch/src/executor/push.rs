@@ -334,6 +334,32 @@ where
     }
 }
 
+/// Drives a stream-backed source into a push sink.
+///
+/// Some batch leaf executors still receive data from connector or storage APIs
+/// that naturally expose streams. Keep them source-driven here instead of going
+/// through the executor pull adapter.
+pub async fn push_chunk_stream(
+    mut stream: BoxedDataChunkStream,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus> {
+    let mut processed = 0;
+    while let Some(chunk) = stream.next().await {
+        context.check_shutdown()?;
+        let status = sink.push(chunk?).await?;
+        if status.is_finished() {
+            return sink.finish().await;
+        }
+        processed += 1;
+        if processed >= context.morsel_budget() {
+            tokio::task::yield_now().await;
+            processed = 0;
+        }
+    }
+    sink.finish().await
+}
+
 /// Adapter used while operators are migrated from pull to push.
 pub async fn execute_pull_stream_as_push(
     stream: BoxedDataChunkStream,

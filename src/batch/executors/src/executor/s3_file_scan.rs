@@ -26,7 +26,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::BatchError;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, PushContext, PushSink,
-    PushStatus, execute_pull_stream_as_push,
+    PushStatus, push_chunk_stream,
 };
 
 #[derive(PartialEq, Debug)]
@@ -65,7 +65,7 @@ impl Executor for S3FileScanExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
-        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
+        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 
