@@ -49,7 +49,7 @@ use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{SchedulerError, SchedulerResult};
+use crate::scheduler::{FrontendPushTaskScope, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 // TODO(error-handling): use a concrete error type.
@@ -122,6 +122,16 @@ impl LocalQueryExecution {
         let strict_mode = self.session.config().batch_expr_strict_mode();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
+        let push_task_scope = Arc::new(FrontendPushTaskScope::new(
+            catalog_reader.clone(),
+            user_info_reader.clone(),
+            auth_context.clone(),
+            db_name.clone(),
+            search_path.clone(),
+            time_zone.clone(),
+            strict_mode,
+            meta_client.clone(),
+        ));
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -158,8 +168,10 @@ impl LocalQueryExecution {
                 let mut sink = LocalQueryPushSink {
                     sender: result_sender,
                 };
+                let push_context =
+                    PushContext::new(exec_shutdown_rx.clone()).with_task_scope(push_task_scope);
                 executor
-                    .execute_push(PushContext::new(exec_shutdown_rx.clone()), &mut sink)
+                    .execute_push(push_context, &mut sink)
                     .await
                     .map_err(|e| Box::new(e) as BoxedError)
             }

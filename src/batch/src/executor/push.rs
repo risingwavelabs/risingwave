@@ -49,6 +49,7 @@ pub struct PushContext {
     morsel_budget: usize,
     morsel_queue_capacity: usize,
     morsel_parallelism: usize,
+    task_scope: Option<Arc<dyn PushTaskScope>>,
 }
 
 impl PushContext {
@@ -62,6 +63,7 @@ impl PushContext {
             morsel_budget: Self::DEFAULT_MORSEL_BUDGET,
             morsel_queue_capacity: Self::DEFAULT_MORSEL_QUEUE_CAPACITY,
             morsel_parallelism: Self::DEFAULT_MORSEL_PARALLELISM,
+            task_scope: None,
         }
     }
 
@@ -80,6 +82,11 @@ impl PushContext {
         self
     }
 
+    pub fn with_task_scope(mut self, task_scope: Arc<dyn PushTaskScope>) -> Self {
+        self.task_scope = Some(task_scope);
+        self
+    }
+
     pub fn morsel_budget(&self) -> usize {
         self.morsel_budget
     }
@@ -92,6 +99,10 @@ impl PushContext {
         self.morsel_parallelism
     }
 
+    pub fn task_scope(&self) -> Option<Arc<dyn PushTaskScope>> {
+        self.task_scope.clone()
+    }
+
     pub fn check_shutdown(&self) -> Result<()> {
         match self.shutdown_rx.message() {
             ShutdownMsg::Init => Ok(()),
@@ -99,6 +110,11 @@ impl PushContext {
             ShutdownMsg::Cancel => Err(BatchError::Aborted("cancelled".to_owned())),
         }
     }
+}
+
+/// Re-enters task-local execution contexts when a push pipeline is spawned.
+pub trait PushTaskScope: Send + Sync + 'static {
+    fn scope(&self, future: BoxFuture<'static, ()>) -> BoxFuture<'static, ()>;
 }
 
 /// A push sink consumes data chunks produced by a pipeline.
@@ -756,15 +772,22 @@ pub async fn execute_push_as_pull(executor: BoxedExecutor, context: PushContext,
     let mut sink = ChannelPushSink {
         sender: sender.clone(),
     };
-    let expr_context = capture_expr_context().ok();
+    let task_scope = context.task_scope();
+    let expr_context = task_scope
+        .is_none()
+        .then(|| capture_expr_context().ok())
+        .flatten();
 
     tokio::spawn(async move {
         let exec = async move {
             if let Err(error) = executor.execute_push(context, &mut sink).await {
                 let _ = sender.send(Err(error)).await;
             }
-        };
-        if let Some(expr_context) = expr_context {
+        }
+        .boxed();
+        if let Some(task_scope) = task_scope {
+            task_scope.scope(exec).await;
+        } else if let Some(expr_context) = expr_context {
             expr_context_scope(expr_context, exec).await;
         } else {
             exec.await;
@@ -1040,6 +1063,66 @@ mod tests {
 
         assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 2);
         assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 3);
+        assert!(stream.next().await.is_none());
+    }
+
+    tokio::task_local! {
+        static TEST_PUSH_TASK_SCOPE: &'static str;
+    }
+
+    struct TestPushTaskScope;
+
+    impl PushTaskScope for TestPushTaskScope {
+        fn scope(&self, future: BoxFuture<'static, ()>) -> BoxFuture<'static, ()> {
+            TEST_PUSH_TASK_SCOPE.scope("set", future).boxed()
+        }
+    }
+
+    struct ContextCheckingPushExecutor {
+        schema: Schema,
+    }
+
+    impl Executor for ContextCheckingPushExecutor {
+        fn schema(&self) -> &Schema {
+            &self.schema
+        }
+
+        fn identity(&self) -> &str {
+            "ContextCheckingPushExecutor"
+        }
+
+        fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+            stream::empty().boxed()
+        }
+
+        fn execute_push<'a>(
+            self: Box<Self>,
+            _context: PushContext,
+            sink: &'a mut dyn PushSink,
+        ) -> BoxFuture<'a, Result<PushStatus>> {
+            async move {
+                let value = TEST_PUSH_TASK_SCOPE
+                    .try_with(|value| *value)
+                    .map_err(|_| BatchError::Internal(anyhow::anyhow!("task scope not set")))?;
+                assert_eq!(value, "set");
+                sink.push(DataChunk::new_dummy(1)).await?;
+                sink.finish().await
+            }
+            .boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_push_as_pull_adapter_reenters_task_scope() {
+        let executor: BoxedExecutor = Box::new(ContextCheckingPushExecutor {
+            schema: Schema::default(),
+        });
+        let context =
+            PushContext::new(ShutdownToken::empty()).with_task_scope(Arc::new(TestPushTaskScope));
+
+        let mut stream = execute_push_as_pull(executor, context, 1);
+
+        assert_eq!(stream.next().await.unwrap().unwrap().cardinality(), 1);
         assert!(stream.next().await.is_none());
     }
 }

@@ -33,8 +33,10 @@ pub use snapshot::*;
 mod local;
 pub use local::*;
 mod fast_insert;
+mod push_task_scope;
 pub use fast_insert::*;
 
+use crate::scheduler::push_task_scope::FrontendPushTaskScope;
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 
 mod error;

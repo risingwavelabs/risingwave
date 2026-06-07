@@ -66,7 +66,9 @@ use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, Query, ROOT_TASK_ID, StageId, TaskId,
 };
-use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
+use crate::scheduler::{
+    ExecutionContextRef, FrontendPushTaskScope, SchedulerError, SchedulerResult,
+};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
@@ -686,16 +688,25 @@ impl StageRunner {
         let db_name = self.ctx.session().database();
         let search_path = self.ctx.session().config().search_path();
         let meta_client = self.ctx.session().env().meta_client_ref();
+        let push_task_scope = Arc::new(FrontendPushTaskScope::new(
+            catalog_reader.clone(),
+            user_info_reader.clone(),
+            auth_context.clone(),
+            db_name.clone(),
+            search_path.clone(),
+            expr_context.time_zone.clone(),
+            expr_context.strict_mode,
+            meta_client.clone(),
+        ));
 
         let exec = async {
             let executor = executor.build().await?;
             let mut sink = RootStagePushSink {
                 sender: result_tx.clone(),
             };
-            if let Err(e) = executor
-                .execute_push(PushContext::new(shutdown_rx.clone()), &mut sink)
-                .await
-            {
+            let push_context =
+                PushContext::new(shutdown_rx.clone()).with_task_scope(push_task_scope);
+            if let Err(e) = executor.execute_push(push_context, &mut sink).await {
                 if !shutdown_rx0.is_cancelled() {
                     return Err(TaskExecutionError(e.to_report_string()));
                 }
