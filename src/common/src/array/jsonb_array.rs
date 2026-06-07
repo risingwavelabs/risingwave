@@ -34,6 +34,17 @@ pub struct JsonbArray {
     data: jsonbb::Value,
 }
 
+fn nullify_oversize(v: jsonbb::ValueRef<'_>) -> jsonbb::ValueRef<'_> {
+    const NULLIFY_BOUND: usize = 1 << 23; // 8 MiB, chosen arbitrarily
+
+    let size = v.capacity();
+    if size < NULLIFY_BOUND {
+        return v;
+    }
+    tracing::warn!("Large jsonb value is transformed into json-null: {size}");
+    jsonbb::ValueRef::Null
+}
+
 impl ArrayBuilder for JsonbArrayBuilder {
     type ArrayType = JsonbArray;
 
@@ -56,7 +67,8 @@ impl ArrayBuilder for JsonbArrayBuilder {
             Some(x) => {
                 self.bitmap.append_n(n, true);
                 for _ in 0..n {
-                    self.builder.add_value(x.0);
+                    let value = nullify_oversize(x.0);
+                    self.builder.add_value(value);
                 }
             }
             None => {
@@ -73,6 +85,7 @@ impl ArrayBuilder for JsonbArrayBuilder {
             self.bitmap.append(bit);
         }
         for value in other.data.as_array().unwrap().iter() {
+            let value = nullify_oversize(value);
             self.builder.add_value(value);
         }
     }
