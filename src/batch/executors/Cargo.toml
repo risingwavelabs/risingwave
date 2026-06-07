@@ -88,5 +88,9 @@ harness = false
 name = "limit"
 harness = false
 
+[[bench]]
+name = "pipeline_driver"
+harness = false
+
 [lints]
 workspace = true
