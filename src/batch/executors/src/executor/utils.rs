@@ -24,8 +24,8 @@ pub use risingwave_storage::table::batch_table::PkScanRange as ScanRange;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, Executor, PushContext, PushSink,
-    PushStatus, execute_push_as_pull, push_chunk_stream_with_operators,
+    BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, Executor, PushContext,
+    PushSink, PushStatus, execute_push_as_pull, push_chunk_stream_with_operators,
 };
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
@@ -160,13 +160,13 @@ impl Executor for WrapStreamExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        self.execute_push_with_operators(context, vec![], sink)
+        self.execute_push_with_operators(context, BatchPipelineOperatorChain::empty(), sink)
     }
 
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         push_chunk_stream_with_operators(self.stream, operators, context, sink).boxed()

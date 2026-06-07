@@ -71,7 +71,7 @@ pub trait Executor: Send + 'static {
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
@@ -24,8 +26,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BatchPipelineOperatorChain, BatchPipelineOperatorFactory,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PipelineOperatorOutput, PushContext, PushSink, PushStatus,
 };
 
 pub struct FilterExecutor {
@@ -53,13 +56,13 @@ impl Executor for FilterExecutor {
         context: PushContext,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        self.execute_push_with_operators(context, vec![], downstream)
+        self.execute_push_with_operators(context, BatchPipelineOperatorChain::empty(), downstream)
     }
 
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        mut operators: Vec<Box<dyn BatchPipelineOperator>>,
+        mut operators: BatchPipelineOperatorChain,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
@@ -69,15 +72,17 @@ impl Executor for FilterExecutor {
                 chunk_size,
                 ..
             } = *self;
-            let mut pipeline_operators = Vec::with_capacity(operators.len() + 1);
-            pipeline_operators.push(Box::new(FilterPipelineOperator::new(
-                expr,
-                child.schema().data_types(),
-                chunk_size,
-            )) as Box<dyn BatchPipelineOperator>);
-            pipeline_operators.append(&mut operators);
+            let expr: Arc<dyn Expression> = Arc::from(expr);
+            operators.prepend_parallel(
+                Box::new(FilterPipelineOperator::new(
+                    expr.clone(),
+                    child.schema().data_types(),
+                    chunk_size,
+                )),
+                Arc::new(FilterPipelineOperatorFactory { expr }),
+            );
             child
-                .execute_push_with_operators(context, pipeline_operators, downstream)
+                .execute_push_with_operators(context, operators, downstream)
                 .await
         }
         .boxed()
@@ -85,16 +90,28 @@ impl Executor for FilterExecutor {
 }
 
 struct FilterPipelineOperator {
-    expr: Box<dyn Expression>,
+    expr: Arc<dyn Expression>,
     data_chunk_builder: DataChunkBuilder,
 }
 
 impl FilterPipelineOperator {
-    fn new(expr: BoxedExpression, data_types: Vec<DataType>, chunk_size: usize) -> Self {
+    fn new(expr: Arc<dyn Expression>, data_types: Vec<DataType>, chunk_size: usize) -> Self {
         Self {
             expr,
             data_chunk_builder: DataChunkBuilder::new(data_types, chunk_size),
         }
+    }
+}
+
+struct FilterPipelineOperatorFactory {
+    expr: Arc<dyn Expression>,
+}
+
+impl BatchPipelineOperatorFactory for FilterPipelineOperatorFactory {
+    fn create(&self) -> Box<dyn BatchPipelineOperator> {
+        Box::new(StatelessFilterPipelineOperator {
+            expr: self.expr.clone(),
+        })
     }
 }
 
@@ -129,6 +146,34 @@ impl BatchPipelineOperator for FilterPipelineOperator {
                 self.data_chunk_builder.consume_all().into_iter().collect(),
                 PushStatus::NeedMoreInput,
             ))
+        }
+        .boxed()
+    }
+}
+
+struct StatelessFilterPipelineOperator {
+    expr: Arc<dyn Expression>,
+}
+
+impl BatchPipelineOperator for StatelessFilterPipelineOperator {
+    fn execute<'a>(
+        &'a mut self,
+        data_chunk: DataChunk,
+    ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+        async move {
+            let data_chunk = data_chunk.compact_vis();
+            let vis_array = self.expr.eval(&data_chunk).await?;
+
+            if let Bool(vis) = vis_array.as_ref() {
+                let data_chunk = data_chunk.with_visibility(vis.to_bitmap()).compact_vis();
+                if data_chunk.cardinality() == 0 {
+                    Ok(PipelineOperatorOutput::empty())
+                } else {
+                    Ok(PipelineOperatorOutput::one(data_chunk))
+                }
+            } else {
+                bail!("Filter can only receive bool array");
+            }
         }
         .boxed()
     }

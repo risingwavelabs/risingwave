@@ -328,6 +328,64 @@ pub trait BatchPipelineOperatorFactory: Send + Sync {
     fn create(&self) -> Box<dyn BatchPipelineOperator>;
 }
 
+/// A collected linear operator chain.
+///
+/// `operators` is always available for the single-driver path. `factories`
+/// remains present only while every operator in the chain can be recreated as
+/// worker-local state for the parallel morsel driver.
+pub struct BatchPipelineOperatorChain {
+    operators: Vec<Box<dyn BatchPipelineOperator>>,
+    factories: Option<Vec<Arc<dyn BatchPipelineOperatorFactory>>>,
+}
+
+impl BatchPipelineOperatorChain {
+    pub fn empty() -> Self {
+        Self {
+            operators: vec![],
+            factories: Some(vec![]),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.operators.is_empty()
+    }
+
+    pub fn prepend_parallel(
+        &mut self,
+        operator: Box<dyn BatchPipelineOperator>,
+        factory: Arc<dyn BatchPipelineOperatorFactory>,
+    ) {
+        self.operators.insert(0, operator);
+        if let Some(factories) = &mut self.factories {
+            factories.insert(0, factory);
+        }
+    }
+
+    pub fn prepend_single(&mut self, operator: Box<dyn BatchPipelineOperator>) {
+        self.operators.insert(0, operator);
+        self.factories = None;
+    }
+
+    fn into_operators(self) -> Vec<Box<dyn BatchPipelineOperator>> {
+        self.operators
+    }
+
+    fn into_driver_plan(self, parallelism: usize) -> BatchPipelineOperatorDriverPlan {
+        if parallelism > 1
+            && let Some(factories) = self.factories
+        {
+            BatchPipelineOperatorDriverPlan::Parallel(factories)
+        } else {
+            BatchPipelineOperatorDriverPlan::Single(self.operators)
+        }
+    }
+}
+
+enum BatchPipelineOperatorDriverPlan {
+    Single(Vec<Box<dyn BatchPipelineOperator>>),
+    Parallel(Vec<Arc<dyn BatchPipelineOperatorFactory>>),
+}
+
 /// Applies a driver-style operator chain to chunks produced by an executor
 /// that is not yet a native morsel source.
 pub struct PipelineOperatorPushSink<'a> {
@@ -336,12 +394,9 @@ pub struct PipelineOperatorPushSink<'a> {
 }
 
 impl<'a> PipelineOperatorPushSink<'a> {
-    pub fn new(
-        operators: Vec<Box<dyn BatchPipelineOperator>>,
-        downstream: &'a mut dyn PushSink,
-    ) -> Self {
+    pub fn new(operators: BatchPipelineOperatorChain, downstream: &'a mut dyn PushSink) -> Self {
         Self {
-            operators,
+            operators: operators.into_operators(),
             downstream,
         }
     }
@@ -724,25 +779,48 @@ pub async fn push_chunk_stream(
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
-    push_chunk_stream_with_operators(stream, vec![], context, sink).await
+    push_chunk_stream_with_operators(stream, BatchPipelineOperatorChain::empty(), context, sink)
+        .await
 }
 
 /// Drives a stream-backed source through a driver-owned operator chain.
 pub async fn push_chunk_stream_with_operators(
     stream: BoxedDataChunkStream,
-    operators: Vec<Box<dyn BatchPipelineOperator>>,
+    operators: BatchPipelineOperatorChain,
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
     let source = StreamMorselSource::new(stream);
+    drive_morsel_source_with_operators(source, operators, context, sink).await
+}
+
+/// Drives a native morsel source through a collected operator chain.
+pub async fn drive_morsel_source_with_operators<S>(
+    source: S,
+    operators: BatchPipelineOperatorChain,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus>
+where
+    S: MorselSource + 'static,
+{
     if operators.is_empty() {
         ParallelMorselPipelineDriver::source_only(source, context)
             .execute(sink)
             .await
     } else {
-        MorselPipelineDriver::new(source, operators, context)
-            .execute(sink)
-            .await
+        match operators.into_driver_plan(context.morsel_parallelism()) {
+            BatchPipelineOperatorDriverPlan::Single(operators) => {
+                MorselPipelineDriver::new(source, operators, context)
+                    .execute(sink)
+                    .await
+            }
+            BatchPipelineOperatorDriverPlan::Parallel(factories) => {
+                ParallelMorselPipelineDriver::new(source, factories, context)
+                    .execute(sink)
+                    .await
+            }
+        }
     }
 }
 

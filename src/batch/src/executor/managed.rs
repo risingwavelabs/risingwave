@@ -23,7 +23,7 @@ use tracing::Instrument;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperator, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
+    BatchPipelineOperatorChain, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
 };
 use crate::task::{ShutdownMsg, ShutdownToken};
 
@@ -109,7 +109,7 @@ impl Executor for ManagedExecutor {
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {

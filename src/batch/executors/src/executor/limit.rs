@@ -24,8 +24,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink, PushStatus,
+    BatchPipelineOperator, BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor,
+    BoxedExecutorBuilder, Executor, ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink,
+    PushStatus,
 };
 
 /// Limit executor.
@@ -137,13 +138,13 @@ impl Executor for LimitExecutor {
         context: PushContext,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        self.execute_push_with_operators(context, vec![], downstream)
+        self.execute_push_with_operators(context, BatchPipelineOperatorChain::empty(), downstream)
     }
 
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        mut operators: Vec<Box<dyn BatchPipelineOperator>>,
+        mut operators: BatchPipelineOperatorChain,
         downstream: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
@@ -157,16 +158,14 @@ impl Executor for LimitExecutor {
                 return downstream.finish().await;
             }
 
-            let mut pipeline_operators = Vec::with_capacity(operators.len() + 1);
-            pipeline_operators.push(Box::new(LimitPipelineOperator {
+            operators.prepend_single(Box::new(LimitPipelineOperator {
                 limit,
                 offset,
                 skipped: 0,
                 returned: 0,
-            }) as Box<dyn BatchPipelineOperator>);
-            pipeline_operators.append(&mut operators);
+            }));
             child
-                .execute_push_with_operators(context, pipeline_operators, downstream)
+                .execute_push_with_operators(context, operators, downstream)
                 .await
         }
         .boxed()

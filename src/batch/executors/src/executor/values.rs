@@ -25,8 +25,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder, Morsel, MorselPipelineDriver, MorselSource, PushContext, PushSink, PushStatus,
+    BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    Executor, ExecutorBuilder, Morsel, MorselSource, PushContext, PushSink, PushStatus,
+    drive_morsel_source_with_operators,
 };
 
 /// [`ValuesExecutor`] implements Values executor.
@@ -72,13 +73,13 @@ impl Executor for ValuesExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        self.execute_push_with_operators(context, vec![], sink)
+        self.execute_push_with_operators(context, BatchPipelineOperatorChain::empty(), sink)
     }
 
     fn execute_push_with_operators<'a>(
         self: Box<Self>,
         context: PushContext,
-        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
@@ -94,9 +95,7 @@ impl Executor for ValuesExecutor {
                 chunk_size,
                 next_sequence: 0,
             };
-            MorselPipelineDriver::new(source, operators, context)
-                .execute(sink)
-                .await
+            drive_morsel_source_with_operators(source, operators, context, sink).await
         }
         .boxed()
     }
