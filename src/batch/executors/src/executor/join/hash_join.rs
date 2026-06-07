@@ -891,6 +891,10 @@ impl<K: HashKey + Send> PushSink for HashTableBuildSink<K> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        false
+    }
 }
 
 struct HashJoinProbeSink<'a, K> {
@@ -1950,6 +1954,10 @@ impl<K: HashKey + Send> PushSink for HashJoinProbeSink<'_, K> {
     fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
         async move { self.finish_probe().await }.boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.downstream.requires_input_order()
+    }
 }
 
 #[derive(Default)]
@@ -1964,6 +1972,10 @@ impl PushSink for VecPushSink {
             Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
+    }
+
+    fn requires_input_order(&self) -> bool {
+        false
     }
 }
 
@@ -2079,6 +2091,10 @@ impl PushSink for HashJoinProbeSpillSink<'_> {
             Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
+    }
+
+    fn requires_input_order(&self) -> bool {
+        false
     }
 }
 

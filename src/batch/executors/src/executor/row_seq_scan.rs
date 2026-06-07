@@ -38,6 +38,7 @@ use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     Executor, ExecutorBuilder, Morsel, MorselSource, PipelineOperatorPushSink, PushContext,
     PushSink, PushStatus, build_scan_ranges_from_pb, drive_morsel_source_with_operators,
+    split_morsel_source_items,
 };
 use crate::monitor::BatchMetrics;
 
@@ -450,6 +451,74 @@ impl<S: StateStore> MorselSource for RowSeqScanMorselSource<S> {
             }
         }
         .boxed()
+    }
+
+    fn into_parallel_sources(self, parallelism: usize) -> Vec<Self> {
+        let Self {
+            table,
+            point_gets,
+            range_scans,
+            active_range_stream,
+            data_chunk_builder,
+            chunk_size,
+            ordered,
+            query_epoch,
+            limit,
+            returned,
+            histogram,
+            next_sequence,
+        } = self;
+
+        if ordered
+            || limit.is_some()
+            || active_range_stream.is_some()
+            || returned != 0
+            || next_sequence != 0
+        {
+            return vec![Self {
+                table,
+                point_gets,
+                range_scans,
+                active_range_stream,
+                data_chunk_builder,
+                chunk_size,
+                ordered,
+                query_epoch,
+                limit,
+                returned,
+                histogram,
+                next_sequence,
+            }];
+        }
+
+        let scan_ranges = point_gets.chain(range_scans).collect::<Vec<_>>();
+        let partitions = split_morsel_source_items(scan_ranges, parallelism);
+        if partitions.is_empty() {
+            return vec![Self::new(
+                table,
+                vec![],
+                ordered,
+                query_epoch,
+                chunk_size,
+                limit,
+                histogram,
+            )];
+        }
+
+        partitions
+            .into_iter()
+            .map(|scan_ranges| {
+                Self::new(
+                    table.clone(),
+                    scan_ranges,
+                    ordered,
+                    query_epoch,
+                    chunk_size,
+                    limit,
+                    histogram.clone(),
+                )
+            })
+            .collect()
     }
 }
 

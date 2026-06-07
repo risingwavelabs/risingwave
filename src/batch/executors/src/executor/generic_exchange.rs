@@ -39,7 +39,7 @@ pub type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     Executor, Morsel, MorselSource, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
-    drive_morsel_source_with_operators,
+    drive_morsel_source_with_operators, split_morsel_source_items,
 };
 use crate::monitor::BatchMetrics;
 
@@ -286,7 +286,10 @@ enum ExchangeMorselStreams {
         streams: Vec<BoxedDataChunkStream>,
         current_idx: usize,
     },
-    Concurrent(BoxedDataChunkStream),
+    Concurrent {
+        streams: Option<Vec<BoxedDataChunkStream>>,
+        stream: Option<BoxedDataChunkStream>,
+    },
 }
 
 struct ExchangeMorselSource {
@@ -302,7 +305,10 @@ impl ExchangeMorselSource {
                 current_idx: 0,
             }
         } else {
-            ExchangeMorselStreams::Concurrent(select_all(streams).boxed())
+            ExchangeMorselStreams::Concurrent {
+                streams: Some(streams),
+                stream: None,
+            }
         };
         Self {
             streams,
@@ -334,7 +340,20 @@ impl MorselSource for ExchangeMorselSource {
                     }
                     Ok(None)
                 }
-                ExchangeMorselStreams::Concurrent(stream) => {
+                ExchangeMorselStreams::Concurrent { streams, stream } => {
+                    if stream.is_none() {
+                        *stream = Some(
+                            select_all(
+                                streams
+                                    .take()
+                                    .expect("exchange morsel streams should initialize once"),
+                            )
+                            .boxed(),
+                        );
+                    }
+                    let stream = stream
+                        .as_mut()
+                        .expect("exchange morsel stream should be initialized");
                     let Some(chunk) = stream.next().await else {
                         return Ok(None);
                     };
@@ -345,6 +364,38 @@ impl MorselSource for ExchangeMorselSource {
             }
         }
         .boxed()
+    }
+
+    fn into_parallel_sources(self, parallelism: usize) -> Vec<Self> {
+        match self.streams {
+            ExchangeMorselStreams::Sequential {
+                streams,
+                current_idx,
+            } => vec![Self {
+                streams: ExchangeMorselStreams::Sequential {
+                    streams,
+                    current_idx,
+                },
+                next_sequence: self.next_sequence,
+            }],
+            ExchangeMorselStreams::Concurrent {
+                streams: Some(streams),
+                stream: None,
+            } if self.next_sequence == 0 => split_morsel_source_items(streams, parallelism)
+                .into_iter()
+                .map(|streams| Self {
+                    streams: ExchangeMorselStreams::Concurrent {
+                        streams: Some(streams),
+                        stream: None,
+                    },
+                    next_sequence: 0,
+                })
+                .collect(),
+            streams => vec![Self {
+                streams,
+                next_sequence: self.next_sequence,
+            }],
+        }
     }
 }
 

@@ -154,6 +154,10 @@ impl PushSink for FilterPushSink<'_> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.downstream.requires_input_order()
+    }
 }
 
 struct FilterPipelineOperator {

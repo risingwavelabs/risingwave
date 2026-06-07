@@ -116,6 +116,10 @@ impl PushSink for ProjectPushSink<'_> {
     fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
         self.downstream.finish()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.downstream.requires_input_order()
+    }
 }
 
 struct ProjectPipelineOperator {

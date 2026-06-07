@@ -567,6 +567,10 @@ impl PushSink for ForwardPushNoFinishSink<'_> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.sink.requires_input_order()
+    }
 }
 
 struct HashAggPushState<K: HashKey> {
@@ -875,6 +879,10 @@ impl<K: HashKey + Send + Sync> PushSink for HashAggInitStateSink<'_, K> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        false
+    }
 }
 
 struct HashAggChildSink<'a, K: HashKey> {
@@ -888,6 +896,10 @@ impl<K: HashKey + Send + Sync> PushSink for HashAggChildSink<'_, K> {
             Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
+    }
+
+    fn requires_input_order(&self) -> bool {
+        false
     }
 }
 

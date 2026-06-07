@@ -126,6 +126,10 @@ impl PushSink for UnionChildSink {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        false
+    }
 }
 
 fn abort_union_tasks(tasks: &[tokio::task::JoinHandle<()>]) {

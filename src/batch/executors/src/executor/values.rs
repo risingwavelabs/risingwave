@@ -28,6 +28,7 @@ use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     Executor, ExecutorBuilder, Morsel, MorselSource, PushContext, PushSink, PushStatus,
     drive_morsel_source_with_operators, push_chunk_stream_with_operators,
+    split_morsel_source_items,
 };
 
 /// [`ValuesExecutor`] implements Values executor.
@@ -152,6 +153,33 @@ impl MorselSource for ValuesMorselSource {
             )))
         }
         .boxed()
+    }
+
+    fn into_parallel_sources(self, parallelism: usize) -> Vec<Self> {
+        let Self {
+            rows,
+            schema,
+            chunk_size,
+            next_sequence,
+        } = self;
+        if next_sequence != 0 {
+            return vec![Self {
+                rows,
+                schema,
+                chunk_size,
+                next_sequence,
+            }];
+        }
+
+        split_morsel_source_items(rows.collect(), parallelism)
+            .into_iter()
+            .map(|rows| Self {
+                rows: rows.into_iter(),
+                schema: schema.clone(),
+                chunk_size,
+                next_sequence: 0,
+            })
+            .collect()
     }
 }
 

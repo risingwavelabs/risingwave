@@ -28,9 +28,10 @@ use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     Executor, ExecutorBuilder, Morsel, MorselSource, PushContext, PushSink, PushStatus,
     drive_morsel_source_with_operators, push_chunk_stream_with_operators,
+    split_morsel_source_items,
 };
 
-#[derive(PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum FileFormat {
     Parquet,
 }
@@ -172,6 +173,40 @@ impl MorselSource for GcsFileScanMorselSource {
             }
         }
         .boxed()
+    }
+
+    fn into_parallel_sources(self, parallelism: usize) -> Vec<Self> {
+        let Self {
+            file_format,
+            file_location,
+            gcs_credential,
+            batch_size,
+            active_file_stream,
+            next_sequence,
+        } = self;
+
+        if active_file_stream.is_some() || next_sequence != 0 {
+            return vec![Self {
+                file_format,
+                file_location,
+                gcs_credential,
+                batch_size,
+                active_file_stream,
+                next_sequence,
+            }];
+        }
+
+        split_morsel_source_items(file_location.collect(), parallelism)
+            .into_iter()
+            .map(|file_location| {
+                Self::new(
+                    file_format,
+                    file_location,
+                    gcs_credential.clone(),
+                    batch_size,
+                )
+            })
+            .collect()
     }
 }
 

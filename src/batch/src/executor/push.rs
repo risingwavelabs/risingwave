@@ -14,13 +14,14 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_expr::expr_context::{capture_expr_context, expr_context_scope};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 
 use super::{BoxedDataChunkStream, BoxedExecutor};
 use crate::error::{BatchError, Result};
@@ -123,6 +124,10 @@ pub trait PushSink: Send {
 
     fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
         async { Ok(PushStatus::NeedMoreInput) }.boxed()
+    }
+
+    fn requires_input_order(&self) -> bool {
+        true
     }
 }
 
@@ -362,6 +367,10 @@ impl PushSink for ForwardingNoFinishSink<'_> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.sink.requires_input_order()
+    }
 }
 
 /// A chunk-sized scheduling unit.
@@ -480,6 +489,25 @@ pub trait MorselSource: Send {
         &'a mut self,
         context: &'a PushContext,
     ) -> BoxFuture<'a, Result<Option<Morsel>>>;
+
+    fn into_parallel_sources(self, _parallelism: usize) -> Vec<Self>
+    where
+        Self: Sized,
+    {
+        vec![self]
+    }
+}
+
+pub fn split_morsel_source_items<T>(items: Vec<T>, parallelism: usize) -> Vec<Vec<T>> {
+    let parallelism = parallelism.max(1).min(items.len().max(1));
+    let mut partitions = (0..parallelism).map(|_| Vec::new()).collect::<Vec<_>>();
+    for (idx, item) in items.into_iter().enumerate() {
+        partitions[idx % parallelism].push(item);
+    }
+    partitions
+        .into_iter()
+        .filter(|items| !items.is_empty())
+        .collect()
 }
 
 /// Output produced by one pipeline operator for a single input chunk.
@@ -646,6 +674,10 @@ impl PushSink for PipelineOperatorPushSink<'_> {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.downstream.requires_input_order()
+    }
 }
 
 pub struct StreamMorselSource {
@@ -683,6 +715,7 @@ impl MorselSource for StreamMorselSource {
 struct MorselSenderSink {
     sender: mpsc::Sender<Result<Morsel>>,
     next_sequence: u64,
+    requires_input_order: bool,
 }
 
 impl PushSink for MorselSenderSink {
@@ -698,6 +731,103 @@ impl PushSink for MorselSenderSink {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        self.requires_input_order
+    }
+}
+
+struct MorselDispatcher<T> {
+    senders: Vec<mpsc::Sender<T>>,
+    next_worker: Arc<AtomicUsize>,
+}
+
+impl<T> Clone for MorselDispatcher<T> {
+    fn clone(&self) -> Self {
+        Self {
+            senders: self.senders.clone(),
+            next_worker: self.next_worker.clone(),
+        }
+    }
+}
+
+impl<T> MorselDispatcher<T> {
+    fn new(senders: Vec<mpsc::Sender<T>>) -> Self {
+        Self {
+            senders,
+            next_worker: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    async fn send(&self, mut item: T) -> bool {
+        if self.senders.is_empty() {
+            return false;
+        }
+
+        let start = self.next_worker.fetch_add(1, Ordering::Relaxed);
+        let mut first_full = None;
+        for offset in 0..self.senders.len() {
+            let idx = (start + offset) % self.senders.len();
+            match self.senders[idx].try_send(item) {
+                Ok(()) => return true,
+                Err(mpsc::error::TrySendError::Full(error)) => {
+                    if first_full.is_none() {
+                        first_full = Some(idx);
+                    }
+                    item = error;
+                }
+                Err(mpsc::error::TrySendError::Closed(error)) => {
+                    item = error;
+                }
+            }
+        }
+
+        if let Some(idx) = first_full {
+            match self.senders[idx].send(item).await {
+                Ok(()) => return true,
+                Err(_error) => {}
+            }
+        }
+
+        false
+    }
+}
+
+fn worker_channels<T>(
+    parallelism: usize,
+    capacity: usize,
+) -> (MorselDispatcher<T>, Vec<mpsc::Receiver<T>>) {
+    let mut senders = Vec::with_capacity(parallelism);
+    let mut receivers = Vec::with_capacity(parallelism);
+    for _ in 0..parallelism {
+        let (sender, receiver) = mpsc::channel(capacity.max(1));
+        senders.push(sender);
+        receivers.push(receiver);
+    }
+    (MorselDispatcher::new(senders), receivers)
+}
+
+struct MorselDispatchSink {
+    dispatcher: MorselDispatcher<Result<Morsel>>,
+    next_sequence: u64,
+}
+
+impl PushSink for MorselDispatchSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let sequence = self.next_sequence;
+            self.next_sequence += 1;
+            if !self.dispatcher.send(Ok(Morsel::new(sequence, chunk))).await {
+                return Err(BatchError::SenderError);
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+
+    fn requires_input_order(&self) -> bool {
+        false
+    }
 }
 
 /// A morsel source backed by a push executor.
@@ -711,6 +841,7 @@ pub struct ExecutorMorselSource {
     receiver: Option<mpsc::Receiver<Result<Morsel>>>,
     handle: Option<tokio::task::JoinHandle<Result<()>>>,
     capacity: usize,
+    requires_input_order: bool,
 }
 
 impl ExecutorMorselSource {
@@ -720,6 +851,7 @@ impl ExecutorMorselSource {
             receiver: None,
             handle: None,
             capacity,
+            requires_input_order: true,
         }
     }
 
@@ -737,6 +869,7 @@ impl ExecutorMorselSource {
         let mut sink = MorselSenderSink {
             sender,
             next_sequence: 0,
+            requires_input_order: self.requires_input_order,
         };
         let task_scope = context.task_scope();
         let expr_context = task_scope
@@ -797,6 +930,11 @@ impl MorselSource for ExecutorMorselSource {
             }
         }
         .boxed()
+    }
+
+    fn into_parallel_sources(mut self, _parallelism: usize) -> Vec<Self> {
+        self.requires_input_order = false;
+        vec![self]
     }
 }
 
@@ -906,10 +1044,10 @@ pub type PipelineExecutor<S> = MorselPipelineDriver<S>;
 
 /// Parallel scheduler-owned morsel pipeline driver.
 ///
-/// This runs a single source producer, multiple worker-local operator chains,
-/// and an ordered output merge. Operators are created per worker so worker state
-/// is isolated. The final sink remains single-threaded and receives chunks in
-/// source sequence order.
+/// This runs source producers, multiple worker-local operator chains, and a
+/// single final sink. Operators are created per worker so worker state is
+/// isolated. Ordered sinks receive chunks in source sequence order; unordered
+/// sinks can consume worker outputs as soon as they complete.
 pub struct ParallelMorselPipelineDriver<S> {
     source: S,
     operator_factories: Vec<Arc<dyn BatchPipelineOperatorFactory>>,
@@ -938,7 +1076,7 @@ where
 
     pub async fn execute(self, sink: &mut dyn PushSink) -> Result<PushStatus> {
         let Self {
-            mut source,
+            source,
             operator_factories,
             context,
         } = self;
@@ -955,37 +1093,47 @@ where
             return driver.execute(sink).await;
         }
 
-        let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
         let (output_tx, mut output_rx) = mpsc::channel(context.morsel_queue_capacity());
-        let shared_rx = Arc::new(Mutex::new(morsel_rx));
+        let preserve_order = sink.requires_input_order();
+        let sources = if preserve_order {
+            vec![source]
+        } else {
+            source.into_parallel_sources(parallelism)
+        };
+        let (dispatcher, worker_receivers) =
+            worker_channels(parallelism, context.morsel_queue_capacity());
 
         let producer_context = context.clone();
-        let producer_output_tx = output_tx.clone();
-        let producer = tokio::spawn(async move {
-            let mut scheduler = MorselScheduler::new(&mut source, producer_context.clone());
-            loop {
-                let next = match scheduler.next_morsel().await {
-                    Ok(next) => next,
-                    Err(error) => {
-                        let _ = producer_output_tx
-                            .send(ParallelDriverOutput::error(error))
-                            .await;
+        let mut tasks = Vec::with_capacity(sources.len() + parallelism);
+        for mut source in sources {
+            let dispatcher = dispatcher.clone();
+            let producer_context = producer_context.clone();
+            let producer_output_tx = output_tx.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut scheduler = MorselScheduler::new(&mut source, producer_context.clone());
+                loop {
+                    let next = match scheduler.next_morsel().await {
+                        Ok(next) => next,
+                        Err(error) => {
+                            let _ = producer_output_tx
+                                .send(ParallelDriverOutput::error(error))
+                                .await;
+                            break;
+                        }
+                    };
+                    let Some(morsel) = next else {
+                        break;
+                    };
+                    if !dispatcher.send(morsel).await {
                         break;
                     }
-                };
-                let Some(morsel) = next else {
-                    break;
-                };
-                if morsel_tx.send(morsel).await.is_err() {
-                    break;
                 }
-            }
-            Ok::<_, BatchError>(())
-        });
+                Ok::<_, BatchError>(())
+            }));
+        }
+        drop(dispatcher);
 
-        let mut tasks = vec![producer];
-        for _ in 0..parallelism {
-            let rx = shared_rx.clone();
+        for mut rx in worker_receivers {
             let tx = output_tx.clone();
             let context = context.clone();
             let factories = operator_factories.clone();
@@ -995,10 +1143,7 @@ where
                     .map(|factory| factory.create())
                     .collect::<Vec<_>>();
                 loop {
-                    let next = {
-                        let mut rx = rx.lock().await;
-                        rx.recv().await
-                    };
+                    let next = rx.recv().await;
                     let Some(morsel) = next else {
                         break;
                     };
@@ -1030,6 +1175,18 @@ where
                     return Err(error);
                 }
             };
+            if !preserve_order {
+                let output = output.output;
+                let status =
+                    MorselPipelineDriver::<StreamMorselSource>::push_outputs(output.chunks, sink)
+                        .await?;
+                if status.is_finished() || output.status.is_finished() {
+                    abort_tasks(&tasks);
+                    return sink.finish().await;
+                }
+                continue;
+            }
+
             pending.insert(output.sequence, output.output);
             while let Some(output) = pending.remove(&next_sequence) {
                 let status =
@@ -1203,33 +1360,31 @@ where
         return Ok(vec![sink]);
     }
 
-    let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
-    let shared_rx = Arc::new(Mutex::new(morsel_rx));
+    let (dispatcher, worker_receivers) =
+        worker_channels(parallelism, context.morsel_queue_capacity());
     let create_local_sink = Arc::new(create_local_sink);
     let producer_context = context.clone();
+    let producer_dispatcher = dispatcher.clone();
     let producer = tokio::spawn(async move {
-        let mut sink = MorselSenderSink {
-            sender: morsel_tx.clone(),
+        let mut sink = MorselDispatchSink {
+            dispatcher: producer_dispatcher.clone(),
             next_sequence: 0,
         };
         if let Err(error) = executor.execute_push(producer_context, &mut sink).await {
-            let _ = morsel_tx.send(Err(error)).await;
+            let _ = producer_dispatcher.send(Err(error)).await;
         }
         Ok::<_, BatchError>(())
     });
+    drop(dispatcher);
 
     let mut tasks = vec![];
-    for _ in 0..parallelism {
-        let rx = shared_rx.clone();
+    for mut rx in worker_receivers {
         let context = context.clone();
         let create_local_sink = create_local_sink.clone();
         tasks.push(tokio::spawn(async move {
             let mut sink = create_local_sink();
             loop {
-                let next = {
-                    let mut rx = rx.lock().await;
-                    rx.recv().await
-                };
+                let next = rx.recv().await;
                 let Some(morsel) = next else {
                     break;
                 };
@@ -1298,12 +1453,15 @@ async fn execute_pull_stream_as_push_parallel(
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
-    let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
     let (output_tx, mut output_rx) = mpsc::channel(context.morsel_queue_capacity());
-    let shared_rx = Arc::new(Mutex::new(morsel_rx));
+    let (dispatcher, worker_receivers) = worker_channels(
+        context.morsel_parallelism(),
+        context.morsel_queue_capacity(),
+    );
 
     let producer_context = context.clone();
     let producer_output_tx = output_tx.clone();
+    let producer_dispatcher = dispatcher.clone();
     let producer = tokio::spawn(async move {
         let mut sequence = 0;
         while let Some(chunk) = stream.next().await {
@@ -1315,23 +1473,20 @@ async fn execute_pull_stream_as_push_parallel(
                 }
             };
 
-            if morsel_tx.send(Morsel::new(sequence, chunk)).await.is_err() {
+            if !producer_dispatcher.send(Morsel::new(sequence, chunk)).await {
                 break;
             }
             sequence += 1;
         }
     });
+    drop(dispatcher);
 
     let mut tasks = vec![producer];
-    for _ in 0..context.morsel_parallelism() {
-        let rx = shared_rx.clone();
+    for mut rx in worker_receivers {
         let tx = output_tx.clone();
         tasks.push(tokio::spawn(async move {
             loop {
-                let next = {
-                    let mut rx = rx.lock().await;
-                    rx.recv().await
-                };
+                let next = rx.recv().await;
                 let Some(morsel) = next else {
                     break;
                 };
@@ -1416,6 +1571,11 @@ pub async fn execute_push_as_pull(executor: BoxedExecutor, context: PushContext,
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
     use futures::{StreamExt, stream};
     use risingwave_common::catalog::Schema;
 
@@ -1448,6 +1608,24 @@ mod tests {
                 Ok(PushStatus::NeedMoreInput)
             }
             .boxed()
+        }
+    }
+
+    struct UnorderedCollectSink {
+        cardinalities: Vec<usize>,
+    }
+
+    impl PushSink for UnorderedCollectSink {
+        fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+            async move {
+                self.cardinalities.push(chunk.cardinality());
+                Ok(PushStatus::NeedMoreInput)
+            }
+            .boxed()
+        }
+
+        fn requires_input_order(&self) -> bool {
+            false
         }
     }
 
@@ -1618,6 +1796,31 @@ mod tests {
         }
     }
 
+    struct DelayFirstOperator;
+
+    impl BatchPipelineOperator for DelayFirstOperator {
+        fn execute<'a>(
+            &'a mut self,
+            chunk: DataChunk,
+        ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+            async move {
+                if chunk.cardinality() == 1 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Ok(PipelineOperatorOutput::one(chunk))
+            }
+            .boxed()
+        }
+    }
+
+    struct DelayFirstOperatorFactory;
+
+    impl BatchPipelineOperatorFactory for DelayFirstOperatorFactory {
+        fn create(&self) -> Box<dyn BatchPipelineOperator> {
+            Box::new(DelayFirstOperator)
+        }
+    }
+
     #[tokio::test]
     async fn test_morsel_pipeline_driver_runs_operator_chain() {
         let stream = stream::iter(vec![
@@ -1667,6 +1870,110 @@ mod tests {
 
         assert_eq!(status, PushStatus::NeedMoreInput);
         assert_eq!(sink.cardinalities, vec![2, 4, 6, 8]);
+    }
+
+    #[tokio::test]
+    async fn test_parallel_morsel_pipeline_driver_skips_sequence_for_unordered_sink() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(1)),
+            Ok(DataChunk::new_dummy(2)),
+        ])
+        .boxed();
+        let source = StreamMorselSource::new(stream);
+        let context = PushContext::new(ShutdownToken::empty())
+            .with_morsel_queue_capacity(2)
+            .with_morsel_parallelism(2);
+        let driver = ParallelMorselPipelineDriver::new(
+            source,
+            vec![Arc::new(DelayFirstOperatorFactory)],
+            context,
+        );
+        let mut sink = UnorderedCollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = driver.execute(&mut sink).await.unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(sink.cardinalities, vec![2, 1]);
+    }
+
+    struct SplitCountingSource {
+        chunks: VecDeque<DataChunk>,
+        split_count: Arc<AtomicUsize>,
+        next_sequence: u64,
+    }
+
+    impl MorselSource for SplitCountingSource {
+        fn next_morsel<'a>(
+            &'a mut self,
+            _context: &'a PushContext,
+        ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+            async move {
+                let Some(chunk) = self.chunks.pop_front() else {
+                    return Ok(None);
+                };
+                let sequence = self.next_sequence;
+                self.next_sequence += 1;
+                Ok(Some(Morsel::new(sequence, chunk)))
+            }
+            .boxed()
+        }
+
+        fn into_parallel_sources(self, parallelism: usize) -> Vec<Self> {
+            let Self {
+                chunks,
+                split_count,
+                next_sequence,
+            } = self;
+            if next_sequence != 0 {
+                return vec![Self {
+                    chunks,
+                    split_count,
+                    next_sequence,
+                }];
+            }
+
+            let partitions = split_morsel_source_items(chunks.into_iter().collect(), parallelism);
+            split_count.store(partitions.len(), Ordering::SeqCst);
+            partitions
+                .into_iter()
+                .map(|chunks| Self {
+                    chunks: chunks.into(),
+                    split_count: split_count.clone(),
+                    next_sequence: 0,
+                })
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unordered_parallel_driver_splits_sources() {
+        let split_count = Arc::new(AtomicUsize::new(0));
+        let source = SplitCountingSource {
+            chunks: vec![
+                DataChunk::new_dummy(1),
+                DataChunk::new_dummy(2),
+                DataChunk::new_dummy(3),
+                DataChunk::new_dummy(4),
+            ]
+            .into(),
+            split_count: split_count.clone(),
+            next_sequence: 0,
+        };
+        let context = PushContext::new(ShutdownToken::empty())
+            .with_morsel_queue_capacity(4)
+            .with_morsel_parallelism(3);
+        let driver = ParallelMorselPipelineDriver::source_only(source, context);
+        let mut sink = UnorderedCollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = driver.execute(&mut sink).await.unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(split_count.load(Ordering::SeqCst), 3);
+        assert_eq!(sink.cardinalities.len(), 4);
     }
 
     struct FinishAfterFirstOperator {

@@ -100,6 +100,10 @@ impl PushSink for TaskOutputPushSink {
         }
         .boxed()
     }
+
+    fn requires_input_order(&self) -> bool {
+        false
+    }
 }
 
 /// Send batch task status (local/distributed) to frontend.
