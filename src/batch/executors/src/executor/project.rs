@@ -26,7 +26,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperator, BatchPipelineOperatorChain, BatchPipelineOperatorFactory,
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PipelineOperatorOutput, PushContext, PushSink, PushStatus,
+    PipelineOperatorOutput, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
 };
 
 pub struct ProjectExecutor {
@@ -66,6 +66,20 @@ impl Executor for ProjectExecutor {
         async move {
             let Self { expr, child, .. } = *self;
             let expr: Arc<[Box<dyn Expression>]> = expr.into();
+            if context.morsel_parallelism() == 1 {
+                if operators.is_empty() {
+                    let mut sink = ProjectPushSink { expr, downstream };
+                    return child.execute_push(context, &mut sink).await;
+                } else {
+                    let mut pipeline_sink = PipelineOperatorPushSink::new(operators, downstream);
+                    let mut sink = ProjectPushSink {
+                        expr,
+                        downstream: &mut pipeline_sink,
+                    };
+                    return child.execute_push(context, &mut sink).await;
+                }
+            }
+
             operators.prepend_parallel(
                 Box::new(ProjectPipelineOperator { expr: expr.clone() }),
                 Arc::new(ProjectPipelineOperatorFactory { expr }),
@@ -75,6 +89,32 @@ impl Executor for ProjectExecutor {
                 .await
         }
         .boxed()
+    }
+}
+
+struct ProjectPushSink<'a> {
+    expr: Arc<[Box<dyn Expression>]>,
+    downstream: &'a mut dyn PushSink,
+}
+
+impl PushSink for ProjectPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let arrays = {
+                let expr_futs = self.expr.iter().map(|expr| expr.eval(&data_chunk));
+                futures::future::join_all(expr_futs)
+                    .await
+                    .into_iter()
+                    .try_collect()?
+            };
+            let (_, vis) = data_chunk.into_parts();
+            self.downstream.push(DataChunk::new(arrays, vis)).await
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        self.downstream.finish()
     }
 }
 

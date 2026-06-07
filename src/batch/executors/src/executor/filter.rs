@@ -28,7 +28,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperator, BatchPipelineOperatorChain, BatchPipelineOperatorFactory,
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PipelineOperatorOutput, PushContext, PushSink, PushStatus,
+    PipelineOperatorOutput, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
 };
 
 pub struct FilterExecutor {
@@ -72,6 +72,31 @@ impl Executor for FilterExecutor {
                 chunk_size,
                 ..
             } = *self;
+            if context.morsel_parallelism() == 1 {
+                if operators.is_empty() {
+                    let mut sink = FilterPushSink {
+                        expr,
+                        downstream,
+                        data_chunk_builder: DataChunkBuilder::new(
+                            child.schema().data_types(),
+                            chunk_size,
+                        ),
+                    };
+                    return child.execute_push(context, &mut sink).await;
+                } else {
+                    let mut pipeline_sink = PipelineOperatorPushSink::new(operators, downstream);
+                    let mut sink = FilterPushSink {
+                        expr,
+                        downstream: &mut pipeline_sink,
+                        data_chunk_builder: DataChunkBuilder::new(
+                            child.schema().data_types(),
+                            chunk_size,
+                        ),
+                    };
+                    return child.execute_push(context, &mut sink).await;
+                }
+            }
+
             let expr: Arc<dyn Expression> = Arc::from(expr);
             operators.prepend_parallel(
                 Box::new(FilterPipelineOperator::new(
@@ -84,6 +109,48 @@ impl Executor for FilterExecutor {
             child
                 .execute_push_with_operators(context, operators, downstream)
                 .await
+        }
+        .boxed()
+    }
+}
+
+struct FilterPushSink<'a> {
+    expr: BoxedExpression,
+    downstream: &'a mut dyn PushSink,
+    data_chunk_builder: DataChunkBuilder,
+}
+
+impl PushSink for FilterPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let data_chunk = data_chunk.compact_vis();
+            let vis_array = self.expr.eval(&data_chunk).await?;
+
+            if let Bool(vis) = vis_array.as_ref() {
+                for data_chunk in self
+                    .data_chunk_builder
+                    .append_chunk(data_chunk.with_visibility(vis.to_bitmap()))
+                {
+                    if self.downstream.push(data_chunk).await?.is_finished() {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+                Ok(PushStatus::NeedMoreInput)
+            } else {
+                bail!("Filter can only receive bool array");
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if let Some(data_chunk) = self.data_chunk_builder.consume_all()
+                && self.downstream.push(data_chunk).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+            self.downstream.finish().await
         }
         .boxed()
     }

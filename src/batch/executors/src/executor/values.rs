@@ -27,7 +27,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     Executor, ExecutorBuilder, Morsel, MorselSource, PushContext, PushSink, PushStatus,
-    drive_morsel_source_with_operators,
+    drive_morsel_source_with_operators, push_chunk_stream_with_operators,
 };
 
 /// [`ValuesExecutor`] implements Values executor.
@@ -82,6 +82,11 @@ impl Executor for ValuesExecutor {
         operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        if context.morsel_parallelism() == 1 {
+            return push_chunk_stream_with_operators(self.do_execute(), operators, context, sink)
+                .boxed();
+        }
+
         async move {
             let Self {
                 rows,

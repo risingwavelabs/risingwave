@@ -37,8 +37,8 @@ use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    Executor, ExecutorBuilder, PushContext, PushSink, PushStatus, build_scan_ranges_from_pb,
-    push_chunk_stream_with_operators,
+    Executor, ExecutorBuilder, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
+    build_scan_ranges_from_pb, push_chunk_stream_with_operators,
 };
 use crate::monitor::BatchMetrics;
 
@@ -268,6 +268,18 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
+        if context.morsel_parallelism() == 1 {
+            return async move {
+                if operators.is_empty() {
+                    self.execute_push(context, sink).await
+                } else {
+                    let mut pipeline_sink = PipelineOperatorPushSink::new(operators, sink);
+                    self.execute_push(context, &mut pipeline_sink).await
+                }
+            }
+            .boxed();
+        }
+
         push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
             .boxed()
     }

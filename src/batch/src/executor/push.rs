@@ -790,8 +790,46 @@ pub async fn push_chunk_stream_with_operators(
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
+    if context.morsel_parallelism() == 1 {
+        return push_chunk_stream_serial(stream, operators, context, sink).await;
+    }
+
     let source = StreamMorselSource::new(stream);
     drive_morsel_source_with_operators(source, operators, context, sink).await
+}
+
+async fn push_chunk_stream_serial(
+    stream: BoxedDataChunkStream,
+    operators: BatchPipelineOperatorChain,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus> {
+    if operators.is_empty() {
+        push_chunk_stream_direct(stream, context, sink).await
+    } else {
+        let mut pipeline_sink = PipelineOperatorPushSink::new(operators, sink);
+        push_chunk_stream_direct(stream, context, &mut pipeline_sink).await
+    }
+}
+
+async fn push_chunk_stream_direct(
+    mut stream: BoxedDataChunkStream,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus> {
+    let mut processed = 0;
+    while let Some(chunk) = stream.next().await {
+        context.check_shutdown()?;
+        if sink.push(chunk?).await?.is_finished() {
+            return sink.finish().await;
+        }
+        processed += 1;
+        if processed >= context.morsel_budget() {
+            tokio::task::yield_now().await;
+            processed = 0;
+        }
+    }
+    sink.finish().await
 }
 
 /// Drives a native morsel source through a collected operator chain.

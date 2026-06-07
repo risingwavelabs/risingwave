@@ -25,8 +25,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperator, BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor,
-    BoxedExecutorBuilder, Executor, ExecutorBuilder, PipelineOperatorOutput, PushContext, PushSink,
-    PushStatus,
+    BoxedExecutorBuilder, Executor, ExecutorBuilder, PipelineOperatorOutput,
+    PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
 };
 
 /// Limit executor.
@@ -158,6 +158,29 @@ impl Executor for LimitExecutor {
                 return downstream.finish().await;
             }
 
+            if context.morsel_parallelism() == 1 {
+                if operators.is_empty() {
+                    let mut sink = LimitPushSink {
+                        downstream,
+                        limit,
+                        offset,
+                        skipped: 0,
+                        returned: 0,
+                    };
+                    return child.execute_push(context, &mut sink).await;
+                } else {
+                    let mut pipeline_sink = PipelineOperatorPushSink::new(operators, downstream);
+                    let mut sink = LimitPushSink {
+                        downstream: &mut pipeline_sink,
+                        limit,
+                        offset,
+                        skipped: 0,
+                        returned: 0,
+                    };
+                    return child.execute_push(context, &mut sink).await;
+                }
+            }
+
             operators.prepend_single(Box::new(LimitPipelineOperator {
                 limit,
                 offset,
@@ -169,6 +192,74 @@ impl Executor for LimitExecutor {
                 .await
         }
         .boxed()
+    }
+}
+
+struct LimitPushSink<'a> {
+    downstream: &'a mut dyn PushSink,
+    limit: usize,
+    offset: usize,
+    skipped: usize,
+    returned: usize,
+}
+
+impl PushSink for LimitPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.returned == self.limit {
+                return Ok(PushStatus::Finished);
+            }
+
+            let cardinality = data_chunk.cardinality();
+            if cardinality + self.skipped <= self.offset {
+                self.skipped += cardinality;
+                return Ok(PushStatus::NeedMoreInput);
+            }
+
+            let output = if self.skipped == self.offset && cardinality + self.returned <= self.limit
+            {
+                self.returned += cardinality;
+                data_chunk
+            } else {
+                let mut new_vis;
+                if !data_chunk.is_vis_compacted() {
+                    new_vis = data_chunk.visibility().iter().collect_vec();
+                    for vis in new_vis.iter_mut().filter(|x| **x) {
+                        if self.skipped < self.offset {
+                            self.skipped += 1;
+                            *vis = false;
+                        } else if self.returned < self.limit {
+                            self.returned += 1;
+                        } else {
+                            *vis = false;
+                        }
+                    }
+                } else {
+                    let chunk_size = data_chunk.capacity();
+                    new_vis = vec![false; chunk_size];
+                    let l = self.offset - self.skipped;
+                    let r = min(l + self.limit - self.returned, chunk_size);
+                    new_vis[l..r].fill(true);
+                    self.returned += r - l;
+                    self.skipped += l;
+                }
+                data_chunk
+                    .with_visibility(new_vis.into_iter().collect::<Bitmap>())
+                    .compact_vis()
+            };
+
+            let downstream_status = self.downstream.push(output).await?;
+            if self.returned == self.limit || downstream_status.is_finished() {
+                Ok(PushStatus::Finished)
+            } else {
+                Ok(PushStatus::NeedMoreInput)
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        self.downstream.finish()
     }
 }
 
