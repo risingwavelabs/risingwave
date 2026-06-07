@@ -22,7 +22,7 @@ use risingwave_common::catalog::Schema;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, register_executor,
+    PushContext, PushSink, PushStatus, push_chunk_stream, register_executor,
 };
 use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSource;
@@ -145,7 +145,7 @@ impl Executor for BlockExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        execute_pull_stream_as_push(self.execute(), context, sink).boxed()
+        push_chunk_stream(self.execute(), context, sink).boxed()
     }
 }
 
@@ -187,7 +187,7 @@ impl Executor for BusyLoopExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        execute_pull_stream_as_push(self.execute(), context, sink).boxed()
+        push_chunk_stream(self.execute(), context, sink).boxed()
     }
 }
 

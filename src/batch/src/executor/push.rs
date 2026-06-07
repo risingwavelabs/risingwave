@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, VecDeque};
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+#[cfg(test)]
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -20,7 +23,9 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_expr::expr_context::{capture_expr_context, expr_context_scope};
-use tokio::sync::{Mutex, mpsc};
+#[cfg(test)]
+use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 
 use super::{BoxedDataChunkStream, BoxedExecutor};
 use crate::error::{BatchError, Result};
@@ -360,8 +365,9 @@ pub async fn push_chunk_stream(
     sink.finish().await
 }
 
-/// Adapter used while operators are migrated from pull to push.
-pub async fn execute_pull_stream_as_push(
+/// Test-only adapter for validating the old pull-to-push bridge behavior.
+#[cfg(test)]
+async fn execute_pull_stream_as_push(
     stream: BoxedDataChunkStream,
     context: PushContext,
     sink: &mut dyn PushSink,
@@ -374,6 +380,7 @@ pub async fn execute_pull_stream_as_push(
     PipelineExecutor::new(source, context).execute(sink).await
 }
 
+#[cfg(test)]
 async fn execute_pull_stream_as_push_parallel(
     mut stream: BoxedDataChunkStream,
     context: PushContext,
@@ -461,7 +468,7 @@ impl PushSink for ChannelPushSink {
     }
 }
 
-/// Adapter used while pull consumers are migrated to consume push pipelines directly.
+/// Compatibility bridge for algorithms that still consume ordered stream inputs.
 #[try_stream(boxed, ok = DataChunk, error = BatchError)]
 pub async fn execute_push_as_pull(executor: BoxedExecutor, context: PushContext, buffer: usize) {
     let (sender, mut receiver) = mpsc::channel(buffer.max(1));
