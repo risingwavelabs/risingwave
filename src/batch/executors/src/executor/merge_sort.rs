@@ -28,7 +28,7 @@ use risingwave_common_estimate_size::EstimateSize;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
-    execute_pull_stream_as_push, wrap_push_executor,
+    push_chunk_stream, wrap_push_executor,
 };
 use crate::error::{BatchError, Result};
 
@@ -85,7 +85,7 @@ impl Executor for MergeSortExecutor {
                 mem_context,
             ));
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            push_chunk_stream(executor.do_execute(), context, sink).await
         }
         .boxed()
     }

@@ -41,8 +41,7 @@ use super::{AsOfDesc, AsOfInequalityType, ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
-    wrap_push_executor,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor, push_chunk_stream, wrap_push_executor,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
@@ -159,7 +158,7 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
                 mem_ctx,
             ));
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            push_chunk_stream(executor.do_execute(), context, sink).await
         }
         .boxed()
     }
