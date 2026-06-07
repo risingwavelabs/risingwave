@@ -36,8 +36,9 @@ use risingwave_storage::{StateStore, dispatch_state_store};
 use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, build_scan_ranges_from_pb,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, PushContext, PushSink, PushStatus, build_scan_ranges_from_pb,
+    push_chunk_stream_with_operators,
 };
 use crate::monitor::BatchMetrics;
 
@@ -259,6 +260,16 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             sink.finish().await
         }
         .boxed()
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
+            .boxed()
     }
 }
 

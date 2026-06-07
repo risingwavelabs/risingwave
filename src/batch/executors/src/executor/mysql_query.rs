@@ -27,8 +27,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, BatchExternalSystemError};
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, PushContext, PushSink,
-    PushStatus, push_chunk_stream,
+    BatchPipelineOperator, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, push_chunk_stream_with_operators,
 };
 
 /// `MySqlQuery` executor. Runs a query against a `MySql` database.
@@ -62,7 +62,17 @@ impl Executor for MySqlQueryExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
-        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
+        self.execute_push_with_operators(context, vec![], sink)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
+        push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
+            .boxed()
     }
 }
 pub fn mysql_row_to_owned_row(

@@ -39,7 +39,9 @@ use super::{
 };
 use crate::build_scan_range_from_pb;
 use crate::error::{BatchError, Result};
-use crate::executor::{PushContext, PushSink, PushStatus, push_chunk_stream};
+use crate::executor::{
+    BatchPipelineOperator, PushContext, PushSink, PushStatus, push_chunk_stream_with_operators,
+};
 use crate::monitor::BatchMetrics;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -185,7 +187,17 @@ impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        push_chunk_stream(self.do_execute().boxed(), context, sink).boxed()
+        self.execute_push_with_operators(context, vec![], sink)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
+            .boxed()
     }
 }
 

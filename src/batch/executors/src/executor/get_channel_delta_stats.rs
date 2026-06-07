@@ -25,8 +25,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, push_chunk_stream,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder, PushContext, PushSink, PushStatus, push_chunk_stream_with_operators,
 };
 
 /// [`GetChannelDeltaStatsExecutor`] implements the executor for retrieving channel statistics
@@ -104,7 +104,16 @@ impl Executor for GetChannelDeltaStatsExecutor {
         context: PushContext,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
-        push_chunk_stream(self.do_execute(), context, sink).boxed()
+        self.execute_push_with_operators(context, vec![], sink)
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        push_chunk_stream_with_operators(self.do_execute(), operators, context, sink).boxed()
     }
 }
 

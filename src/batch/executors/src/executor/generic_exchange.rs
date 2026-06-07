@@ -37,8 +37,8 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, PushContext, PushSink,
-    PushStatus,
+    BatchPipelineOperator, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    PushContext, PushSink, PushStatus, push_chunk_stream_with_operators,
 };
 use crate::monitor::BatchMetrics;
 
@@ -239,6 +239,15 @@ impl<CS: 'static + Send + CreateSource> Executor for GenericExchangeExecutor<CS>
             sink.finish().await
         }
         .boxed()
+    }
+
+    fn execute_push_with_operators<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        push_chunk_stream_with_operators(self.do_execute(), operators, context, sink).boxed()
     }
 }
 
