@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
-use std::collections::BTreeMap;
-use std::collections::VecDeque;
-#[cfg(test)]
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -23,9 +20,7 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_expr::expr_context::{capture_expr_context, expr_context_scope};
-#[cfg(test)]
-use tokio::sync::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 
 use super::{BoxedDataChunkStream, BoxedExecutor};
 use crate::error::{BatchError, Result};
@@ -312,6 +307,11 @@ pub trait BatchPipelineOperator: Send {
     }
 }
 
+/// Creates per-worker operators for parallel morsel drivers.
+pub trait BatchPipelineOperatorFactory: Send + Sync {
+    fn create(&self) -> Box<dyn BatchPipelineOperator>;
+}
+
 pub struct StreamMorselSource {
     stream: BoxedDataChunkStream,
     next_sequence: u64,
@@ -445,6 +445,189 @@ where
 /// Compatibility name for older tests and source-only pipelines.
 pub type PipelineExecutor<S> = MorselPipelineDriver<S>;
 
+/// Parallel scheduler-owned morsel pipeline driver.
+///
+/// This runs a single source producer, multiple worker-local operator chains,
+/// and an ordered output merge. Operators are created per worker so worker state
+/// is isolated. The final sink remains single-threaded and receives chunks in
+/// source sequence order.
+pub struct ParallelMorselPipelineDriver<S> {
+    source: S,
+    operator_factories: Vec<Arc<dyn BatchPipelineOperatorFactory>>,
+    context: PushContext,
+}
+
+impl<S> ParallelMorselPipelineDriver<S>
+where
+    S: MorselSource + 'static,
+{
+    pub fn new(
+        source: S,
+        operator_factories: Vec<Arc<dyn BatchPipelineOperatorFactory>>,
+        context: PushContext,
+    ) -> Self {
+        Self {
+            source,
+            operator_factories,
+            context,
+        }
+    }
+
+    pub fn source_only(source: S, context: PushContext) -> Self {
+        Self::new(source, vec![], context)
+    }
+
+    pub async fn execute(self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        let Self {
+            mut source,
+            operator_factories,
+            context,
+        } = self;
+        let parallelism = context.morsel_parallelism().max(1);
+        if parallelism == 1 {
+            let mut driver = MorselPipelineDriver::new(
+                source,
+                operator_factories
+                    .into_iter()
+                    .map(|factory| factory.create())
+                    .collect(),
+                context,
+            );
+            return driver.execute(sink).await;
+        }
+
+        let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
+        let (output_tx, mut output_rx) = mpsc::channel(context.morsel_queue_capacity());
+        let shared_rx = Arc::new(Mutex::new(morsel_rx));
+
+        let producer_context = context.clone();
+        let producer_output_tx = output_tx.clone();
+        let producer = tokio::spawn(async move {
+            let mut scheduler = MorselScheduler::new(&mut source, producer_context.clone());
+            loop {
+                let next = match scheduler.next_morsel().await {
+                    Ok(next) => next,
+                    Err(error) => {
+                        let _ = producer_output_tx
+                            .send(ParallelDriverOutput::error(error))
+                            .await;
+                        break;
+                    }
+                };
+                let Some(morsel) = next else {
+                    break;
+                };
+                if morsel_tx.send(morsel).await.is_err() {
+                    break;
+                }
+            }
+            Ok::<_, BatchError>(())
+        });
+
+        let mut tasks = vec![producer];
+        for _ in 0..parallelism {
+            let rx = shared_rx.clone();
+            let tx = output_tx.clone();
+            let context = context.clone();
+            let factories = operator_factories.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut operators = factories
+                    .into_iter()
+                    .map(|factory| factory.create())
+                    .collect::<Vec<_>>();
+                loop {
+                    let next = {
+                        let mut rx = rx.lock().await;
+                        rx.recv().await
+                    };
+                    let Some(morsel) = next else {
+                        break;
+                    };
+                    context.check_shutdown()?;
+                    let sequence = morsel.sequence();
+                    let output = MorselPipelineDriver::<StreamMorselSource>::run_operators_from(
+                        &mut operators,
+                        0,
+                        vec![morsel.into_chunk()],
+                    )
+                    .await?;
+                    let driver_output = ParallelDriverOutput::ok(sequence, output);
+                    if tx.send(driver_output).await.is_err() {
+                        break;
+                    }
+                }
+                Ok::<_, BatchError>(())
+            }));
+        }
+        drop(output_tx);
+
+        let mut next_sequence = 0;
+        let mut pending = BTreeMap::new();
+        while let Some(output) = output_rx.recv().await {
+            let output = match output.into_result() {
+                Ok(output) => output,
+                Err(error) => {
+                    abort_tasks(&tasks);
+                    return Err(error);
+                }
+            };
+            pending.insert(output.sequence, output.output);
+            while let Some(output) = pending.remove(&next_sequence) {
+                let status =
+                    MorselPipelineDriver::<StreamMorselSource>::push_outputs(output.chunks, sink)
+                        .await?;
+                next_sequence += 1;
+                if status.is_finished() || output.status.is_finished() {
+                    abort_tasks(&tasks);
+                    return sink.finish().await;
+                }
+            }
+        }
+
+        for task in tasks {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => return Err(BatchError::Internal(anyhow::anyhow!(error.to_string()))),
+            }
+        }
+
+        sink.finish().await
+    }
+}
+
+struct ParallelDriverOutput {
+    result: Result<ParallelDriverOutputData>,
+}
+
+impl ParallelDriverOutput {
+    fn ok(sequence: u64, output: PipelineOperatorOutput) -> Self {
+        Self {
+            result: Ok(ParallelDriverOutputData { sequence, output }),
+        }
+    }
+
+    fn error(error: BatchError) -> Self {
+        Self { result: Err(error) }
+    }
+
+    fn into_result(self) -> Result<ParallelDriverOutputData> {
+        self.result
+    }
+}
+
+struct ParallelDriverOutputData {
+    sequence: u64,
+    output: PipelineOperatorOutput,
+}
+
+fn abort_tasks(tasks: &[tokio::task::JoinHandle<Result<()>>]) {
+    for task in tasks {
+        task.abort();
+    }
+}
+
 /// Drives a stream-backed source into a push sink.
 ///
 /// Some batch leaf executors still receive data from connector or storage APIs
@@ -456,7 +639,7 @@ pub async fn push_chunk_stream(
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
     let source = StreamMorselSource::new(stream);
-    MorselPipelineDriver::source_only(source, context)
+    ParallelMorselPipelineDriver::source_only(source, context)
         .execute(sink)
         .await
 }
@@ -715,6 +898,14 @@ mod tests {
         }
     }
 
+    struct DoubleCardinalityOperatorFactory;
+
+    impl BatchPipelineOperatorFactory for DoubleCardinalityOperatorFactory {
+        fn create(&self) -> Box<dyn BatchPipelineOperator> {
+            Box::new(DoubleCardinalityOperator)
+        }
+    }
+
     #[tokio::test]
     async fn test_morsel_pipeline_driver_runs_operator_chain() {
         let stream = stream::iter(vec![
@@ -736,6 +927,34 @@ mod tests {
 
         assert_eq!(status, PushStatus::NeedMoreInput);
         assert_eq!(sink.cardinalities, vec![4, 6]);
+    }
+
+    #[tokio::test]
+    async fn test_parallel_morsel_pipeline_driver_preserves_sequence() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(1)),
+            Ok(DataChunk::new_dummy(2)),
+            Ok(DataChunk::new_dummy(3)),
+            Ok(DataChunk::new_dummy(4)),
+        ])
+        .boxed();
+        let source = StreamMorselSource::new(stream);
+        let context = PushContext::new(ShutdownToken::empty())
+            .with_morsel_queue_capacity(2)
+            .with_morsel_parallelism(3);
+        let driver = ParallelMorselPipelineDriver::new(
+            source,
+            vec![Arc::new(DoubleCardinalityOperatorFactory)],
+            context,
+        );
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = driver.execute(&mut sink).await.unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(sink.cardinalities, vec![2, 4, 6, 8]);
     }
 
     struct FinishAfterFirstOperator {
