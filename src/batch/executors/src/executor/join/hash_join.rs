@@ -189,31 +189,59 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
                     };
                     async move {
                         context.check_shutdown()?;
-                        let create_build_sink = move || {
-                            HashTableBuildSink::<K>::new(
-                                build_key_idxs.clone(),
-                                null_matched.clone(),
+                        if context.morsel_parallelism() == 1 {
+                            let mut build_sink = HashTableBuildSink::<K>::new(
+                                build_key_idxs,
+                                null_matched,
                                 spill_available,
                                 check_memory,
-                                shutdown_rx.clone(),
-                                mem_ctx.clone(),
+                                shutdown_rx,
+                                mem_ctx,
+                            );
+                            build_side_source
+                                .execute_push(context, &mut build_sink)
+                                .await?;
+                            store_pipeline_state(
+                                &build_state,
+                                build_sink,
+                                "build",
+                                &pipeline_identity,
+                            )?;
+                            return Ok(PushStatus::NeedMoreInput);
+                        }
+
+                        let local_build_key_idxs = build_key_idxs.clone();
+                        let local_null_matched = null_matched.clone();
+                        let local_shutdown_rx = shutdown_rx.clone();
+                        let create_build_sink = move || {
+                            HashTableBuildSink::<K>::new_with_chunk_memory_tracking(
+                                local_build_key_idxs.clone(),
+                                local_null_matched.clone(),
+                                spill_available,
+                                false,
+                                local_shutdown_rx.clone(),
+                                MemoryContext::none(),
+                                false,
                             )
                         };
-                        let mut build_sinks = drive_push_executor_into_parallel_sinks(
+                        let build_sinks = drive_push_executor_into_parallel_sinks(
                             build_side_source,
                             context,
                             create_build_sink,
                         )
                         .await?;
-                        let mut build_sink = build_sinks.pop().ok_or_else(|| {
-                            BatchError::Internal(anyhow::anyhow!(
-                                "push pipeline {}-build produced no local sinks",
-                                pipeline_identity
-                            ))
-                        })?;
+                        let mut build_sink = HashTableBuildSink::<K>::new(
+                            build_key_idxs,
+                            null_matched,
+                            spill_available,
+                            check_memory,
+                            shutdown_rx,
+                            mem_ctx,
+                        );
                         for local_build_sink in build_sinks {
                             build_sink.merge_from(local_build_sink);
                         }
+                        build_sink.reserve_unreserved_chunk_memory()?;
                         store_pipeline_state(
                             &build_state,
                             build_sink,
@@ -339,6 +367,7 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
                                             build_data_types,
                                             full_data_types,
                                             output_data_types,
+                                            None,
                                             &mut forward_sink,
                                         )?;
                                         probe_side_source
@@ -705,6 +734,8 @@ struct HashTableBuildSink<K> {
     build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
     build_row_count: usize,
     mem_added_by_chunks: i64,
+    mem_reserved_by_chunks: i64,
+    reserve_chunks_on_push: bool,
     need_to_spill: bool,
     _phantom: PhantomData<K>,
 }
@@ -718,6 +749,26 @@ impl<K: HashKey> HashTableBuildSink<K> {
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
+        Self::new_with_chunk_memory_tracking(
+            build_key_idxs,
+            null_matched,
+            spill_available,
+            check_memory,
+            shutdown_rx,
+            mem_ctx,
+            true,
+        )
+    }
+
+    fn new_with_chunk_memory_tracking(
+        build_key_idxs: Vec<usize>,
+        null_matched: Vec<bool>,
+        spill_available: bool,
+        check_memory: bool,
+        shutdown_rx: ShutdownToken,
+        mem_ctx: MemoryContext,
+        reserve_chunks_on_push: bool,
+    ) -> Self {
         Self {
             build_key_idxs,
             null_matched,
@@ -728,21 +779,45 @@ impl<K: HashKey> HashTableBuildSink<K> {
             mem_ctx,
             build_row_count: 0,
             mem_added_by_chunks: 0,
+            mem_reserved_by_chunks: 0,
+            reserve_chunks_on_push,
             need_to_spill: false,
             _phantom: PhantomData,
         }
     }
 
     fn spill_fallback(self) -> BuildFinalizeResult<K> {
-        self.mem_ctx.add(-self.mem_added_by_chunks);
+        self.mem_ctx.add(-self.mem_reserved_by_chunks);
         BuildFinalizeResult::SpillFallback(self.build_side.into_iter().collect())
     }
 
     fn merge_from(&mut self, other: Self) {
         self.build_row_count += other.build_row_count;
         self.mem_added_by_chunks += other.mem_added_by_chunks;
+        self.mem_reserved_by_chunks += other.mem_reserved_by_chunks;
         self.need_to_spill |= other.need_to_spill;
         self.build_side.extend(other.build_side);
+    }
+
+    fn reserve_chunk_memory(&mut self, bytes: i64) -> Result<()> {
+        if bytes <= 0 {
+            return Ok(());
+        }
+
+        if self.mem_ctx.add(bytes) {
+            self.mem_reserved_by_chunks += bytes;
+        } else if self.check_memory {
+            if self.spill_available {
+                self.need_to_spill = true;
+            } else {
+                Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn reserve_unreserved_chunk_memory(&mut self) -> Result<()> {
+        self.reserve_chunk_memory(self.mem_added_by_chunks - self.mem_reserved_by_chunks)
     }
 
     fn finalize(self) -> Result<BuildFinalizeResult<K>> {
@@ -808,12 +883,8 @@ impl<K: HashKey + Send> PushSink for HashTableBuildSink<K> {
                 let chunk_estimated_heap_size = chunk.estimated_heap_size() as i64;
                 self.mem_added_by_chunks += chunk_estimated_heap_size;
                 self.build_side.push(chunk);
-                if !self.mem_ctx.add(chunk_estimated_heap_size) && self.check_memory {
-                    if self.spill_available {
-                        self.need_to_spill = true;
-                    } else {
-                        Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
-                    }
+                if self.reserve_chunks_on_push {
+                    self.reserve_chunk_memory(chunk_estimated_heap_size)?;
                 }
             }
             Ok(PushStatus::NeedMoreInput)
@@ -855,16 +926,21 @@ impl<'a, K: HashKey> HashJoinProbeSink<'a, K> {
         build_data_types: Vec<DataType>,
         full_data_types: Vec<DataType>,
         output_data_types: Vec<DataType>,
+        shared_build_row_matched: Option<Arc<SharedBuildRowMatched>>,
         downstream: &'a mut dyn PushSink,
     ) -> Result<Self> {
-        let build_row_matched = match join_type {
-            JoinType::RightOuter
-            | JoinType::RightSemi
-            | JoinType::RightAnti
-            | JoinType::FullOuter => Some(BuildRowMatched::local(
-                built.build_side.iter().map(|c| c.capacity()),
-            )?),
-            _ => None,
+        let build_row_matched = if let Some(shared) = shared_build_row_matched {
+            Some(BuildRowMatched::from_shared(shared))
+        } else {
+            match join_type {
+                JoinType::RightOuter
+                | JoinType::RightSemi
+                | JoinType::RightAnti
+                | JoinType::FullOuter => Some(BuildRowMatched::local(
+                    built.build_side.iter().map(|c| c.capacity()),
+                )?),
+                _ => None,
+            }
         };
 
         Ok(Self {
@@ -884,13 +960,6 @@ impl<'a, K: HashKey> HashJoinProbeSink<'a, K> {
             downstream,
             finished: false,
         })
-    }
-
-    fn with_shared_build_row_matched(mut self, shared: Option<Arc<SharedBuildRowMatched>>) -> Self {
-        if let Some(shared) = shared {
-            self.build_row_matched = Some(BuildRowMatched::from_shared(shared));
-        }
-        self
     }
 
     async fn emit_output(&mut self, chunk: DataChunk) -> Result<PushStatus> {
@@ -1970,9 +2039,9 @@ impl<K: HashKey + Send + Sync> BatchPipelineOperator for HashJoinProbeOperator<K
                 self.build_data_types.clone(),
                 self.full_data_types.clone(),
                 self.output_data_types.clone(),
+                self.shared_build_row_matched.clone(),
                 &mut output_sink,
-            )?
-            .with_shared_build_row_matched(self.shared_build_row_matched.clone());
+            )?;
             let status = probe_sink.push(chunk).await?;
             let flush_status = probe_sink.flush_output().await?;
             let status = if status.is_finished() || flush_status.is_finished() {
@@ -2391,9 +2460,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 build_data_types,
                 full_data_types,
                 output_data_types,
+                shared_build_row_matched,
                 sink,
-            )?
-            .with_shared_build_row_matched(shared_build_row_matched);
+            )?;
             probe_finalizer.finish_probe().await
         } else {
             Ok(PushStatus::NeedMoreInput)
@@ -5336,6 +5405,39 @@ mod tests {
         test_fixture.do_test(expected_chunk, false, false).await;
     }
 
+    #[tokio::test]
+    async fn test_right_outer_join_push() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             2   .   2   .
+             3   3.9 3   3.7
+             3   3.9 3   .
+             4   6.6 4   7.5
+             3   .   3   3.7
+             3   .   3   .
+             .   .   8   6.1
+             .   .   .   8.9
+             .   .   .   3.5
+             .   .   6   .
+             .   .   6   .
+             .   .   .   8
+             .   .   7   .
+             .   .   .   9.1
+             .   .   9   .
+             .   .   9   .
+             .   .   .   9.6
+             .   .   100 .
+             .   .   .   8.18
+             .   .   200 .",
+        );
+
+        test_fixture
+            .do_push_test(expected_chunk, false, false)
+            .await;
+    }
+
     /// Sql:
     /// ```sql
     /// select * from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
@@ -5643,6 +5745,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_right_anti_join_push() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   F
+             8   6.1
+             .   8.9
+             .   3.5
+             6   .
+             6   .
+             .   8.0
+             7   .
+             .   9.1
+             9   .
+             9   .
+             .   9.6
+             100 .
+             .   8.18
+             200 .",
+        );
+
+        test_fixture
+            .do_push_test(expected_chunk, false, false)
+            .await;
+    }
+
+    #[tokio::test]
     async fn test_right_anti_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
 
@@ -5683,6 +5812,23 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, false, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_semi_join_push() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   F
+             2   .
+             3   .
+             4   7.5
+             3   3.7",
+        );
+
+        test_fixture
+            .do_push_test(expected_chunk, false, false)
+            .await;
     }
 
     #[tokio::test]

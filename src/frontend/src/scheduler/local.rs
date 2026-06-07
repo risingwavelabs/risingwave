@@ -162,6 +162,7 @@ impl LocalQueryExecution {
                     .build()
                     .await
                     .map_err(|e| Box::new(e) as BoxedError)?;
+                let morsel_parallelism = self.query.batch_parallelism();
                 // The following execution can be slow.
                 // Release potential large object in Query and PlanNode early.
                 drop(plan_node);
@@ -170,8 +171,9 @@ impl LocalQueryExecution {
                 let mut sink = LocalQueryPushSink {
                     sender: result_sender,
                 };
-                let push_context =
-                    PushContext::new(exec_shutdown_rx.clone()).with_task_scope(push_task_scope);
+                let push_context = PushContext::new(exec_shutdown_rx.clone())
+                    .with_morsel_parallelism(morsel_parallelism)
+                    .with_task_scope(push_task_scope);
                 let scheduler = PushQueryScheduler::new(push_context);
                 scheduler
                     .execute_root(executor, &mut sink)
@@ -294,6 +296,7 @@ impl LocalQueryExecution {
             // to really get the output of computation, which is single distribution
             // but we do not need to explicitly specify this.
             exchange_info: None,
+            morsel_parallelism: self.query.batch_parallelism() as u32,
         })
     }
 
@@ -365,6 +368,7 @@ impl LocalQueryExecution {
                                 mode: DistributionMode::Single as i32,
                                 ..Default::default()
                             }),
+                            morsel_parallelism: self.query.batch_parallelism() as u32,
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
@@ -408,6 +412,7 @@ impl LocalQueryExecution {
                                 mode: DistributionMode::Single as i32,
                                 ..Default::default()
                             }),
+                            morsel_parallelism: self.query.batch_parallelism() as u32,
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
@@ -446,6 +451,7 @@ impl LocalQueryExecution {
                                 mode: DistributionMode::Single as i32,
                                 ..Default::default()
                             }),
+                            morsel_parallelism: self.query.batch_parallelism() as u32,
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
@@ -480,6 +486,7 @@ impl LocalQueryExecution {
                             mode: DistributionMode::Single as i32,
                             ..Default::default()
                         }),
+                        morsel_parallelism: self.query.batch_parallelism() as u32,
                     };
 
                     let local_execute_plan = LocalExecutePlan {

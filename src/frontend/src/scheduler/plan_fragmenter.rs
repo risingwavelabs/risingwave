@@ -288,6 +288,10 @@ impl Query {
         &self.query_id
     }
 
+    pub fn batch_parallelism(&self) -> usize {
+        self.stage_graph.batch_parallelism.max(1)
+    }
+
     pub fn stages_with_table_scan(&self) -> HashSet<StageId> {
         self.stage_graph
             .stages

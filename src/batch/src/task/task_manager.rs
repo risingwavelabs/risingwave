@@ -341,6 +341,7 @@ mod tests {
                 mode: DistributionMode::Single as i32,
                 distribution: None,
             }),
+            morsel_parallelism: 1,
         };
         let task_id = PbTaskId {
             query_id: "".to_owned(),
@@ -372,6 +373,7 @@ mod tests {
                 mode: DistributionMode::Single as i32,
                 distribution: None,
             }),
+            morsel_parallelism: 1,
         };
         let task_id = PbTaskId {
             query_id: "".to_owned(),

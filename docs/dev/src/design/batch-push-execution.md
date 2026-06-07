@@ -26,6 +26,7 @@ Batch push execution should follow the same execution ownership model as DuckDB:
 
 ## Implementation State
 
+- Production push execution now wires morsel parallelism into `PushContext`: frontend-local and frontend-root execution use the resolved query batch parallelism, while distributed compute tasks receive task-local worker parallelism through `PlanFragment`.
 - `ExecutorMorselSource` turns a push child into scheduler-owned morsels without using the pull stream bridge.
 - `drive_push_executor_into_parallel_sinks` drives a push child into worker-local sink states and returns them for combine/finalize.
 - Hash join build now combines worker-local build sinks before finalize.

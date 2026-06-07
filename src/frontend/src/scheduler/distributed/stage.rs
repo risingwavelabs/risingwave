@@ -706,8 +706,9 @@ impl StageRunner {
             let mut sink = RootStagePushSink {
                 sender: result_tx.clone(),
             };
-            let push_context =
-                PushContext::new(shutdown_rx.clone()).with_task_scope(push_task_scope);
+            let push_context = PushContext::new(shutdown_rx.clone())
+                .with_morsel_parallelism(self.query.batch_parallelism())
+                .with_task_scope(push_task_scope);
             let scheduler = PushQueryScheduler::new(push_context);
             if let Err(e) = scheduler.execute_root(executor, &mut sink).await {
                 if !shutdown_rx0.is_cancelled() {
@@ -972,11 +973,12 @@ impl StageRunner {
     async fn schedule_task(
         &self,
         task_id: PbTaskId,
-        plan_fragment: PlanFragment,
+        mut plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
         expr_context: ExprContext,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
+        plan_fragment.morsel_parallelism = worker.compute_node_parallelism().max(1) as u32;
         let worker_node_addr = worker.host.take().unwrap();
         let compute_client = self
             .compute_client_pool
@@ -1019,6 +1021,7 @@ impl StageRunner {
         PlanFragment {
             root: Some(plan_node_prost),
             exchange_info: Some(exchange_info),
+            morsel_parallelism: self.query.batch_parallelism() as u32,
         }
     }
 

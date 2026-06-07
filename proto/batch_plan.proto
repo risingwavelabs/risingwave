@@ -519,4 +519,5 @@ message ExchangeInfo {
 message PlanFragment {
   PlanNode root = 1;
   ExchangeInfo exchange_info = 2;
+  uint32 morsel_parallelism = 3;
 }

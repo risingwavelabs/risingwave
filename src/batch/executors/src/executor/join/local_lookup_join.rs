@@ -136,6 +136,7 @@ impl InnerSideExecutorBuilder {
                     mode: DistributionMode::Single as i32,
                     ..Default::default()
                 }),
+                morsel_parallelism: worker.compute_node_parallelism().max(1) as u32,
             }),
             tracing_context: TracingContext::from_current_span().to_protobuf(),
         };

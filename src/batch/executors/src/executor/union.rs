@@ -18,13 +18,15 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_expr::expr_context::{capture_expr_context, expr_context_scope};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use rw_futures_util::select_all;
+use tokio::sync::mpsc;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    ForwardingNoFinishSink, PushContext, PushSink, PushStatus,
+    PushContext, PushSink, PushStatus,
 };
 
 pub struct UnionExecutor {
@@ -51,16 +53,84 @@ impl Executor for UnionExecutor {
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, Result<PushStatus>> {
         async move {
+            let (sender, mut receiver) = mpsc::channel(context.morsel_queue_capacity());
+            let mut tasks = Vec::with_capacity(self.inputs.len());
             for input in self.inputs {
-                let mut child_sink = ForwardingNoFinishSink::new(sink);
-                let status = input.execute_push(context.clone(), &mut child_sink).await?;
-                if status.is_finished() {
+                let context = context.clone();
+                let sender = sender.clone();
+                let task_scope = context.task_scope();
+                let expr_context = task_scope
+                    .is_none()
+                    .then(|| capture_expr_context().ok())
+                    .flatten();
+                tasks.push(tokio::spawn(async move {
+                    let exec = async move {
+                        let mut child_sink = UnionChildSink::from_sender(sender.clone());
+                        if let Err(error) = input.execute_push(context, &mut child_sink).await {
+                            let _ = sender.send(Err(error)).await;
+                        }
+                    }
+                    .boxed();
+                    if let Some(task_scope) = task_scope {
+                        task_scope.scope(exec).await;
+                    } else if let Some(expr_context) = expr_context {
+                        expr_context_scope(expr_context, exec).await;
+                    } else {
+                        exec.await;
+                    }
+                }));
+            }
+            drop(sender);
+
+            while let Some(chunk) = receiver.recv().await {
+                let chunk = chunk?;
+                if sink.push(chunk).await?.is_finished() {
+                    abort_union_tasks(&tasks);
                     return sink.finish().await;
                 }
             }
+
+            for task in tasks {
+                match task.await {
+                    Ok(()) => {}
+                    Err(error) if error.is_cancelled() => {}
+                    Err(error) => {
+                        return Err(BatchError::Internal(anyhow::anyhow!(error.to_string())));
+                    }
+                }
+            }
+
             sink.finish().await
         }
         .boxed()
+    }
+}
+
+struct UnionChildSink {
+    sender: mpsc::Sender<Result<DataChunk>>,
+}
+
+impl UnionChildSink {
+    fn from_sender(sender: mpsc::Sender<Result<DataChunk>>) -> Self {
+        Self { sender }
+    }
+}
+
+impl PushSink for UnionChildSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.sender.send(Ok(chunk)).await.is_err() {
+                return Ok(PushStatus::Finished);
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+fn abort_union_tasks(tasks: &[tokio::task::JoinHandle<()>]) {
+    for task in tasks {
+        task.abort();
     }
 }
 
@@ -113,7 +183,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Executor, UnionExecutor};
+    use crate::executor::{Executor, PushContext, UnionExecutor, collect_push_input};
+    use crate::task::ShutdownToken;
 
     #[tokio::test]
     async fn test_union_executor() {
@@ -195,5 +266,65 @@ mod tests {
 
         let res = stream.next().await;
         assert_matches!(res, None);
+    }
+
+    #[tokio::test]
+    async fn test_union_push_executor() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        };
+        let mut mock_executor1 = MockExecutor::new(schema.clone());
+        mock_executor1.add(DataChunk::from_pretty(
+            "i i
+             1 10
+             2 20
+             3 30
+             4 40",
+        ));
+
+        let mut mock_executor2 = MockExecutor::new(schema);
+        mock_executor2.add(DataChunk::from_pretty(
+            "i i
+             5 50
+             6 60
+             7 70
+             8 80",
+        ));
+
+        let union_executor = Box::new(UnionExecutor {
+            inputs: vec![Box::new(mock_executor1), Box::new(mock_executor2)],
+            identity: "UnionExecutor".to_owned(),
+        });
+        let context = PushContext::new(ShutdownToken::empty()).with_morsel_parallelism(2);
+        let (_schema, chunks) = collect_push_input(union_executor, context).await.unwrap();
+        let mut rows = vec![];
+        for chunk in chunks {
+            let col1 = chunk.column_at(0).as_int32();
+            let col2 = chunk.column_at(1).as_int32();
+            for row_idx in 0..chunk.cardinality() {
+                rows.push((
+                    col1.value_at(row_idx).unwrap(),
+                    col2.value_at(row_idx).unwrap(),
+                ));
+            }
+        }
+        rows.sort();
+
+        assert_eq!(
+            rows,
+            vec![
+                (1, 10),
+                (2, 20),
+                (3, 30),
+                (4, 40),
+                (5, 50),
+                (6, 60),
+                (7, 70),
+                (8, 80)
+            ]
+        );
     }
 }

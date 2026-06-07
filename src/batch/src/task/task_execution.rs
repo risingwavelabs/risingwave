@@ -567,7 +567,8 @@ impl BatchTaskExecution {
         let mut error = None;
 
         let mut sink = TaskOutputPushSink::new(sender, self.shutdown_rx.clone());
-        let push_context = PushContext::new(self.shutdown_rx.clone());
+        let push_context = PushContext::new(self.shutdown_rx.clone())
+            .with_morsel_parallelism(self.plan.morsel_parallelism as usize);
         let scheduler = PushQueryScheduler::new(push_context);
         match scheduler.execute_root(root, &mut sink).await {
             Ok(_) => {
