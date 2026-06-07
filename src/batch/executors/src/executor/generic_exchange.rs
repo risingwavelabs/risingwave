@@ -38,8 +38,8 @@ use crate::task::{BatchTaskContext, TaskId};
 pub type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    Executor, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
-    push_chunk_stream_with_operators,
+    Executor, Morsel, MorselSource, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
+    drive_morsel_source_with_operators,
 };
 use crate::monitor::BatchMetrics;
 
@@ -213,7 +213,7 @@ impl<CS: 'static + Send + CreateSource> Executor for GenericExchangeExecutor<CS>
                     Self::data_chunk_stream(
                         prost_source,
                         source_creator,
-                        &*self.context,
+                        self.context.clone(),
                         self.metrics.clone(),
                     )
                 });
@@ -260,7 +260,91 @@ impl<CS: 'static + Send + CreateSource> Executor for GenericExchangeExecutor<CS>
             .boxed();
         }
 
-        push_chunk_stream_with_operators(self.do_execute(), operators, context, sink).boxed()
+        async move {
+            let streams = self
+                .proto_sources
+                .into_iter()
+                .zip_eq_fast(self.source_creators)
+                .map(|(prost_source, source_creator)| {
+                    Self::data_chunk_stream(
+                        prost_source,
+                        source_creator,
+                        self.context.clone(),
+                        self.metrics.clone(),
+                    )
+                })
+                .collect();
+            let source = ExchangeMorselSource::new(streams, self.sequential);
+            drive_morsel_source_with_operators(source, operators, context, sink).await
+        }
+        .boxed()
+    }
+}
+
+enum ExchangeMorselStreams {
+    Sequential {
+        streams: Vec<BoxedDataChunkStream>,
+        current_idx: usize,
+    },
+    Concurrent(BoxedDataChunkStream),
+}
+
+struct ExchangeMorselSource {
+    streams: ExchangeMorselStreams,
+    next_sequence: u64,
+}
+
+impl ExchangeMorselSource {
+    fn new(streams: Vec<BoxedDataChunkStream>, sequential: bool) -> Self {
+        let streams = if sequential {
+            ExchangeMorselStreams::Sequential {
+                streams,
+                current_idx: 0,
+            }
+        } else {
+            ExchangeMorselStreams::Concurrent(select_all(streams).boxed())
+        };
+        Self {
+            streams,
+            next_sequence: 0,
+        }
+    }
+}
+
+impl MorselSource for ExchangeMorselSource {
+    fn next_morsel<'a>(
+        &'a mut self,
+        context: &'a PushContext,
+    ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+        async move {
+            context.check_shutdown()?;
+            match &mut self.streams {
+                ExchangeMorselStreams::Sequential {
+                    streams,
+                    current_idx,
+                } => {
+                    while *current_idx < streams.len() {
+                        if let Some(chunk) = streams[*current_idx].next().await {
+                            context.check_shutdown()?;
+                            let sequence = self.next_sequence;
+                            self.next_sequence += 1;
+                            return Ok(Some(Morsel::new(sequence, chunk?)));
+                        }
+                        *current_idx += 1;
+                    }
+                    Ok(None)
+                }
+                ExchangeMorselStreams::Concurrent(stream) => {
+                    let Some(chunk) = stream.next().await else {
+                        return Ok(None);
+                    };
+                    let sequence = self.next_sequence;
+                    self.next_sequence += 1;
+                    Ok(Some(Morsel::new(sequence, chunk?)))
+                }
+            }
+        }
+        .boxed()
     }
 }
 
@@ -275,7 +359,7 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
                 Self::data_chunk_stream(
                     prost_source,
                     source_creator,
-                    &*self.context,
+                    self.context.clone(),
                     self.metrics.clone(),
                 )
             });
@@ -300,10 +384,12 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
     async fn data_chunk_stream(
         prost_source: PbExchangeSource,
         source_creator: CS,
-        context: &dyn BatchTaskContext,
+        context: Arc<dyn BatchTaskContext>,
         metrics: Option<BatchMetrics>,
     ) {
-        let mut source = source_creator.create_source(context, &prost_source).await?;
+        let mut source = source_creator
+            .create_source(&*context, &prost_source)
+            .await?;
         // Release potential large objects in LocalExecutePlan early.
         drop(prost_source);
         // create the collector

@@ -36,7 +36,9 @@ use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result, SharedResult};
-use crate::executor::{BoxedExecutor, ExecutorBuilder, PushContext, PushSink, PushStatus};
+use crate::executor::{
+    BoxedExecutor, ExecutorBuilder, PushContext, PushQueryScheduler, PushSink, PushStatus,
+};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::BatchTaskContext;
@@ -566,7 +568,8 @@ impl BatchTaskExecution {
 
         let mut sink = TaskOutputPushSink::new(sender, self.shutdown_rx.clone());
         let push_context = PushContext::new(self.shutdown_rx.clone());
-        match root.execute_push(push_context, &mut sink).await {
+        let scheduler = PushQueryScheduler::new(push_context);
+        match scheduler.execute_root(root, &mut sink).await {
             Ok(_) => {
                 debug!("Batch task {:?} finished successfully.", self.task_id);
                 state = TaskStatus::Finished;

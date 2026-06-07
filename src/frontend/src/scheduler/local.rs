@@ -23,7 +23,9 @@ use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{ExecutorBuilder, PushContext, PushSink, PushStatus};
+use risingwave_batch::executor::{
+    ExecutorBuilder, PushContext, PushQueryScheduler, PushSink, PushStatus,
+};
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -170,8 +172,9 @@ impl LocalQueryExecution {
                 };
                 let push_context =
                     PushContext::new(exec_shutdown_rx.clone()).with_task_scope(push_task_scope);
-                executor
-                    .execute_push(push_context, &mut sink)
+                let scheduler = PushQueryScheduler::new(push_context);
+                scheduler
+                    .execute_root(executor, &mut sink)
                     .await
                     .map_err(|e| Box::new(e) as BoxedError)
             }

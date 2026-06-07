@@ -517,7 +517,7 @@ mod tests {
         FakeInnerSideExecutorBuilder, MockExecutor, diff_executor_output,
     };
     use crate::executor::{
-        BoxedExecutor, PushContext, SortExecutor, WrapStreamExecutor, execute_push_as_pull,
+        BoxedExecutor, BufferChunkExecutor, PushContext, SortExecutor, collect_push_input,
     };
     use crate::local_lookup_join::LocalLookupJoinExecutorArgs;
     use crate::monitor::BatchSpillMetrics;
@@ -644,13 +644,11 @@ mod tests {
     ) {
         let lookup_join_executor = create_lookup_join_executor(join_type, condition, null_safe);
         let order_by_executor = create_order_by_executor(lookup_join_executor);
-        let schema = order_by_executor.schema().clone();
-        let push_stream = execute_push_as_pull(
-            order_by_executor,
-            PushContext::new(ShutdownToken::empty()),
-            CHUNK_SIZE,
-        );
-        let push_output = Box::new(WrapStreamExecutor::new(schema.clone(), push_stream));
+        let (schema, chunks) =
+            collect_push_input(order_by_executor, PushContext::new(ShutdownToken::empty()))
+                .await
+                .unwrap();
+        let push_output = Box::new(BufferChunkExecutor::new(schema.clone(), chunks));
         let mut expected_mock_exec = MockExecutor::new(schema);
         expected_mock_exec.add(expected);
         diff_executor_output(push_output, Box::new(expected_mock_exec)).await;

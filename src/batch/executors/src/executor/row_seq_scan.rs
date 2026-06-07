@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -37,8 +36,8 @@ use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    Executor, ExecutorBuilder, PipelineOperatorPushSink, PushContext, PushSink, PushStatus,
-    build_scan_ranges_from_pb, push_chunk_stream_with_operators,
+    Executor, ExecutorBuilder, Morsel, MorselSource, PipelineOperatorPushSink, PushContext,
+    PushSink, PushStatus, build_scan_ranges_from_pb, drive_morsel_source_with_operators,
 };
 use crate::monitor::BatchMetrics;
 
@@ -174,9 +173,12 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             } = *self;
             let table = Arc::new(table);
 
-            let histogram = metrics
-                .as_ref()
-                .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
+            let histogram = metrics.as_ref().map(|metrics| {
+                metrics
+                    .executor_metrics()
+                    .row_seq_scan_next_duration
+                    .clone()
+            });
 
             if ordered {
                 // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -202,7 +204,8 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
                 context.check_shutdown()?;
                 let table = table.clone();
                 if let Some(row) =
-                    Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+                    Self::execute_point_get(table, point_get, query_epoch, histogram.clone())
+                        .await?
                     && let Some(chunk) = data_chunk_builder.append_one_row(row)
                 {
                     returned += chunk.cardinality() as u64;
@@ -240,7 +243,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
                     query_epoch,
                     chunk_size,
                     limit,
-                    histogram,
+                    histogram.clone(),
                 );
                 #[for_await]
                 for chunk in stream {
@@ -280,8 +283,173 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             .boxed();
         }
 
-        push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
-            .boxed()
+        async move {
+            let Self {
+                chunk_size,
+                metrics,
+                table,
+                scan_ranges,
+                ordered,
+                query_epoch,
+                limit,
+                ..
+            } = *self;
+            let histogram = metrics.as_ref().map(|metrics| {
+                metrics
+                    .executor_metrics()
+                    .row_seq_scan_next_duration
+                    .clone()
+            });
+            let source = RowSeqScanMorselSource::new(
+                Arc::new(table),
+                scan_ranges,
+                ordered,
+                query_epoch,
+                chunk_size,
+                limit,
+                histogram,
+            );
+
+            drive_morsel_source_with_operators(source, operators, context, sink).await
+        }
+        .boxed()
+    }
+}
+
+struct RowSeqScanMorselSource<S: StateStore> {
+    table: Arc<BatchTable<S>>,
+    point_gets: std::vec::IntoIter<ScanRange>,
+    range_scans: std::vec::IntoIter<ScanRange>,
+    active_range_stream: Option<BoxedDataChunkStream>,
+    data_chunk_builder: DataChunkBuilder,
+    chunk_size: usize,
+    ordered: bool,
+    query_epoch: BatchQueryEpoch,
+    limit: Option<u64>,
+    returned: u64,
+    histogram: Option<Histogram>,
+    next_sequence: u64,
+}
+
+impl<S: StateStore> RowSeqScanMorselSource<S> {
+    fn new(
+        table: Arc<BatchTable<S>>,
+        scan_ranges: Vec<ScanRange>,
+        ordered: bool,
+        query_epoch: BatchQueryEpoch,
+        chunk_size: usize,
+        limit: Option<u64>,
+        histogram: Option<Histogram>,
+    ) -> Self {
+        if ordered {
+            // Currently we execute range-scans concurrently so the order is not guaranteed if
+            // there're multiple ranges.
+            // TODO: reserve the order for multiple ranges.
+            assert_eq!(scan_ranges.len(), 1);
+        }
+
+        let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
+            .into_iter()
+            .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
+        let data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
+
+        Self {
+            table,
+            point_gets: point_gets.into_iter(),
+            range_scans: range_scans.into_iter(),
+            active_range_stream: None,
+            data_chunk_builder,
+            chunk_size,
+            ordered,
+            query_epoch,
+            limit,
+            returned: 0,
+            histogram,
+            next_sequence: 0,
+        }
+    }
+
+    fn next_chunk_morsel(&mut self, chunk: DataChunk) -> Morsel {
+        self.returned += chunk.cardinality() as u64;
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        Morsel::new(sequence, chunk)
+    }
+
+    fn limit_reached(&self) -> bool {
+        self.limit.is_some_and(|limit| self.returned >= limit)
+    }
+}
+
+impl<S: StateStore> MorselSource for RowSeqScanMorselSource<S> {
+    fn next_morsel<'a>(
+        &'a mut self,
+        context: &'a PushContext,
+    ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+        async move {
+            context.check_shutdown()?;
+            if self.limit_reached() {
+                return Ok(None);
+            }
+
+            loop {
+                let active_range_chunk = match &mut self.active_range_stream {
+                    Some(stream) => stream.next().await,
+                    None => None,
+                };
+                if let Some(chunk) = active_range_chunk {
+                    context.check_shutdown()?;
+                    return Ok(Some(self.next_chunk_morsel(chunk?)));
+                }
+                if self.active_range_stream.is_some() {
+                    self.active_range_stream = None;
+                    continue;
+                }
+
+                while let Some(point_get) = self.point_gets.next() {
+                    context.check_shutdown()?;
+                    if let Some(row) = RowSeqScanExecutor::<S>::execute_point_get(
+                        self.table.clone(),
+                        point_get,
+                        self.query_epoch,
+                        self.histogram.clone(),
+                    )
+                    .await?
+                    {
+                        if let Some(chunk) = self.data_chunk_builder.append_one_row(row) {
+                            return Ok(Some(self.next_chunk_morsel(chunk)));
+                        }
+                    }
+                    if self.limit_reached() {
+                        if let Some(chunk) = self.data_chunk_builder.consume_all() {
+                            return Ok(Some(self.next_chunk_morsel(chunk)));
+                        }
+                        return Ok(None);
+                    }
+                }
+
+                if let Some(chunk) = self.data_chunk_builder.consume_all() {
+                    return Ok(Some(self.next_chunk_morsel(chunk)));
+                }
+
+                let Some(range) = self.range_scans.next() else {
+                    return Ok(None);
+                };
+                self.active_range_stream = Some(
+                    RowSeqScanExecutor::<S>::execute_range(
+                        self.table.clone(),
+                        range,
+                        self.ordered,
+                        self.query_epoch,
+                        self.chunk_size,
+                        self.limit,
+                        self.histogram.clone(),
+                    )
+                    .boxed(),
+                );
+            }
+        }
+        .boxed()
     }
 }
 
@@ -301,9 +469,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let table = Arc::new(table);
 
         // Create collector.
-        let histogram = metrics
-            .as_ref()
-            .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
+        let histogram = metrics.as_ref().map(|metrics| {
+            metrics
+                .executor_metrics()
+                .row_seq_scan_next_duration
+                .clone()
+        });
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -328,7 +499,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+                Self::execute_point_get(table, point_get, query_epoch, histogram.clone()).await?
                 && let Some(chunk) = data_chunk_builder.append_one_row(row)
             {
                 returned += chunk.cardinality() as u64;
@@ -361,7 +532,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 query_epoch,
                 chunk_size,
                 limit,
-                histogram,
+                histogram.clone(),
             );
             #[for_await]
             for chunk in stream {
@@ -381,7 +552,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         query_epoch: BatchQueryEpoch,
-        histogram: Option<impl Deref<Target = Histogram>>,
+        histogram: Option<Histogram>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());
@@ -406,7 +577,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         query_epoch: BatchQueryEpoch,
         chunk_size: usize,
         limit: Option<u64>,
-        histogram: Option<impl Deref<Target = Histogram>>,
+        histogram: Option<Histogram>,
     ) {
         let pk_prefix = scan_range.pk_prefix.clone();
         let range_bounds = scan_range.convert_to_range_bounds(&table);

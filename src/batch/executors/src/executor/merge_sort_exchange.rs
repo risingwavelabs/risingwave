@@ -196,7 +196,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{FakeCreateSource, FakeExchangeSource};
-    use crate::executor::{PushContext, execute_push_as_pull};
+    use crate::executor::{PushContext, collect_push_input};
     use crate::task::{ComputeNodeContext, ShutdownToken};
 
     const CHUNK_SIZE: usize = 1024;
@@ -291,15 +291,14 @@ mod tests {
             CHUNK_SIZE,
         ));
 
-        let mut stream = execute_push_as_pull(
-            executor,
-            PushContext::new(ShutdownToken::empty()),
-            CHUNK_SIZE,
-        );
-        let res = stream.next().await;
+        let (_schema, chunks) =
+            collect_push_input(executor, PushContext::new(ShutdownToken::empty()))
+                .await
+                .unwrap();
+        let mut chunks = chunks.into_iter();
+        let res = chunks.next();
         assert!(res.is_some());
         if let Some(res) = res {
-            let res = res.unwrap();
             assert_eq!(res.capacity(), 3 * num_sources);
             let col0 = res.column_at(0);
             assert_eq!(col0.as_int32().value_at(0), Some(1));
@@ -309,7 +308,7 @@ mod tests {
             assert_eq!(col0.as_int32().value_at(4), Some(3));
             assert_eq!(col0.as_int32().value_at(5), Some(3));
         }
-        let res = stream.next().await;
+        let res = chunks.next();
         assert!(res.is_none());
     }
 }

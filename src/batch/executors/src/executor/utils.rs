@@ -25,7 +25,7 @@ pub use risingwave_storage::table::batch_table::PkScanRange as ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, Executor, PushContext,
-    PushSink, PushStatus, execute_push_as_pull, push_chunk_stream_with_operators,
+    PushSink, PushStatus, push_chunk_stream_with_operators,
 };
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
@@ -100,6 +100,37 @@ impl BufferChunkExecutor {
     }
 }
 
+#[derive(Default)]
+pub struct BufferChunkSink {
+    chunk_list: Vec<DataChunk>,
+}
+
+impl BufferChunkSink {
+    pub fn into_chunks(self) -> Vec<DataChunk> {
+        self.chunk_list
+    }
+}
+
+impl PushSink for BufferChunkSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.chunk_list.push(chunk);
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+pub async fn collect_push_input(
+    executor: BoxedExecutor,
+    context: PushContext,
+) -> Result<(Schema, Vec<DataChunk>)> {
+    let schema = executor.schema().clone();
+    let mut sink = BufferChunkSink::default();
+    executor.execute_push(context, &mut sink).await?;
+    Ok((schema, sink.into_chunks()))
+}
+
 pub struct DummyExecutor {
     pub schema: Schema,
 }
@@ -171,12 +202,6 @@ impl Executor for WrapStreamExecutor {
     ) -> BoxFuture<'a, Result<PushStatus>> {
         push_chunk_stream_with_operators(self.stream, operators, context, sink).boxed()
     }
-}
-
-pub fn wrap_push_executor(executor: BoxedExecutor, context: PushContext) -> BoxedExecutor {
-    let schema = executor.schema().clone();
-    let stream = execute_push_as_pull(executor, context.clone(), context.morsel_budget());
-    Box::new(WrapStreamExecutor::new(schema, stream))
 }
 
 pub fn build_scan_ranges_from_pb(

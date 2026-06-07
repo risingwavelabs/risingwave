@@ -36,7 +36,7 @@ use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams, HashJoinExecutor,
     JoinHashMap, JoinType, LookupExecutorBuilder, PushContext, PushSink, PushStatus, RowId,
-    push_chunk_stream, utils, wrap_push_executor,
+    push_chunk_stream, utils,
 };
 use crate::task::ShutdownToken;
 
@@ -98,7 +98,7 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
             let executor = Box::new(Self {
                 join_type,
                 condition,
-                outer_side_input: wrap_push_executor(outer_side_input, context.clone()),
+                outer_side_input,
                 outer_side_data_types,
                 outer_side_key_idxs,
                 inner_side_builder,

@@ -23,10 +23,11 @@ use risingwave_connector::source::iceberg::{
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{
-    BatchPipelineOperatorChain, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, push_chunk_stream_with_operators,
+    BatchPipelineOperatorChain, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
+    Executor, ExecutorBuilder, Morsel, MorselSource, PushContext, PushSink, PushStatus,
+    drive_morsel_source_with_operators, push_chunk_stream_with_operators,
 };
 
 #[derive(PartialEq, Debug)]
@@ -73,8 +74,124 @@ impl Executor for AzblobFileScanExecutor {
         operators: BatchPipelineOperatorChain,
         sink: &'a mut dyn PushSink,
     ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
+        if context.morsel_parallelism() > 1 {
+            return async move {
+                let Self {
+                    file_format,
+                    file_location,
+                    account_name,
+                    account_key,
+                    endpoint,
+                    batch_size,
+                    ..
+                } = *self;
+                let source = AzblobFileScanMorselSource::new(
+                    file_format,
+                    file_location,
+                    account_name,
+                    account_key,
+                    endpoint,
+                    batch_size,
+                );
+                drive_morsel_source_with_operators(source, operators, context, sink).await
+            }
+            .boxed();
+        }
         push_chunk_stream_with_operators(self.do_execute().boxed(), operators, context, sink)
             .boxed()
+    }
+}
+
+struct AzblobFileScanMorselSource {
+    file_format: FileFormat,
+    file_location: std::vec::IntoIter<String>,
+    account_name: String,
+    account_key: String,
+    endpoint: String,
+    batch_size: usize,
+    active_file_stream: Option<BoxedDataChunkStream>,
+    next_sequence: u64,
+}
+
+impl AzblobFileScanMorselSource {
+    fn new(
+        file_format: FileFormat,
+        file_location: Vec<String>,
+        account_name: String,
+        account_key: String,
+        endpoint: String,
+        batch_size: usize,
+    ) -> Self {
+        Self {
+            file_format,
+            file_location: file_location.into_iter(),
+            account_name,
+            account_key,
+            endpoint,
+            batch_size,
+            active_file_stream: None,
+            next_sequence: 0,
+        }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    async fn read_file(
+        file: String,
+        account_name: String,
+        account_key: String,
+        endpoint: String,
+        batch_size: usize,
+    ) {
+        let (bucket, file_name) = extract_bucket_and_file_name(&file, &FileScanBackend::Azblob)?;
+        let op = new_azblob_operator(endpoint, account_name, account_key, bucket)?;
+        let chunk_stream =
+            read_parquet_file(op, file_name, None, None, false, batch_size, 0, None, None).await?;
+        #[for_await]
+        for stream_chunk in chunk_stream {
+            let stream_chunk = stream_chunk?;
+            let (data_chunk, _) = stream_chunk.into_parts();
+            yield data_chunk;
+        }
+    }
+}
+
+impl MorselSource for AzblobFileScanMorselSource {
+    fn next_morsel<'a>(
+        &'a mut self,
+        context: &'a PushContext,
+    ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+        async move {
+            assert_eq!(self.file_format, FileFormat::Parquet);
+            context.check_shutdown()?;
+            loop {
+                let active_file_chunk = match &mut self.active_file_stream {
+                    Some(stream) => stream.next().await,
+                    None => None,
+                };
+                if let Some(chunk) = active_file_chunk {
+                    context.check_shutdown()?;
+                    let sequence = self.next_sequence;
+                    self.next_sequence += 1;
+                    return Ok(Some(Morsel::new(sequence, chunk?)));
+                }
+                if self.active_file_stream.is_some() {
+                    self.active_file_stream = None;
+                    continue;
+                }
+
+                let Some(file) = self.file_location.next() else {
+                    return Ok(None);
+                };
+                self.active_file_stream = Some(Self::read_file(
+                    file,
+                    self.account_name.clone(),
+                    self.account_key.clone(),
+                    self.endpoint.clone(),
+                    self.batch_size,
+                ));
+            }
+        }
+        .boxed()
     }
 }
 

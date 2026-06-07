@@ -33,7 +33,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::join::{JoinType, concatenate, convert_row_to_chunk};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, push_chunk_stream, wrap_push_executor,
+    PushContext, PushSink, PushStatus, push_chunk_stream,
 };
 use crate::task::ShutdownToken;
 
@@ -109,8 +109,8 @@ impl Executor for NestedLoopJoinExecutor {
                 original_schema,
                 schema,
                 output_indices,
-                left_child: wrap_push_executor(left_child, context.clone()),
-                right_child: wrap_push_executor(right_child, context.clone()),
+                left_child,
+                right_child,
                 identity,
                 chunk_size,
                 mem_context,

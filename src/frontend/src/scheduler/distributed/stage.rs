@@ -27,7 +27,9 @@ use futures::stream::Fuse;
 use futures::{StreamExt, TryStreamExt, stream};
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{ExecutorBuilder, PushContext, PushSink, PushStatus};
+use risingwave_batch::executor::{
+    ExecutorBuilder, PushContext, PushQueryScheduler, PushSink, PushStatus,
+};
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -706,7 +708,8 @@ impl StageRunner {
             };
             let push_context =
                 PushContext::new(shutdown_rx.clone()).with_task_scope(push_task_scope);
-            if let Err(e) = executor.execute_push(push_context, &mut sink).await {
+            let scheduler = PushQueryScheduler::new(push_context);
+            if let Err(e) = scheduler.execute_root(executor, &mut sink).await {
                 if !shutdown_rx0.is_cancelled() {
                     return Err(TaskExecutionError(e.to_report_string()));
                 }

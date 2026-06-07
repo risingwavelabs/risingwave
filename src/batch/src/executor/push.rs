@@ -126,6 +126,204 @@ pub trait PushSink: Send {
     }
 }
 
+/// Scheduler-owned entrypoint for push execution.
+///
+/// Today this delegates to the root executor's push implementation. Keeping a
+/// distinct scheduler object gives the pipeline DAG work one root-level owner
+/// instead of scattering future graph execution across local/distributed task
+/// runners.
+pub struct PushQueryScheduler {
+    context: PushContext,
+}
+
+impl PushQueryScheduler {
+    pub fn new(context: PushContext) -> Self {
+        Self { context }
+    }
+
+    pub async fn execute_root(
+        &self,
+        root: BoxedExecutor,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        root.execute_push(self.context.clone(), sink).await
+    }
+
+    pub async fn execute_pipeline_schedule(
+        &self,
+        schedule: PushPipelineSchedule,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        schedule.execute_inner(self.context.clone(), sink).await
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PushPipelineId(usize);
+
+type PushPipelineAction = Box<
+    dyn for<'sink> FnMut(
+            PushContext,
+            &'sink mut dyn PushSink,
+        ) -> BoxFuture<'sink, Result<PushStatus>>
+        + Send,
+>;
+
+struct PushPipelineTask {
+    id: PushPipelineId,
+    name: String,
+    dependencies: Vec<PushPipelineId>,
+    action: PushPipelineAction,
+}
+
+/// Task-local dependency graph for push pipeline boundaries.
+///
+/// This models DuckDB-style execution-level completion dependencies: a pipeline
+/// becomes runnable only after all dependency pipelines have completed. The
+/// current runner is intentionally single-sink and deterministic; the graph is
+/// explicit so breaker operators can expose build/finalize/probe boundaries.
+/// Parallel pipeline execution still requires separate sink-local state and a
+/// later combine step, instead of sharing one `&mut dyn PushSink`.
+pub struct PushPipelineSchedule {
+    tasks: Vec<PushPipelineTask>,
+}
+
+impl PushPipelineSchedule {
+    pub fn new() -> Self {
+        Self { tasks: vec![] }
+    }
+
+    pub fn add_pipeline<F>(
+        &mut self,
+        name: impl Into<String>,
+        dependencies: impl IntoIterator<Item = PushPipelineId>,
+        action: F,
+    ) -> PushPipelineId
+    where
+        F: for<'sink> FnMut(
+                PushContext,
+                &'sink mut dyn PushSink,
+            ) -> BoxFuture<'sink, Result<PushStatus>>
+            + Send
+            + 'static,
+    {
+        let id = PushPipelineId(self.tasks.len());
+        self.tasks.push(PushPipelineTask {
+            id,
+            name: name.into(),
+            dependencies: dependencies.into_iter().collect(),
+            action: Box::new(action),
+        });
+        id
+    }
+
+    pub fn add_dependency(
+        &mut self,
+        pipeline: PushPipelineId,
+        dependency: PushPipelineId,
+    ) -> Result<()> {
+        let task_count = self.tasks.len();
+        if pipeline.0 >= task_count || dependency.0 >= task_count {
+            return Err(BatchError::Internal(anyhow::anyhow!(
+                "invalid push pipeline dependency: {:?} depends on {:?}, but schedule has {} pipelines",
+                pipeline,
+                dependency,
+                task_count
+            )));
+        }
+        self.tasks[pipeline.0].dependencies.push(dependency);
+        Ok(())
+    }
+
+    pub async fn execute(
+        self,
+        context: PushContext,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        PushQueryScheduler::new(context)
+            .execute_pipeline_schedule(self, sink)
+            .await
+    }
+
+    async fn execute_inner(
+        mut self,
+        context: PushContext,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        let task_count = self.tasks.len();
+        if task_count == 0 {
+            return sink.finish().await;
+        }
+
+        let mut ready = VecDeque::new();
+        let mut remaining_dependencies = vec![0; task_count];
+        let mut dependents = vec![Vec::new(); task_count];
+        for task in &self.tasks {
+            for dependency in &task.dependencies {
+                if dependency.0 >= task_count {
+                    return Err(BatchError::Internal(anyhow::anyhow!(
+                        "invalid push pipeline dependency: {} depends on {:?}, but schedule has {} pipelines",
+                        task.name,
+                        dependency,
+                        task_count
+                    )));
+                }
+                remaining_dependencies[task.id.0] += 1;
+                dependents[dependency.0].push(task.id.0);
+            }
+        }
+        for (task_idx, remaining) in remaining_dependencies.iter().enumerate() {
+            if *remaining == 0 {
+                ready.push_back(task_idx);
+            }
+        }
+
+        let mut completed = 0;
+        while let Some(task_idx) = ready.pop_front() {
+            context.check_shutdown()?;
+            let status = (self.tasks[task_idx].action)(context.clone(), sink).await?;
+            completed += 1;
+            // Internal bookkeeping pipelines must return `NeedMoreInput`. A
+            // `Finished` status means a pipeline that drives the downstream
+            // sink observed early completion, so the remaining schedule is
+            // skipped and the downstream sink is finalized once.
+            if status.is_finished() {
+                return sink.finish().await;
+            }
+
+            for dependent in &dependents[task_idx] {
+                remaining_dependencies[*dependent] -= 1;
+                if remaining_dependencies[*dependent] == 0 {
+                    ready.push_back(*dependent);
+                }
+            }
+        }
+
+        if completed != task_count {
+            let blocked = self
+                .tasks
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| remaining_dependencies[*idx] != 0)
+                .map(|(_, task)| task.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(BatchError::Internal(anyhow::anyhow!(
+                "cyclic push pipeline dependency involving: {}",
+                blocked
+            )));
+        }
+
+        sink.finish().await
+    }
+}
+
+impl Default for PushPipelineSchedule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Forwards chunks to another sink but suppresses `finish`.
 ///
 /// This is used by parent operators that execute multiple child push pipelines
@@ -477,6 +675,126 @@ impl MorselSource for StreamMorselSource {
             let sequence = self.next_sequence;
             self.next_sequence += 1;
             Ok(Some(Morsel::new(sequence, chunk?)))
+        }
+        .boxed()
+    }
+}
+
+struct MorselSenderSink {
+    sender: mpsc::Sender<Result<Morsel>>,
+    next_sequence: u64,
+}
+
+impl PushSink for MorselSenderSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let sequence = self.next_sequence;
+            self.next_sequence += 1;
+            self.sender
+                .send(Ok(Morsel::new(sequence, chunk)))
+                .await
+                .map_err(|_| BatchError::SenderError)?;
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+/// A morsel source backed by a push executor.
+///
+/// The child executor remains push-native: it is driven into a morsel channel
+/// by a small sink, and the scheduler-owned morsel driver consumes that channel
+/// with worker-local operator state. This is the forward path for breaker probe
+/// pipelines that need morsel parallelism without falling back to a pull stream.
+pub struct ExecutorMorselSource {
+    executor: Option<BoxedExecutor>,
+    receiver: Option<mpsc::Receiver<Result<Morsel>>>,
+    handle: Option<tokio::task::JoinHandle<Result<()>>>,
+    capacity: usize,
+}
+
+impl ExecutorMorselSource {
+    pub fn new(executor: BoxedExecutor, capacity: usize) -> Self {
+        Self {
+            executor: Some(executor),
+            receiver: None,
+            handle: None,
+            capacity,
+        }
+    }
+
+    fn start(&mut self, context: PushContext) {
+        if self.receiver.is_some() {
+            return;
+        }
+
+        let executor = self
+            .executor
+            .take()
+            .expect("executor morsel source should be started once");
+        let (sender, receiver) = mpsc::channel(self.capacity.max(1));
+        let task_sender = sender.clone();
+        let mut sink = MorselSenderSink {
+            sender,
+            next_sequence: 0,
+        };
+        let task_scope = context.task_scope();
+        let expr_context = task_scope
+            .is_none()
+            .then(|| capture_expr_context().ok())
+            .flatten();
+
+        self.receiver = Some(receiver);
+        self.handle = Some(tokio::spawn(async move {
+            let exec = async move {
+                if let Err(error) = executor.execute_push(context, &mut sink).await {
+                    let _ = task_sender.send(Err(error)).await;
+                }
+            }
+            .boxed();
+            if let Some(task_scope) = task_scope {
+                task_scope.scope(exec).await;
+            } else if let Some(expr_context) = expr_context {
+                expr_context_scope(expr_context, exec).await;
+            } else {
+                exec.await;
+            }
+            Ok(())
+        }));
+    }
+}
+
+impl MorselSource for ExecutorMorselSource {
+    fn next_morsel<'a>(
+        &'a mut self,
+        context: &'a PushContext,
+    ) -> BoxFuture<'a, Result<Option<Morsel>>> {
+        async move {
+            context.check_shutdown()?;
+            self.start(context.clone());
+
+            let receiver = self
+                .receiver
+                .as_mut()
+                .expect("executor morsel source receiver should be initialized");
+            match receiver.recv().await {
+                Some(Ok(morsel)) => Ok(Some(morsel)),
+                Some(Err(error)) => Err(error),
+                None => {
+                    if let Some(handle) = self.handle.take() {
+                        match handle.await {
+                            Ok(result) => result?,
+                            Err(error) if error.is_cancelled() => {}
+                            Err(error) => {
+                                return Err(BatchError::Internal(anyhow::anyhow!(
+                                    error.to_string()
+                                )));
+                            }
+                        }
+                    }
+                    Ok(None)
+                }
+            }
         }
         .boxed()
     }
@@ -862,6 +1180,101 @@ where
     }
 }
 
+/// Drives a push executor into worker-local sinks and returns those local states.
+///
+/// This is the local/global sink-state hook used by breaker operators. Each
+/// worker owns one local sink and consumes morsels from the scheduler queue.
+/// The caller is responsible for combining the returned local states and
+/// running the operator-specific finalize step.
+pub async fn drive_push_executor_into_parallel_sinks<F, L>(
+    executor: BoxedExecutor,
+    context: PushContext,
+    create_local_sink: F,
+) -> Result<Vec<L>>
+where
+    F: Fn() -> L + Send + Sync + 'static,
+    L: PushSink + Send + 'static,
+{
+    let parallelism = context.morsel_parallelism().max(1);
+    if parallelism == 1 {
+        let mut sink = create_local_sink();
+        executor.execute_push(context, &mut sink).await?;
+        sink.finish().await?;
+        return Ok(vec![sink]);
+    }
+
+    let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
+    let shared_rx = Arc::new(Mutex::new(morsel_rx));
+    let create_local_sink = Arc::new(create_local_sink);
+    let producer_context = context.clone();
+    let producer = tokio::spawn(async move {
+        let mut sink = MorselSenderSink {
+            sender: morsel_tx.clone(),
+            next_sequence: 0,
+        };
+        if let Err(error) = executor.execute_push(producer_context, &mut sink).await {
+            let _ = morsel_tx.send(Err(error)).await;
+        }
+        Ok::<_, BatchError>(())
+    });
+
+    let mut tasks = vec![];
+    for _ in 0..parallelism {
+        let rx = shared_rx.clone();
+        let context = context.clone();
+        let create_local_sink = create_local_sink.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut sink = create_local_sink();
+            loop {
+                let next = {
+                    let mut rx = rx.lock().await;
+                    rx.recv().await
+                };
+                let Some(morsel) = next else {
+                    break;
+                };
+                let morsel = morsel?;
+                context.check_shutdown()?;
+                if sink.push(morsel.into_chunk()).await?.is_finished() {
+                    break;
+                }
+            }
+            sink.finish().await?;
+            Ok::<_, BatchError>(sink)
+        }));
+    }
+
+    match producer.await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            abort_local_sink_tasks(&tasks);
+            return Err(error);
+        }
+        Err(error) if error.is_cancelled() => {}
+        Err(error) => {
+            abort_local_sink_tasks(&tasks);
+            return Err(BatchError::Internal(anyhow::anyhow!(error.to_string())));
+        }
+    }
+
+    let mut sinks = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        match task.await {
+            Ok(Ok(sink)) => sinks.push(sink),
+            Ok(Err(error)) => return Err(error),
+            Err(error) if error.is_cancelled() => {}
+            Err(error) => return Err(BatchError::Internal(anyhow::anyhow!(error.to_string()))),
+        }
+    }
+    Ok(sinks)
+}
+
+fn abort_local_sink_tasks<L>(tasks: &[tokio::task::JoinHandle<Result<L>>]) {
+    for task in tasks {
+        task.abort();
+    }
+}
+
 /// Test-only adapter for validating the old pull-to-push bridge behavior.
 #[cfg(test)]
 async fn execute_pull_stream_as_push(
@@ -1081,6 +1494,80 @@ mod tests {
         assert_eq!(second.sequence(), 1);
         assert_eq!(third.sequence(), 2);
         assert!(scheduler.next_morsel().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_push_pipeline_schedule_respects_dependencies() {
+        use std::sync::Mutex as StdMutex;
+
+        let order = Arc::new(StdMutex::new(vec![]));
+        let mut schedule = PushPipelineSchedule::new();
+        let first = {
+            let order = order.clone();
+            schedule.add_pipeline("first", [], move |_, _| {
+                let order = order.clone();
+                async move {
+                    order.lock().unwrap().push("first");
+                    Ok(PushStatus::NeedMoreInput)
+                }
+                .boxed()
+            })
+        };
+        let second = {
+            let order = order.clone();
+            schedule.add_pipeline("second", [first], move |_, _| {
+                let order = order.clone();
+                async move {
+                    order.lock().unwrap().push("second");
+                    Ok(PushStatus::NeedMoreInput)
+                }
+                .boxed()
+            })
+        };
+        {
+            let order = order.clone();
+            schedule.add_pipeline("third", [second], move |_, _| {
+                let order = order.clone();
+                async move {
+                    order.lock().unwrap().push("third");
+                    Ok(PushStatus::NeedMoreInput)
+                }
+                .boxed()
+            });
+        }
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = schedule
+            .execute(PushContext::new(ShutdownToken::empty()), &mut sink)
+            .await
+            .unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(*order.lock().unwrap(), vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn test_push_pipeline_schedule_rejects_cycles() {
+        let mut schedule = PushPipelineSchedule::new();
+        let first = schedule.add_pipeline("first", [], move |_, _| {
+            async { Ok(PushStatus::NeedMoreInput) }.boxed()
+        });
+        let second = schedule.add_pipeline("second", [first], move |_, _| {
+            async { Ok(PushStatus::NeedMoreInput) }.boxed()
+        });
+        schedule.add_dependency(first, second).unwrap();
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let error = schedule
+            .execute(PushContext::new(ShutdownToken::empty()), &mut sink)
+            .await
+            .unwrap_err();
+
+        assert!(format!("{error:?}").contains("cyclic push pipeline dependency"));
     }
 
     #[tokio::test]

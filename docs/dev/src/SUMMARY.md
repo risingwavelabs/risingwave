@@ -48,6 +48,7 @@
 - [Meta Service](./design/meta-service.md)
 - [Data Model and Encoding](./design/data-model-and-encoding.md)
 - [Batch Local Execution Mode](./design/batch-local-execution-mode.md)
+- [Batch Push Execution Pipeline Parallelism](./design/batch-push-execution.md)
 - [Consistent Hash](./design/consistent-hash.md)
 - [Keys](./design/keys.md)
 <!--

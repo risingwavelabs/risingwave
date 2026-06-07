@@ -16,7 +16,8 @@ use std::cmp::Ordering;
 use std::iter;
 use std::iter::empty;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex as StdMutex};
 
 use bytes::Bytes;
 use futures::future::{BoxFuture, FutureExt};
@@ -36,12 +37,16 @@ use risingwave_expr::expr::{BoxedExpression, Expression, build_from_prost};
 use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
+use tokio::sync::Mutex;
 
 use super::{AsOfDesc, AsOfInequalityType, ChunkedData, JoinType, RowId};
 use crate::error::{BatchError, Result};
 use crate::executor::{
+    BatchPipelineOperator, BatchPipelineOperatorChain, BatchPipelineOperatorFactory,
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, WrapStreamExecutor, push_chunk_stream, wrap_push_executor,
+    ExecutorMorselSource, ForwardingNoFinishSink, PipelineOperatorOutput, PushContext,
+    PushPipelineSchedule, PushQueryScheduler, PushSink, PushStatus, WrapStreamExecutor,
+    drive_morsel_source_with_operators, drive_push_executor_into_parallel_sinks, push_chunk_stream,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
@@ -50,6 +55,8 @@ use crate::spill::spill_op::{
     DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY, SpillBackend, SpillBuildHasher, SpillOp,
 };
 use crate::task::ShutdownToken;
+
+const MAX_RECURSIVE_SPILL_DEPTH: usize = 8;
 
 /// Hash Join Executor
 ///
@@ -92,6 +99,7 @@ pub struct HashJoinExecutor<K> {
     spill_metrics: Arc<BatchSpillMetrics>,
     /// The upper bound of memory usage for this executor.
     memory_upper_bound: Option<u64>,
+    spill_recursion_depth: usize,
 
     shutdown_rx: ShutdownToken,
 
@@ -121,7 +129,7 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
             let HashJoinExecutor {
                 join_type,
                 original_schema: _,
-                schema: _,
+                schema,
                 output_indices,
                 probe_side_source,
                 build_side_source,
@@ -135,30 +143,244 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
                 spill_backend,
                 spill_metrics,
                 memory_upper_bound,
+                spill_recursion_depth,
                 shutdown_rx,
                 mem_ctx,
                 _phantom: _,
             } = *self;
-            let executor = Box::new(HashJoinExecutor::<K>::new_inner(
-                join_type,
-                output_indices,
-                wrap_push_executor(probe_side_source, context.clone()),
-                wrap_push_executor(build_side_source, context.clone()),
-                probe_key_idxs,
-                build_key_idxs,
-                null_matched,
-                cond,
-                identity,
-                chunk_size,
-                asof_desc,
-                spill_backend,
-                spill_metrics,
-                memory_upper_bound,
-                shutdown_rx,
-                mem_ctx,
-            ));
+            let probe_schema = probe_side_source.schema().clone();
+            let build_schema = build_side_source.schema().clone();
+            let probe_data_types = probe_schema.data_types();
+            let build_data_types = build_schema.data_types();
+            let full_data_types = [probe_data_types.clone(), build_data_types.clone()].concat();
+            let check_memory = match memory_upper_bound {
+                Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
+                None => true,
+            };
 
-            push_chunk_stream(executor.do_execute(), context, sink).await
+            let build_state = Arc::new(StdMutex::new(None));
+            let finalize_state = Arc::new(StdMutex::new(None));
+            let mut schedule = PushPipelineSchedule::new();
+
+            let build_pipeline = {
+                let build_state = build_state.clone();
+                let pipeline_identity = identity.clone();
+                let mut build_side_source = Some(build_side_source);
+                let build_key_idxs = build_key_idxs.clone();
+                let null_matched = null_matched.clone();
+                let spill_available = spill_backend.is_some();
+                let shutdown_rx = shutdown_rx.clone();
+                let mem_ctx = mem_ctx.clone();
+                schedule.add_pipeline(format!("{}-build", identity), [], move |context, _| {
+                    let build_state = build_state.clone();
+                    let pipeline_identity = pipeline_identity.clone();
+                    let build_key_idxs = build_key_idxs.clone();
+                    let null_matched = null_matched.clone();
+                    let shutdown_rx = shutdown_rx.clone();
+                    let mem_ctx = mem_ctx.clone();
+                    let Some(build_side_source) = build_side_source.take() else {
+                        return async move {
+                            Err(BatchError::Internal(anyhow::anyhow!(
+                                "push pipeline {}-build was executed more than once",
+                                pipeline_identity
+                            )))
+                        }
+                        .boxed();
+                    };
+                    async move {
+                        context.check_shutdown()?;
+                        let create_build_sink = move || {
+                            HashTableBuildSink::<K>::new(
+                                build_key_idxs.clone(),
+                                null_matched.clone(),
+                                spill_available,
+                                check_memory,
+                                shutdown_rx.clone(),
+                                mem_ctx.clone(),
+                            )
+                        };
+                        let mut build_sinks = drive_push_executor_into_parallel_sinks(
+                            build_side_source,
+                            context,
+                            create_build_sink,
+                        )
+                        .await?;
+                        let mut build_sink = build_sinks.pop().ok_or_else(|| {
+                            BatchError::Internal(anyhow::anyhow!(
+                                "push pipeline {}-build produced no local sinks",
+                                pipeline_identity
+                            ))
+                        })?;
+                        for local_build_sink in build_sinks {
+                            build_sink.merge_from(local_build_sink);
+                        }
+                        store_pipeline_state(
+                            &build_state,
+                            build_sink,
+                            "build",
+                            &pipeline_identity,
+                        )?;
+                        Ok(PushStatus::NeedMoreInput)
+                    }
+                    .boxed()
+                })
+            };
+
+            let finalize_pipeline = {
+                let build_state = build_state.clone();
+                let finalize_state = finalize_state.clone();
+                let pipeline_identity = identity.clone();
+                schedule.add_pipeline(
+                    format!("{}-finalize", identity),
+                    [build_pipeline],
+                    move |context, _| {
+                        let build_state = build_state.clone();
+                        let finalize_state = finalize_state.clone();
+                        let pipeline_identity = pipeline_identity.clone();
+                        async move {
+                            context.check_shutdown()?;
+                            let build_sink =
+                                take_pipeline_state(&build_state, "build", &pipeline_identity)?;
+                            let finalized = build_sink.finalize()?;
+                            store_pipeline_state(
+                                &finalize_state,
+                                finalized,
+                                "finalize",
+                                &pipeline_identity,
+                            )?;
+                            Ok(PushStatus::NeedMoreInput)
+                        }
+                        .boxed()
+                    },
+                )
+            };
+
+            {
+                let finalize_state = finalize_state.clone();
+                let pipeline_identity = identity.clone();
+                let mut probe_side_source = Some(probe_side_source);
+                schedule.add_pipeline(
+                    format!("{}-probe", identity),
+                    [finalize_pipeline],
+                    move |context, sink| {
+                        let finalize_state = finalize_state.clone();
+                        let pipeline_identity = pipeline_identity.clone();
+                        let Some(probe_side_source) = probe_side_source.take() else {
+                            return async move {
+                                Err(BatchError::Internal(anyhow::anyhow!(
+                                    "push pipeline {}-probe was executed more than once",
+                                    pipeline_identity
+                                )))
+                            }
+                            .boxed();
+                        };
+                        let output_indices = output_indices.clone();
+                        let probe_key_idxs = probe_key_idxs.clone();
+                        let build_key_idxs = build_key_idxs.clone();
+                        let null_matched = null_matched.clone();
+                        let cond = cond.clone();
+                        let asof_desc = asof_desc.clone();
+                        let spill_backend = spill_backend.clone();
+                        let spill_metrics = spill_metrics.clone();
+                        let shutdown_rx = shutdown_rx.clone();
+                        let mem_ctx = mem_ctx.clone();
+                        let probe_data_types = probe_data_types.clone();
+                        let build_data_types = build_data_types.clone();
+                        let full_data_types = full_data_types.clone();
+                        let output_data_types = schema.data_types();
+                        let probe_schema = probe_schema.clone();
+                        let build_schema = build_schema.clone();
+                        async move {
+                            context.check_shutdown()?;
+                            let finalized = take_pipeline_state(
+                                &finalize_state,
+                                "finalize",
+                                &pipeline_identity,
+                            )?;
+                            let mut forward_sink = ForwardingNoFinishSink::new(sink);
+                            match finalized {
+                                BuildFinalizeResult::InMemory(built) => {
+                                    let built = Arc::new(built);
+                                    if context.morsel_parallelism() > 1
+                                        && HashJoinExecutor::<K>::supports_parallel_probe(
+                                            join_type,
+                                            cond.is_some() && asof_desc.is_none(),
+                                        )
+                                    {
+                                        HashJoinExecutor::<K>::execute_parallel_probe(
+                                            join_type,
+                                            output_indices,
+                                            probe_side_source,
+                                            probe_key_idxs,
+                                            cond,
+                                            chunk_size,
+                                            asof_desc,
+                                            shutdown_rx,
+                                            built,
+                                            probe_data_types,
+                                            build_data_types,
+                                            full_data_types,
+                                            output_data_types,
+                                            context,
+                                            &mut forward_sink,
+                                        )
+                                        .await
+                                    } else {
+                                        let mut probe_sink = HashJoinProbeSink::<K>::new(
+                                            join_type,
+                                            output_indices,
+                                            probe_key_idxs,
+                                            cond,
+                                            chunk_size,
+                                            asof_desc,
+                                            shutdown_rx,
+                                            built,
+                                            probe_data_types,
+                                            build_data_types,
+                                            full_data_types,
+                                            output_data_types,
+                                            &mut forward_sink,
+                                        )?;
+                                        probe_side_source
+                                            .execute_push(context, &mut probe_sink)
+                                            .await
+                                    }
+                                }
+                                BuildFinalizeResult::SpillFallback(build_chunks) => {
+                                    HashJoinExecutor::<K>::execute_spill_push(
+                                        join_type,
+                                        output_indices,
+                                        probe_side_source,
+                                        build_chunks,
+                                        probe_schema,
+                                        build_schema,
+                                        probe_key_idxs,
+                                        build_key_idxs,
+                                        null_matched,
+                                        cond,
+                                        pipeline_identity,
+                                        chunk_size,
+                                        asof_desc,
+                                        spill_backend,
+                                        spill_metrics,
+                                        spill_recursion_depth,
+                                        shutdown_rx,
+                                        mem_ctx,
+                                        context,
+                                        &mut forward_sink,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        .boxed()
+                    },
+                );
+            }
+
+            PushQueryScheduler::new(context)
+                .execute_pipeline_schedule(schedule, sink)
+                .await
         }
         .boxed()
     }
@@ -294,6 +516,1539 @@ struct RightNonEquiJoinState {
     build_row_ids: Vec<RowId>,
     /// Whether a build row has been matched.
     build_row_matched: ChunkedData<bool>,
+}
+
+struct SharedBuildRowMatched {
+    data: Vec<AtomicBool>,
+    chunk_offsets: Vec<usize>,
+}
+
+impl SharedBuildRowMatched {
+    fn with_chunk_sizes<C>(chunk_sizes: C) -> Result<Self>
+    where
+        C: IntoIterator<Item = usize>,
+    {
+        let chunk_sizes = chunk_sizes.into_iter();
+        let mut chunk_offsets = Vec::with_capacity(chunk_sizes.size_hint().0 + 1);
+        let mut cur = 0usize;
+        chunk_offsets.push(0);
+        for chunk_size in chunk_sizes {
+            ensure!(chunk_size > 0, "Chunk size can't be zero!");
+            cur += chunk_size;
+            chunk_offsets.push(cur);
+        }
+
+        let mut data = Vec::with_capacity(cur);
+        data.resize_with(cur, AtomicBool::default);
+
+        Ok(Self {
+            data,
+            chunk_offsets,
+        })
+    }
+
+    fn index_in_data(&self, index: RowId) -> usize {
+        self.chunk_offsets[index.chunk_id()] + index.row_id()
+    }
+
+    fn mark(&self, index: RowId) {
+        self.data[self.index_in_data(index)].store(true, AtomicOrdering::Relaxed);
+    }
+
+    fn is_matched(&self, index: RowId) -> bool {
+        self.data[self.index_in_data(index)].load(AtomicOrdering::Relaxed)
+    }
+
+    fn all_row_ids(&self) -> impl Iterator<Item = RowId> + '_ {
+        let chunk_offsets = &self.chunk_offsets;
+        let mut cur = RowId::default();
+        std::iter::from_fn(move || {
+            if (cur.chunk_id() + 1) >= chunk_offsets.len() {
+                None
+            } else {
+                let ret = cur;
+                let current_chunk_row_count =
+                    chunk_offsets[cur.chunk_id() + 1] - chunk_offsets[cur.chunk_id()];
+                cur = cur.next_row(current_chunk_row_count);
+                Some(ret)
+            }
+        })
+    }
+}
+
+enum BuildRowMatched {
+    Local(ChunkedData<bool>),
+    Shared(Arc<SharedBuildRowMatched>),
+}
+
+impl BuildRowMatched {
+    fn local<C>(chunk_sizes: C) -> Result<Self>
+    where
+        C: IntoIterator<Item = usize>,
+    {
+        Ok(Self::Local(ChunkedData::with_chunk_sizes(chunk_sizes)?))
+    }
+
+    fn shared<C>(chunk_sizes: C) -> Result<Self>
+    where
+        C: IntoIterator<Item = usize>,
+    {
+        Ok(Self::Shared(Arc::new(
+            SharedBuildRowMatched::with_chunk_sizes(chunk_sizes)?,
+        )))
+    }
+
+    fn clone_shared(&self) -> Option<Arc<SharedBuildRowMatched>> {
+        match self {
+            Self::Local(_) => None,
+            Self::Shared(shared) => Some(shared.clone()),
+        }
+    }
+
+    fn from_shared(shared: Arc<SharedBuildRowMatched>) -> Self {
+        Self::Shared(shared)
+    }
+
+    fn into_local(self) -> ChunkedData<bool> {
+        match self {
+            Self::Local(local) => local,
+            Self::Shared(_) => {
+                unreachable!("right/full non-equi probe paths do not use shared match state")
+            }
+        }
+    }
+
+    fn mark(&mut self, index: RowId) {
+        match self {
+            Self::Local(local) => local[index] = true,
+            Self::Shared(shared) => shared.mark(index),
+        }
+    }
+
+    fn is_matched(&self, index: RowId) -> bool {
+        match self {
+            Self::Local(local) => local[index],
+            Self::Shared(shared) => shared.is_matched(index),
+        }
+    }
+
+    fn all_row_ids(&self) -> Vec<RowId> {
+        match self {
+            Self::Local(local) => local.all_row_ids().collect(),
+            Self::Shared(shared) => shared.all_row_ids().collect(),
+        }
+    }
+}
+
+struct BuiltHashTable<K> {
+    build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
+    hash_map: JoinHashMap<K>,
+    next_build_row_with_same_key: ChunkedData<Option<RowId>>,
+}
+
+enum BuildFinalizeResult<K> {
+    InMemory(BuiltHashTable<K>),
+    SpillFallback(Vec<DataChunk>),
+}
+
+fn take_pipeline_state<T>(
+    state: &StdMutex<Option<T>>,
+    state_name: &str,
+    identity: &str,
+) -> Result<T> {
+    let mut guard = state.lock().map_err(|_| {
+        BatchError::Internal(anyhow::anyhow!(
+            "hash join {} pipeline state for {} is poisoned",
+            state_name,
+            identity
+        ))
+    })?;
+    guard.take().ok_or_else(|| {
+        BatchError::Internal(anyhow::anyhow!(
+            "hash join {} pipeline state for {} is missing",
+            state_name,
+            identity
+        ))
+    })
+}
+
+fn store_pipeline_state<T>(
+    state: &StdMutex<Option<T>>,
+    value: T,
+    state_name: &str,
+    identity: &str,
+) -> Result<()> {
+    let mut guard = state.lock().map_err(|_| {
+        BatchError::Internal(anyhow::anyhow!(
+            "hash join {} pipeline state for {} is poisoned",
+            state_name,
+            identity
+        ))
+    })?;
+    if guard.replace(value).is_some() {
+        return Err(BatchError::Internal(anyhow::anyhow!(
+            "hash join {} pipeline state for {} is already set",
+            state_name,
+            identity
+        )));
+    }
+    Ok(())
+}
+
+struct HashTableBuildSink<K> {
+    build_key_idxs: Vec<usize>,
+    null_matched: Vec<bool>,
+    spill_available: bool,
+    check_memory: bool,
+    shutdown_rx: ShutdownToken,
+    mem_ctx: MemoryContext,
+    build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
+    build_row_count: usize,
+    mem_added_by_chunks: i64,
+    need_to_spill: bool,
+    _phantom: PhantomData<K>,
+}
+
+impl<K: HashKey> HashTableBuildSink<K> {
+    fn new(
+        build_key_idxs: Vec<usize>,
+        null_matched: Vec<bool>,
+        spill_available: bool,
+        check_memory: bool,
+        shutdown_rx: ShutdownToken,
+        mem_ctx: MemoryContext,
+    ) -> Self {
+        Self {
+            build_key_idxs,
+            null_matched,
+            spill_available,
+            check_memory,
+            shutdown_rx,
+            build_side: Vec::new_in(mem_ctx.global_allocator()),
+            mem_ctx,
+            build_row_count: 0,
+            mem_added_by_chunks: 0,
+            need_to_spill: false,
+            _phantom: PhantomData,
+        }
+    }
+
+    fn spill_fallback(self) -> BuildFinalizeResult<K> {
+        self.mem_ctx.add(-self.mem_added_by_chunks);
+        BuildFinalizeResult::SpillFallback(self.build_side.into_iter().collect())
+    }
+
+    fn merge_from(&mut self, other: Self) {
+        self.build_row_count += other.build_row_count;
+        self.mem_added_by_chunks += other.mem_added_by_chunks;
+        self.need_to_spill |= other.need_to_spill;
+        self.build_side.extend(other.build_side);
+    }
+
+    fn finalize(self) -> Result<BuildFinalizeResult<K>> {
+        if self.need_to_spill {
+            return Ok(self.spill_fallback());
+        }
+
+        let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
+            self.build_row_count,
+            PrecomputedBuildHasher,
+            self.mem_ctx.global_allocator(),
+        );
+        let mut next_build_row_with_same_key =
+            ChunkedData::with_chunk_sizes(self.build_side.iter().map(|c| c.capacity()))?;
+        let null_matched = K::Bitmap::from_bool_vec(self.null_matched.clone());
+        let mut mem_added_by_hash_table = 0;
+        let mut spill_to_fallback = false;
+
+        'build_hash_table: for (build_chunk_id, build_chunk) in self.build_side.iter().enumerate() {
+            let build_keys = K::build_many(&self.build_key_idxs, build_chunk);
+
+            for (build_row_id, build_key) in build_keys
+                .into_iter()
+                .enumerate()
+                .filter_by_bitmap(build_chunk.visibility())
+            {
+                self.shutdown_rx.check()?;
+                if build_key.null_bitmap().is_subset(&null_matched) {
+                    let row_id = RowId::new(build_chunk_id, build_row_id);
+                    let build_key_size = build_key.estimated_heap_size() as i64;
+                    mem_added_by_hash_table += build_key_size;
+                    if !self.mem_ctx.add(build_key_size) && self.check_memory {
+                        if self.spill_available {
+                            self.mem_ctx.add(-mem_added_by_hash_table);
+                            spill_to_fallback = true;
+                            break 'build_hash_table;
+                        } else {
+                            Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+                        }
+                    }
+                    next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                }
+            }
+        }
+
+        if spill_to_fallback {
+            return Ok(self.spill_fallback());
+        }
+
+        Ok(BuildFinalizeResult::InMemory(BuiltHashTable {
+            build_side: self.build_side,
+            hash_map,
+            next_build_row_with_same_key,
+        }))
+    }
+}
+
+impl<K: HashKey + Send> PushSink for HashTableBuildSink<K> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if chunk.cardinality() > 0 {
+                self.build_row_count += chunk.cardinality();
+                let chunk_estimated_heap_size = chunk.estimated_heap_size() as i64;
+                self.mem_added_by_chunks += chunk_estimated_heap_size;
+                self.build_side.push(chunk);
+                if !self.mem_ctx.add(chunk_estimated_heap_size) && self.check_memory {
+                    if self.spill_available {
+                        self.need_to_spill = true;
+                    } else {
+                        Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+                    }
+                }
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+struct HashJoinProbeSink<'a, K> {
+    join_type: JoinType,
+    output_indices: Vec<usize>,
+    probe_key_idxs: Vec<usize>,
+    cond: Option<Arc<BoxedExpression>>,
+    chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
+    shutdown_rx: ShutdownToken,
+    built: Option<Arc<BuiltHashTable<K>>>,
+    probe_data_types: Vec<DataType>,
+    build_data_types: Vec<DataType>,
+    full_data_types: Vec<DataType>,
+    output_chunk_builder: DataChunkBuilder,
+    build_row_matched: Option<BuildRowMatched>,
+    downstream: &'a mut dyn PushSink,
+    finished: bool,
+}
+
+impl<'a, K: HashKey> HashJoinProbeSink<'a, K> {
+    #[expect(clippy::too_many_arguments)]
+    fn new(
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+        probe_key_idxs: Vec<usize>,
+        cond: Option<Arc<BoxedExpression>>,
+        chunk_size: usize,
+        asof_desc: Option<AsOfDesc>,
+        shutdown_rx: ShutdownToken,
+        built: Arc<BuiltHashTable<K>>,
+        probe_data_types: Vec<DataType>,
+        build_data_types: Vec<DataType>,
+        full_data_types: Vec<DataType>,
+        output_data_types: Vec<DataType>,
+        downstream: &'a mut dyn PushSink,
+    ) -> Result<Self> {
+        let build_row_matched = match join_type {
+            JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::FullOuter => Some(BuildRowMatched::local(
+                built.build_side.iter().map(|c| c.capacity()),
+            )?),
+            _ => None,
+        };
+
+        Ok(Self {
+            join_type,
+            output_indices,
+            probe_key_idxs,
+            cond,
+            chunk_size,
+            asof_desc,
+            shutdown_rx,
+            built: Some(built),
+            probe_data_types,
+            build_data_types,
+            full_data_types,
+            output_chunk_builder: DataChunkBuilder::new(output_data_types, chunk_size),
+            build_row_matched,
+            downstream,
+            finished: false,
+        })
+    }
+
+    fn with_shared_build_row_matched(mut self, shared: Option<Arc<SharedBuildRowMatched>>) -> Self {
+        if let Some(shared) = shared {
+            self.build_row_matched = Some(BuildRowMatched::from_shared(shared));
+        }
+        self
+    }
+
+    async fn emit_output(&mut self, chunk: DataChunk) -> Result<PushStatus> {
+        if self.finished {
+            return Ok(PushStatus::Finished);
+        }
+
+        let chunk = chunk.project(&self.output_indices);
+        for output_chunk in self.output_chunk_builder.append_chunk(chunk) {
+            if self.downstream.push(output_chunk).await?.is_finished() {
+                self.finished = true;
+                return Ok(PushStatus::Finished);
+            }
+        }
+
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn flush_output(&mut self) -> Result<PushStatus> {
+        if self.finished {
+            return Ok(PushStatus::Finished);
+        }
+
+        if let Some(output_chunk) = self.output_chunk_builder.consume_all()
+            && self.downstream.push(output_chunk).await?.is_finished()
+        {
+            self.finished = true;
+            return Ok(PushStatus::Finished);
+        }
+
+        let status = self.downstream.finish().await?;
+        self.finished |= status.is_finished();
+        Ok(status)
+    }
+
+    fn built(&self) -> &BuiltHashTable<K> {
+        self.built.as_ref().expect("probe sink is already finished")
+    }
+
+    fn matched_build_row_ids(&self, probe_key: &K) -> Vec<RowId> {
+        let built = self.built();
+        built
+            .next_build_row_with_same_key
+            .row_id_iter(built.hash_map.get(probe_key).copied())
+            .collect()
+    }
+
+    async fn emit_spilled(&mut self, chunk_builder: &mut DataChunkBuilder) -> Result<PushStatus> {
+        if let Some(spilled) = chunk_builder.consume_all() {
+            self.emit_output(spilled).await
+        } else {
+            Ok(PushStatus::NeedMoreInput)
+        }
+    }
+
+    async fn push_inner_join(&mut self, probe_chunk: DataChunk) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            if let Some(asof_desc) = &self.asof_desc {
+                let build_row_id = {
+                    let built = self.built();
+                    let build_side_row_iter = built
+                        .next_build_row_with_same_key
+                        .row_id_iter(built.hash_map.get(probe_key).copied());
+                    HashJoinExecutor::<K>::find_asof_matched_rows(
+                        probe_chunk.row_at_unchecked_vis(probe_row_id),
+                        &built.build_side,
+                        build_side_row_iter,
+                        asof_desc,
+                    )
+                };
+                if let Some(build_row_id) = build_row_id {
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled
+                        && self.emit_output(spilled).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            } else {
+                for build_row_id in self.matched_build_row_ids(probe_key) {
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled
+                        && self.emit_output(spilled).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn push_inner_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            for build_row_id in self.matched_build_row_ids(probe_key) {
+                self.shutdown_rx.check()?;
+                let spilled = {
+                    let built = self.built();
+                    let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                    HashJoinExecutor::<K>::append_one_row(
+                        &mut chunk_builder,
+                        &probe_chunk,
+                        probe_row_id,
+                        build_chunk,
+                        build_row_id.row_id(),
+                    )
+                };
+                if let Some(mut spilled) = spilled {
+                    spilled.set_visibility(cond.eval(&spilled).await?.as_bool().iter().collect());
+                    if self.emit_output(spilled).await?.is_finished() {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            }
+        }
+        if let Some(mut spilled) = chunk_builder.consume_all() {
+            spilled.set_visibility(cond.eval(&spilled).await?.as_bool().iter().collect());
+            self.emit_output(spilled).await
+        } else {
+            Ok(PushStatus::NeedMoreInput)
+        }
+    }
+
+    async fn push_left_outer_join(&mut self, probe_chunk: DataChunk) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            let mut matched = false;
+            if let Some(asof_desc) = &self.asof_desc {
+                let build_row_id = {
+                    let built = self.built();
+                    let build_side_row_iter = built
+                        .next_build_row_with_same_key
+                        .row_id_iter(built.hash_map.get(probe_key).copied());
+                    HashJoinExecutor::<K>::find_asof_matched_rows(
+                        probe_chunk.row_at_unchecked_vis(probe_row_id),
+                        &built.build_side,
+                        build_side_row_iter,
+                        asof_desc,
+                    )
+                };
+                if let Some(build_row_id) = build_row_id {
+                    matched = true;
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled
+                        && self.emit_output(spilled).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            } else {
+                let build_row_ids = self.matched_build_row_ids(probe_key);
+                matched = !build_row_ids.is_empty();
+                for build_row_id in build_row_ids {
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled
+                        && self.emit_output(spilled).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            }
+
+            if !matched {
+                self.shutdown_rx.check()?;
+                let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                if let Some(spilled) = HashJoinExecutor::<K>::append_one_row_with_null_build_side(
+                    &mut chunk_builder,
+                    probe_row,
+                    self.build_data_types.len(),
+                ) && self.emit_output(spilled).await?.is_finished()
+                {
+                    return Ok(PushStatus::Finished);
+                }
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn push_left_outer_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut remaining_chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut non_equi_state = LeftNonEquiJoinState {
+            probe_column_count: self.probe_data_types.len(),
+            ..Default::default()
+        };
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            let build_row_ids = self.matched_build_row_ids(probe_key);
+            if !build_row_ids.is_empty() {
+                non_equi_state
+                    .first_output_row_id
+                    .push(chunk_builder.buffered_count());
+                let mut build_row_iter = build_row_ids.into_iter().peekable();
+                while let Some(build_row_id) = build_row_iter.next() {
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled {
+                        non_equi_state.has_more_output_rows = build_row_iter.peek().is_some();
+                        let processed =
+                            HashJoinExecutor::<K>::process_left_outer_join_non_equi_condition(
+                                spilled,
+                                cond,
+                                &mut non_equi_state,
+                            )
+                            .await?;
+                        if self.emit_output(processed).await?.is_finished() {
+                            return Ok(PushStatus::Finished);
+                        }
+                    }
+                }
+            } else {
+                self.shutdown_rx.check()?;
+                let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                if let Some(spilled) = HashJoinExecutor::<K>::append_one_row_with_null_build_side(
+                    &mut remaining_chunk_builder,
+                    probe_row,
+                    self.build_data_types.len(),
+                ) && self.emit_output(spilled).await?.is_finished()
+                {
+                    return Ok(PushStatus::Finished);
+                }
+            }
+        }
+        non_equi_state.has_more_output_rows = false;
+        if let Some(spilled) = chunk_builder.consume_all() {
+            let processed = HashJoinExecutor::<K>::process_left_outer_join_non_equi_condition(
+                spilled,
+                cond,
+                &mut non_equi_state,
+            )
+            .await?;
+            if self.emit_output(processed).await?.is_finished() {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.emit_spilled(&mut remaining_chunk_builder).await
+    }
+
+    async fn push_left_semi_anti_join<const ANTI_JOIN: bool>(
+        &mut self,
+        probe_chunk: DataChunk,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.probe_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            self.shutdown_rx.check()?;
+            let has_match = self.built().hash_map.contains_key(probe_key);
+            if ((!ANTI_JOIN && has_match) || (ANTI_JOIN && !has_match))
+                && let Some(spilled) = HashJoinExecutor::<K>::append_one_probe_row(
+                    &mut chunk_builder,
+                    &probe_chunk,
+                    probe_row_id,
+                )
+                && self.emit_output(spilled).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn push_left_semi_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut non_equi_state = LeftNonEquiJoinState::default();
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            non_equi_state.found_matched = false;
+            let build_row_ids = self.matched_build_row_ids(probe_key);
+            if !build_row_ids.is_empty() {
+                non_equi_state
+                    .first_output_row_id
+                    .push(chunk_builder.buffered_count());
+                for build_row_id in build_row_ids {
+                    self.shutdown_rx.check()?;
+                    if non_equi_state.found_matched {
+                        break;
+                    }
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled {
+                        let processed = HashJoinExecutor::<K>::
+                            process_left_semi_anti_join_non_equi_condition::<false>(
+                                spilled,
+                                cond,
+                                &mut non_equi_state,
+                            )
+                            .await?;
+                        if self.emit_output(processed).await?.is_finished() {
+                            return Ok(PushStatus::Finished);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all() {
+            let processed =
+                HashJoinExecutor::<K>::process_left_semi_anti_join_non_equi_condition::<false>(
+                    spilled,
+                    cond,
+                    &mut non_equi_state,
+                )
+                .await?;
+            self.emit_output(processed).await
+        } else {
+            Ok(PushStatus::NeedMoreInput)
+        }
+    }
+
+    async fn push_left_anti_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut remaining_chunk_builder =
+            DataChunkBuilder::new(self.probe_data_types.clone(), self.chunk_size);
+        let mut non_equi_state = LeftNonEquiJoinState::default();
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            let build_row_ids = self.matched_build_row_ids(probe_key);
+            if !build_row_ids.is_empty() {
+                non_equi_state
+                    .first_output_row_id
+                    .push(chunk_builder.buffered_count());
+                let mut build_row_iter = build_row_ids.into_iter().peekable();
+                while let Some(build_row_id) = build_row_iter.next() {
+                    self.shutdown_rx.check()?;
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled {
+                        non_equi_state.has_more_output_rows = build_row_iter.peek().is_some();
+                        let processed = HashJoinExecutor::<K>::
+                            process_left_semi_anti_join_non_equi_condition::<true>(
+                                spilled,
+                                cond,
+                                &mut non_equi_state,
+                            )
+                            .await?;
+                        if self.emit_output(processed).await?.is_finished() {
+                            return Ok(PushStatus::Finished);
+                        }
+                    }
+                }
+            } else if let Some(spilled) = HashJoinExecutor::<K>::append_one_probe_row(
+                &mut remaining_chunk_builder,
+                &probe_chunk,
+                probe_row_id,
+            ) && self.emit_output(spilled).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        non_equi_state.has_more_output_rows = false;
+        if let Some(spilled) = chunk_builder.consume_all() {
+            let processed =
+                HashJoinExecutor::<K>::process_left_semi_anti_join_non_equi_condition::<true>(
+                    spilled,
+                    cond,
+                    &mut non_equi_state,
+                )
+                .await?;
+            if self.emit_output(processed).await?.is_finished() {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.emit_spilled(&mut remaining_chunk_builder).await
+    }
+
+    async fn push_right_outer_join(&mut self, probe_chunk: DataChunk) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            for build_row_id in self.matched_build_row_ids(probe_key) {
+                self.shutdown_rx.check()?;
+                self.build_row_matched.as_mut().unwrap().mark(build_row_id);
+                let spilled = {
+                    let built = self.built();
+                    let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                    HashJoinExecutor::<K>::append_one_row(
+                        &mut chunk_builder,
+                        &probe_chunk,
+                        probe_row_id,
+                        build_chunk,
+                        build_row_id.row_id(),
+                    )
+                };
+                if let Some(spilled) = spilled
+                    && self.emit_output(spilled).await?.is_finished()
+                {
+                    return Ok(PushStatus::Finished);
+                }
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn push_right_outer_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut non_equi_state = RightNonEquiJoinState {
+            build_row_ids: Vec::new(),
+            build_row_matched: self.build_row_matched.take().unwrap().into_local(),
+        };
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            for build_row_id in self.matched_build_row_ids(probe_key) {
+                self.shutdown_rx.check()?;
+                non_equi_state.build_row_ids.push(build_row_id);
+                let spilled = {
+                    let built = self.built();
+                    let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                    HashJoinExecutor::<K>::append_one_row(
+                        &mut chunk_builder,
+                        &probe_chunk,
+                        probe_row_id,
+                        build_chunk,
+                        build_row_id.row_id(),
+                    )
+                };
+                if let Some(spilled) = spilled {
+                    let processed =
+                        HashJoinExecutor::<K>::process_right_outer_join_non_equi_condition(
+                            spilled,
+                            cond,
+                            &mut non_equi_state,
+                        )
+                        .await?;
+                    if self.emit_output(processed).await?.is_finished() {
+                        self.build_row_matched =
+                            Some(BuildRowMatched::Local(non_equi_state.build_row_matched));
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all() {
+            let processed = HashJoinExecutor::<K>::process_right_outer_join_non_equi_condition(
+                spilled,
+                cond,
+                &mut non_equi_state,
+            )
+            .await?;
+            if self.emit_output(processed).await?.is_finished() {
+                self.build_row_matched =
+                    Some(BuildRowMatched::Local(non_equi_state.build_row_matched));
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.build_row_matched = Some(BuildRowMatched::Local(non_equi_state.build_row_matched));
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn push_right_semi_anti_join<const ANTI_JOIN: bool>(
+        &mut self,
+        probe_chunk: DataChunk,
+    ) -> Result<PushStatus> {
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for probe_key in probe_keys.iter().filter_by_bitmap(probe_chunk.visibility()) {
+            for build_row_id in self.matched_build_row_ids(probe_key) {
+                self.shutdown_rx.check()?;
+                self.build_row_matched.as_mut().unwrap().mark(build_row_id);
+            }
+        }
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn push_right_semi_anti_join_with_non_equi_condition<const ANTI_JOIN: bool>(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut non_equi_state = RightNonEquiJoinState {
+            build_row_ids: Vec::new(),
+            build_row_matched: self.build_row_matched.take().unwrap().into_local(),
+        };
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            for build_row_id in self.matched_build_row_ids(probe_key) {
+                self.shutdown_rx.check()?;
+                non_equi_state.build_row_ids.push(build_row_id);
+                let spilled = {
+                    let built = self.built();
+                    let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                    HashJoinExecutor::<K>::append_one_row(
+                        &mut chunk_builder,
+                        &probe_chunk,
+                        probe_row_id,
+                        build_chunk,
+                        build_row_id.row_id(),
+                    )
+                };
+                if let Some(spilled) = spilled {
+                    HashJoinExecutor::<K>::process_right_semi_anti_join_non_equi_condition(
+                        spilled,
+                        cond,
+                        &mut non_equi_state,
+                    )
+                    .await?;
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all() {
+            HashJoinExecutor::<K>::process_right_semi_anti_join_non_equi_condition(
+                spilled,
+                cond,
+                &mut non_equi_state,
+            )
+            .await?;
+        }
+        self.build_row_matched = Some(BuildRowMatched::Local(non_equi_state.build_row_matched));
+        Ok(PushStatus::NeedMoreInput)
+    }
+
+    async fn push_full_outer_join(&mut self, probe_chunk: DataChunk) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            let build_row_ids = self.matched_build_row_ids(probe_key);
+            if !build_row_ids.is_empty() {
+                for build_row_id in build_row_ids {
+                    self.shutdown_rx.check()?;
+                    self.build_row_matched.as_mut().unwrap().mark(build_row_id);
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled
+                        && self.emit_output(spilled).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            } else {
+                self.shutdown_rx.check()?;
+                let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                if let Some(spilled) = HashJoinExecutor::<K>::append_one_row_with_null_build_side(
+                    &mut chunk_builder,
+                    probe_row,
+                    self.build_data_types.len(),
+                ) && self.emit_output(spilled).await?.is_finished()
+                {
+                    return Ok(PushStatus::Finished);
+                }
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn push_full_outer_join_with_non_equi_condition(
+        &mut self,
+        probe_chunk: DataChunk,
+        cond: &dyn Expression,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut remaining_chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        let mut left_non_equi_state = LeftNonEquiJoinState {
+            probe_column_count: self.probe_data_types.len(),
+            ..Default::default()
+        };
+        let mut right_non_equi_state = RightNonEquiJoinState {
+            build_row_ids: Vec::new(),
+            build_row_matched: self.build_row_matched.take().unwrap().into_local(),
+        };
+        let probe_keys = K::build_many(&self.probe_key_idxs, &probe_chunk);
+        for (probe_row_id, probe_key) in probe_keys
+            .iter()
+            .enumerate()
+            .filter_by_bitmap(probe_chunk.visibility())
+        {
+            left_non_equi_state.found_matched = false;
+            let build_row_ids = self.matched_build_row_ids(probe_key);
+            if !build_row_ids.is_empty() {
+                left_non_equi_state
+                    .first_output_row_id
+                    .push(chunk_builder.buffered_count());
+                let mut build_row_iter = build_row_ids.into_iter().peekable();
+                while let Some(build_row_id) = build_row_iter.next() {
+                    self.shutdown_rx.check()?;
+                    right_non_equi_state.build_row_ids.push(build_row_id);
+                    let spilled = {
+                        let built = self.built();
+                        let build_chunk = &built.build_side[build_row_id.chunk_id()];
+                        HashJoinExecutor::<K>::append_one_row(
+                            &mut chunk_builder,
+                            &probe_chunk,
+                            probe_row_id,
+                            build_chunk,
+                            build_row_id.row_id(),
+                        )
+                    };
+                    if let Some(spilled) = spilled {
+                        left_non_equi_state.has_more_output_rows = build_row_iter.peek().is_some();
+                        let processed =
+                            HashJoinExecutor::<K>::process_full_outer_join_non_equi_condition(
+                                spilled,
+                                cond,
+                                &mut left_non_equi_state,
+                                &mut right_non_equi_state,
+                            )
+                            .await?;
+                        if self.emit_output(processed).await?.is_finished() {
+                            self.build_row_matched = Some(BuildRowMatched::Local(
+                                right_non_equi_state.build_row_matched,
+                            ));
+                            return Ok(PushStatus::Finished);
+                        }
+                    }
+                }
+            } else {
+                self.shutdown_rx.check()?;
+                let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                if let Some(spilled) = HashJoinExecutor::<K>::append_one_row_with_null_build_side(
+                    &mut remaining_chunk_builder,
+                    probe_row,
+                    self.build_data_types.len(),
+                ) && self.emit_output(spilled).await?.is_finished()
+                {
+                    self.build_row_matched = Some(BuildRowMatched::Local(
+                        right_non_equi_state.build_row_matched,
+                    ));
+                    return Ok(PushStatus::Finished);
+                }
+            }
+        }
+        left_non_equi_state.has_more_output_rows = false;
+        if let Some(spilled) = chunk_builder.consume_all() {
+            let processed = HashJoinExecutor::<K>::process_full_outer_join_non_equi_condition(
+                spilled,
+                cond,
+                &mut left_non_equi_state,
+                &mut right_non_equi_state,
+            )
+            .await?;
+            if self.emit_output(processed).await?.is_finished() {
+                self.build_row_matched = Some(BuildRowMatched::Local(
+                    right_non_equi_state.build_row_matched,
+                ));
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.build_row_matched = Some(BuildRowMatched::Local(
+            right_non_equi_state.build_row_matched,
+        ));
+        self.emit_spilled(&mut remaining_chunk_builder).await
+    }
+
+    async fn emit_remaining_build_rows_for_right_outer_join(&mut self) -> Result<PushStatus> {
+        let build_row_ids = {
+            let build_row_matched = self.build_row_matched.as_ref().unwrap();
+            build_row_matched
+                .all_row_ids()
+                .into_iter()
+                .filter(|build_row_id| !build_row_matched.is_matched(*build_row_id))
+                .collect_vec()
+        };
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.full_data_types.clone(), self.chunk_size);
+        for build_row_id in build_row_ids {
+            let spilled = {
+                let built = self.built();
+                let build_row = built.build_side[build_row_id.chunk_id()]
+                    .row_at_unchecked_vis(build_row_id.row_id());
+                HashJoinExecutor::<K>::append_one_row_with_null_probe_side(
+                    &mut chunk_builder,
+                    build_row,
+                    self.probe_data_types.len(),
+                )
+            };
+            if let Some(spilled) = spilled
+                && self.emit_output(spilled).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn emit_remaining_build_rows_for_right_semi_anti_join<const ANTI_JOIN: bool>(
+        &mut self,
+    ) -> Result<PushStatus> {
+        let build_row_ids = {
+            let build_row_matched = self.build_row_matched.as_ref().unwrap();
+            build_row_matched
+                .all_row_ids()
+                .into_iter()
+                .filter(|build_row_id| {
+                    if !ANTI_JOIN {
+                        build_row_matched.is_matched(*build_row_id)
+                    } else {
+                        !build_row_matched.is_matched(*build_row_id)
+                    }
+                })
+                .collect_vec()
+        };
+        let mut chunk_builder =
+            DataChunkBuilder::new(self.build_data_types.clone(), self.chunk_size);
+        for build_row_id in build_row_ids {
+            let spilled = {
+                let built = self.built();
+                HashJoinExecutor::<K>::append_one_build_row(
+                    &mut chunk_builder,
+                    &built.build_side[build_row_id.chunk_id()],
+                    build_row_id.row_id(),
+                )
+            };
+            if let Some(spilled) = spilled
+                && self.emit_output(spilled).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        self.emit_spilled(&mut chunk_builder).await
+    }
+
+    async fn finish_probe(&mut self) -> Result<PushStatus> {
+        if self.finished {
+            return Ok(PushStatus::Finished);
+        }
+
+        match self.join_type {
+            JoinType::RightOuter | JoinType::FullOuter => {
+                if self
+                    .emit_remaining_build_rows_for_right_outer_join()
+                    .await?
+                    .is_finished()
+                {
+                    self.built = None;
+                    return Ok(PushStatus::Finished);
+                }
+            }
+            JoinType::RightSemi => {
+                if self
+                    .emit_remaining_build_rows_for_right_semi_anti_join::<false>()
+                    .await?
+                    .is_finished()
+                {
+                    self.built = None;
+                    return Ok(PushStatus::Finished);
+                }
+            }
+            JoinType::RightAnti => {
+                if self
+                    .emit_remaining_build_rows_for_right_semi_anti_join::<true>()
+                    .await?
+                    .is_finished()
+                {
+                    self.built = None;
+                    return Ok(PushStatus::Finished);
+                }
+            }
+            _ => {}
+        }
+
+        self.built = None;
+        self.flush_output().await
+    }
+}
+
+impl<K: HashKey + Send> PushSink for HashJoinProbeSink<'_, K> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.finished {
+                return Ok(PushStatus::Finished);
+            }
+
+            if let Some(cond) = self.cond.clone()
+                && self.asof_desc.is_none()
+            {
+                match self.join_type {
+                    JoinType::Inner => {
+                        self.push_inner_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::LeftOuter => {
+                        self.push_left_outer_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::LeftSemi => {
+                        self.push_left_semi_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::LeftAnti => {
+                        self.push_left_anti_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::RightOuter => {
+                        self.push_right_outer_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::RightSemi => {
+                        self.push_right_semi_anti_join_with_non_equi_condition::<false>(
+                            chunk,
+                            cond.as_ref(),
+                        )
+                        .await
+                    }
+                    JoinType::RightAnti => {
+                        self.push_right_semi_anti_join_with_non_equi_condition::<true>(
+                            chunk,
+                            cond.as_ref(),
+                        )
+                        .await
+                    }
+                    JoinType::FullOuter => {
+                        self.push_full_outer_join_with_non_equi_condition(chunk, cond.as_ref())
+                            .await
+                    }
+                    JoinType::AsOfInner | JoinType::AsOfLeftOuter => {
+                        unreachable!("AsOf join should not reach here")
+                    }
+                }
+            } else {
+                match self.join_type {
+                    JoinType::Inner | JoinType::AsOfInner => self.push_inner_join(chunk).await,
+                    JoinType::LeftOuter | JoinType::AsOfLeftOuter => {
+                        self.push_left_outer_join(chunk).await
+                    }
+                    JoinType::LeftSemi => self.push_left_semi_anti_join::<false>(chunk).await,
+                    JoinType::LeftAnti => self.push_left_semi_anti_join::<true>(chunk).await,
+                    JoinType::RightOuter => self.push_right_outer_join(chunk).await,
+                    JoinType::RightSemi => self.push_right_semi_anti_join::<false>(chunk).await,
+                    JoinType::RightAnti => self.push_right_semi_anti_join::<true>(chunk).await,
+                    JoinType::FullOuter => self.push_full_outer_join(chunk).await,
+                }
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move { self.finish_probe().await }.boxed()
+    }
+}
+
+#[derive(Default)]
+struct VecPushSink {
+    chunks: Vec<DataChunk>,
+}
+
+impl PushSink for VecPushSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.chunks.push(chunk);
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+struct HashJoinProbeOperatorFactory<K> {
+    join_type: JoinType,
+    output_indices: Vec<usize>,
+    probe_key_idxs: Vec<usize>,
+    cond: Option<Arc<BoxedExpression>>,
+    chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
+    shutdown_rx: ShutdownToken,
+    built: Arc<BuiltHashTable<K>>,
+    shared_build_row_matched: Option<Arc<SharedBuildRowMatched>>,
+    probe_data_types: Vec<DataType>,
+    build_data_types: Vec<DataType>,
+    full_data_types: Vec<DataType>,
+    output_data_types: Vec<DataType>,
+}
+
+impl<K: HashKey + Send + Sync> BatchPipelineOperatorFactory for HashJoinProbeOperatorFactory<K> {
+    fn create(&self) -> Box<dyn BatchPipelineOperator> {
+        Box::new(HashJoinProbeOperator {
+            join_type: self.join_type,
+            output_indices: self.output_indices.clone(),
+            probe_key_idxs: self.probe_key_idxs.clone(),
+            cond: self.cond.clone(),
+            chunk_size: self.chunk_size,
+            asof_desc: self.asof_desc.clone(),
+            shutdown_rx: self.shutdown_rx.clone(),
+            built: self.built.clone(),
+            shared_build_row_matched: self.shared_build_row_matched.clone(),
+            probe_data_types: self.probe_data_types.clone(),
+            build_data_types: self.build_data_types.clone(),
+            full_data_types: self.full_data_types.clone(),
+            output_data_types: self.output_data_types.clone(),
+        })
+    }
+}
+
+struct HashJoinProbeOperator<K> {
+    join_type: JoinType,
+    output_indices: Vec<usize>,
+    probe_key_idxs: Vec<usize>,
+    cond: Option<Arc<BoxedExpression>>,
+    chunk_size: usize,
+    asof_desc: Option<AsOfDesc>,
+    shutdown_rx: ShutdownToken,
+    built: Arc<BuiltHashTable<K>>,
+    shared_build_row_matched: Option<Arc<SharedBuildRowMatched>>,
+    probe_data_types: Vec<DataType>,
+    build_data_types: Vec<DataType>,
+    full_data_types: Vec<DataType>,
+    output_data_types: Vec<DataType>,
+}
+
+impl<K: HashKey + Send + Sync> BatchPipelineOperator for HashJoinProbeOperator<K> {
+    fn execute<'a>(
+        &'a mut self,
+        chunk: DataChunk,
+    ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+        async move {
+            let mut output_sink = VecPushSink::default();
+            let mut probe_sink = HashJoinProbeSink::<K>::new(
+                self.join_type,
+                self.output_indices.clone(),
+                self.probe_key_idxs.clone(),
+                self.cond.clone(),
+                self.chunk_size,
+                self.asof_desc.clone(),
+                self.shutdown_rx.clone(),
+                self.built.clone(),
+                self.probe_data_types.clone(),
+                self.build_data_types.clone(),
+                self.full_data_types.clone(),
+                self.output_data_types.clone(),
+                &mut output_sink,
+            )?
+            .with_shared_build_row_matched(self.shared_build_row_matched.clone());
+            let status = probe_sink.push(chunk).await?;
+            let flush_status = probe_sink.flush_output().await?;
+            let status = if status.is_finished() || flush_status.is_finished() {
+                PushStatus::Finished
+            } else {
+                PushStatus::NeedMoreInput
+            };
+            Ok(PipelineOperatorOutput::new(output_sink.chunks, status))
+        }
+        .boxed()
+    }
+}
+
+struct HashJoinProbeSpillSink<'a> {
+    join_spill_manager: &'a mut JoinSpillManager,
+    probe_key_idxs: Vec<usize>,
+}
+
+impl PushSink for HashJoinProbeSpillSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let hash_codes = chunk.get_hash_values(
+                self.probe_key_idxs.as_slice(),
+                self.join_spill_manager.spill_build_hasher,
+            );
+            self.join_spill_manager
+                .write_probe_side_chunk(
+                    chunk,
+                    hash_codes
+                        .into_iter()
+                        .map(|hash_code| hash_code.value())
+                        .collect(),
+                )
+                .await?;
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+struct SpillPartitionExecutor {
+    schema: Schema,
+    stream: BoxedDataChunkStream,
+    identity: String,
+}
+
+impl SpillPartitionExecutor {
+    fn new(schema: Schema, stream: BoxedDataChunkStream, identity: String) -> Self {
+        Self {
+            schema,
+            stream,
+            identity,
+        }
+    }
+}
+
+impl Executor for SpillPartitionExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.stream
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        push_chunk_stream(self.stream, context, sink).boxed()
+    }
 }
 
 pub struct JoinSpillManager {
@@ -498,6 +2253,32 @@ impl JoinSpillManager {
         Ok(SpillOp::read_stream(r, self.spill_metrics.clone()))
     }
 
+    async fn read_probe_side_partition_source(
+        &mut self,
+        partition: usize,
+        schema: Schema,
+    ) -> Result<BoxedExecutor> {
+        let stream = self.read_probe_side_partition(partition).await?;
+        Ok(Box::new(SpillPartitionExecutor::new(
+            schema,
+            stream,
+            format!("HashJoinProbeSpillPartition-{}", partition),
+        )))
+    }
+
+    async fn read_build_side_partition_source(
+        &mut self,
+        partition: usize,
+        schema: Schema,
+    ) -> Result<BoxedExecutor> {
+        let stream = self.read_build_side_partition(partition).await?;
+        Ok(Box::new(SpillPartitionExecutor::new(
+            schema,
+            stream,
+            format!("HashJoinBuildSpillPartition-{}", partition),
+        )))
+    }
+
     pub async fn estimate_partition_size(&self, partition: usize) -> Result<u64> {
         let join_probe_side_partition_file_name = format!("join-probe-side-p{}", partition);
         let probe_size = self
@@ -524,6 +2305,353 @@ impl JoinSpillManager {
 }
 
 impl<K: HashKey> HashJoinExecutor<K> {
+    fn supports_parallel_probe(join_type: JoinType, has_non_equi_condition: bool) -> bool {
+        !has_non_equi_condition
+            || !matches!(
+                join_type,
+                JoinType::RightOuter
+                    | JoinType::RightSemi
+                    | JoinType::RightAnti
+                    | JoinType::FullOuter
+            )
+    }
+
+    fn shared_build_row_matched(
+        join_type: JoinType,
+        built: &BuiltHashTable<K>,
+    ) -> Result<Option<Arc<SharedBuildRowMatched>>> {
+        match join_type {
+            JoinType::RightOuter
+            | JoinType::RightSemi
+            | JoinType::RightAnti
+            | JoinType::FullOuter => Ok(BuildRowMatched::shared(
+                built.build_side.iter().map(|c| c.capacity()),
+            )?
+            .clone_shared()),
+            _ => Ok(None),
+        }
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    async fn execute_parallel_probe(
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+        probe_side_source: BoxedExecutor,
+        probe_key_idxs: Vec<usize>,
+        cond: Option<Arc<BoxedExpression>>,
+        chunk_size: usize,
+        asof_desc: Option<AsOfDesc>,
+        shutdown_rx: ShutdownToken,
+        built: Arc<BuiltHashTable<K>>,
+        probe_data_types: Vec<DataType>,
+        build_data_types: Vec<DataType>,
+        full_data_types: Vec<DataType>,
+        output_data_types: Vec<DataType>,
+        context: PushContext,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus>
+    where
+        K: Send + Sync,
+    {
+        let shared_build_row_matched = Self::shared_build_row_matched(join_type, &built)?;
+        let factory = Arc::new(HashJoinProbeOperatorFactory {
+            join_type,
+            output_indices: output_indices.clone(),
+            probe_key_idxs: probe_key_idxs.clone(),
+            cond: cond.clone(),
+            chunk_size,
+            asof_desc: asof_desc.clone(),
+            shutdown_rx: shutdown_rx.clone(),
+            built: built.clone(),
+            shared_build_row_matched: shared_build_row_matched.clone(),
+            probe_data_types: probe_data_types.clone(),
+            build_data_types: build_data_types.clone(),
+            full_data_types: full_data_types.clone(),
+            output_data_types: output_data_types.clone(),
+        });
+        let mut operators = BatchPipelineOperatorChain::empty();
+        operators.prepend_parallel(factory.create(), factory);
+        let source = ExecutorMorselSource::new(probe_side_source, context.morsel_queue_capacity());
+        let status = drive_morsel_source_with_operators(source, operators, context, sink).await?;
+        if status.is_finished() {
+            return Ok(PushStatus::Finished);
+        }
+
+        if shared_build_row_matched.is_some() {
+            let mut probe_finalizer = HashJoinProbeSink::<K>::new(
+                join_type,
+                output_indices,
+                probe_key_idxs,
+                cond,
+                chunk_size,
+                asof_desc,
+                shutdown_rx,
+                built,
+                probe_data_types,
+                build_data_types,
+                full_data_types,
+                output_data_types,
+                sink,
+            )?
+            .with_shared_build_row_matched(shared_build_row_matched);
+            probe_finalizer.finish_probe().await
+        } else {
+            Ok(PushStatus::NeedMoreInput)
+        }
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    async fn execute_spill_push(
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+        probe_side_source: BoxedExecutor,
+        build_chunks: Vec<DataChunk>,
+        probe_schema: Schema,
+        build_schema: Schema,
+        probe_key_idxs: Vec<usize>,
+        build_key_idxs: Vec<usize>,
+        null_matched: Vec<bool>,
+        cond: Option<Arc<BoxedExpression>>,
+        identity: String,
+        chunk_size: usize,
+        asof_desc: Option<AsOfDesc>,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        spill_recursion_depth: usize,
+        shutdown_rx: ShutdownToken,
+        mem_ctx: MemoryContext,
+        context: PushContext,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus>
+    where
+        K: Send,
+    {
+        info!("batch hash join executor {} starts to spill out", &identity);
+        if spill_recursion_depth >= MAX_RECURSIVE_SPILL_DEPTH {
+            return Err(BatchError::OutOfMemory(mem_ctx.mem_limit()));
+        }
+
+        let probe_data_types = probe_schema.data_types();
+        let build_data_types = build_schema.data_types();
+        let join_spill_manager = Arc::new(Mutex::new(JoinSpillManager::new(
+            spill_backend.clone().unwrap(),
+            &identity,
+            DEFAULT_SPILL_PARTITION_NUM,
+            probe_data_types,
+            build_data_types,
+            chunk_size,
+            spill_metrics.clone(),
+        )?));
+        {
+            let mut manager = join_spill_manager.lock().await;
+            manager.init_writers().await?;
+        }
+        let partition_num = {
+            let manager = join_spill_manager.lock().await;
+            manager.partition_num
+        };
+
+        let mut schedule = PushPipelineSchedule::new();
+
+        let spill_build_pipeline = {
+            let manager = join_spill_manager.clone();
+            let build_key_idxs = build_key_idxs.clone();
+            let pipeline_identity = identity.clone();
+            let mut build_chunks = Some(build_chunks);
+            schedule.add_pipeline(
+                format!("{}-spill-build", identity),
+                [],
+                move |context, _| {
+                    let manager = manager.clone();
+                    let build_key_idxs = build_key_idxs.clone();
+                    let Some(build_chunks) = build_chunks.take() else {
+                        let pipeline_identity = pipeline_identity.clone();
+                        return async move {
+                            Err(BatchError::Internal(anyhow::anyhow!(
+                                "push pipeline {}-spill-build was executed more than once",
+                                pipeline_identity
+                            )))
+                        }
+                        .boxed();
+                    };
+                    async move {
+                        context.check_shutdown()?;
+                        let mut manager = manager.lock().await;
+                        for chunk in build_chunks {
+                            context.check_shutdown()?;
+                            let hash_codes = chunk.get_hash_values(
+                                build_key_idxs.as_slice(),
+                                manager.spill_build_hasher,
+                            );
+                            manager
+                                .write_build_side_chunk(
+                                    chunk,
+                                    hash_codes
+                                        .into_iter()
+                                        .map(|hash_code| hash_code.value())
+                                        .collect(),
+                                )
+                                .await?;
+                        }
+                        Ok(PushStatus::NeedMoreInput)
+                    }
+                    .boxed()
+                },
+            )
+        };
+
+        let spill_probe_pipeline = {
+            let manager = join_spill_manager.clone();
+            let probe_key_idxs = probe_key_idxs.clone();
+            let pipeline_identity = identity.clone();
+            let mut probe_side_source = Some(probe_side_source);
+            schedule.add_pipeline(
+                format!("{}-spill-probe", identity),
+                [spill_build_pipeline],
+                move |context, _| {
+                    let manager = manager.clone();
+                    let probe_key_idxs = probe_key_idxs.clone();
+                    let Some(probe_side_source) = probe_side_source.take() else {
+                        let pipeline_identity = pipeline_identity.clone();
+                        return async move {
+                            Err(BatchError::Internal(anyhow::anyhow!(
+                                "push pipeline {}-spill-probe was executed more than once",
+                                pipeline_identity
+                            )))
+                        }
+                        .boxed();
+                    };
+                    async move {
+                        context.check_shutdown()?;
+                        let mut manager = manager.lock().await;
+                        let mut probe_spill_sink = HashJoinProbeSpillSink {
+                            join_spill_manager: &mut manager,
+                            probe_key_idxs,
+                        };
+                        probe_side_source
+                            .execute_push(context, &mut probe_spill_sink)
+                            .await
+                    }
+                    .boxed()
+                },
+            )
+        };
+
+        let close_spill_pipeline = {
+            let manager = join_spill_manager.clone();
+            schedule.add_pipeline(
+                format!("{}-spill-close", identity),
+                [spill_probe_pipeline],
+                move |context, _| {
+                    let manager = manager.clone();
+                    async move {
+                        context.check_shutdown()?;
+                        let mut manager = manager.lock().await;
+                        manager.close_writers().await?;
+                        Ok(PushStatus::NeedMoreInput)
+                    }
+                    .boxed()
+                },
+            )
+        };
+
+        for i in 0..partition_num {
+            let manager = join_spill_manager.clone();
+            let output_indices = output_indices.clone();
+            let probe_schema = probe_schema.clone();
+            let build_schema = build_schema.clone();
+            let probe_key_idxs = probe_key_idxs.clone();
+            let build_key_idxs = build_key_idxs.clone();
+            let null_matched = null_matched.clone();
+            let cond = cond.clone();
+            let identity = identity.clone();
+            let asof_desc = asof_desc.clone();
+            let spill_backend = spill_backend.clone();
+            let spill_metrics = spill_metrics.clone();
+            let shutdown_rx = shutdown_rx.clone();
+            let mem_ctx = mem_ctx.clone();
+            schedule.add_pipeline(
+                format!("{}-spill-partition-{}", identity, i),
+                [close_spill_pipeline],
+                move |context, sink| {
+                    let manager = manager.clone();
+                    let output_indices = output_indices.clone();
+                    let probe_schema = probe_schema.clone();
+                    let build_schema = build_schema.clone();
+                    let probe_key_idxs = probe_key_idxs.clone();
+                    let build_key_idxs = build_key_idxs.clone();
+                    let null_matched = null_matched.clone();
+                    let cond = cond.clone();
+                    let identity = identity.clone();
+                    let asof_desc = asof_desc.clone();
+                    let spill_backend = spill_backend.clone();
+                    let spill_metrics = spill_metrics.clone();
+                    let shutdown_rx = shutdown_rx.clone();
+                    let mem_ctx = mem_ctx.clone();
+                    async move {
+                        context.check_shutdown()?;
+                        let (partition_size, probe_side_source, build_side_source) = {
+                            let mut manager = manager.lock().await;
+                            let partition_size = manager.estimate_partition_size(i).await?;
+                            let probe_side_source = manager
+                                .read_probe_side_partition_source(i, probe_schema)
+                                .await?;
+                            let build_side_source = manager
+                                .read_build_side_partition_source(i, build_schema)
+                                .await?;
+                            (partition_size, probe_side_source, build_side_source)
+                        };
+
+                        let sub_hash_join_executor: HashJoinExecutor<K> =
+                            HashJoinExecutor::new_inner(
+                                join_type,
+                                output_indices,
+                                probe_side_source,
+                                build_side_source,
+                                probe_key_idxs,
+                                build_key_idxs,
+                                null_matched,
+                                cond,
+                                format!("{}-sub{}", identity, i),
+                                chunk_size,
+                                asof_desc,
+                                spill_backend,
+                                spill_metrics,
+                                Some(partition_size),
+                                spill_recursion_depth + 1,
+                                shutdown_rx,
+                                mem_ctx,
+                            );
+
+                        debug!(
+                            "create sub_hash_join {} for hash_join {} to spill",
+                            sub_hash_join_executor.identity, identity
+                        );
+
+                        let status = {
+                            let mut forward_sink = ForwardingNoFinishSink::new(sink);
+                            Box::new(sub_hash_join_executor)
+                                .execute_push(context, &mut forward_sink)
+                                .await?
+                        };
+
+                        {
+                            let mut manager = manager.lock().await;
+                            manager.clear_partition(i).await?;
+                        }
+
+                        Ok(status)
+                    }
+                    .boxed()
+                },
+            );
+        }
+
+        PushQueryScheduler::new(context)
+            .execute_pipeline_schedule(schedule, sink)
+            .await
+    }
+
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut need_to_spill = false;
@@ -612,6 +2740,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 "batch hash join executor {} starts to spill out",
                 &self.identity
             );
+            if self.spill_recursion_depth >= MAX_RECURSIVE_SPILL_DEPTH {
+                Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
+            }
             let mut join_spill_manager = JoinSpillManager::new(
                 self.spill_backend.clone().unwrap(),
                 &self.identity,
@@ -714,6 +2845,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     self.spill_backend.clone(),
                     self.spill_metrics.clone(),
                     Some(partition_size),
+                    self.spill_recursion_depth + 1,
                     self.shutdown_rx.clone(),
                     self.mem_ctx.clone(),
                 );
@@ -2487,6 +4619,7 @@ impl<K> HashJoinExecutor<K> {
             spill_backend,
             spill_metrics,
             None,
+            0,
             shutdown_rx,
             mem_ctx,
         )
@@ -2508,6 +4641,7 @@ impl<K> HashJoinExecutor<K> {
         spill_backend: Option<SpillBackend>,
         spill_metrics: Arc<BatchSpillMetrics>,
         memory_upper_bound: Option<u64>,
+        spill_recursion_depth: usize,
         shutdown_rx: ShutdownToken,
         mem_ctx: MemoryContext,
     ) -> Self {
@@ -2548,6 +4682,7 @@ impl<K> HashJoinExecutor<K> {
             spill_backend,
             spill_metrics,
             memory_upper_bound,
+            spill_recursion_depth,
             mem_ctx,
             _phantom: PhantomData,
         }
@@ -2578,7 +4713,7 @@ mod tests {
     use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{
-        BoxedExecutor, Executor, PushContext, WrapStreamExecutor, execute_push_as_pull,
+        BoxedExecutor, BufferChunkExecutor, Executor, PushContext, collect_push_input,
     };
     use crate::monitor::BatchSpillMetrics;
     use crate::spill::spill_op::SpillBackend;
@@ -2934,37 +5069,38 @@ mod tests {
             has_non_equi_cond: bool,
             null_safe: bool,
         ) {
-            let parent_mem_context =
-                MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
-            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
-                has_non_equi_cond,
-                null_safe,
-                self::CHUNK_SIZE,
-                self.create_left_executor(),
-                self.create_right_executor(),
-                ShutdownToken::empty(),
-                Some(parent_mem_context.clone()),
-                false,
-            );
-            let schema = join_executor.schema().clone();
-            let push_stream = execute_push_as_pull(
-                join_executor,
-                PushContext::new(ShutdownToken::empty()),
-                self::CHUNK_SIZE,
-            );
-            let push_output = Box::new(WrapStreamExecutor::new(schema, push_stream));
-            let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
-            let mut stream = push_output.execute();
+            for (test_spill, morsel_parallelism) in
+                [false, true].into_iter().cartesian_product([1, 2])
+            {
+                let parent_mem_context =
+                    MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
+                let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                    has_non_equi_cond,
+                    null_safe,
+                    self::CHUNK_SIZE,
+                    self.create_left_executor(),
+                    self.create_right_executor(),
+                    ShutdownToken::empty(),
+                    Some(parent_mem_context.clone()),
+                    test_spill,
+                );
+                let context = PushContext::new(ShutdownToken::empty())
+                    .with_morsel_parallelism(morsel_parallelism);
+                let (schema, chunks) = collect_push_input(join_executor, context).await.unwrap();
+                let push_output = Box::new(BufferChunkExecutor::new(schema, chunks));
+                let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+                let mut stream = push_output.execute();
 
-            while let Some(data_chunk) = stream.next().await {
-                let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact_vis();
-                data_chunk_merger.append(&data_chunk).unwrap();
+                while let Some(data_chunk) = stream.next().await {
+                    let data_chunk = data_chunk.unwrap();
+                    let data_chunk = data_chunk.compact_vis();
+                    data_chunk_merger.append(&data_chunk).unwrap();
+                }
+
+                let result_chunk = data_chunk_merger.finish().unwrap();
+                assert!(compare_data_chunk_with_rowsort(&expected, &result_chunk));
+                assert_eq!(0, parent_mem_context.get_bytes_used());
             }
-
-            let result_chunk = data_chunk_merger.finish().unwrap();
-            assert!(compare_data_chunk_with_rowsort(&expected, &result_chunk));
-            assert_eq!(0, parent_mem_context.get_bytes_used());
         }
 
         async fn do_test_shutdown(&self, has_non_equi_cond: bool) {

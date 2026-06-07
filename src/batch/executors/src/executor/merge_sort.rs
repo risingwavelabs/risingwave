@@ -28,7 +28,7 @@ use risingwave_common_estimate_size::EstimateSize;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
-    push_chunk_stream, wrap_push_executor,
+    push_chunk_stream,
 };
 use crate::error::{BatchError, Result};
 
@@ -72,10 +72,6 @@ impl Executor for MergeSortExecutor {
                 min_heap: _,
                 current_chunks: _,
             } = *self;
-            let inputs = inputs
-                .into_iter()
-                .map(|input| wrap_push_executor(input, context.clone()))
-                .collect_vec();
             let executor = Box::new(MergeSortExecutor::new(
                 inputs,
                 column_orders,
