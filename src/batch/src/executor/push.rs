@@ -273,6 +273,45 @@ pub trait MorselSource: Send {
     ) -> BoxFuture<'a, Result<Option<Morsel>>>;
 }
 
+/// Output produced by one pipeline operator for a single input chunk.
+pub struct PipelineOperatorOutput {
+    chunks: Vec<DataChunk>,
+    status: PushStatus,
+}
+
+impl PipelineOperatorOutput {
+    pub fn new(chunks: Vec<DataChunk>, status: PushStatus) -> Self {
+        Self { chunks, status }
+    }
+
+    pub fn one(chunk: DataChunk) -> Self {
+        Self::new(vec![chunk], PushStatus::NeedMoreInput)
+    }
+
+    pub fn empty() -> Self {
+        Self::new(vec![], PushStatus::NeedMoreInput)
+    }
+
+    pub fn finished(chunks: Vec<DataChunk>) -> Self {
+        Self::new(chunks, PushStatus::Finished)
+    }
+}
+
+/// A linear pipeline operator owned by a morsel driver.
+///
+/// Unlike [`PushSink`], this represents an operator inside a scheduler-owned
+/// pipeline: the driver feeds chunks through each operator and owns the final
+/// sink call. This is the foundation for moving simple pipelines away from
+/// recursive child-to-sink execution.
+pub trait BatchPipelineOperator: Send {
+    fn execute<'a>(&'a mut self, chunk: DataChunk)
+    -> BoxFuture<'a, Result<PipelineOperatorOutput>>;
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+        async { Ok(PipelineOperatorOutput::empty()) }.boxed()
+    }
+}
+
 pub struct StreamMorselSource {
     stream: BoxedDataChunkStream,
     next_sequence: u64,
@@ -305,39 +344,106 @@ impl MorselSource for StreamMorselSource {
     }
 }
 
-/// Task-local pipeline executor. Sources emit morsels; the sink applies the
-/// downstream operator chain and backpressures through async `push`.
-pub struct PipelineExecutor<S> {
+/// Scheduler-owned task-local morsel pipeline driver.
+///
+/// A source emits morsels, the driver owns the linear operator chain, and only
+/// the driver talks to the final sink. This is the execution shape we want for
+/// real morsel-driven pipelines.
+pub struct MorselPipelineDriver<S> {
     source: S,
+    operators: Vec<Box<dyn BatchPipelineOperator>>,
     context: PushContext,
 }
 
-impl<S> PipelineExecutor<S>
+impl<S> MorselPipelineDriver<S>
 where
     S: MorselSource,
 {
-    pub fn new(source: S, context: PushContext) -> Self {
-        Self { source, context }
+    pub fn new(
+        source: S,
+        operators: Vec<Box<dyn BatchPipelineOperator>>,
+        context: PushContext,
+    ) -> Self {
+        Self {
+            source,
+            operators,
+            context,
+        }
+    }
+
+    pub fn source_only(source: S, context: PushContext) -> Self {
+        Self::new(source, vec![], context)
     }
 
     pub async fn execute(&mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        let operators = &mut self.operators;
+        let context = self.context.clone();
         let mut processed = 0;
-        let mut scheduler = MorselScheduler::new(&mut self.source, self.context.clone());
+        let mut scheduler = MorselScheduler::new(&mut self.source, context.clone());
         while let Some(morsel) = scheduler.next_morsel().await? {
-            self.context.check_shutdown()?;
-            let status = sink.push(morsel.into_chunk()).await?;
+            context.check_shutdown()?;
+            let output = Self::run_operators_from(operators, 0, vec![morsel.into_chunk()]).await?;
+            let status = Self::push_outputs(output.chunks, sink).await?;
             if status.is_finished() {
                 return sink.finish().await;
             }
+            if output.status.is_finished() {
+                return sink.finish().await;
+            }
             processed += 1;
-            if processed >= self.context.morsel_budget() {
+            if processed >= context.morsel_budget() {
                 tokio::task::yield_now().await;
                 processed = 0;
             }
         }
+        for operator_idx in 0..operators.len() {
+            let output = operators[operator_idx].finish().await?;
+            let output =
+                Self::run_operators_from(operators, operator_idx + 1, output.chunks).await?;
+            let status = Self::push_outputs(output.chunks, sink).await?;
+            if status.is_finished() || output.status.is_finished() {
+                return sink.finish().await;
+            }
+        }
         sink.finish().await
     }
+
+    async fn run_operators_from(
+        operators: &mut [Box<dyn BatchPipelineOperator>],
+        start: usize,
+        mut chunks: Vec<DataChunk>,
+    ) -> Result<PipelineOperatorOutput> {
+        let mut status = PushStatus::NeedMoreInput;
+        for operator in operators.iter_mut().skip(start) {
+            let mut next_chunks = Vec::new();
+            for chunk in chunks {
+                let output = operator.execute(chunk).await?;
+                status = output.status;
+                next_chunks.extend(output.chunks);
+                if status.is_finished() {
+                    break;
+                }
+            }
+            chunks = next_chunks;
+            if chunks.is_empty() || status.is_finished() {
+                break;
+            }
+        }
+        Ok(PipelineOperatorOutput::new(chunks, status))
+    }
+
+    async fn push_outputs(chunks: Vec<DataChunk>, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        for chunk in chunks {
+            if sink.push(chunk).await?.is_finished() {
+                return Ok(PushStatus::Finished);
+            }
+        }
+        Ok(PushStatus::NeedMoreInput)
+    }
 }
+
+/// Compatibility name for older tests and source-only pipelines.
+pub type PipelineExecutor<S> = MorselPipelineDriver<S>;
 
 /// Drives a stream-backed source into a push sink.
 ///
@@ -345,24 +451,14 @@ where
 /// that naturally expose streams. Keep them source-driven here instead of going
 /// through the executor pull adapter.
 pub async fn push_chunk_stream(
-    mut stream: BoxedDataChunkStream,
+    stream: BoxedDataChunkStream,
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
-    let mut processed = 0;
-    while let Some(chunk) = stream.next().await {
-        context.check_shutdown()?;
-        let status = sink.push(chunk?).await?;
-        if status.is_finished() {
-            return sink.finish().await;
-        }
-        processed += 1;
-        if processed >= context.morsel_budget() {
-            tokio::task::yield_now().await;
-            processed = 0;
-        }
-    }
-    sink.finish().await
+    let source = StreamMorselSource::new(stream);
+    MorselPipelineDriver::source_only(source, context)
+        .execute(sink)
+        .await
 }
 
 /// Test-only adapter for validating the old pull-to-push bridge behavior.
@@ -377,7 +473,9 @@ async fn execute_pull_stream_as_push(
     }
 
     let source = StreamMorselSource::new(stream);
-    PipelineExecutor::new(source, context).execute(sink).await
+    PipelineExecutor::source_only(source, context)
+        .execute(sink)
+        .await
 }
 
 #[cfg(test)]
@@ -599,6 +697,86 @@ mod tests {
 
         assert_eq!(status, PushStatus::NeedMoreInput);
         assert_eq!(sink.cardinalities, vec![1, 2, 3, 4]);
+    }
+
+    struct DoubleCardinalityOperator;
+
+    impl BatchPipelineOperator for DoubleCardinalityOperator {
+        fn execute<'a>(
+            &'a mut self,
+            chunk: DataChunk,
+        ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+            async move {
+                Ok(PipelineOperatorOutput::one(DataChunk::new_dummy(
+                    chunk.cardinality() * 2,
+                )))
+            }
+            .boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_morsel_pipeline_driver_runs_operator_chain() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(2)),
+            Ok(DataChunk::new_dummy(3)),
+        ])
+        .boxed();
+        let source = StreamMorselSource::new(stream);
+        let mut driver = MorselPipelineDriver::new(
+            source,
+            vec![Box::new(DoubleCardinalityOperator)],
+            PushContext::new(ShutdownToken::empty()),
+        );
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = driver.execute(&mut sink).await.unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(sink.cardinalities, vec![4, 6]);
+    }
+
+    struct FinishAfterFirstOperator {
+        seen: bool,
+    }
+
+    impl BatchPipelineOperator for FinishAfterFirstOperator {
+        fn execute<'a>(
+            &'a mut self,
+            chunk: DataChunk,
+        ) -> BoxFuture<'a, Result<PipelineOperatorOutput>> {
+            async move {
+                assert!(!self.seen, "driver should stop after Finished");
+                self.seen = true;
+                Ok(PipelineOperatorOutput::finished(vec![chunk]))
+            }
+            .boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_morsel_pipeline_driver_stops_on_finished_operator() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(2)),
+            Ok(DataChunk::new_dummy(3)),
+        ])
+        .boxed();
+        let source = StreamMorselSource::new(stream);
+        let mut driver = MorselPipelineDriver::new(
+            source,
+            vec![Box::new(FinishAfterFirstOperator { seen: false })],
+            PushContext::new(ShutdownToken::empty()),
+        );
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = driver.execute(&mut sink).await.unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(sink.cardinalities, vec![2]);
     }
 
     struct PushOnlyExecutor {
