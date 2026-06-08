@@ -68,9 +68,9 @@ pub async fn handle_create_secret(
     }
     let with_options = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
 
-    let secret_payload = get_secret_payload(stmt.credential, with_options, &session).await?;
-
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    let secret_payload = get_secret_payload(stmt.credential, with_options, &session).await?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
@@ -245,6 +245,12 @@ fn build_aws_secrets_manager_config(
         .into());
     }
     config.set_credential_refs(access_key_id_ref, secret_access_key_ref, session_token_ref);
+    if config.endpoint_url.is_some() && config.session_token_ref.is_some() {
+        return Err(ErrorCode::InvalidParameterValue(
+            "session_token SECRET reference cannot be used with endpoint_url".to_owned(),
+        )
+        .into());
+    }
     Ok(config)
 }
 

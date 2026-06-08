@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::id::ObjectId;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -32,8 +35,16 @@ struct RwDepend {
 #[system_catalog(table, "rw_catalog.rw_depend")]
 fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
     let catalog_guard = reader.catalog_reader.read_guard();
+    let secret_object_ids: HashSet<ObjectId> = catalog_guard
+        .iter_schemas(&reader.auth_context.database)?
+        .flat_map(|schema| schema.iter_secret().map(|secret| secret.id.as_object_id()))
+        .collect();
     Ok(catalog_guard
         .iter_object_dependencies()
+        .filter(|depend| {
+            !(depend.referenced_object_type == PbObjectType::Secret
+                && secret_object_ids.contains(&depend.object_id))
+        })
         .map(|depend| RwDepend {
             objid: depend.object_id,
             refobjid: depend.referenced_object_id,
