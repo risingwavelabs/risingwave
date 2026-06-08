@@ -312,7 +312,6 @@ pub enum Command {
         actors: Vec<ActorId>,
         /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
-        unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     },
@@ -522,21 +521,17 @@ impl Command {
             Command::Pause => None,
             Command::Resume => None,
             Command::DropStreamingJobs {
-                unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
                 ..
             } => {
-                let changes = unregistered_fragment_ids
+                let changes = dropped_sink_fragment_by_targets
                     .iter()
-                    .map(|fragment_id| (*fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .chain(dropped_sink_fragment_by_targets.iter().map(
-                        |(target_fragment, sink_fragments)| {
-                            (
-                                *target_fragment,
-                                CommandFragmentChanges::DropNodeUpstream(sink_fragments.clone()),
-                            )
-                        },
-                    ))
+                    .map(|(target_fragment, sink_fragments)| {
+                        (
+                            *target_fragment,
+                            CommandFragmentChanges::DropNodeUpstream(sink_fragments.clone()),
+                        )
+                    })
                     .collect();
 
                 Some((None, changes))
