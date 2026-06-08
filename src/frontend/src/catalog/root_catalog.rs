@@ -1200,7 +1200,7 @@ impl Catalog {
         self.remove_object_dependencies_for_objects(&object_ids);
     }
 
-    fn remove_object_dependencies_for_objects(&mut self, object_ids: &HashSet<ObjectId>) {
+    pub fn remove_object_dependencies_for_objects(&mut self, object_ids: &HashSet<ObjectId>) {
         if object_ids.is_empty() {
             return;
         }

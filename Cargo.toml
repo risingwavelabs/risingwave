@@ -131,6 +131,10 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
     "default-https-client",
     "rt-tokio",
 ] }
+aws-sdk-secretsmanager = { version = "1", default-features = false, features = [
+    "default-https-client",
+    "rt-tokio",
+] }
 aws-sdk-sqs = { version = "1", default-features = false, features = [
     "default-https-client",
     "rt-tokio",

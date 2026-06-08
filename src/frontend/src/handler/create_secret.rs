@@ -15,18 +15,36 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
 use risingwave_common::license::Feature;
+use risingwave_common::secret::aws_secrets_manager_client::{
+    AwsSecretsManagerClient, AwsSecretsManagerConfig,
+};
 use risingwave_common::secret::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
+use crate::session::SessionImpl;
+use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
 
 const SECRET_BACKEND_KEY: &str = "backend";
 
 const SECRET_BACKEND_META: &str = "meta";
 const SECRET_BACKEND_HASHICORP_VAULT: &str = "hashicorp_vault";
+const SECRET_BACKEND_AWS_SECRETS_MANAGER: &str = "aws_secrets_manager";
+
+const SUPPORTED_SECRET_BACKENDS: [&str; 3] = [
+    SECRET_BACKEND_META,
+    SECRET_BACKEND_HASHICORP_VAULT,
+    SECRET_BACKEND_AWS_SECRETS_MANAGER,
+];
+
+const AWS_ACCESS_KEY_ID_KEYS: [&str; 2] = ["access_key_id", "aws.credentials.access_key_id"];
+const AWS_SECRET_ACCESS_KEY_KEYS: [&str; 2] =
+    ["secret_access_key", "aws.credentials.secret_access_key"];
+const AWS_SESSION_TOKEN_KEYS: [&str; 2] = ["session_token", "aws.credentials.session_token"];
 
 pub async fn handle_create_secret(
     handler_args: HandlerArgs,
@@ -50,15 +68,7 @@ pub async fn handle_create_secret(
     }
     let with_options = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
 
-    // Check for secret references in WITH options (forbid them during secret creation)
-    if !with_options.secret_ref().is_empty() {
-        return Err(ErrorCode::InvalidParameterValue(
-            "Secret references are not allowed when creating a secret".to_owned(),
-        )
-        .into());
-    }
-
-    let secret_payload = get_secret_payload(stmt.credential, with_options).await?;
+    let secret_payload = get_secret_payload(stmt.credential, with_options, &session).await?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
@@ -89,10 +99,12 @@ pub fn secret_to_str(value: &Value) -> Result<String> {
 pub(crate) async fn get_secret_payload(
     credential: Value,
     with_options: WithOptions,
+    session: &SessionImpl,
 ) -> Result<Vec<u8>> {
     if let Some(backend) = with_options.get(SECRET_BACKEND_KEY) {
         match backend.to_lowercase().as_ref() {
             SECRET_BACKEND_META => {
+                reject_secret_refs(&with_options)?;
                 let secret = secret_to_str(&credential)?.as_bytes().to_vec();
                 let backend = risingwave_pb::secret::Secret {
                     secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
@@ -102,6 +114,7 @@ pub(crate) async fn get_secret_payload(
                 Ok(backend.encode_to_vec())
             }
             SECRET_BACKEND_HASHICORP_VAULT => {
+                reject_secret_refs(&with_options)?;
                 if credential != Value::Null {
                     return Err(ErrorCode::InvalidParameterValue(
                         "credential must be null for hashicorp_vault backend".to_owned(),
@@ -145,18 +158,165 @@ pub(crate) async fn get_secret_payload(
                 };
                 Ok(backend.encode_to_vec())
             }
+            SECRET_BACKEND_AWS_SECRETS_MANAGER => {
+                if credential != Value::Null {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "credential must be null for aws_secrets_manager backend".to_owned(),
+                    )
+                    .into());
+                }
+
+                let config = build_aws_secrets_manager_config(with_options, session)?;
+
+                {
+                    // Validate that the AWS secret is readable before storing the backend config.
+                    let client = AwsSecretsManagerClient::new(config.clone()).await?;
+                    client.get_secret().await?;
+                }
+
+                let backend = risingwave_pb::secret::Secret {
+                    secret_backend: Some(
+                        risingwave_pb::secret::secret::SecretBackend::AwsSecretsManager(
+                            config.to_protobuf(),
+                        ),
+                    ),
+                };
+                Ok(backend.encode_to_vec())
+            }
             _ => Err(ErrorCode::InvalidParameterValue(format!(
                 "secret backend \"{}\" is not supported. Supported backends are: {}",
                 backend,
-                [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+                SUPPORTED_SECRET_BACKENDS.join(",")
             ))
             .into()),
         }
     } else {
         Err(ErrorCode::InvalidParameterValue(format!(
             "secret backend is not specified in with clause. Supported backends are: {}",
-            [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+            SUPPORTED_SECRET_BACKENDS.join(",")
         ))
         .into())
     }
+}
+
+fn reject_secret_refs(with_options: &WithOptions) -> Result<()> {
+    if !with_options.secret_ref().is_empty() {
+        return Err(ErrorCode::InvalidParameterValue(
+            "Secret references are not allowed when creating this secret backend".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn build_aws_secrets_manager_config(
+    with_options: WithOptions,
+    session: &SessionImpl,
+) -> Result<AwsSecretsManagerConfig> {
+    validate_no_duplicate_aws_options(&with_options)?;
+    validate_aws_credential_secret_refs(&with_options)?;
+    let (options, mut secret_refs) =
+        resolve_secret_ref_in_with_options(with_options, session)?.into_parts();
+    let mut options = options;
+    options.remove(SECRET_BACKEND_KEY);
+
+    let mut config: AwsSecretsManagerConfig = serde_json::from_value(serde_json::Value::Object(
+        options
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::Value::String(v)))
+            .collect(),
+    ))
+    .map_err(|e| {
+        ErrorCode::InvalidParameterValue(format!(
+            "Invalid AWS Secrets Manager configuration: {}",
+            e.as_report()
+        ))
+    })?;
+
+    let access_key_id_ref = take_first_secret_ref(&mut secret_refs, &AWS_ACCESS_KEY_ID_KEYS);
+    let secret_access_key_ref =
+        take_first_secret_ref(&mut secret_refs, &AWS_SECRET_ACCESS_KEY_KEYS);
+    let session_token_ref = take_first_secret_ref(&mut secret_refs, &AWS_SESSION_TOKEN_KEYS);
+    if !secret_refs.is_empty() {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "Unsupported SECRET references in aws_secrets_manager backend: {}",
+            secret_refs.keys().cloned().collect::<Vec<_>>().join(",")
+        ))
+        .into());
+    }
+    config.set_credential_refs(access_key_id_ref, secret_access_key_ref, session_token_ref);
+    Ok(config)
+}
+
+fn validate_aws_credential_secret_refs(with_options: &WithOptions) -> Result<()> {
+    for (key, secret_ref) in with_options.secret_ref() {
+        if !is_aws_credential_secret_key(key) {
+            return Err(ErrorCode::InvalidParameterValue(format!(
+                "SECRET reference is not allowed for aws_secrets_manager option `{}`",
+                key
+            ))
+            .into());
+        }
+        if secret_ref.ref_as != risingwave_sqlparser::ast::SecretRefAsType::Text {
+            return Err(ErrorCode::InvalidParameterValue(format!(
+                "SECRET reference for aws_secrets_manager option `{}` must be text, not AS FILE",
+                key
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_no_duplicate_aws_options(with_options: &WithOptions) -> Result<()> {
+    let mut seen = std::collections::BTreeMap::new();
+    for key in with_options
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .chain(with_options.secret_ref().keys().map(String::as_str))
+    {
+        let Some(canonical_key) = canonical_aws_option_key(key) else {
+            continue;
+        };
+        if let Some(previous_key) = seen.insert(canonical_key, key) {
+            return Err(ErrorCode::InvalidParameterValue(format!(
+                "Duplicate AWS Secrets Manager option `{}` and `{}` both map to `{}`",
+                previous_key, key, canonical_key
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn canonical_aws_option_key(key: &str) -> Option<&'static str> {
+    match key {
+        SECRET_BACKEND_KEY => None,
+        "secret_id" => Some("secret_id"),
+        "region" | "aws.region" => Some("region"),
+        "field" => Some("field"),
+        "version_id" => Some("version_id"),
+        "version_stage" => Some("version_stage"),
+        "endpoint_url" | "aws.endpoint_url" => Some("endpoint_url"),
+        "access_key_id" | "aws.credentials.access_key_id" => Some("access_key_id"),
+        "secret_access_key" | "aws.credentials.secret_access_key" => Some("secret_access_key"),
+        "session_token" | "aws.credentials.session_token" => Some("session_token"),
+        "role_arn" | "aws.credentials.role.arn" => Some("role_arn"),
+        "external_id" | "aws.credentials.role.external_id" => Some("external_id"),
+        "profile" | "aws.profile" => Some("profile"),
+        _ => None,
+    }
+}
+
+fn is_aws_credential_secret_key(key: &str) -> bool {
+    AWS_ACCESS_KEY_ID_KEYS.contains(&key)
+        || AWS_SECRET_ACCESS_KEY_KEYS.contains(&key)
+        || AWS_SESSION_TOKEN_KEYS.contains(&key)
+}
+
+fn take_first_secret_ref(
+    secret_refs: &mut std::collections::BTreeMap<String, PbSecretRef>,
+    keys: &[&str],
+) -> Option<PbSecretRef> {
+    keys.iter().find_map(|key| secret_refs.remove(*key))
 }

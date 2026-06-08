@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -20,6 +20,7 @@ use parking_lot::RwLock;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::id::ObjectId;
 use risingwave_common::license::LicenseManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
@@ -30,7 +31,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::meta::{
+    FragmentWorkerSlotMapping, MetaSnapshot, PbObjectGroup, SubscribeResponse,
+};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
@@ -63,11 +66,11 @@ impl ObserverState for FrontendObserverNode {
 
         // TODO: this clone can be avoided
         match info.to_owned() {
-            Info::Database(_)
-            | Info::Schema(_)
-            | Info::ObjectGroup(_)
-            | Info::Function(_)
-            | Info::Connection(_) => {
+            Info::Database(_) | Info::Schema(_) | Info::Function(_) | Info::Connection(_) => {
+                self.handle_catalog_notification(resp);
+            }
+            Info::ObjectGroup(object_group) => {
+                self.handle_object_group_secret_notification(resp.operation(), &object_group);
                 self.handle_catalog_notification(resp);
             }
             Info::Secret(_) => {
@@ -264,6 +267,17 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::ObjectGroup(object_group) => {
+                if resp.operation() == Operation::Update {
+                    let secret_ids: HashSet<ObjectId> = object_group
+                        .objects
+                        .iter()
+                        .filter_map(|object| match object.object_info.as_ref()? {
+                            ObjectInfo::Secret(secret) => Some(secret.id.as_object_id()),
+                            _ => None,
+                        })
+                        .collect();
+                    catalog_guard.remove_object_dependencies_for_objects(&secret_ids);
+                }
                 if !object_group.dependencies.is_empty() {
                     catalog_guard.insert_object_dependencies(object_group.dependencies.clone());
                 }
@@ -543,6 +557,32 @@ impl FrontendObserverNode {
             }
             _ => {
                 panic!("invalid notification operation: {resp_op:?}");
+            }
+        }
+    }
+
+    fn handle_object_group_secret_notification(
+        &mut self,
+        operation: Operation,
+        object_group: &PbObjectGroup,
+    ) {
+        for object in &object_group.objects {
+            let Some(ObjectInfo::Secret(secret)) = object.object_info.as_ref() else {
+                continue;
+            };
+            match operation {
+                Operation::Add => {
+                    LocalSecretManager::global().add_secret(secret.id, secret.value.clone());
+                }
+                Operation::Delete => {
+                    LocalSecretManager::global().remove_secret(secret.id);
+                }
+                Operation::Update => {
+                    LocalSecretManager::global().update_secret(secret.id, secret.value.clone());
+                }
+                _ => {
+                    panic!("invalid notification operation: {operation:?}");
+                }
             }
         }
     }

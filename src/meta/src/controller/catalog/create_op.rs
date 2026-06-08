@@ -21,6 +21,7 @@ use risingwave_pb::meta::PbObjectDependency;
 
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
+use crate::manager::get_referred_secret_ids_from_secret_payload;
 
 impl CatalogController {
     pub(crate) async fn create_object(
@@ -494,6 +495,7 @@ impl CatalogController {
         ensure_object_id(ObjectType::Database, pb_secret.database_id, &txn).await?;
         ensure_object_id(ObjectType::Schema, pb_secret.schema_id, &txn).await?;
         check_secret_name_duplicate(&pb_secret, &txn).await?;
+        let dep_secrets = get_referred_secret_ids_from_secret_payload(&secret_plain_payload)?;
 
         let secret_obj = Self::create_object(
             &txn,
@@ -506,6 +508,18 @@ impl CatalogController {
         pb_secret.id = secret_obj.oid.as_secret_id();
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::insert(secret).exec(&txn).await?;
+
+        if !dep_secrets.is_empty() {
+            ObjectDependency::insert_many(dep_secrets.iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id.as_object_id()),
+                    used_by: Set(secret_obj.oid),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         let updated_user_info =
             grant_default_privileges_automatically(&txn, secret_obj.oid).await?;
@@ -524,7 +538,19 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Secret(secret_plain),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Secret(secret_plain)),
+                    }],
+                    dependencies: dep_secrets
+                        .iter()
+                        .map(|secret_id| PbObjectDependency {
+                            object_id: secret_obj.oid,
+                            referenced_object_id: secret_id.as_object_id(),
+                            referenced_object_type: PbObjectType::Secret as _,
+                        })
+                        .collect(),
+                }),
             )
             .await;
 

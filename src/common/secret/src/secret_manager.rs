@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Context;
-use parking_lot::RwLock;
-use parking_lot::lock_api::RwLockReadGuard;
+use parking_lot::{Mutex, RwLock};
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
 use risingwave_pb::id::WorkerId;
@@ -30,14 +30,31 @@ use tokio::runtime::Handle;
 use tokio::task;
 
 use super::SecretId;
+use super::aws_secrets_manager_client::{AwsSecretsManagerClient, AwsSecretsManagerConfig};
 use super::error::{SecretError, SecretResult};
 use super::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 
 static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
+thread_local! {
+    static SECRET_RESOLVE_STACK: RefCell<Vec<SecretId>> = const { RefCell::new(Vec::new()) };
+}
+
+struct SecretResolveGuard(SecretId);
+
+impl Drop for SecretResolveGuard {
+    fn drop(&mut self) {
+        SECRET_RESOLVE_STACK.with(|stack| {
+            let popped = stack.borrow_mut().pop();
+            debug_assert_eq!(popped, Some(self.0));
+        });
+    }
+}
+
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
+    secret_file_lock: Mutex<()>,
     /// The local directory used to write secrets into file, so that it can be passed into some libraries
     secret_file_dir: PathBuf,
 }
@@ -61,6 +78,7 @@ impl LocalSecretManager {
 
             Self {
                 secrets: RwLock::new(HashMap::new()),
+                secret_file_lock: Mutex::new(()),
                 secret_file_dir,
             }
         });
@@ -95,6 +113,7 @@ impl LocalSecretManager {
                 "updating a secret but it does not exist, adding it"
             );
         }
+        let _guard = self.secret_file_lock.lock();
         self.remove_secret_file_if_exist(&secret_id);
     }
 
@@ -129,6 +148,7 @@ impl LocalSecretManager {
     pub fn remove_secret(&self, secret_id: SecretId) {
         let mut secret_guard = self.secrets.write();
         secret_guard.remove(&secret_id);
+        let _guard = self.secret_file_lock.lock();
         self.remove_secret_file_if_exist(&secret_id);
     }
 
@@ -137,30 +157,24 @@ impl LocalSecretManager {
         mut options: BTreeMap<String, String>,
         secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> SecretResult<BTreeMap<String, String>> {
-        let secret_guard = self.secrets.read();
         for (option_key, secret_ref) in secret_refs {
-            let path_str = self.fill_secret_inner(secret_ref, &secret_guard)?;
+            let path_str = self.fill_secret(secret_ref)?;
             options.insert(option_key, path_str);
         }
         Ok(options)
     }
 
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>> =
-            self.secrets.read();
-        self.fill_secret_inner(secret_ref, &secret_guard)
-    }
-
-    fn fill_secret_inner(
-        &self,
-        secret_ref: PbSecretRef,
-        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>>,
-    ) -> SecretResult<String> {
         let secret_id = secret_ref.secret_id;
-        let pb_secret_bytes = secret_guard
-            .get(&secret_id)
-            .ok_or(SecretError::ItemNotFound(secret_id))?;
-        let secret_value_bytes = Self::get_secret_value(pb_secret_bytes)?;
+        let _resolve_guard = enter_secret_resolution(secret_id)?;
+        let pb_secret_bytes = {
+            let secret_guard = self.secrets.read();
+            secret_guard
+                .get(&secret_id)
+                .cloned()
+                .ok_or(SecretError::ItemNotFound(secret_id))?
+        };
+        let secret_value_bytes = Self::get_secret_value(&pb_secret_bytes)?;
         match secret_ref.ref_as() {
             RefAsType::Text => {
                 // We converted the secret string from sql to bytes using `as_bytes` in frontend.
@@ -168,6 +182,7 @@ impl LocalSecretManager {
                 Ok(String::from_utf8(secret_value_bytes)?)
             }
             RefAsType::File => {
+                let _guard = self.secret_file_lock.lock();
                 let path_str = self.get_or_init_secret_file(secret_id, secret_value_bytes)?;
                 Ok(path_str)
             }
@@ -176,7 +191,7 @@ impl LocalSecretManager {
     }
 
     /// Get the secret file for the given secret id and return the path string. If the file does not exist, create it.
-    /// WARNING: This method should be called only when the secret manager is locked.
+    /// WARNING: This method should be called only when the secret file lock is held.
     fn get_or_init_secret_file(
         &self,
         secret_id: SecretId,
@@ -191,7 +206,7 @@ impl LocalSecretManager {
         Ok(path.to_string_lossy().to_string())
     }
 
-    /// WARNING: This method should be called only when the secret manager is locked.
+    /// WARNING: This method should be called only when the secret file lock is held.
     fn remove_secret_file_if_exist(&self, secret_id: &SecretId) {
         let path = self.secret_file_dir.join(secret_id.to_string());
         if path.exists() {
@@ -218,6 +233,17 @@ impl LocalSecretManager {
                     Handle::current().block_on(async move { client.get_secret().await })
                 })?
             }
+            risingwave_pb::secret::secret::SecretBackend::AwsSecretsManager(aws_backend) => {
+                let config = AwsSecretsManagerConfig::from_protobuf(&aws_backend);
+                let client = task::block_in_place(move || {
+                    Handle::current()
+                        .block_on(async move { AwsSecretsManagerClient::new(config).await })
+                })?;
+
+                task::block_in_place(move || {
+                    Handle::current().block_on(async move { client.get_secret().await })
+                })?
+            }
         };
         Ok(secret_value)
     }
@@ -230,4 +256,18 @@ impl LocalSecretManager {
             .context("failed to decode secret")?;
         Ok(pb_secret.get_secret_backend().unwrap().clone())
     }
+}
+
+fn enter_secret_resolution(secret_id: SecretId) -> SecretResult<SecretResolveGuard> {
+    SECRET_RESOLVE_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack.contains(&secret_id) {
+            return Err(SecretError::Internal(anyhow::anyhow!(
+                "cyclic secret reference detected while resolving secret {}",
+                secret_id
+            )));
+        }
+        stack.push(secret_id);
+        Ok(SecretResolveGuard(secret_id))
+    })
 }

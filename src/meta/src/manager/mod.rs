@@ -27,16 +27,19 @@ mod streaming_job;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
+use anyhow::Context;
 pub use env::{MetaSrvEnv, *};
 pub use event_log::EventLogManagerRef;
 pub use idle::*;
 pub use metadata::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
+use prost::Message;
 use risingwave_common::id::WorkerId;
 pub use risingwave_meta_model::prelude;
 use risingwave_meta_model::{ConnectionId, SecretId};
 use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::common::PbHostAddress;
+use risingwave_pb::secret::secret::SecretBackend;
 pub use streaming_job::*;
 
 use crate::MetaResult;
@@ -112,4 +115,25 @@ pub fn get_referred_secret_ids_from_sink(sink: &PbSink) -> HashSet<SecretId> {
         }
     }
     secret_ids
+}
+
+pub fn get_referred_secret_ids_from_secret_payload(
+    secret_plain_payload: &[u8],
+) -> MetaResult<HashSet<SecretId>> {
+    let secret = risingwave_pb::secret::Secret::decode(secret_plain_payload)
+        .context("failed to decode secret payload")?;
+    let mut secret_ids = HashSet::new();
+    if let Some(SecretBackend::AwsSecretsManager(backend)) = secret.secret_backend {
+        for secret_ref in [
+            backend.access_key_id_ref,
+            backend.secret_access_key_ref,
+            backend.session_token_ref,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            secret_ids.insert(secret_ref.secret_id);
+        }
+    }
+    Ok(secret_ids)
 }

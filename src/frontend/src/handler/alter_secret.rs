@@ -67,10 +67,16 @@ pub async fn handle_alter_secret(
                     )
                     .into());
                 }
+                secret::SecretBackend::AwsSecretsManager(_aws_backend) => {
+                    return Err(crate::error::ErrorCode::InvalidParameterValue(
+                        "alter secret with aws_secrets_manager backend is not supported".to_owned(),
+                    )
+                    .into());
+                }
             }
         } else {
             let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
-            get_secret_payload(credential, with_options).await?
+            get_secret_payload(credential, with_options, &session).await?
         };
 
         let catalog_writer = session.catalog_writer()?;

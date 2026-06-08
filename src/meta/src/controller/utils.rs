@@ -917,7 +917,23 @@ where
                         format!("connection {}.{} depends on it", schema_name, view_name)
                     }));
                 }
-                // only the table, source, sink, subscription, view, connection and index will depend on other objects.
+                ObjectType::Secret => {
+                    let secrets: Vec<(String, String)> = Secret::find()
+                        .join(JoinType::InnerJoin, secret::Relation::Object.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(secret::Column::Name)
+                        .filter(secret::Column::SecretId.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(secrets.into_iter().map(|(schema_name, secret_name)| {
+                        format!("secret {}.{} depends on it", schema_name, secret_name)
+                    }));
+                }
+                // only the table, source, sink, subscription, view, connection, secret and index will depend on other objects.
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }

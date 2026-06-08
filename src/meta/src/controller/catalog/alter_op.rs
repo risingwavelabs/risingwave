@@ -20,6 +20,8 @@ use risingwave_common::config::{StreamingConfig, merge_streaming_config_section}
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::meta::PbObjectDependency;
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
@@ -29,6 +31,7 @@ use thiserror_ext::AsReport;
 use super::*;
 use crate::controller::utils::load_streaming_jobs_by_ids;
 use crate::error::bail_invalid_parameter;
+use crate::manager::get_referred_secret_ids_from_secret_payload;
 
 impl CatalogController {
     async fn alter_database_name(
@@ -945,12 +948,31 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_secret.schema_id, &txn).await?;
 
         ensure_object_id(ObjectType::Secret, pb_secret.id, &txn).await?;
+        let dep_secrets = get_referred_secret_ids_from_secret_payload(&secret_plain_payload)?;
+        ensure_secret_dependencies_have_no_cycle(pb_secret.id, &dep_secrets, &txn).await?;
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::update(secret).exec(&txn).await?;
+
+        let _ = ObjectDependency::delete_many()
+            .filter(object_dependency::Column::UsedBy.eq(pb_secret.id.as_object_id()))
+            .exec(&txn)
+            .await?;
+        if !dep_secrets.is_empty() {
+            ObjectDependency::insert_many(dep_secrets.iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id.as_object_id()),
+                    used_by: Set(pb_secret.id.as_object_id()),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
         // Notify the compute and frontend node plain secret
+        let secret_obj_id = pb_secret.id.as_object_id();
         let mut secret_plain = pb_secret;
         secret_plain.value.clone_from(&secret_plain_payload);
 
@@ -962,7 +984,19 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Secret(secret_plain),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(PbObjectInfo::Secret(secret_plain)),
+                    }],
+                    dependencies: dep_secrets
+                        .iter()
+                        .map(|secret_id| PbObjectDependency {
+                            object_id: secret_obj_id,
+                            referenced_object_id: secret_id.as_object_id(),
+                            referenced_object_type: PbObjectType::Secret as _,
+                        })
+                        .collect(),
+                }),
             )
             .await;
 
@@ -1286,6 +1320,54 @@ impl CatalogController {
         RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
+}
+
+async fn ensure_secret_dependencies_have_no_cycle(
+    secret_id: SecretId,
+    dep_secrets: &HashSet<SecretId>,
+    txn: &DatabaseTransaction,
+) -> MetaResult<()> {
+    let secret_obj_id = secret_id.as_object_id();
+    for dep_secret in dep_secrets {
+        let dep_obj_id = dep_secret.as_object_id();
+        if dep_obj_id == secret_obj_id
+            || secret_dependency_reaches(dep_obj_id, secret_obj_id, txn).await?
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "cyclic secret reference detected while resolving secret {}",
+                secret_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn secret_dependency_reaches(
+    start: ObjectId,
+    target: ObjectId,
+    txn: &DatabaseTransaction,
+) -> MetaResult<bool> {
+    let mut visited = HashSet::new();
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(current) = queue.pop_front() {
+        if !visited.insert(current) {
+            continue;
+        }
+        let referenced_objects: Vec<ObjectId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::Oid)
+            .filter(object_dependency::Column::UsedBy.eq(current))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        for referenced_object in referenced_objects {
+            if referenced_object == target {
+                return Ok(true);
+            }
+            queue.push_back(referenced_object);
+        }
+    }
+    Ok(false)
 }
 
 async fn should_skip_refresh_job_db_err<C>(

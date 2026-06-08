@@ -20,4 +20,5 @@ mod encryption;
 pub use encryption::*;
 mod error;
 pub use error::*;
+pub mod aws_secrets_manager_client;
 pub mod vault_client;
