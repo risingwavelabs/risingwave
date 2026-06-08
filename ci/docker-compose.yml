@@ -185,8 +185,20 @@ services:
     environment:
       - SERVICES=secretsmanager
       - AWS_DEFAULT_REGION=us-east-1
+      - GATEWAY_LISTEN=0.0.0.0:4566
     expose:
       - "4566"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4566/_localstack/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
@@ -469,7 +481,8 @@ services:
   e2e-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
-      - localstack
+      localstack:
+        condition: service_healthy
     environment:
       - LOCALSTACK_SECRETSMANAGER_ENDPOINT=http://localstack:4566
     volumes:
@@ -489,9 +502,12 @@ services:
   ci-standard-e2e-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
-      - mysql-meta
-      - db
-      - localstack
+      mysql-meta:
+        condition: service_started
+      db:
+        condition: service_started
+      localstack:
+        condition: service_healthy
     environment:
       - LOCALSTACK_SECRETSMANAGER_ENDPOINT=http://localstack:4566
     volumes:
