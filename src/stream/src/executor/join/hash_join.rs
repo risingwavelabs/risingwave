@@ -359,7 +359,9 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
 ) {
     let old_degree_row = (&matched_row.row)
         .project(order_key_indices)
-        .chain(row::once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
+        .chain(row::once(Some(ScalarImpl::Int64(
+            matched_row.degree as i64,
+        ))));
     if INCREMENT {
         matched_row.degree += 1;
     } else {
@@ -368,7 +370,9 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     }
     let new_degree_row = (&matched_row.row)
         .project(order_key_indices)
-        .chain(row::once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
+        .chain(row::once(Some(ScalarImpl::Int64(
+            matched_row.degree as i64,
+        ))));
     degree_state.table.update(old_degree_row, new_degree_row);
 }
 
