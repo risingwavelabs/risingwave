@@ -117,6 +117,27 @@ pub static DEBEZIUM_UNAVAILABLE_JSON: std::sync::LazyLock<JsonbVal> =
         JsonbVal(builder.finish())
     });
 
+/// Magic per-element value used to build the Debezium unchanged-TOAST sentinel for
+/// pgvector columns. Picked because normal embeddings sit in a normalised range and
+/// having all elements simultaneously equal to `f32::MAX` is effectively impossible.
+pub const DEBEZIUM_UNAVAILABLE_VECTOR_ELEM: f32 = f32::MAX;
+
+/// Build a sentinel `VectorVal` of the given dimension to represent Debezium's
+/// unchanged-TOAST placeholder. The dimension must match the column's declared
+/// `vector(N)` size so it passes `check_datum_type` on the way through the
+/// `SourceStreamChunkBuilder`; the materialize executor recognises this sentinel
+/// by checking that every element equals `DEBEZIUM_UNAVAILABLE_VECTOR_ELEM`.
+pub fn debezium_unavailable_vector(size: usize) -> VectorVal {
+    VectorVal::from(
+        (0..size)
+            .map(|_| {
+                crate::array::Finite32::try_from(DEBEZIUM_UNAVAILABLE_VECTOR_ELEM)
+                    .expect("f32::MAX is finite")
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 /// The set of datatypes that are supported in RisingWave.
 ///
 /// # Trait implementations

@@ -13,7 +13,7 @@ psql -c "
         v4 boolean DEFAULT false,
         v5 date DEFAULT '2020-01-01',
         v6 time DEFAULT '12:34:56',
-        v7 timestamp DEFAULT '2020-01-01 12:34:56',
+        v7 timestamp DEFAULT now(),
         v8 timestamptz DEFAULT '2020-01-01 12:34:56+00',
         v9 interval DEFAULT '1 day',
         v10 jsonb DEFAULT '{}',
@@ -61,12 +61,14 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
+# v7 defaults to `now()` upstream, so its value is non-deterministic;
+# use <slt:ignore> to skip matching those two tokens (date + time).
 query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
-1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
-2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
-3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {}
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {}
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {}
 
 sleep 3s
 
@@ -108,10 +110,10 @@ table description rw_test_schema_change NULL NULL
 query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
-1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-11 aaa 11 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 1.1 2.2 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
 
 
 system ok
@@ -153,15 +155,79 @@ table description rw_test_schema_change NULL NULL
 query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
-1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-2 name2 21 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-3 name3 22 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-11 aaa 11 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-12 bbb 12 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+1 name1 20 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+12 bbb 12 3.3 f 2020-01-01 12:34:56 <slt:ignore> <slt:ignore> 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
 
 
 statement ok
 drop source pg_source cascade;
+
+# Test auto schema change with composite type column
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_composite_schema_change;
+    CREATE TABLE IF NOT EXISTS test_composite_schema_change(
+        id int PRIMARY KEY,
+        name varchar(255)
+    );
+    INSERT INTO test_composite_schema_change(id, name) VALUES (1, 'alice'), (2, 'bob');
+    "
+
+statement ok
+create source pg_source_composite with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_slot_composite',
+ auto.schema.change = 'true',
+ debezium.include.unknown.datatypes = 'true'
+);
+
+statement ok
+create table rw_test_composite_schema_change (*) from pg_source_composite table 'public.test_composite_schema_change';
+
+query IT retry 4 backoff 1s
+SELECT * from rw_test_composite_schema_change order by id;
+----
+1 alice
+2 bob
+
+sleep 3s
+
+# Add a composite type column via ALTER TABLE
+system ok
+psql -c "
+    ALTER TABLE test_composite_schema_change ADD COLUMN price money_type;
+    INSERT INTO test_composite_schema_change (id, name, price) VALUES (3, 'charlie', ROW('USD', 9.99)::money_type);
+"
+
+# Verify the composite column is added as varchar
+query TTTT retry 4 backoff 1s
+describe rw_test_composite_schema_change;
+----
+id integer false NULL
+name character varying false NULL
+price character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_composite_schema_change NULL NULL
+
+query ITT retry 4 backoff 1s
+SELECT * from rw_test_composite_schema_change order by id;
+----
+1 alice NULL
+2 bob NULL
+3 charlie (USD,9.99)
+
+statement ok
+drop source pg_source_composite cascade;
 
 # Test INCLUDE timestamp with auto schema change
 system ok
