@@ -148,43 +148,39 @@ pub struct ReleaseContext {
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
-impl CatalogController {
+fn explicit_cache_refill_policy(config_override: &str) -> MetaResult<Option<CacheRefillPolicy>> {
+    if config_override.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let table: toml::Table =
+        toml::from_str(config_override).context("invalid streaming job config override")?;
+    let has_explicit_policy = table
+        .get("streaming")
+        .and_then(toml::Value::as_table)
+        .and_then(|table| table.get("developer"))
+        .and_then(toml::Value::as_table)
+        .is_some_and(|table| table.contains_key("cache_refill_policy"));
+    if !has_explicit_policy {
+        return Ok(None);
+    }
+
+    let merged = merge_streaming_config_section(&StreamingConfig::default(), config_override)
+        .context("invalid streaming job config override")?
+        .context("empty streaming job config override")?;
+    Ok(Some(merged.developer.cache_refill_policy))
+}
+
+impl CatalogControllerInner {
     pub async fn table_cache_refill_policies_snapshot(
         &self,
     ) -> MetaResult<PbTableCacheRefillPolicies> {
-        fn explicit_cache_refill_policy(
-            config_override: &str,
-        ) -> MetaResult<Option<CacheRefillPolicy>> {
-            if config_override.trim().is_empty() {
-                return Ok(None);
-            }
-
-            let table: toml::Table =
-                toml::from_str(config_override).context("invalid streaming job config override")?;
-            let has_explicit_policy = table
-                .get("streaming")
-                .and_then(toml::Value::as_table)
-                .and_then(|table| table.get("developer"))
-                .and_then(toml::Value::as_table)
-                .is_some_and(|table| table.contains_key("cache_refill_policy"));
-            if !has_explicit_policy {
-                return Ok(None);
-            }
-
-            let merged =
-                merge_streaming_config_section(&StreamingConfig::default(), config_override)
-                    .context("invalid streaming job config override")?
-                    .context("empty streaming job config override")?;
-            Ok(Some(merged.developer.cache_refill_policy))
-        }
-
-        let inner = self.inner.read().await;
         let job_configs = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .column(streaming_job::Column::ConfigOverride)
             .into_tuple::<(JobId, Option<String>)>()
-            .all(&inner.db)
+            .all(&self.db)
             .await?;
         let mut policies_by_job = HashMap::new();
         for (job_id, config_override) in job_configs {
@@ -205,7 +201,7 @@ impl CatalogController {
             .column(table::Column::BelongsToJobId)
             .filter(table::Column::BelongsToJobId.is_in(policies_by_job.keys().copied()))
             .into_tuple()
-            .all(&inner.db)
+            .all(&self.db)
             .await?;
 
         let policies = internal_tables
@@ -220,6 +216,15 @@ impl CatalogController {
             .collect();
 
         Ok(PbTableCacheRefillPolicies { policies })
+    }
+}
+
+impl CatalogController {
+    pub async fn table_cache_refill_policies_snapshot(
+        &self,
+    ) -> MetaResult<PbTableCacheRefillPolicies> {
+        let inner = self.inner.read().await;
+        inner.table_cache_refill_policies_snapshot().await
     }
 
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {

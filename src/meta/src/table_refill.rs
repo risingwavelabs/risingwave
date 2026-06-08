@@ -12,65 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::meta::{PbServingTableVnodeMappings, PbTableRefillRuntimeConfig};
+use std::collections::HashMap;
 
-use crate::MetaResult;
-use crate::manager::{MetadataManager, NotificationVersion, WorkerKey};
+use risingwave_meta_model::{FragmentId, WorkerId};
+use risingwave_pb::meta::{
+    PbServingTableVnodeMappings, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
+};
+
+use crate::controller::fragment::FragmentParallelismInfo;
+use crate::manager::NotificationVersion;
 use crate::serving::{
     ServingVnodeMappingRef, build_table_vnode_mapping_for_worker,
     to_pb_serving_table_vnode_mappings,
 };
 
-async fn build_hummock_serving_table_vnode_mappings(
-    metadata_manager: &MetadataManager,
+fn build_hummock_serving_table_vnode_mappings(
     serving_vnode_mapping: &ServingVnodeMappingRef,
-    worker_key: &WorkerKey,
-) -> MetaResult<PbServingTableVnodeMappings> {
-    let active_serving_workers = metadata_manager
-        .cluster_controller
-        .list_active_serving_workers()
-        .await?;
-    let Some(worker_id) = active_serving_workers
-        .iter()
-        .find(|worker| worker.host.as_ref() == Some(&worker_key.0))
-        .map(|worker| worker.id)
-    else {
-        return Ok(PbServingTableVnodeMappings::default());
-    };
-
-    let streaming_parallelisms = metadata_manager
-        .catalog_controller
-        .running_fragment_parallelisms(None)?;
+    worker_id: WorkerId,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+) -> PbServingTableVnodeMappings {
     let serving_vnode_mappings = serving_vnode_mapping.all();
     let table_vnode_mapping = build_table_vnode_mapping_for_worker(
         worker_id,
         &serving_vnode_mappings,
-        &streaming_parallelisms,
+        streaming_parallelisms,
     );
 
-    Ok(to_pb_serving_table_vnode_mappings(&table_vnode_mapping))
+    to_pb_serving_table_vnode_mappings(&table_vnode_mapping)
 }
 
-pub async fn build_hummock_table_refill_runtime_config(
-    metadata_manager: &MetadataManager,
+pub fn build_hummock_table_refill_runtime_config(
     serving_vnode_mapping: &ServingVnodeMappingRef,
-    worker_key: &WorkerKey,
+    worker_id: WorkerId,
+    table_cache_refill_policies: PbTableCacheRefillPolicies,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
     version: NotificationVersion,
-) -> MetaResult<PbTableRefillRuntimeConfig> {
-    let table_cache_refill_policies = metadata_manager
-        .catalog_controller
-        .table_cache_refill_policies_snapshot()
-        .await?;
+) -> PbTableRefillRuntimeConfig {
     let serving_table_vnode_mappings = build_hummock_serving_table_vnode_mappings(
-        metadata_manager,
         serving_vnode_mapping,
-        worker_key,
-    )
-    .await?;
+        worker_id,
+        streaming_parallelisms,
+    );
 
-    Ok(PbTableRefillRuntimeConfig {
+    PbTableRefillRuntimeConfig {
         table_cache_refill_policies: Some(table_cache_refill_policies),
         serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
         version,
-    })
+    }
 }
