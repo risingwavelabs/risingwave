@@ -177,8 +177,10 @@ grep -Fx 'before update' "$HTTP_SINK_OUTPUT"
 grep -Fx 'hello world' "$HTTP_SINK_OUTPUT"
 grep -Fx '{"key":"value"}' "$HTTP_SINK_OUTPUT"
 grep -q '"event"' "$HTTP_SINK_OUTPUT"
-# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb
-test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 4
+grep -Fx 'dynamic url payload' "$HTTP_SINK_OUTPUT"
+grep -Fx 'dynamic url as select payload' "$HTTP_SINK_OUTPUT"
+# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb + 2 from dynamic URL tests
+test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 6
 # Verify the custom header set via header.x_test = 'rw-http-sink' was sent
 grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
 # Verify inferred default content types for varchar and jsonb payloads

@@ -9,12 +9,13 @@ mysql -e "
     DROP TABLE IF EXISTS customers;
     CREATE TABLE customers(
          id BIGINT PRIMARY KEY,
+         ubig BIGINT UNSIGNED,
          modified DATETIME,
          name VARCHAR(32),
          custinfo JSON
     );
-    INSERT INTO customers VALUES(1, NOW(), 'John', NULL);
-    INSERT INTO customers VALUES(2, NOW(), 'Doe', NULL);
+    INSERT INTO customers VALUES(1, 18446744073709551615, NOW(), 'John', NULL);
+    INSERT INTO customers VALUES(2, 0, NOW(), 'Doe', NULL);
     ALTER TABLE customers ADD INDEX zipsa( (CAST(custinfo->'zipcode' AS UNSIGNED ARRAY)) );
     "
 
@@ -31,13 +32,14 @@ create source mysql_source with (
 );
 
 statement ok
-create table rw_customers (id bigint, modified timestamp, name varchar, custinfo jsonb, primary key (id)) from mysql_source table 'mytest.customers';
+create table rw_customers (id bigint, ubig numeric, modified timestamp, name varchar, custinfo jsonb, primary key (id)) from mysql_source table 'mytest.customers';
 
 # Name, Type, Is Hidden, Description
 query TTTT
 describe rw_customers;
 ----
 id bigint false NULL
+ubig numeric false NULL
 modified timestamp without time zone false NULL
 name character varying false NULL
 custinfo jsonb false NULL
@@ -47,10 +49,10 @@ distribution key id NULL NULL
 table description rw_customers NULL NULL
 
 query IT retry 4 backoff 1s
-select id,name from rw_customers order by id;
+select id,ubig,name from rw_customers order by id;
 ----
-1 John
-2 Doe
+1 18446744073709551615 John
+2 0 Doe
 
 # add column
 system ok
@@ -66,6 +68,7 @@ query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL
+ubig numeric false NULL
 modified timestamp without time zone false NULL
 name character varying false NULL
 custinfo jsonb false NULL
@@ -77,10 +80,10 @@ distribution key id NULL NULL
 table description rw_customers NULL NULL
 
 query TTTT
-select id,v1,v2,name from rw_customers order by id;
+select id,ubig,v1,v2,name from rw_customers order by id;
 ----
-1 hello 88.9 John
-2 hello 88.9 Doe
+1 18446744073709551615 hello 88.9 John
+2 0 hello 88.9 Doe
 
 # rename column on upstream will not be replicated, since we do not support rename column
 system ok
@@ -96,6 +99,7 @@ query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL
+ubig numeric false NULL
 modified timestamp without time zone false NULL
 name character varying false NULL
 custinfo jsonb false NULL
@@ -129,6 +133,7 @@ query TTTT retry 4 backoff 1s
 describe rw_customers;
 ----
 id bigint false NULL
+ubig numeric false NULL
 name character varying false NULL
 custinfo jsonb false NULL
 _rw_timestamp timestamp with time zone true NULL
