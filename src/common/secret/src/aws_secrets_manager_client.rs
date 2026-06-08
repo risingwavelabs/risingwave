@@ -172,8 +172,7 @@ impl AwsSecretsManagerConfig {
         if let Some(role_arn) = &self.role_arn {
             let source_credentials = sdk_config
                 .credentials_provider()
-                .ok_or_else(|| anyhow!("missing AWS credentials_provider for assume role"))?
-                .clone();
+                .ok_or_else(|| anyhow!("missing AWS credentials_provider for assume role"))?;
             let role_region = region.clone();
             let mut role_builder = AssumeRoleProvider::builder(role_arn)
                 .session_name(AWS_SECRETS_MANAGER_SESSION_NAME)
@@ -297,9 +296,11 @@ fn extract_secret_value(
     let value: Value = serde_json::from_slice(&secret_bytes).with_context(|| {
         format!("field `{field}` requires the secret value to be a JSON object")
     })?;
-    let field_value = value
+    let object = value
         .as_object()
-        .and_then(|object| object.get(field))
+        .ok_or_else(|| anyhow!("field `{field}` requires the secret value to be a JSON object"))?;
+    let field_value = object
+        .get(field)
         .ok_or_else(|| anyhow!("Field '{}' not found in secret", field))?;
 
     match field_value {

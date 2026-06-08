@@ -102,6 +102,8 @@ impl LocalSecretManager {
                 secret_id = %secret_id,
                 "adding a secret but it already exists, overwriting it"
             );
+            let _guard = self.secret_file_lock.lock();
+            self.remove_secret_file_if_exist(&secret_id);
         };
     }
 

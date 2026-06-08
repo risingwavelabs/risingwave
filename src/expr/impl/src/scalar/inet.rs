@@ -99,7 +99,7 @@ mod tests {
 
         if let ExprError::InvalidParam { name, reason } = inet_aton("127.1").unwrap_err() {
             assert_eq!(name, "str");
-            assert_eq!(reason, "Invalid IP address: 127.1".into());
+            assert_eq!(&*reason, "Invalid IP address: 127.1");
         } else {
             panic!("Expected InvalidParam error");
         }
@@ -111,17 +111,14 @@ mod tests {
 
     #[test]
     fn test_inet_ntoa() {
-        assert_eq!(inet_ntoa(167773449).unwrap(), "10.0.5.9".into());
-        assert_eq!(inet_ntoa(3413450530).unwrap(), "203.117.31.34".into());
-        assert_eq!(inet_ntoa(0).unwrap(), "0.0.0.0".into());
-        assert_eq!(
-            inet_ntoa(u32::MAX as i64).unwrap(),
-            "255.255.255.255".into()
-        );
+        assert_eq!(&*inet_ntoa(167773449).unwrap(), "10.0.5.9");
+        assert_eq!(&*inet_ntoa(3413450530).unwrap(), "203.117.31.34");
+        assert_eq!(&*inet_ntoa(0).unwrap(), "0.0.0.0");
+        assert_eq!(&*inet_ntoa(u32::MAX as i64).unwrap(), "255.255.255.255");
 
         if let ExprError::InvalidParam { name, reason } = inet_ntoa(-1).unwrap_err() {
             assert_eq!(name, "num");
-            assert_eq!(reason, "Invalid IP number: -1".into());
+            assert_eq!(&*reason, "Invalid IP number: -1");
         } else {
             panic!("Expected InvalidParam error");
         }
