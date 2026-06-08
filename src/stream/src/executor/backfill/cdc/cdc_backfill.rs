@@ -168,6 +168,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             for idx in 0..chunk.capacity() {
                 let (op, row, visible) = chunk.row_at(idx);
                 if !visible {
+                    // Buffered chunks may carry sparse visibility from previous filtering rounds.
                     continue;
                 }
                 let event_offset = (*offset_parse_func)(
@@ -185,14 +186,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let reached_current_pos =
                     cmp_datum_iter(row_pk.iter(), current_pos.iter(), pk_order.iter().copied())
                         .is_le();
+                let should_emit = in_binlog_range && reached_current_pos;
+                let should_retain = in_binlog_range && !reached_current_pos;
 
-                if in_binlog_range && !reached_current_pos {
+                if should_retain {
                     retained_vis.set(idx, true);
                 }
 
                 match op {
                     Op::Insert | Op::Delete => {
-                        if in_binlog_range && reached_current_pos {
+                        if should_emit {
                             emitted_vis.set(idx, true);
                             consumed_binlog_offset = Some(event_offset);
                             upstream_processed_row_count += 1;
