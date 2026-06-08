@@ -99,7 +99,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     fn try_rewrite_window_function(&mut self, window_func: WindowFunction) -> Result<ExprImpl> {
         let WindowFunction {
             kind,
-            args,
+            mut args,
             return_type,
             partition_by,
             order_by,
@@ -131,6 +131,45 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                     )?,
                 ))
             })?
+        } else if matches!(kind, WindowFuncKind::Lag | WindowFuncKind::Lead) {
+            assert!(!ignore_nulls); // the conversion is not applicable to `LAG`/`LEAD` with `IGNORE NULLS`
+            let default = if args.len() == 3 {
+                let mut default = args.pop().unwrap();
+                default.cast_implicit_mut(&return_type)?;
+                Some(self.rewrite_expr(default))
+            } else {
+                None
+            };
+            let frame = LogicalOverWindow::lag_lead_frame(&kind, &mut args)?;
+
+            let first_value = ExprImpl::from(self.push_window_func(WindowFunction::new(
+                WindowFuncKind::Aggregate(AggType::Builtin(PbAggKind::FirstValue)),
+                args,
+                false,
+                partition_by.clone(),
+                order_by.clone(),
+                Some(frame.clone()),
+            )?));
+
+            if let Some(default) = default {
+                let count = ExprImpl::from(self.push_window_func(WindowFunction::new(
+                    WindowFuncKind::Aggregate(AggType::Builtin(PbAggKind::Count)),
+                    vec![],
+                    false,
+                    partition_by,
+                    order_by,
+                    Some(frame),
+                )?));
+                let zero = ExprImpl::literal_bigint(0);
+                let case_cond =
+                    ExprImpl::from(FunctionCall::new(ExprType::Equal, vec![count, zero])?);
+                ExprImpl::from(FunctionCall::new(
+                    ExprType::Case,
+                    vec![case_cond, default, first_value],
+                )?)
+            } else {
+                first_value
+            }
         } else {
             ExprImpl::from(self.push_window_func(WindowFunction::new(
                 kind,
@@ -336,46 +375,7 @@ impl LogicalOverWindow {
                 //     == `first_value(x) over (rows between N following and N following)`
                 assert!(!window_function.ignore_nulls); // the conversion is not applicable to `LAG`/`LEAD` with `IGNORE NULLS`
 
-                let offset = if args.len() > 1 {
-                    let offset_expr = args.remove(1);
-                    if !offset_expr.return_type().is_int() {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "the `offset` of `{}` function should be integer",
-                            window_function.kind
-                        ))
-                        .into());
-                    }
-                    let const_offset = offset_expr
-                        .cast_implicit(&DataType::Int64)?
-                        .try_fold_const();
-                    if const_offset.is_none() {
-                        // should already be checked in `WindowFunction::infer_return_type`,
-                        // but just in case
-                        bail_not_implemented!(
-                            "non-const `offset` of `lag`/`lead` is not supported yet"
-                        );
-                    }
-                    const_offset.unwrap()?.map(|v| *v.as_int64()).unwrap_or(1)
-                } else {
-                    1
-                };
-                let sign = if window_function.kind == WindowFuncKind::Lag {
-                    -1
-                } else {
-                    1
-                };
-                let abs_offset = offset.unsigned_abs() as usize;
-                let frame = if sign * offset <= 0 {
-                    Frame::rows(
-                        FrameBound::Preceding(abs_offset),
-                        FrameBound::Preceding(abs_offset),
-                    )
-                } else {
-                    Frame::rows(
-                        FrameBound::Following(abs_offset),
-                        FrameBound::Following(abs_offset),
-                    )
-                };
+                let frame = Self::lag_lead_frame(&window_function.kind, &mut args)?;
 
                 (
                     WindowFuncKind::Aggregate(AggType::Builtin(PbAggKind::FirstValue)),
@@ -413,6 +413,48 @@ impl LogicalOverWindow {
             order_by,
             frame,
         })
+    }
+
+    fn lag_lead_frame(kind: &WindowFuncKind, args: &mut Vec<ExprImpl>) -> Result<Frame> {
+        let offset = if args.len() > 1 {
+            let offset_expr = args.remove(1);
+            if !offset_expr.return_type().is_int() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "the `offset` of `{kind}` function should be integer"
+                ))
+                .into());
+            }
+            let const_offset = offset_expr
+                .cast_implicit(&DataType::Int64)?
+                .try_fold_const();
+            if const_offset.is_none() {
+                // should already be checked in `WindowFunction::infer_return_type`,
+                // but just in case
+                bail_not_implemented!("non-const `offset` of `lag`/`lead` is not supported yet");
+            }
+            const_offset.unwrap()?.map(|v| *v.as_int64()).unwrap_or(1)
+        } else {
+            1
+        };
+        let abs_offset = offset.unsigned_abs() as usize;
+        // Avoid `sign * offset` which can overflow for `offset == i64::MIN`.
+        let is_preceding = match kind {
+            WindowFuncKind::Lag => offset >= 0,
+            WindowFuncKind::Lead => offset <= 0,
+            _ => unreachable!(),
+        };
+        let frame = if is_preceding {
+            Frame::rows(
+                FrameBound::Preceding(abs_offset),
+                FrameBound::Preceding(abs_offset),
+            )
+        } else {
+            Frame::rows(
+                FrameBound::Following(abs_offset),
+                FrameBound::Following(abs_offset),
+            )
+        };
+        Ok(frame)
     }
 
     pub fn window_functions(&self) -> &[PlanWindowFunction] {
