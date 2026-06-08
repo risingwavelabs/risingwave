@@ -180,6 +180,14 @@ services:
     ports:
       - "8900:8900"
 
+  localstack:
+    image: localstack/localstack:3.0
+    environment:
+      - SERVICES=secretsmanager
+      - AWS_DEFAULT_REGION=us-east-1
+    expose:
+      - "4566"
+
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
@@ -458,12 +466,34 @@ services:
       - ..:/risingwave
     stop_grace_period: 30s
 
+  e2e-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - localstack
+    environment:
+      - LOCALSTACK_SECRETSMANAGER_ENDPOINT=http://localstack:4566
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - mysql-meta
       - db
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  ci-standard-e2e-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql-meta
+      - db
+      - localstack
+    environment:
+      - LOCALSTACK_SECRETSMANAGER_ENDPOINT=http://localstack:4566
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

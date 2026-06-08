@@ -104,7 +104,9 @@ steps:
       depends_on:
         - "build"
       plugins:
-        - docker-compose#v5.5.0: *docker-compose-standard
+        - docker-compose#v5.5.0:
+            <<: *docker-compose-standard
+            run: ci-standard-e2e-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 45
       retry: *auto-retry
@@ -117,7 +119,9 @@ steps:
       depends_on:
         - "build"
       plugins:
-        - docker-compose#v5.5.0: *docker-compose-standard
+        - docker-compose#v5.5.0:
+            <<: *docker-compose-standard
+            run: ci-standard-e2e-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 35
       parallelism: 4
@@ -879,7 +883,9 @@ steps:
     depends_on:
       - "build"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: e2e-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 40
     retry: *auto-retry
@@ -894,7 +900,9 @@ steps:
     depends_on:
       - "build"
     plugins:
-      - docker-compose#v5.5.0: *docker-compose
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: e2e-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 40
     retry: *auto-retry

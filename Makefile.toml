@@ -1466,6 +1466,7 @@ description = "🌟 Run SQLLogicTest"
 SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
 SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
 SLT_DB = "dev"
+LOCALSTACK_SECRETSMANAGER_ENDPOINT = { value = "http://127.0.0.1:14566", condition = { env_not_set = ["LOCALSTACK_SECRETSMANAGER_ENDPOINT"] } }
 PATH = "${PWD}/e2e_test/commands:${PATH}"
 RUST_BACKTRACE = "0" # slt backtrace is useless
 RUST_LOG = "sqllogictest=warn,sqllogictest::system_command=info"

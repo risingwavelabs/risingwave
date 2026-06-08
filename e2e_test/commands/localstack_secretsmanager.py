@@ -16,6 +16,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -27,7 +28,8 @@ import uuid
 CONTAINER_NAME = "rw-localstack-secretsmanager-slt"
 IMAGE = "localstack/localstack:3.0"
 PORT = 14566
-ENDPOINT = f"http://127.0.0.1:{PORT}"
+DEFAULT_ENDPOINT = f"http://127.0.0.1:{PORT}"
+ENDPOINT = os.environ.get("LOCALSTACK_SECRETSMANAGER_ENDPOINT", DEFAULT_ENDPOINT)
 REGION = "us-east-1"
 
 
@@ -75,29 +77,35 @@ def wait_until_ready():
     raise RuntimeError(f"LocalStack Secrets Manager did not become ready: {last_error}")
 
 
+def use_managed_container():
+    return ENDPOINT == DEFAULT_ENDPOINT
+
+
 def start(_args):
-    run(["docker", "rm", "-f", CONTAINER_NAME], check=False)
-    run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            CONTAINER_NAME,
-            "-p",
-            f"{PORT}:4566",
-            "-e",
-            "SERVICES=secretsmanager",
-            "-e",
-            f"AWS_DEFAULT_REGION={REGION}",
-            IMAGE,
-        ]
-    )
+    if use_managed_container():
+        run(["docker", "rm", "-f", CONTAINER_NAME], check=False)
+        run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                CONTAINER_NAME,
+                "-p",
+                f"{PORT}:4566",
+                "-e",
+                "SERVICES=secretsmanager",
+                "-e",
+                f"AWS_DEFAULT_REGION={REGION}",
+                IMAGE,
+            ]
+        )
     wait_until_ready()
 
 
 def stop(_args):
-    run(["docker", "rm", "-f", CONTAINER_NAME], check=False)
+    if use_managed_container():
+        run(["docker", "rm", "-f", CONTAINER_NAME], check=False)
 
 
 def put(args):
