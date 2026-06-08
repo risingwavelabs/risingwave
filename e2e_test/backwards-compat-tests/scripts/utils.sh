@@ -108,6 +108,23 @@ insert_json_kafka() {
   rpk topic produce backwards_compat_test_kafka_source -f "%k,%v"
 }
 
+create_kafka_header_topic() {
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic create backwards_compat_test_kafka_header_source
+}
+
+insert_json_kafka_with_headers() {
+  local JSON=$1
+
+  printf 'dup=first header1=v1 dup=second %s\n' "$JSON" | \
+  RPK_BROKERS=message_queue:29092 \
+  rpk topic produce backwards_compat_test_kafka_header_source -f "%H{3}%h{%k=%v }%k,%v"
+}
+
+seed_json_kafka_header() {
+  insert_json_kafka_with_headers '{"key": 1},{"a": 1}'
+}
+
 seed_json_kafka() {
   insert_json_kafka '{"user_id": 1},{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
   insert_json_kafka '{"user_id": 2},{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
@@ -392,11 +409,19 @@ seed_old_cluster() {
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/include_key_as.slt"
   fi
 
+  echo "--- KAFKA HEADER TEST: Seeding old cluster with full-header list catalog"
+  create_kafka_header_topic
+  seed_json_kafka_header
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/header/seed.slt"
+
   echo "--- KAFKA TEST: wait 5s for kafka to process data"
   sleep 5
 
   echo "--- KAFKA TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
+
+  echo "--- KAFKA HEADER TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/header/validate_original.slt"
 
   # Test version columns backwards compatibility, if OLD_VERSION <= 2.6.0
   if version_le "$OLD_VERSION" "2.6.0"; then
@@ -486,6 +511,9 @@ validate_new_cluster() {
 
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
+
+  echo "--- KAFKA HEADER TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/header/validate_restart.slt"
 
   # Test version columns backwards compatibility, if OLD_VERSION <= 2.6.0
   if version_le "$OLD_VERSION" "2.6.0"; then

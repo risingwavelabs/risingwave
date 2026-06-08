@@ -1,0 +1,24 @@
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_relations r on c.relation_id = r.id
+where r.name = 'kafka_header_source'
+  and c.name = 'header_col_combined';
+----
+struct<key character varying, value bytea>[]
+
+query T rowsort retry 6 backoff 1s
+WITH arr AS (
+  SELECT header_col_combined
+  FROM kafka_header_mv1
+),
+unnested AS (
+  SELECT unnest(header_col_combined) AS h
+  FROM arr
+)
+SELECT h::varchar
+FROM unnested;
+----
+(dup,"\\x6669727374")
+(dup,"\\x7365636f6e64")
+(header1,"\\x7631")

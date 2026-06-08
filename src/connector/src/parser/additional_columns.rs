@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, max_column_id};
-use risingwave_common::types::{DataType, StructType};
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
@@ -431,7 +431,7 @@ fn build_header_catalog(
         ColumnDesc::named_with_additional_column(
             col_name,
             column_id,
-            DataType::list(get_kafka_header_item_datatype()),
+            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Bytea)),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
             },

@@ -18,7 +18,8 @@ use itertools::Itertools;
 use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
 use rdkafka::{Message, Timestamp};
 use risingwave_common::types::{
-    Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
+    DataType, Datum, DatumCow, DatumRef, ListValue, MapValue, ScalarImpl, ScalarRefImpl,
+    StructValue,
 };
 use risingwave_pb::data::DataType as PbDataType;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
@@ -85,6 +86,36 @@ impl KafkaMeta {
                 &get_kafka_header_item_datatype(),
                 header_item,
             )))
+        })
+    }
+
+    pub fn extract_headers_as_map(&self) -> Option<Datum> {
+        self.headers.as_ref().map(|headers| {
+            let mut entries: Vec<(&str, Option<&[u8]>)> = Vec::with_capacity(headers.count());
+
+            for header in headers.iter() {
+                if let Some((_, value)) = entries.iter_mut().find(|(key, _)| *key == header.key) {
+                    tracing::warn!(
+                        header_key = header.key,
+                        "duplicate Kafka header key found when building header map; overwriting previous value"
+                    );
+                    *value = header.value;
+                } else {
+                    entries.push((header.key, header.value));
+                }
+            }
+
+            let keys = entries.iter().map(|(key, _)| Some(*key)).collect::<ListValue>();
+            let values = ListValue::from_datum_iter(
+                &DataType::Bytea,
+                entries
+                    .into_iter()
+                    .map(|(_, value)| value.map(|value| ScalarRefImpl::Bytea(value))),
+            );
+            Some(ScalarImpl::Map(
+                MapValue::try_from_kv(keys, values)
+                    .expect("Kafka header map keys are de-duplicated and non-null"),
+            ))
         })
     }
 }

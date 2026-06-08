@@ -174,7 +174,9 @@ system ok
 rpk topic create 'test_additional_columns'
 
 system ok
-for i in {0..10}; do echo "key$i:{\"a\": $i}" | rpk topic produce test_additional_columns -f "%k:%v\n" -H "header1=v1" -H "header2=v2"; done
+set -e
+for i in {0..9}; do echo "key$i:{\"a\": $i}" | rpk topic produce test_additional_columns -f "%k:%v\n" -H "header1=v1" -H "header2=v2"; done
+printf 'key10 header1=v1 header2=v2 header1=v1_override {"a": 10}\n' | rpk topic produce test_additional_columns -f "%k %H{3}%h{%k=%v }%v\n"
 
 statement error
 create table additional_columns (a int)
@@ -217,6 +219,15 @@ query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'additional_columns';
 ----
 CREATE TABLE additional_columns (a INT) INCLUDE key AS key_col INCLUDE partition AS partition_col INCLUDE offset AS offset_col INCLUDE timestamp AS timestamp_col INCLUDE header AS header_col_combined INCLUDE header 'header1' AS header_col_1 INCLUDE header 'header2' AS header_col_2 INCLUDE header 'header2' CHARACTER VARYING AS header_col_3 INCLUDE header 'header3' AS header_col_4
+
+query B
+select c.data_type = 'map(character varying,bytea)'
+from rw_catalog.rw_columns c
+join rw_catalog.rw_relations r on c.relation_id = r.id
+where r.name = 'additional_columns'
+  and c.name = 'header_col_combined';
+----
+t
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 
@@ -269,13 +280,29 @@ WHERE  key_col IS NOT NULL
 11
 
 
-query ?? retry 3 backoff 1s
-WITH arr AS (SELECT header_col_combined FROM additional_columns),
-unnested AS (SELECT unnest(header_col_combined) FROM arr)
-select *, count(*) from unnested group by 1 order by 1;
+query TTT retry 3 backoff 1s
+select encode(header_col_combined['header1'], 'hex'),
+       encode(header_col_combined['header2'], 'hex'),
+       (header_col_combined['header3'] is null)::varchar
+from additional_columns
+where a = 0;
 ----
-(header1,"\\x7631") 11
-(header2,"\\x7632") 11
+7631	7632	true
+
+query T retry 3 backoff 1s
+select encode(header_col_combined['header1'], 'hex')
+from additional_columns
+where a = 10;
+----
+76315f6f76657272696465
+
+query TT retry 3 backoff 1s
+select encode(header_col_1, 'hex'),
+       encode(header_col_combined['header1'], 'hex')
+from additional_columns
+where a = 10;
+----
+7631	76315f6f76657272696465
 
 query ???? retry 3 backoff 1s
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1

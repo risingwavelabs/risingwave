@@ -1,0 +1,76 @@
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_relations r on c.relation_id = r.id
+where r.name = 'kafka_header_source'
+  and c.name = 'header_col_combined';
+----
+struct<key character varying, value bytea>[]
+
+query T rowsort retry 6 backoff 1s
+WITH arr AS (
+  SELECT header_col_combined
+  FROM kafka_header_mv1
+),
+unnested AS (
+  SELECT unnest(header_col_combined) AS h
+  FROM arr
+)
+SELECT h::varchar
+FROM unnested;
+----
+(dup,"\\x6669727374")
+(dup,"\\x7365636f6e64")
+(header1,"\\x7631")
+
+statement ok
+CREATE MATERIALIZED VIEW kafka_header_mv2 AS
+SELECT a, header_col_combined
+FROM kafka_header_source;
+
+query T rowsort retry 6 backoff 1s
+WITH arr AS (
+  SELECT header_col_combined
+  FROM kafka_header_mv2
+),
+unnested AS (
+  SELECT unnest(header_col_combined) AS h
+  FROM arr
+)
+SELECT h::varchar
+FROM unnested;
+----
+(dup,"\\x6669727374")
+(dup,"\\x7365636f6e64")
+(header1,"\\x7631")
+
+statement ok
+CREATE SOURCE kafka_header_source_new
+(
+ a integer
+)
+INCLUDE header AS header_map
+WITH (
+ connector='kafka',
+ topic='backwards_compat_test_kafka_header_source',
+ properties.bootstrap.server='message_queue:29092',
+ scan.startup.mode='earliest',
+) FORMAT PLAIN ENCODE JSON;
+
+query B
+select c.data_type = 'map(character varying,bytea)'
+from rw_catalog.rw_columns c
+join rw_catalog.rw_relations r on c.relation_id = r.id
+where r.name = 'kafka_header_source_new'
+  and c.name = 'header_map';
+----
+t
+
+query TTT retry 6 backoff 1s
+select encode(header_map['dup'], 'hex'),
+       encode(header_map['header1'], 'hex'),
+       (header_map['missing'] is null)::varchar
+from kafka_header_source_new
+where a = 1;
+----
+7365636f6e64	7631	true

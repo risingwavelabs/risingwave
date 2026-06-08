@@ -415,7 +415,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 (_, &Some(AdditionalColumnType::Headers(_))) => Ok(A::output_for(
                     self.row_meta
                         .as_ref()
-                        .and_then(|ele| extract_headers_from_meta(ele.source_meta))
+                        .and_then(|ele| extract_headers_from_meta(ele.source_meta, &desc.data_type))
                         .unwrap_or(None),
                 )),
                 (_, &Some(AdditionalColumnType::PulsarMessageIdData(_))) => {
