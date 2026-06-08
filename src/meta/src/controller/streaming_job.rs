@@ -686,10 +686,6 @@ impl CatalogController {
                 streaming_job_ids: HashSet::from_iter([job_id]),
                 actors: vec![],
                 unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                unregistered_fragment_ids: fragments
-                    .iter()
-                    .map(|fragment| fragment.fragment_id)
-                    .collect(),
                 dropped_sink_fragment_by_targets,
             },
             state_table_ids,

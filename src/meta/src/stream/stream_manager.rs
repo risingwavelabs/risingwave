@@ -669,7 +669,6 @@ impl GlobalStreamManager {
         database_id: DatabaseId,
         streaming_job_ids: Vec<JobId>,
         state_table_ids: Vec<TableId>,
-        fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
         if !streaming_job_ids.is_empty() || !state_table_ids.is_empty() {
@@ -683,7 +682,6 @@ impl GlobalStreamManager {
                         streaming_job_ids: streaming_job_ids.into_iter().collect(),
                         actors: vec![],
                         unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                        unregistered_fragment_ids: fragment_ids,
                         dropped_sink_fragment_by_targets,
                     },
                 )

@@ -1062,6 +1062,14 @@ impl InflightDatabaseInfo {
                         assert!(injected, "should inject upstream into UpstreamSinkUnion");
                     }
                     CommandFragmentChanges::DropNodeUpstream(drop_upstream_fragment_ids) => {
+                        if !self.fragment_location.contains_key(&fragment_id) {
+                            warn!(
+                                target_fragment_id = %fragment_id,
+                                drop_upstream_fragment_ids = ?drop_upstream_fragment_ids,
+                                "skip dropping upstream sink fragments for non-existing target fragment"
+                            );
+                            continue;
+                        }
                         let (info, _) = self.fragment_mut(fragment_id);
                         let mut removed = false;
                         visit_stream_node_mut(&mut info.nodes, |node| {
@@ -1357,6 +1365,23 @@ impl InflightDatabaseInfo {
             }
         }
         shared_actor_writer.finish();
+    }
+
+    pub(crate) fn post_apply_remove_job(
+        &mut self,
+        job_id: JobId,
+    ) -> Option<InflightStreamingJobInfo> {
+        let job = self.jobs.remove(&job_id)?;
+        let inner = self.shared_actor_infos.clone();
+        let mut shared_actor_writer = inner.start_writer(self.database_id);
+        for (fragment_id, fragment) in &job.fragment_infos {
+            self.fragment_location
+                .remove(fragment_id)
+                .expect("should exist");
+            shared_actor_writer.remove(fragment);
+        }
+        shared_actor_writer.finish();
+        Some(job)
     }
 }
 
