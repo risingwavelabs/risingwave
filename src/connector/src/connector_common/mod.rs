@@ -29,7 +29,7 @@ pub use connection::{
     ConfluentSchemaRegistryConnection, Connection, ElasticsearchConnection, IcebergConnection,
     KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
-pub use iceberg::compaction::IcebergSinkCompactionUpdate;
+pub use iceberg::compaction::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 
 mod iceberg;
 #[cfg(not(madsim))]

@@ -52,6 +52,7 @@ fn new_track(
         report_timeout: Duration::from_secs(30 * 60),
         last_config_refresh_at: now,
         pending_commit_count,
+        latest_observed_snapshot: None,
         state: CompactionTrackState::Idle {
             next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
         },
@@ -66,6 +67,34 @@ fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
 fn record_commits(track: &mut CompactionTrack, n: usize) {
     for _ in 0..n {
         track.record_commit();
+    }
+}
+
+fn committed_snapshot(snapshot_id: i64, timestamp_ms: i64) -> IcebergCommittedSnapshot {
+    IcebergCommittedSnapshot {
+        branch: "main".to_owned(),
+        snapshot_id,
+        timestamp_ms,
+    }
+}
+
+fn commit_update(snapshot_id: i64, timestamp_ms: i64) -> SinkUpdateKind {
+    SinkUpdateKind::Commit {
+        observed_snapshot: committed_snapshot(snapshot_id, timestamp_ms),
+    }
+}
+
+fn force_update(snapshot_id: i64, timestamp_ms: i64) -> SinkUpdateKind {
+    SinkUpdateKind::ForceCompaction {
+        observed_snapshot: committed_snapshot(snapshot_id, timestamp_ms),
+    }
+}
+
+fn empty_inner() -> IcebergCompactionManagerInner {
+    IcebergCompactionManagerInner {
+        sink_schedules: HashMap::new(),
+        snapshot_expiration_sink_ids: HashSet::new(),
+        manual_task_waiters: HashMap::new(),
     }
 }
 
@@ -142,6 +171,173 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
         assert_eq!(track.pending_commit_count, expected_backlog);
         assert!(track.should_trigger(now));
     }
+}
+
+#[tokio::test]
+async fn test_commit_update_freezes_gc_watermark_after_task_start() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(404);
+    let now = Instant::now();
+    let config = new_test_iceberg_config(300, 10, CompactionType::SmallFiles);
+    let mut guard = empty_inner();
+
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id,
+            kind: commit_update(10, 1000),
+            now,
+            allow_track_initialization: true,
+            loaded_config: Some(config),
+        },
+    );
+    guard
+        .sink_schedules
+        .get_mut(&sink_id)
+        .unwrap()
+        .start_processing();
+
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id,
+            kind: commit_update(11, 2000),
+            now,
+            allow_track_initialization: false,
+            loaded_config: None,
+        },
+    );
+
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
+    assert_eq!(
+        track
+            .latest_observed_snapshot
+            .as_ref()
+            .map(|s| s.snapshot_id),
+        Some(11)
+    );
+    match track.processing_gc_watermark_snapshot() {
+        Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
+        protection => panic!("unexpected gc watermark: {protection:?}"),
+    }
+
+    guard
+        .sink_schedules
+        .get_mut(&sink_id)
+        .unwrap()
+        .mark_dispatched(1, now);
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id,
+            kind: commit_update(12, 3000),
+            now,
+            allow_track_initialization: false,
+            loaded_config: None,
+        },
+    );
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id,
+            kind: force_update(13, 4000),
+            now,
+            allow_track_initialization: false,
+            loaded_config: None,
+        },
+    );
+
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
+    assert_eq!(
+        track
+            .latest_observed_snapshot
+            .as_ref()
+            .map(|s| s.snapshot_id),
+        Some(12)
+    );
+    match track.processing_gc_watermark_snapshot() {
+        Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
+        protection => panic!("unexpected gc watermark: {protection:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_force_update_records_observed_snapshot_only_for_idle_track() {
+    let manager = build_test_manager().await;
+    let idle_sink_id = SinkId::new(405);
+    let processing_sink_id = SinkId::new(406);
+    let now = Instant::now();
+    let config = new_test_iceberg_config(300, 10, CompactionType::SmallFiles);
+    let mut guard = empty_inner();
+
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id: idle_sink_id,
+            kind: force_update(10, 1000),
+            now,
+            allow_track_initialization: true,
+            loaded_config: Some(config),
+        },
+    );
+
+    let track = guard.sink_schedules.get_mut(&idle_sink_id).unwrap();
+    track.start_processing();
+    match track.processing_gc_watermark_snapshot() {
+        Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
+        protection => panic!("unexpected gc watermark: {protection:?}"),
+    }
+
+    let mut track = new_track(now, 300, 10, 0);
+    track.record_observed_snapshot(committed_snapshot(20, 2000));
+    track.record_force_compaction(now);
+    track.start_processing();
+    guard.sink_schedules.insert(processing_sink_id, track);
+
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id: processing_sink_id,
+            kind: force_update(21, 3000),
+            now,
+            allow_track_initialization: false,
+            loaded_config: None,
+        },
+    );
+
+    let track = guard.sink_schedules.get(&processing_sink_id).unwrap();
+    assert_eq!(
+        track
+            .latest_observed_snapshot
+            .as_ref()
+            .map(|s| s.snapshot_id),
+        Some(20)
+    );
+    match track.processing_gc_watermark_snapshot() {
+        Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 20),
+        protection => panic!("unexpected gc watermark: {protection:?}"),
+    }
+}
+
+#[test]
+fn test_active_task_without_observed_snapshot_has_no_gc_watermark() {
+    let now = Instant::now();
+    let skip_sink_id = SinkId::new(42);
+    let mut skip_track = new_track(now, 300, 10, 0);
+    skip_track.record_force_compaction(now);
+    skip_track.start_processing();
+
+    let mut inner = empty_inner();
+    inner.sink_schedules.insert(skip_sink_id, skip_track);
+
+    assert!(matches!(
+        inner
+            .sink_schedules
+            .get(&skip_sink_id)
+            .unwrap()
+            .processing_gc_watermark_snapshot(),
+        Some(None)
+    ));
 }
 
 #[test]
@@ -391,7 +587,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
         &mut guard,
         PreparedSinkUpdate {
             sink_id,
-            kind: SinkUpdateKind::Commit,
+            kind: commit_update(1, 1),
             now: refresh_at,
             allow_track_initialization: false,
             loaded_config: Some(config),
@@ -423,6 +619,7 @@ async fn test_update_iceberg_commit_info_skips_missing_track_on_load_failure() {
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
             force_compaction: false,
+            observed_snapshot: committed_snapshot(1, 1),
         })
         .await;
 
@@ -444,6 +641,7 @@ async fn test_update_iceberg_commit_info_refresh_failure_keeps_refresh_deadline_
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
             force_compaction: false,
+            observed_snapshot: committed_snapshot(1, 1),
         })
         .await;
 
@@ -471,7 +669,7 @@ async fn test_apply_sink_update_creates_missing_track() {
         &mut guard,
         PreparedSinkUpdate {
             sink_id,
-            kind: SinkUpdateKind::Commit,
+            kind: commit_update(1, 1),
             now,
             allow_track_initialization: true,
             loaded_config: Some(config),
@@ -505,7 +703,7 @@ async fn test_apply_sink_update_tracks_snapshot_expiration_without_compaction() 
         &mut guard,
         PreparedSinkUpdate {
             sink_id,
-            kind: SinkUpdateKind::Commit,
+            kind: commit_update(1, 1),
             now,
             allow_track_initialization: true,
             loaded_config: Some(config),
@@ -532,7 +730,7 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
         &mut guard,
         PreparedSinkUpdate {
             sink_id,
-            kind: SinkUpdateKind::Commit,
+            kind: commit_update(1, 1),
             now,
             allow_track_initialization: false,
             loaded_config: Some(config),
