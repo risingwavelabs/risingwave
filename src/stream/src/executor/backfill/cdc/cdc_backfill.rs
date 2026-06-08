@@ -190,11 +190,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     continue;
                 }
                 let should_emit = reached_current_pos;
-                let should_retain = !reached_current_pos;
-
-                if should_retain {
-                    retained_vis.set(idx, true);
-                }
 
                 match op {
                     Op::Insert | Op::Delete => {
@@ -202,6 +197,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             emitted_vis.set(idx, true);
                             consumed_binlog_offset = Some(event_offset);
                             upstream_processed_row_count += 1;
+                        } else {
+                            retained_vis.set(idx, true);
                         }
                     }
                     Op::UpdateDelete | Op::UpdateInsert => {
