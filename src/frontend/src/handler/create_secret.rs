@@ -284,8 +284,8 @@ fn validate_aws_credential_secret_refs(with_options: &WithOptions) -> Result<()>
 fn validate_no_duplicate_aws_options(with_options: &WithOptions) -> Result<()> {
     let mut seen = std::collections::BTreeMap::new();
     for key in with_options
-        .iter()
-        .map(|(key, _)| key.as_str())
+        .keys()
+        .map(String::as_str)
         .chain(with_options.secret_ref().keys().map(String::as_str))
     {
         let Some(canonical_key) = canonical_aws_option_key(key) else {
