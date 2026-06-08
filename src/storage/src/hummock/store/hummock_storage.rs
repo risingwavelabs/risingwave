@@ -34,6 +34,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_rpc_client::error::RpcError;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
@@ -348,7 +349,14 @@ impl HummockStorageReadSnapshot {
                 .get_version_by_epoch(epoch, table_id)
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
-                .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
+                .map_err(|e| match &e {
+                    RpcError::GrpcStatus(status)
+                        if status.inner().code() == tonic::Code::OutOfRange =>
+                    {
+                        HummockError::time_travel_version_expired(table_id, epoch)
+                    }
+                    _ => HummockError::meta_error(e.to_report_string()),
+                })?;
             let version = LocalHummockVersion::from_rpc_protobuf(&pb_version);
             let (tx, _rx) = unbounded_channel();
             Ok(PinnedVersion::new(version, tx))
@@ -383,10 +391,11 @@ impl HummockStorageReadSnapshot {
                     .into());
                 };
                 if committed_epoch != epoch {
-                    return Err(HummockError::wait_epoch(format!(
-                        "mismatch table {} committed_epoch {} for read committed_epoch {}",
-                        self.table_id, committed_epoch, epoch
-                    ))
+                    return Err(HummockError::committed_epoch_mismatch(
+                        self.table_id,
+                        committed_epoch,
+                        epoch,
+                    )
                     .into());
                 }
                 Ok(tuple)
@@ -775,13 +784,9 @@ impl StateStoreReadLog for HummockStorage {
             let table_change_log = table_change_log.get(&table_id).ok_or_else(|| {
                 HummockError::next_epoch(format!("table {} has been dropped", table_id))
             })?;
-            table_change_log.next_epoch(epoch).map_err(|_| {
-                HummockError::next_epoch(format!(
-                    "invalid epoch {}, change log epoch: {:?}",
-                    epoch,
-                    table_change_log.epochs().collect_vec()
-                ))
-            })
+            table_change_log
+                .next_epoch(epoch)
+                .map_err(|_| HummockError::change_log_retention_miss(table_id, epoch))
         }
         {
             // fast path

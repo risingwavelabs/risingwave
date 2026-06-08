@@ -471,11 +471,9 @@ impl HummockManager {
             .order_by_desc(hummock_epoch_to_version::Column::Epoch)
             .one(&sql_store.conn)
             .await?
-            .ok_or_else(|| {
-                Error::TimeTravel(anyhow!(format!(
-                    "version not found for epoch {}",
-                    query_epoch
-                )))
+            .ok_or_else(|| Error::TimeTravelVersionExpired {
+                table_id,
+                epoch: query_epoch,
             })?;
         let timer = self
             .metrics
@@ -496,11 +494,9 @@ impl HummockManager {
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)
             .await?
-            .ok_or_else(|| {
-                Error::TimeTravel(anyhow!(format!(
-                    "no replay version found for epoch {}, version {}",
-                    query_epoch, actual_version_id,
-                )))
+            .ok_or_else(|| Error::TimeTravelVersionExpired {
+                table_id,
+                epoch: query_epoch,
             })?;
         let deltas = hummock_time_travel_delta::Entity::find()
             .filter(hummock_time_travel_delta::Column::VersionId.gt(replay_version.version_id))
@@ -534,10 +530,10 @@ impl HummockManager {
             }
         }
         if sst_count != sst_id_to_info.len() {
-            return Err(Error::TimeTravel(anyhow!(format!(
-                "some SstableInfos not found for epoch {}, version {}",
-                query_epoch, actual_version_id,
-            ))));
+            return Err(Error::TimeTravelVersionExpired {
+                table_id,
+                epoch: query_epoch,
+            });
         }
         refill_version(&mut actual_version, &sst_id_to_info, table_id);
         timer.observe_duration();
