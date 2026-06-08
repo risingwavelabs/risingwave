@@ -186,8 +186,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let reached_current_pos =
                     cmp_datum_iter(row_pk.iter(), current_pos.iter(), pk_order.iter().copied())
                         .is_le();
-                let should_emit = in_binlog_range && reached_current_pos;
-                let should_retain = in_binlog_range && !reached_current_pos;
+                if !in_binlog_range {
+                    continue;
+                }
+                let should_emit = reached_current_pos;
+                let should_retain = !reached_current_pos;
 
                 if should_retain {
                     retained_vis.set(idx, true);
@@ -1363,7 +1366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_consume_upstream_chunk_buffer_handles_non_monotonic_pk_within_chunk() {
+    fn test_consume_buffer_non_monotonic_pk_in_chunk() {
         let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
             &[
                 (
@@ -1454,7 +1457,7 @@ mod tests {
     }
 
     #[test]
-    fn test_consume_upstream_chunk_buffer_processes_following_chunks_after_future_row() {
+    fn test_consume_buffer_processes_chunks_after_future_row() {
         let mut upstream_chunk_buffer = vec![
             StreamChunk::from_rows(
                 &[
