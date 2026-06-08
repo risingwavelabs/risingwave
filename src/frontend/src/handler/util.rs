@@ -28,6 +28,7 @@ use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
+use risingwave_common::id::ObjectId;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{
     DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
@@ -313,10 +314,54 @@ pub fn get_table_catalog_by_table_name(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
     let reader = session.env().catalog_reader().read_guard();
-    let (table, schema_name) =
-        reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+    match reader.get_created_table_by_name(db_name, schema_path, &real_table_name) {
+        Ok((table, schema_name)) => Ok((table.clone(), schema_name.to_owned())),
+        Err(err) => {
+            if let Some(table) = session
+                .staging_catalog_manager()
+                .get_table(&real_table_name)
+            {
+                // During CREATE TABLE (iceberg engine), the table is only in staging, but we
+                // still need a stable schema name for internal sink planning.
+                let schema_name = reader
+                    .get_schema_by_id(table.database_id, table.schema_id)
+                    .map(|schema| schema.name.clone())?;
+                Ok((Arc::new(table.clone()), schema_name))
+            } else {
+                Err(err.into())
+            }
+        }
+    }
+}
 
-    Ok((table.clone(), schema_name.to_owned()))
+pub fn reject_internal_table_dependency(
+    table: &TableCatalog,
+    statement_name: &str,
+) -> RwResult<()> {
+    if table.is_internal_table() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "{statement_name} does not support internal table \"{}\"",
+            table.name()
+        ))));
+    }
+    Ok(())
+}
+
+pub fn reject_internal_table_dependencies<'a, I>(
+    session: &SessionImpl,
+    dependent_relations: I,
+    statement_name: &str,
+) -> RwResult<()>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    for object_id in dependent_relations {
+        if let Ok(table) = catalog_reader.get_any_table_by_id(object_id.as_table_id()) {
+            reject_internal_table_dependency(table.as_ref(), statement_name)?;
+        }
+    }
+    Ok(())
 }
 
 /// Execute an async operation with a notification if it takes too long.

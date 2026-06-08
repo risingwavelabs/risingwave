@@ -27,31 +27,7 @@ impl ToSql for ScalarImpl {
     where
         Self: Sized,
     {
-        match self {
-            ScalarImpl::Int16(v) => v.to_sql(ty, out),
-            ScalarImpl::Int32(v) => v.to_sql(ty, out),
-            ScalarImpl::Int64(v) => v.to_sql(ty, out),
-            ScalarImpl::Serial(v) => v.to_sql(ty, out),
-            ScalarImpl::Float32(v) => v.to_sql(ty, out),
-            ScalarImpl::Float64(v) => v.to_sql(ty, out),
-            ScalarImpl::Utf8(v) => v.to_sql(ty, out),
-            ScalarImpl::Bool(v) => v.to_sql(ty, out),
-            ScalarImpl::Decimal(v) => v.to_sql(ty, out),
-            ScalarImpl::Interval(v) => v.to_sql(ty, out),
-            ScalarImpl::Date(v) => v.to_sql(ty, out),
-            ScalarImpl::Timestamp(v) => v.to_sql(ty, out),
-            ScalarImpl::Timestamptz(v) => v.to_sql(ty, out),
-            ScalarImpl::Time(v) => v.to_sql(ty, out),
-            ScalarImpl::Bytea(v) => (&**v).to_sql(ty, out),
-            ScalarImpl::Jsonb(v) => v.to_sql(ty, out),
-            ScalarImpl::Vector(_)
-            | ScalarImpl::Int256(_)
-            | ScalarImpl::Struct(_)
-            | ScalarImpl::List(_) => {
-                bail_not_implemented!("the postgres encoding for {ty} is unsupported")
-            }
-            ScalarImpl::Map(_) => todo!(),
-        }
+        self.as_scalar_ref_impl().to_sql(ty, out)
     }
 
     // return true to accept all types

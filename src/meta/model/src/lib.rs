@@ -44,6 +44,7 @@ pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
 pub mod hummock_sequence;
 pub mod hummock_sstable_info;
+pub mod hummock_table_change_log;
 pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
@@ -322,6 +323,8 @@ pub(crate) use {derive_array_from_blob, derive_from_blob};
 
 derive_from_json_struct!(TableIdArray, Vec<TableId>);
 
+derive_from_json_struct!(EpochArray, Vec<Epoch>);
+
 derive_from_json_struct!(I32Array, Vec<i32>);
 
 impl From<Vec<u32>> for I32Array {
@@ -417,6 +420,12 @@ derive_array_from_blob!(
     HummockVersionDeltaArray,
     risingwave_pb::hummock::PbHummockVersionDelta,
     PbHummockVersionDeltaArray
+);
+
+derive_array_from_blob!(
+    SstableInfoArray,
+    risingwave_pb::hummock::PbSstableInfo,
+    PbSstableInfoArray
 );
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]

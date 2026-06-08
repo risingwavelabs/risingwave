@@ -1,0 +1,91 @@
+statement ok
+create table t(v1 int, v2 int as v1 + v1, v3 int default 10, v4 int default 20);
+
+# Baseline: provide explicit v1/v4, and let v3 use its default.
+statement ok
+INSERT INTO t(v1, v4) VALUES (1, 4);
+
+statement ok
+flush;
+
+query T
+SELECT * FROM t;
+----
+1 2 10 4
+
+# Only provide v3; v1/v2 should be NULL in this row, and let v4 use its default.
+statement ok
+INSERT INTO t(v3) VALUES (1);
+
+statement ok
+flush;
+
+query T rowsort
+SELECT * FROM t;
+----
+1 2 10 4
+NULL NULL 1 20
+
+# Omit v1/v3 and verify v3 default still works when generated column v2 exists.
+statement ok
+insert into t(v4) values (9);
+
+statement ok
+flush;
+
+query T rowsort
+SELECT * FROM t;
+----
+1 2 10 4
+NULL NULL 1 20
+NULL NULL 10 9
+
+# User-specified column order differs from table order.
+statement ok
+insert into t(v4, v1) values (11, 4);
+
+statement ok
+flush;
+
+query T rowsort
+select * from t;
+----
+1 2 10 4
+4 8 10 11
+NULL NULL 1 20
+NULL NULL 10 9
+
+# INSERT ... VALUES with fewer expressions should backfill trailing defaults.
+statement ok
+insert into t values (7);
+
+statement ok
+flush;
+
+query T rowsort
+select * from t;
+----
+1 2 10 4
+4 8 10 11
+7 14 10 20
+NULL NULL 1 20
+NULL NULL 10 9
+
+statement ok
+insert into t(v1, v4) values (2, 5);
+
+statement ok
+flush;
+
+query T rowsort
+select * from t;
+----
+1 2 10 4
+2 4 10 5
+4 8 10 11
+7 14 10 20
+NULL NULL 1 20
+NULL NULL 10 9
+
+statement ok
+drop table t;

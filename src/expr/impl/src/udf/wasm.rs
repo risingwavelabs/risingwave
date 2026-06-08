@@ -13,16 +13,15 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use arrow_udf_runtime::wasm::Runtime;
 use educe::Educe;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
-use risingwave_common::must_match;
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::{BuildOptions, UdfKind};
 

@@ -93,6 +93,18 @@ name1               character varying   false     NULL
 distribution key    t._row_id           NULL      NULL
 table description   s                   NULL      NULL
 
+statement ok
+alter table t drop column name1;
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
 query TTTT
 describe s_unchange;
 ----

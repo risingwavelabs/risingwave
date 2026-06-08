@@ -67,7 +67,9 @@ function drop_mvs() {
 
 function backup() {
   local snapshot_id
-  snapshot_id=$(execute_sql_t "BACKUP;" | awk '{$1=$1}; NF {print $1}' | tail -n 1)
+  o=$(execute_sql_t "BACKUP;")
+  snapshot_id=$(echo "${o}" | awk '{$1=$1}; NF {print $1}' | tail -n 1)
+  # snapshot_id=$(awk '{$1=$1}; NF {print $1}' < <(execute_sql_t "BACKUP;") | tail -n 1)
   [ -n "${snapshot_id}" ]
   echo "${snapshot_id}"
 }

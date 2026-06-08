@@ -1,0 +1,52 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+DROP TABLE IF EXISTS column_order_validation_t;
+
+statement ok
+CREATE TABLE column_order_validation_t (col_a int, col_b int);
+
+# The Iceberg table column order is (col_a, col_b). The sink writes columns by
+# position, so projecting in reverse order (col_b, col_a) must be rejected at
+# CREATE SINK time instead of silently writing to the wrong columns.
+statement error Column order mismatch
+CREATE SINK column_order_validation_sink AS SELECT col_b, col_a FROM column_order_validation_t WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'column_order_validation_table',
+    commit_checkpoint_interval = 1,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+# Matching column order succeeds.
+statement ok
+CREATE SINK column_order_validation_sink AS SELECT col_a, col_b FROM column_order_validation_t WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'column_order_validation_table',
+    commit_checkpoint_interval = 1,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+DROP SINK column_order_validation_sink;
+
+statement ok
+DROP TABLE column_order_validation_t;

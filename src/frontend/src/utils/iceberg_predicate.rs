@@ -21,61 +21,60 @@ use risingwave_common::types::ScalarImpl;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::utils::Condition;
 
+pub struct ExtractIcebergPredicateResult {
+    pub iceberg_predicate: IcebergPredicate,
+    pub extracted_condition: Condition,
+    pub remaining_condition: Condition,
+}
+
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
 /// zone-map is used to evaluate predicates on iceberg tables.
 /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
-pub fn to_iceberg_predicate(
+pub fn extract_iceberg_predicate(
     predicate: Condition,
     fields: &[Field],
-) -> (IcebergPredicate, Condition) {
+) -> ExtractIcebergPredicateResult {
     if predicate.always_true() {
-        return (IcebergPredicate::AlwaysTrue, predicate);
+        return ExtractIcebergPredicateResult {
+            iceberg_predicate: IcebergPredicate::AlwaysTrue,
+            extracted_condition: Condition {
+                conjunctions: vec![],
+            },
+            remaining_condition: Condition {
+                conjunctions: vec![],
+            },
+        };
     }
 
-    let mut conjunctions = predicate.conjunctions;
-    let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
+    let mut iceberg_predicates = Vec::new();
+    let mut extracted_conjunctions = Vec::new();
+    let mut remaining_conjunctions = Vec::new();
 
-    let mut iceberg_condition_root = None;
-    while let Some(conjunction) = conjunctions.pop() {
+    for conjunction in predicate.conjunctions {
         match rw_expr_to_iceberg_predicate(&conjunction, fields) {
-            iceberg_predicate @ Some(_) => {
-                iceberg_condition_root = iceberg_predicate;
-                break;
-            }
-            None => {
-                ignored_conjunctions.push(conjunction);
-                continue;
-            }
-        }
-    }
-
-    let mut iceberg_condition_root = match iceberg_condition_root {
-        Some(p) => p,
-        None => {
-            return (
-                IcebergPredicate::AlwaysTrue,
-                Condition {
-                    conjunctions: ignored_conjunctions,
-                },
-            );
-        }
-    };
-
-    for rw_condition in conjunctions {
-        match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
             Some(iceberg_predicate) => {
-                iceberg_condition_root = iceberg_condition_root.and(iceberg_predicate)
+                iceberg_predicates.push(iceberg_predicate);
+                extracted_conjunctions.push(conjunction);
             }
-            None => ignored_conjunctions.push(rw_condition),
+            None => remaining_conjunctions.push(conjunction),
         }
     }
-    (
-        iceberg_condition_root,
-        Condition {
-            conjunctions: ignored_conjunctions,
+
+    let iceberg_predicate = iceberg_predicates
+        .into_iter()
+        .reduce(IcebergPredicate::and)
+        .unwrap_or(IcebergPredicate::AlwaysTrue);
+
+    ExtractIcebergPredicateResult {
+        iceberg_predicate,
+        extracted_condition: Condition {
+            conjunctions: extracted_conjunctions,
         },
-    )
+        remaining_condition: Condition {
+            conjunctions: remaining_conjunctions,
+        },
+    }
 }
 
 fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {

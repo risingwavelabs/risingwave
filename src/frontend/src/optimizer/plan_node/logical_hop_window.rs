@@ -392,7 +392,7 @@ mod test {
     ///     TableScan(date, v3)
     /// ```
     async fn test_prune_hop_window_with_order_required() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Date, "date"),
             Field::with_name(DataType::Int32, "v1"),
@@ -449,7 +449,7 @@ mod test {
         // FD: { date, v1 } --> { v2 }
         //     window_start --> window_end
         //     window_end --> window_start
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Date, "date"),
             Field::with_name(DataType::Int32, "v1"),

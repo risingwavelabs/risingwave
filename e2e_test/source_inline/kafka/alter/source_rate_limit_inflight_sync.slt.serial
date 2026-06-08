@@ -1,0 +1,137 @@
+# Regression: `ALTER SOURCE source_rate_limit` updates DB and notifies running actors via
+# `Mutation::Throttle`, but historically did not refresh `database_info.fragment(..).nodes`.
+# A subsequent reschedule (e.g. `ALTER SOURCE SET PARALLELISM`) materialized fresh source
+# actors from stale inflight nodes, so they started with the *original* `rate_limit = Some(0)`
+# and stayed paused -- their splits never produced data.
+#
+# Repro:
+#   1. CREATE SOURCE with `source_rate_limit = 0` (parallelism=1).
+#      All actors + inflight nodes start at rate_limit = Some(0).
+#   2. ALTER SOURCE ... source_rate_limit TO DEFAULT.
+#      DB → null, the running actor resumes via Throttle mutation.
+#      Without the fix, inflight `info.nodes.source_inner.rate_limit` is still Some(0).
+#   3. ALTER SOURCE SET PARALLELISM = 4.
+#      Reschedule materializes 3 fresh actors from inflight. Without the fix, those actors
+#      start with `rate_limit_rps = Some(0)` and the 3 partitions assigned to them never
+#      drain.
+#   4. Produce 100 more rows, distributed round-robin across 4 partitions. Verify the MV
+#      sees all 200. With the bug, only the 1 partition on the kept actor advances and the
+#      MV stalls below 200.
+
+control substitution on
+
+system ok
+rpk topic delete test_rl_inflight_sync || true
+
+system ok
+rpk topic create test_rl_inflight_sync --partitions 4 --replicas 1
+
+############## Seed 100 rows into kafka
+
+statement ok
+create table seed (v1 int);
+
+statement ok
+insert into seed select * from generate_series(1, 100);
+
+statement ok
+create sink seed_sink from seed with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_rl_inflight_sync',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+sleep 5s
+
+############## Step 1: CREATE SOURCE with rate_limit = 0, parallelism = 1.
+# Inflight `info.nodes.source_inner.rate_limit` is set to Some(0) here.
+
+statement ok
+SET STREAMING_PARALLELISM = 1;
+
+statement ok
+create source rl_src (v1 int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rl_inflight_sync',
+  source_rate_limit = 0
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+SET STREAMING_PARALLELISM = DEFAULT;
+
+statement ok
+flush;
+
+query T
+select rate_limit from rw_rate_limit join rw_relations on table_id = id where name = 'rl_src';
+----
+0
+
+query I
+select parallelism from rw_fragments join rw_relations on rw_fragments.table_id = rw_relations.id
+where name = 'rl_src';
+----
+1
+
+############## Step 2: ALTER source rate_limit TO DEFAULT.
+# DB cleared, the existing 1 actor is resumed by the Throttle mutation.
+# Without the fix, inflight `info.nodes.source_inner.rate_limit` stays at Some(0).
+
+statement ok
+alter source rl_src set source_rate_limit to default;
+
+# rw_rate_limit only lists fragments with a non-null rate_limit; should now be empty.
+query T
+select rate_limit from rw_rate_limit join rw_relations on table_id = id where name = 'rl_src';
+----
+
+############## Step 3: Scale parallelism 1 → 4.
+# This adds 3 brand-new source actors. Without the fix they read stale inflight nodes
+# and come up paused.
+
+statement ok
+alter source rl_src set parallelism = 4;
+
+query I
+select parallelism from rw_fragments join rw_relations on rw_fragments.table_id = rw_relations.id
+where name = 'rl_src';
+----
+4
+
+############## Step 4: Verify the upstream source is not stuck on any partition.
+# We attach an MV after the reschedule. SourceBackfill backfills directly from kafka (it
+# gets the seed 100 regardless), but data produced *after* backfill must flow through the
+# upstream Source actors -- which is exactly what the bug breaks for the 3 new actors.
+
+statement ok
+create materialized view rl_mv as select count(*) as c from rl_src;
+
+query I retry 30 backoff 1s
+select c from rl_mv;
+----
+100
+
+statement ok
+insert into seed select * from generate_series(101, 200);
+
+# With the bug, ~75 of the 100 new rows land on partitions owned by the freshly-created
+# (paused) actors and never reach the MV. With the fix all 100 flow through.
+query I retry 60 backoff 1s
+select c from rl_mv;
+----
+200
+
+############## Cleanup
+
+statement ok
+drop source rl_src cascade;
+
+statement ok
+drop sink seed_sink;
+
+statement ok
+drop table seed;
+
+system ok
+rpk topic delete test_rl_inflight_sync || true

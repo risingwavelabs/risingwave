@@ -691,6 +691,11 @@ impl ToStream for LogicalOverWindow {
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
+            // After sharding by partition key, `StreamEowcSort` gives rows in the same partition
+            // and `ORDER BY` value a deterministic tie-break based on the preserved input stream
+            // key. This matches `EowcOverWindow`'s persisted order
+            // (`partition key | order key | input pk`), so numbering functions recover with the
+            // same peer ordering as the live path.
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
             let core = self.core.clone_with_input(sort.into());

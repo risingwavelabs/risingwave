@@ -28,6 +28,7 @@ pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
 feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
+pub mod http;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -64,6 +65,7 @@ use std::sync::{Arc, LazyLock};
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono_tz::{Tz, UTC};
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
@@ -125,6 +127,7 @@ macro_rules! for_all_sinks {
                 { Kafka, $crate::sink::kafka::KafkaSink, $crate::sink::kafka::KafkaConfig },
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
+                { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
@@ -588,6 +591,7 @@ pub struct SinkWriterParam {
     pub sink_name: String,
     pub connector: String,
     pub streaming_config: StreamingConfig,
+    pub time_zone: Tz,
 }
 
 #[derive(Clone)]
@@ -684,6 +688,7 @@ impl SinkWriterParam {
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
             streaming_config: StreamingConfig::default(),
+            time_zone: UTC,
         }
     }
 }
@@ -993,6 +998,12 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
+    #[error("Http error: {0}")]
+    Http(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Mqtt error: {0}")]
     Mqtt(
         #[source]
@@ -1095,6 +1106,13 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+}
+
+#[allow(clippy::disallowed_types)]
+impl From<::iceberg::Error> for SinkError {
+    fn from(err: ::iceberg::Error) -> Self {
+        SinkError::Iceberg(anyhow!(err))
+    }
 }
 
 impl From<sea_orm::DbErr> for SinkError {

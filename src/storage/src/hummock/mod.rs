@@ -79,10 +79,10 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<impl HummockIterator>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
+    // SST filter key is the distribution key, which does not need to be the prefix of pk, and does not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
-        && !hit_sstable_bloom_filter(
+        && !hit_sstable_filter(
             &sstable,
             &(
                 Bound::Included(full_key.user_key),
@@ -120,7 +120,7 @@ pub async fn get_from_sstable_info(
     Ok(value)
 }
 
-pub fn hit_sstable_bloom_filter(
+pub fn hit_sstable_filter(
     sstable_ref: &Sstable,
     user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,

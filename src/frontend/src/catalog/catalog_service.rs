@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -95,6 +96,7 @@ pub trait CatalogWriter: Send + Sync {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()>;
 
     async fn replace_materialized_view(
@@ -238,6 +240,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -245,6 +248,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -284,7 +288,7 @@ pub trait CatalogWriter: Send + Sync {
         if_not_exists: bool,
     ) -> Result<()>;
 
-    async fn wait(&self) -> Result<()>;
+    async fn wait(&self, job_id: Option<JobId>) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -344,11 +348,19 @@ impl CatalogWriter for CatalogWriterImpl {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies, resource_type, if_not_exists)
+            .create_materialized_view(
+                table,
+                graph,
+                dependencies,
+                resource_type,
+                if_not_exists,
+                refresh_interval_sec,
+            )
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -648,10 +660,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(job_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, adaptive_parallelism_strategy, deferred)
             .await?;
         Ok(())
     }
@@ -660,10 +673,16 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_backfill_parallelism(job_id, parallelism, deferred)
+            .alter_backfill_parallelism(
+                job_id,
+                parallelism,
+                adaptive_parallelism_strategy,
+                deferred,
+            )
             .await?;
         Ok(())
     }
@@ -765,8 +784,12 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn wait(&self) -> Result<()> {
-        let version = self.meta_client.wait().await.map_err(|e| anyhow!(e))?;
+    async fn wait(&self, job_id: Option<JobId>) -> Result<()> {
+        let version = self
+            .meta_client
+            .wait(job_id)
+            .await
+            .map_err(|e| anyhow!(e))?;
         self.wait_version(version).await
     }
 }

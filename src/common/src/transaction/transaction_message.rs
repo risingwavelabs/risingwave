@@ -18,13 +18,13 @@ use tokio::sync::oneshot;
 use crate::array::StreamChunk;
 use crate::transaction::transaction_id::TxnId;
 use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End, Rollback};
-use crate::util::epoch::Epoch;
 
 #[derive(Debug, EnumAsInner)]
 pub enum TxnMsg {
     Begin(TxnId),
     Data(TxnId, StreamChunk),
-    End(TxnId, Option<oneshot::Sender<Epoch>>),
+    /// The optional sender is fired after the data has been durably persisted.
+    End(TxnId, Option<oneshot::Sender<()>>),
     Rollback(TxnId),
 }
 

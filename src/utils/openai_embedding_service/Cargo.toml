@@ -12,15 +12,7 @@ async-openai = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 

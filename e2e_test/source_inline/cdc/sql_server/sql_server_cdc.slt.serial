@@ -63,67 +63,6 @@ CREATE SOURCE mssql_source WITH (
     database.name = 'wrong_mydb',
 );
 
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
-CREATE TABLE orders (
-  order_id INT PRIMARY KEY,
-  order_date BIGINT,
-  customer_name VARCHAR,
-  price DECIMAL,
-  product_id INT,
-  order_status SMALLINT
-) WITH (
-  connector = 'sqlserver-cdc',
-  hostname = '${SQLCMDSERVER:sqlserver-server}',
-  port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:SA}',
-  password = '${SQLCMDPASSWORD}',
-  table.name = 'orders',
-  database.name = '${SQLCMDDBNAME}',
-);
-
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
-CREATE TABLE single_type (
-  id INT,
-  c_time time,
-  PRIMARY KEY (id)
-)  WITH (
-  connector = 'sqlserver-cdc',
-  hostname = '${SQLCMDSERVER:sqlserver-server}',
-  port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:SA}',
-  password = '${SQLCMDPASSWORD}',
-  table.name = 'single_type',
-  database.name = '${SQLCMDDBNAME}',
-);
-
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
-CREATE TABLE sqlserver_all_data_types (
-  id INT PRIMARY KEY,
-  c_bit BOOLEAN,
-  c_tinyint SMALLINT,
-  c_smallint SMALLINT,
-  c_int INTEGER,
-  c_bigint BIGINT,
-  c_decimal DECIMAL,
-  c_real REAL,
-  c_float FLOAT,
-  c_varchar VARCHAR,
-  c_varbinary BYTEA,
-  c_date DATE,
-  c_time TIME,
-  c_datetime2 TIMESTAMP,
-  c_datetimeoffset TIMESTAMPTZ,
-  c_money DECIMAL
-) WITH (
-  connector = 'sqlserver-cdc',
-  hostname = '${SQLCMDSERVER:sqlserver-server}',
-  port = '${SQLCMDPORT:1433}',
-  username = '${SQLCMDUSER:SA}',
-  password = '${SQLCMDPASSWORD}',
-  table.name = 'sqlserver_all_data_types',
-  database.name = '${SQLCMDDBNAME}',
-);
-
 # invalid dbname
 statement error does not match db_name
 CREATE SOURCE upper_mssql_source WITH (

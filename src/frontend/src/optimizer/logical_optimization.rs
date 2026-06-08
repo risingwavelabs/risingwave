@@ -544,12 +544,7 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
 static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Rewrite Source For Batch",
-        vec![
-            SourceToKafkaScanRule::create(),
-            // For Iceberg, we use the intermediate scan to defer metadata reading
-            // until after predicate pushdown and column pruning
-            SourceToIcebergIntermediateScanRule::create(),
-        ],
+        vec![SourceToKafkaScanRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -557,7 +552,13 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static MATERIALIZE_ICEBERG_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Materialize Iceberg Scan",
-        vec![IcebergIntermediateScanRule::create()],
+        vec![
+            // When storage mode is auto, may rewrite Iceberg intermediate scan to Hummock scan based on statistics.
+            IcebergEngineStorageSelectionRule::create(),
+            // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
+            // for delete files.
+            IcebergIntermediateScanRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -928,14 +929,12 @@ impl LogicalOptimizer {
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
-            (#[allow(unused_assignments)]
+            (#[expect(unused_assignments)]
             last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
         // Materialize Iceberg intermediate scans after predicate pushdown and column pruning.
-        // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
-        // for delete files.
         plan = plan.optimize_by_rules(&MATERIALIZE_ICEBERG_SCAN)?;
 
         plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;

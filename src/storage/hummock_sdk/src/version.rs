@@ -26,9 +26,7 @@ use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::*;
 use tracing::warn;
 
-use crate::change_log::{
-    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
-};
+use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::level::LevelsCommon;
@@ -231,6 +229,7 @@ pub struct HummockVersionCommon<T, L = T> {
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    #[deprecated]
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,
@@ -281,6 +280,7 @@ where
 }
 
 impl HummockVersion {
+    #[expect(deprecated)]
     pub fn estimated_encode_len(&self) -> usize {
         self.levels.len() * size_of::<CompactionGroupId>()
             + self
@@ -544,29 +544,6 @@ impl HummockVersion {
             vector_index_delta: Default::default(),
         }
     }
-
-    pub fn split_change_log(mut self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
-        let table_change_log = {
-            let mut table_change_log = HashMap::new();
-            for (table_id, log) in &mut self.table_change_log {
-                let change_log_iter =
-                    log.change_log_iter_mut()
-                        .map(|item| EpochNewChangeLogCommon {
-                            new_value: std::mem::take(&mut item.new_value),
-                            old_value: std::mem::take(&mut item.old_value),
-                            non_checkpoint_epochs: item.non_checkpoint_epochs.clone(),
-                            checkpoint_epoch: item.checkpoint_epoch,
-                        });
-                table_change_log.insert(*table_id, TableChangeLogCommon::new(change_log_iter));
-            }
-
-            table_change_log
-        };
-
-        let local_version = LocalHummockVersion::from(self);
-
-        (local_version, table_change_log)
-    }
 }
 
 impl<T, L> HummockVersionCommon<T, L> {
@@ -709,7 +686,7 @@ impl<T> HummockVersionDeltaCommon<T> {
                         GroupDeltaCommon::GroupConstruct(_)
                         | GroupDeltaCommon::GroupDestroy(_)
                         | GroupDeltaCommon::GroupMerge(_)
-                        | GroupDeltaCommon::TruncateTables(_) => None,
+                        | GroupDeltaCommon::PruneTableIdsFromSsts(_) => None,
                     };
                     sst_slice.into_iter().flatten()
                 })
@@ -1037,7 +1014,10 @@ pub enum GroupDeltaCommon<T> {
     GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
-    TruncateTables(HashSet<TableId>),
+    /// Prunes table ids from SST metadata.
+    ///
+    /// Serialized as protobuf `truncate_tables` for compatibility.
+    PruneTableIdsFromSsts(HashSet<TableId>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -1068,7 +1048,9 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.into_iter().collect())
+                GroupDeltaCommon::PruneTableIdsFromSsts(
+                    pb_truncate_tables.table_ids.into_iter().collect(),
+                )
             }
 
             None => panic!("delta_type is not set"),
@@ -1102,7 +1084,7 @@ where
                         .collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1134,7 +1116,7 @@ where
                     inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1169,7 +1151,7 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(
+                GroupDeltaCommon::PruneTableIdsFromSsts(
                     pb_truncate_tables.table_ids.iter().copied().collect(),
                 )
             }
@@ -1305,22 +1287,7 @@ impl From<HummockVersion> for LocalHummockVersion {
             levels: version.levels,
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version.table_watermarks,
-            table_change_log: version
-                .table_change_log
-                .into_iter()
-                .map(|(k, v)| {
-                    let epoch_new_change_logs: Vec<EpochNewChangeLogCommon<()>> = v
-                        .change_log_into_iter()
-                        .map(|epoch_new_change_log| EpochNewChangeLogCommon {
-                            new_value: Vec::new(),
-                            old_value: Vec::new(),
-                            non_checkpoint_epochs: epoch_new_change_log.non_checkpoint_epochs,
-                            checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
-                        })
-                        .collect();
-                    (k, TableChangeLogCommon::new(epoch_new_change_logs))
-                })
-                .collect(),
+            table_change_log: HashMap::default(),
             state_table_info: version.state_table_info,
             vector_indexes: version.vector_indexes,
         }

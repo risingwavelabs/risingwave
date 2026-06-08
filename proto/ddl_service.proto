@@ -163,6 +163,7 @@ message CreateMaterializedViewRequest {
   repeated uint32 dependencies = 4;
 
   bool if_not_exists = 6;
+  optional uint64 refresh_interval_sec = 7;
 }
 
 message CreateMaterializedViewResponse {
@@ -321,6 +322,7 @@ message AlterParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterParallelismResponse {}
@@ -331,6 +333,7 @@ message AlterBackfillParallelismRequest {
   // When `parallelism` is `None`, it indicates resetting to no backfill override.
   optional meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterBackfillParallelismResponse {}
@@ -619,7 +622,9 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
-message WaitRequest {}
+message WaitRequest {
+  optional uint32 job_id = 1;
+}
 
 message WaitResponse {
   WaitVersion version = 1;

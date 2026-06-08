@@ -78,6 +78,21 @@
           │   └─StreamDml { columns: [id, _row_id] }
           │     └─StreamSource
           └─StreamUpstreamSinkUnion
+- id: watermark ttl timestamptz with day interval
+  sql: |
+    explain create table t (
+      id int primary key,
+      max_event_time timestamptz,
+      watermark for max_event_time as max_event_time - interval '7' day with ttl
+    );
+  explain_output: |
+    StreamMaterialize { columns: [id, max_event_time], stream_key: [id, max_event_time], pk_columns: [id], pk_conflict: Overwrite, watermark_columns: [max_event_time] }
+    └─StreamWatermarkFilter [upsert] { watermark_descs: [Desc { column: max_event_time, expr: SubtractWithTimeZone(max_event_time, '7 days':Interval, 'UTC':Varchar) }], output_watermarks: [[max_event_time]] }
+      └─StreamUnion { all: true }
+        ├─StreamExchange { dist: HashShard(id) }
+        │ └─StreamDml { columns: [id, max_event_time] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - id: watermark ttl scan keeps stream key columns
   sql: |
     create table t (

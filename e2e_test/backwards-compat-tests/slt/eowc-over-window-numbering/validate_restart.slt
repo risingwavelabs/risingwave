@@ -1,0 +1,71 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query TIIIIIIII rowsort retry 11 backoff 1s
+SELECT
+    tm,
+    bar,
+    count(*),
+    min(rn),
+    max(rn),
+    min(rk),
+    max(rk),
+    min(dr),
+    max(dr)
+FROM eowc_rank_mv
+GROUP BY tm, bar
+ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 1 1 1 1 1 1 1 1
+2024-01-01 00:00:00+00:00 2 1 1 1 1 1 1 1
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:40+00', 12, 1);
+
+query TIIIIIIII rowsort retry 11 backoff 1s
+SELECT
+    tm,
+    bar,
+    count(*),
+    min(rn),
+    max(rn),
+    min(rk),
+    max(rk),
+    min(dr),
+    max(dr)
+FROM eowc_rank_mv
+GROUP BY tm, bar
+ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 1 1 1 1 1 1 1 1
+2024-01-01 00:00:00+00:00 2 1 1 1 1 1 1 1
+2024-01-01 00:00:20+00:00 1 2 2 3 2 2 2 2
+2024-01-01 00:00:20+00:00 2 2 2 3 2 2 2 2
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:40+00', 23, 2);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 01:00:00+00', 14, 1);
+
+query TIIIIIIII rowsort retry 11 backoff 1s
+SELECT
+    tm,
+    bar,
+    count(*),
+    min(rn),
+    max(rn),
+    min(rk),
+    max(rk),
+    min(dr),
+    max(dr)
+FROM eowc_rank_mv
+GROUP BY tm, bar
+ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 1 1 1 1 1 1 1 1
+2024-01-01 00:00:00+00:00 2 1 1 1 1 1 1 1
+2024-01-01 00:00:20+00:00 1 2 2 3 2 2 2 2
+2024-01-01 00:00:20+00:00 2 2 2 3 2 2 2 2
+2024-01-01 00:00:40+00:00 1 1 4 4 4 4 3 3
+2024-01-01 00:00:40+00:00 2 1 4 4 4 4 3 3

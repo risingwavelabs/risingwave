@@ -234,6 +234,7 @@ pub async fn sst_dump_via_sstable_store(
         uncompressed_file_size: 0,
         range_tombstone_count: 0,
         bloom_filter_kind: Default::default(),
+        filter_type: Default::default(),
         sst_size: 0,
         vnode_statistics: None,
     }
@@ -248,7 +249,7 @@ pub async fn sst_dump_via_sstable_store(
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable.estimate_size());
+    println!("File Size: {}", sstable_meta.estimated_size);
 
     println!("Key Range:");
     println!(

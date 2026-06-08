@@ -1852,7 +1852,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1916,7 +1916,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_semi_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1996,7 +1996,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2071,7 +2071,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(DataType::Int32, format!("v{}", i)))
             .collect();
@@ -2242,7 +2242,7 @@ mod tests {
     #[tokio::test]
     async fn test_join_column_prune_with_order_required() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2326,7 +2326,7 @@ mod tests {
         // Right Semi/Anti Join:
         //  Schema: [r0, r1, r2]
         //  FD: r0 --> {r1, r2}
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let left = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "l0"),

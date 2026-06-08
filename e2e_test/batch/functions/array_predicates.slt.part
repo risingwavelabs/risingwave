@@ -1,0 +1,54 @@
+query T
+select array[1,2,3] @> array[2,3];
+----
+t
+
+query T
+select array[1,2,3] @> array[3,4];
+----
+f
+
+query T
+select array[2,3] <@ array[1,2,3];
+----
+t
+
+query T
+select array[2,4] <@ array[1,2,3];
+----
+f
+
+query T
+select array[1,2,3] && array[3,4];
+----
+t
+
+query T
+select array[1,2,3] && array[4,5];
+----
+f
+
+query T
+select array_overlaps(array['a','b'], array['b','c']);
+----
+t
+
+query T
+select array_is_overlap(array['a','b'], array['c','d']);
+----
+f
+
+query T
+select array_is_intersect(array['a','b'], array['b','c']);
+----
+t
+
+query T
+select array[1,null] && array[null,2];
+----
+f
+
+query T
+select array[null]::int[] && array[null]::int[];
+----
+f

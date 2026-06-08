@@ -539,7 +539,7 @@ impl Sink for BigQuerySink {
                 .get(project_id, dataset_id, table_id, None)
                 .await
             {
-                Err(BQError::RequestError(_)) => {
+                Err(BQError::ResponseError { error }) if error.error.code == 404 => {
                     // early return: no need to query schema to check column and type
                     return self
                         .create_table(
@@ -839,6 +839,7 @@ impl StorageWriterClient {
         let conn_options = ConnectionOptions {
             connect_timeout: CONNECT_TIMEOUT,
             timeout: CONNECTION_TIMEOUT,
+            ..Default::default()
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
         let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)

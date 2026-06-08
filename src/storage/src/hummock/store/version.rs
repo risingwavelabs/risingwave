@@ -51,6 +51,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::utils::{
     MemoryTracker, filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts,
     range_overlap, search_sst_idx,
@@ -61,7 +62,7 @@ use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
     ReadVersionTuple, Sstable, SstableIterator, get_from_batch, get_from_sstable_info,
-    hit_sstable_bloom_filter,
+    hit_sstable_filter,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -189,7 +190,7 @@ impl StagingVersion {
             .chain(self.uploading_imms.iter())
             .filter(move |imm| {
                 // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
-                imm.min_epoch() <= max_epoch_inclusive
+                imm.epoch() <= max_epoch_inclusive
                     && imm.table_id == table_id
                     && range_overlap(
                         &(left, right),
@@ -437,10 +438,10 @@ impl HummockReadVersion {
                     if self.is_replicated {
                         self.staging
                             .uploading_imms
-                            .retain(|imm| imm.min_epoch() > committed_epoch);
+                            .retain(|imm| imm.epoch() > committed_epoch);
                         self.staging
                             .pending_imms
-                            .retain(|(imm, _)| imm.min_epoch() > committed_epoch);
+                            .retain(|(imm, _)| imm.epoch() > committed_epoch);
                     } else {
                         self.staging
                             .pending_imms
@@ -449,10 +450,10 @@ impl HummockReadVersion {
                             .chain(self.staging.uploading_imms.iter())
                             .for_each(|imm| {
                                 assert!(
-                                    imm.min_epoch() > committed_epoch,
+                                    imm.epoch() > committed_epoch,
                                     "imm of table {} min_epoch {} should be greater than committed_epoch {}",
                                     imm.table_id,
-                                    imm.min_epoch(),
+                                    imm.epoch(),
                                     committed_epoch
                                 )
                             });
@@ -654,7 +655,7 @@ impl HummockVersionReader {
         // 1. read staging data
         for imm in &imms {
             // skip imm that only holding out-of-date data
-            if imm.max_epoch() < min_epoch {
+            if imm.epoch() < min_epoch {
                 continue;
             }
 
@@ -687,9 +688,10 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
-            Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id())
-        });
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_filter(dist_key.as_ref(), table_id.as_raw_id()));
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
@@ -1035,10 +1037,10 @@ impl HummockVersionReader {
         );
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_prefix_hash = read_options
+        let filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.as_raw_id()));
+            .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.prefetch {
             sst_read_options.must_iterated_end_user_key =
@@ -1052,8 +1054,8 @@ impl HummockVersionReader {
                 .sstable(sstable_info, local_stats)
                 .await?;
 
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref()
-                && !hit_sstable_bloom_filter(
+            if let Some(prefix_hash) = filter_prefix_hash.as_ref()
+                && !hit_sstable_filter(
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
@@ -1104,8 +1106,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
 
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
@@ -1141,8 +1143,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
@@ -1180,13 +1182,16 @@ impl HummockVersionReader {
 
     pub async fn iter_log(
         &self,
-        version: PinnedVersion,
         epoch_range: (u64, u64),
         key_range: TableKeyRange,
         options: ReadLogOptions,
+        table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = {
-            let table_change_logs = version.table_change_log_read_lock();
+        // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
+        let change_log: Vec<_> = {
+            let table_change_logs = table_change_log_manager
+                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                .await?;
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {
@@ -1520,6 +1525,7 @@ mod tests {
             uncompressed_file_size: 0,
             range_tombstone_count: 0,
             bloom_filter_kind: PbBloomFilterType::Sstable,
+            filter_type: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
         }

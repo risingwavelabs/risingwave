@@ -218,8 +218,10 @@ impl Build for UserDefinedFunction {
                 .to_string(),
         );
 
+        let children: Vec<BoxedExpression> = udf.children.iter().map(build_child).try_collect()?;
+
         Ok(Self {
-            children: udf.children.iter().map(build_child).try_collect()?,
+            children,
             arg_types,
             return_type,
             arg_schema,
@@ -260,7 +262,7 @@ struct Metrics {
     /// Number of failed UDF calls.
     failure_count: LabelGuardedIntCounter,
     /// Total number of retried UDF calls.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     retry_count: LabelGuardedIntCounter,
     /// Input chunk rows of UDF calls.
     input_chunk_rows: LabelGuardedHistogram,

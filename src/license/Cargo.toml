@@ -16,7 +16,7 @@ jsonwebtoken = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_telemetry_event = { workspace = true }
 serde = { workspace = true }
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tracing = "0.1"

@@ -33,9 +33,11 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -50,6 +52,7 @@ use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -305,6 +308,7 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -354,6 +358,7 @@ impl CatalogWriter for MockCatalogWriter {
             dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
+            None,
         )
         .await?;
         Ok(())
@@ -722,6 +727,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: PbTableParallelism,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -731,6 +737,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: Option<PbTableParallelism>,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -802,7 +809,7 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self, _job_id: Option<JobId>) -> Result<()> {
         Ok(())
     }
 }
@@ -1430,6 +1437,25 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> RpcResult<TableChangeLogs> {
+        Ok(HashMap::default())
+    }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<risingwave_hummock_sdk::CompactionGroupId>,
+        _configs: Vec<PbMutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 }
 

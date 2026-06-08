@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
-use crate::handler::create_connection::print_connection_params;
+use crate::handler::create_connection::print_connection_params_with_secret_visibility;
 
 #[derive(Fields)]
 struct RwConnection {
@@ -64,11 +64,13 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                         rw_connection.provider = conn.provider().into();
                     }
                     risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
-                        rw_connection.connection_params = print_connection_params(
-                            &reader.auth_context.database,
-                            params,
-                            &catalog_reader,
-                        );
+                        rw_connection.connection_params =
+                            print_connection_params_with_secret_visibility(
+                                &reader.auth_context.database,
+                                params,
+                                &catalog_reader,
+                                current_user,
+                            );
                     }
                 };
 
