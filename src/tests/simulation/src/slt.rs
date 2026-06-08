@@ -82,6 +82,11 @@ impl SqlCmd {
     }
 }
 
+const MADSIM_IGNORE_FILES: &[&str] = &[
+    // This SLT depends on LocalStack and shell commands, which are unavailable in simulation.
+    "aws_secrets_manager.slt",
+];
+
 const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
@@ -326,7 +331,10 @@ mod runner {
     #[macro_export]
     macro_rules! evaluate_skip {
         ($env:expr, $path:expr) => {
-            if let Some(partitioner) = PARTITIONER.as_ref()
+            if MADSIM_IGNORE_FILES.iter().any(|s| $path.ends_with(s)) {
+                println!("[skip madsim] {}", $path.display());
+                continue;
+            } else if let Some(partitioner) = PARTITIONER.as_ref()
                 && !partitioner.matches($path.to_str().unwrap())
             {
                 println!("[skip partition] {}", $path.display());
