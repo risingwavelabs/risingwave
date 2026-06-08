@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
-use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
@@ -36,7 +35,7 @@ use risingwave_pb::monitor_service::{
     TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
-use risingwave_storage::hummock::event_handler::refiller::TableCacheRefillContext;
+use risingwave_storage::hummock::event_handler::refiller::TableCacheRefillContextMap;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -53,7 +52,7 @@ pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
-    table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
+    table_cache_refill_context_map: Option<Arc<RwLock<TableCacheRefillContextMap>>>,
 }
 
 impl MonitorServiceImpl {
@@ -62,14 +61,14 @@ impl MonitorServiceImpl {
         server_config: ServerConfig,
         meta_cache: Option<MetaCache>,
         block_cache: Option<BlockCache>,
-        table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
+        table_cache_refill_context_map: Option<Arc<RwLock<TableCacheRefillContextMap>>>,
     ) -> Self {
         Self {
             stream_mgr,
             profile_service: ProfileServiceImpl::new(server_config),
             meta_cache,
             block_cache,
-            table_cache_refill_context,
+            table_cache_refill_context_map,
         }
     }
 }
@@ -448,13 +447,13 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetTableCacheRefillStatsRequest>,
     ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
-        let Some(context) = &self.table_cache_refill_context else {
+        let Some(context_map) = &self.table_cache_refill_context_map else {
             return Ok(Response::new(GetTableCacheRefillStatsResponse {
                 stats: "{}".to_owned(),
             }));
         };
 
-        let stats = TableCacheRefillStats::from(&*context.read());
+        let stats = TableCacheRefillStats::from(&*context_map.read());
         let json_value = serde_json::to_value(stats).map_err(|err| {
             Status::internal(format!(
                 "failed to serialize stats: {e}",
@@ -474,75 +473,45 @@ impl MonitorService for MonitorServiceImpl {
 }
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TableCacheRefillStats {
-    streaming: HashMap<u32, Vec<u16>>,
-    serving: HashMap<u32, Vec<u16>>,
+    contexts: HashMap<u32, TableCacheRefillTableStats>,
     policies: HashMap<u32, String>,
-    default_policy: String,
-    internal: TableCacheRefillInternalStats,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct TableCacheRefillInternalStats {
-    streaming: HashMap<u32, Vec<Vec<u16>>>,
-    serving: HashMap<u32, Vec<u16>>,
+struct TableCacheRefillTableStats {
+    streaming: Option<Vec<u16>>,
+    serving: Option<Vec<u16>>,
+    policy: String,
 }
 
-impl From<&TableCacheRefillContext> for TableCacheRefillStats {
-    fn from(context: &TableCacheRefillContext) -> Self {
+impl From<&TableCacheRefillContextMap> for TableCacheRefillStats {
+    fn from(context_map: &TableCacheRefillContextMap) -> Self {
         fn bitmap_to_vnodes(bitmap: &risingwave_common::bitmap::Bitmap) -> Vec<u16> {
             bitmap.iter_ones().map(|idx| idx as u16).collect()
         }
 
-        let streaming = context
-            .streaming
+        let contexts: HashMap<_, _> = context_map
             .iter()
-            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
-            .collect();
-
-        let serving = context
-            .serving
-            .iter()
-            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
-            .collect();
-
-        let policies = context
-            .policies
-            .iter()
-            .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
-            .collect();
-
-        let read_version_mapping = context.read_version_mapping.read();
-        let internal_streaming = read_version_mapping
-            .iter()
-            .map(|(table_id, mappings)| {
-                let vnodes = mappings
-                    .iter()
-                    .sorted_by_key(|(version, _)| **version)
-                    .map(|(_, read_version)| {
-                        let vnodes = read_version.read().vnodes();
-                        bitmap_to_vnodes(vnodes.as_ref())
-                    })
-                    .collect();
-                (table_id.as_raw_id(), vnodes)
+            .map(|(table_id, context)| {
+                (
+                    table_id.as_raw_id(),
+                    TableCacheRefillTableStats {
+                        streaming: context
+                            .streaming_vnode_bitmap
+                            .as_ref()
+                            .map(bitmap_to_vnodes),
+                        serving: context.serving_vnode_bitmap.as_ref().map(bitmap_to_vnodes),
+                        policy: context.policy.to_string(),
+                    },
+                )
             })
             .collect();
-
-        let internal_serving = context
-            .serving_table_vnode_mapping
+        let policies = contexts
             .iter()
-            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .map(|(table_id, context)| (*table_id, context.policy.clone()))
             .collect();
 
-        Self {
-            streaming,
-            serving,
-            policies,
-            default_policy: context.default_policy.to_string(),
-            internal: TableCacheRefillInternalStats {
-                streaming: internal_streaming,
-                serving: internal_serving,
-            },
-        }
+        Self { contexts, policies }
     }
 }
 

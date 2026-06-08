@@ -51,7 +51,7 @@ use crate::hummock::compactor::{
     CompactionAwaitTreeRegRef, CompactorContext, new_compaction_await_tree_reg_ref,
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
-use crate::hummock::event_handler::refiller::TableCacheRefillContext;
+use crate::hummock::event_handler::refiller::TableCacheRefillContextMap;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockObserverEvent, HummockVersionUpdate,
     ReadOnlyReadVersionMapping,
@@ -126,7 +126,7 @@ pub struct HummockStorage {
 
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 
-    table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
+    table_cache_refill_context_map: Arc<RwLock<TableCacheRefillContextMap>>,
 
     table_change_log_manager: Arc<TableChangeLogManager>,
 }
@@ -259,7 +259,9 @@ impl HummockStorage {
             simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
                 options.time_travel_version_cache_capacity,
             )),
-            table_cache_refill_context: hummock_event_handler.table_cache_refill_context().clone(),
+            table_cache_refill_context_map: hummock_event_handler
+                .table_cache_refill_context_map()
+                .clone(),
             table_change_log_manager,
         };
 
@@ -619,8 +621,8 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
-        &self.table_cache_refill_context
+    pub fn table_cache_refill_context_map(&self) -> &Arc<RwLock<TableCacheRefillContextMap>> {
+        &self.table_cache_refill_context_map
     }
 
     pub fn object_id_manager(&self) -> &ObjectIdManagerRef {

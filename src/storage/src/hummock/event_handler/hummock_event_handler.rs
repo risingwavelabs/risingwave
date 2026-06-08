@@ -47,7 +47,7 @@ use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
 use crate::hummock::event_handler::refiller::{
-    CacheRefillerEvent, SpawnRefillTask, TableCacheRefillContext,
+    CacheRefillerEvent, SpawnRefillTask, TableCacheRefillContextMap,
 };
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
@@ -240,6 +240,100 @@ fn serving_table_vnode_mappings_to_map(
         .collect()
 }
 
+#[derive(Default)]
+struct LocalReadVersions {
+    by_instance: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
+    by_table: HashMap<TableId, HashMap<LocalInstanceId, HummockReadVersionRef>>,
+}
+
+impl LocalReadVersions {
+    fn insert(
+        &mut self,
+        instance_id: LocalInstanceId,
+        table_id: TableId,
+        read_version: HummockReadVersionRef,
+    ) {
+        assert!(
+            !self.by_instance.contains_key(&instance_id),
+            "duplicated local read version instance_id {}",
+            instance_id
+        );
+        assert!(
+            !self
+                .by_table
+                .get(&table_id)
+                .is_some_and(|read_versions| read_versions.contains_key(&instance_id)),
+            "duplicated local read version table_id {} instance_id {}",
+            table_id,
+            instance_id
+        );
+        self.by_instance
+            .insert(instance_id, (table_id, read_version.clone()));
+        self.by_table
+            .entry(table_id)
+            .or_default()
+            .insert(instance_id, read_version);
+    }
+
+    fn remove(&mut self, instance_id: LocalInstanceId) -> (TableId, HummockReadVersionRef) {
+        let (table_id, read_version) = self.by_instance.remove(&instance_id).unwrap_or_else(|| {
+            panic!(
+                "DestroyHummockInstance nonexistent instance instance_id {}",
+                instance_id
+            )
+        });
+        let table_read_versions = self.by_table.get_mut(&table_id).unwrap_or_else(|| {
+            panic!(
+                "DestroyHummockInstance table_id {} instance_id {} fail in local mapping",
+                table_id, instance_id
+            )
+        });
+        let removed = table_read_versions.remove(&instance_id).unwrap_or_else(|| {
+            panic!(
+                "DestroyHummockInstance nonexistent instance in local mapping table_id {} instance_id {}",
+                table_id, instance_id
+            )
+        });
+        debug_assert!(Arc::ptr_eq(&read_version, &removed));
+        if table_read_versions.is_empty() {
+            self.by_table.remove(&table_id);
+        }
+        (table_id, read_version)
+    }
+
+    fn get(&self, instance_id: &LocalInstanceId) -> Option<&(TableId, HummockReadVersionRef)> {
+        self.by_instance.get(instance_id)
+    }
+
+    fn contains_instance(&self, instance_id: &LocalInstanceId) -> bool {
+        self.by_instance.contains_key(instance_id)
+    }
+
+    fn instance_ids(&self) -> impl Iterator<Item = LocalInstanceId> + '_ {
+        self.by_instance.keys().copied()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.by_instance.is_empty() && self.by_table.is_empty()
+    }
+
+    fn table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.by_table.keys().copied()
+    }
+
+    fn table_vnodes(&self, table_id: TableId) -> Option<Bitmap> {
+        let read_versions = self.by_table.get(&table_id)?;
+        let mut vnodes = None;
+        for read_version in read_versions.values() {
+            let read_version_vnodes = read_version.read().vnodes();
+            let current_vnodes =
+                vnodes.get_or_insert_with(|| Bitmap::zeros(read_version_vnodes.as_ref().len()));
+            *current_vnodes |= read_version_vnodes.as_ref();
+        }
+        vnodes
+    }
+}
+
 pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
@@ -247,7 +341,7 @@ pub(crate) struct HummockEventHandler {
     pending_observer_events: VecDeque<HummockObserverEvent>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
-    local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
+    local_read_versions: LocalReadVersions,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
@@ -413,13 +507,8 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let mut refiller = CacheRefiller::new(
-            role,
-            refill_config,
-            sstable_store,
-            spawn_refill_task,
-            read_version_mapping.clone(),
-        );
+        let mut refiller =
+            CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
         let mut pending_observer_events = VecDeque::new();
         while let Ok(event) = observer_event_rx.try_recv() {
             pending_observer_events.push_back(event);
@@ -447,7 +536,7 @@ impl HummockEventHandler {
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
-            local_read_version_mapping: Default::default(),
+            local_read_versions: Default::default(),
             uploader,
             refiller,
             last_instance_id: 0,
@@ -475,15 +564,17 @@ impl HummockEventHandler {
         self.uploader.buffer_tracker()
     }
 
-    pub(crate) fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
-        self.refiller.table_cache_refill_context()
+    pub(crate) fn table_cache_refill_context_map(
+        &self,
+    ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
+        self.refiller.table_cache_refill_context_map()
     }
 }
 
 // Handler for different events
 impl HummockEventHandler {
-    /// This function will be performed under the protection of the `read_version_mapping` read
-    /// lock, and add write lock on each `read_version` operation
+    /// Applies the function to local read versions selected by instance ids.
+    /// Each read version is protected by its own write lock.
     fn for_each_read_version(
         &self,
         instances: impl IntoIterator<Item = LocalInstanceId>,
@@ -507,7 +598,7 @@ impl HummockEventHandler {
         let mut pending = VecDeque::new();
         let mut total_count = 0;
         for instance_id in instances {
-            let Some((_, read_version)) = self.local_read_version_mapping.get(&instance_id) else {
+            let Some((_, read_version)) = self.local_read_versions.get(&instance_id) else {
                 continue;
             };
             total_count += 1;
@@ -539,7 +630,7 @@ impl HummockEventHandler {
 
         while let Some(instance_id) = pending.pop_front() {
             let (_, read_version) = self
-                .local_read_version_mapping
+                .local_read_versions
                 .get(&instance_id)
                 .expect("have checked exist before");
             match read_version.try_write_for(TRY_LOCK_TIMEOUT) {
@@ -615,12 +706,9 @@ impl HummockEventHandler {
 
         if table_ids.is_none() {
             assert!(
-                self.local_read_version_mapping.is_empty(),
+                self.local_read_versions.is_empty(),
                 "read version mapping not empty when clear. remaining tables: {:?}",
-                self.local_read_version_mapping
-                    .values()
-                    .map(|(_, read_version)| read_version.read().table_id())
-                    .collect_vec()
+                self.local_read_versions.table_ids().collect_vec()
             );
         }
 
@@ -641,6 +729,10 @@ impl HummockEventHandler {
                 Self::apply_table_refill_runtime_config(&mut self.refiller, operation, config);
             }
         }
+    }
+
+    fn streaming_table_vnodes(&self, table_id: TableId) -> Option<Bitmap> {
+        self.local_read_versions.table_vnodes(table_id)
     }
 
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
@@ -737,7 +829,7 @@ impl HummockEventHandler {
 
         {
             self.for_each_read_version(
-                self.local_read_version_mapping.keys().cloned(),
+                self.local_read_versions.instance_ids(),
                 |_, read_version| {
                     for CacheRefillerEvent {
                         new_pinned_version, ..
@@ -847,7 +939,7 @@ impl HummockEventHandler {
                 init_epoch,
             } => {
                 let table_id = self
-                    .local_read_version_mapping
+                    .local_read_versions
                     .get(&instance_id)
                     .expect("should exist")
                     .0;
@@ -856,7 +948,7 @@ impl HummockEventHandler {
             }
             HummockEvent::ImmToUploader { instance_id, imms } => {
                 assert!(
-                    self.local_read_version_mapping.contains_key(&instance_id),
+                    self.local_read_versions.contains_instance(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {:?}",
                     instance_id,
                     imms.first().map(|(imm, _)| imm.table_id),
@@ -906,8 +998,11 @@ impl HummockEventHandler {
                 );
 
                 {
-                    self.local_read_version_mapping
-                        .insert(instance_id, (table_id, basic_read_version.clone()));
+                    self.local_read_versions.insert(
+                        instance_id,
+                        table_id,
+                        basic_read_version.clone(),
+                    );
                     let mut read_version_mapping_guard = self.read_version_mapping.write();
 
                     read_version_mapping_guard
@@ -935,18 +1030,22 @@ impl HummockEventHandler {
                     }
                 }
 
-                self.refiller.update_table_cache_refill_vnodes(table_id);
+                self.refiller
+                    .update_streaming_table_vnodes(table_id, self.streaming_table_vnodes(table_id));
             }
 
             HummockEvent::DestroyReadVersion { instance_id } => {
                 let table_id = self
-                    .local_read_version_mapping
+                    .local_read_versions
                     .get(&instance_id)
-                    .unwrap_or_else(|| panic!("query inexist instance instance_id {instance_id}"))
+                    .unwrap_or_else(|| {
+                        panic!("query nonexistent instance instance_id {instance_id}")
+                    })
                     .0;
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
-                self.refiller.update_table_cache_refill_vnodes(table_id);
+                self.refiller
+                    .update_streaming_table_vnodes(table_id, self.streaming_table_vnodes(table_id));
             }
             HummockEvent::GetMinUncommittedObjectId { result_tx } => {
                 let _ = result_tx
@@ -977,15 +1076,7 @@ impl HummockEventHandler {
         {
             {
                 debug!("read version deregister: instance_id: {}", instance_id);
-                let (table_id, _) = self
-                    .local_read_version_mapping
-                    .remove(&instance_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "DestroyHummockInstance inexist instance instance_id {}",
-                            instance_id
-                        )
-                    });
+                let (table_id, _) = self.local_read_versions.remove(instance_id);
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
                     .get_mut(&table_id)
@@ -997,7 +1088,7 @@ impl HummockEventHandler {
                     });
                 entry.remove(&instance_id).unwrap_or_else(|| {
                     panic!(
-                        "DestroyHummockInstance inexist instance table_id {} instance_id {}",
+                        "DestroyHummockInstance nonexistent instance table_id {} instance_id {}",
                         table_id, instance_id
                     )
                 });
@@ -1091,11 +1182,12 @@ mod tests {
     };
     use crate::hummock::event_handler::{
         HummockEvent, HummockEventHandler, HummockObserverEvent, HummockReadVersionRef,
-        LocalInstanceGuard,
+        LocalInstanceGuard, LocalInstanceId,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
+    use crate::hummock::store::version::HummockReadVersion;
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
@@ -1151,7 +1243,6 @@ mod tests {
             CacheRefillConfig::from_storage_opts(&storage_opt),
             mock_sstable_store().await,
             CacheRefiller::default_spawn_refill_task(),
-            Arc::new(RwLock::new(HashMap::new())),
         )
     }
 
@@ -1230,12 +1321,10 @@ mod tests {
             CacheRefiller::default_spawn_refill_task(),
         );
 
-        let context = event_handler.table_cache_refill_context().read();
-        assert_eq!(
-            context.policies.get(&table_id),
-            Some(&CacheRefillPolicy::Serving)
-        );
-        assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+        let context_map = event_handler.table_cache_refill_context_map().read();
+        let context = context_map.get(&table_id).unwrap();
+        assert_eq!(context.policy, CacheRefillPolicy::Serving);
+        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
     }
 
     #[tokio::test]
@@ -1291,12 +1380,10 @@ mod tests {
             CacheRefiller::default_spawn_refill_task(),
         );
 
-        let context = event_handler.table_cache_refill_context().read();
-        assert_eq!(
-            context.policies.get(&table_id),
-            Some(&CacheRefillPolicy::Serving)
-        );
-        drop(context);
+        let context_map = event_handler.table_cache_refill_context_map().read();
+        let context = context_map.get(&table_id).unwrap();
+        assert_eq!(context.policy, CacheRefillPolicy::Serving);
+        drop(context_map);
         assert!(matches!(
             event_handler.pending_observer_events.front(),
             Some(HummockObserverEvent::VersionUpdate(_))
@@ -1344,17 +1431,91 @@ mod tests {
                 ..Default::default()
             },
         );
+        HummockEventHandler::apply_table_refill_runtime_config(
+            &mut refiller,
+            Operation::Update,
+            PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(TableCacheRefillPolicies {
+                    policies: vec![PbTableCacheRefillPolicy {
+                        table_id: table_id.as_raw_id(),
+                        policy: PbCacheRefillPolicy::Serving as i32,
+                    }],
+                }),
+                ..Default::default()
+            },
+        );
 
-        let context = refiller.table_cache_refill_context().read();
-        assert_eq!(
-            context.policies.get(&table_id),
-            Some(&CacheRefillPolicy::Disabled)
+        let context_map = refiller.table_cache_refill_context_map().read();
+        let context = context_map.get(&table_id).unwrap();
+        assert_eq!(context.policy, CacheRefillPolicy::Serving);
+        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
+    }
+
+    #[test]
+    fn test_local_read_versions_tracks_per_table_vnodes() {
+        fn read_version(
+            table_id: TableId,
+            instance_id: LocalInstanceId,
+            committed_version: &PinnedVersion,
+            vnode_range: std::ops::Range<usize>,
+        ) -> HummockReadVersionRef {
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                table_id,
+                instance_id,
+                committed_version.clone(),
+                Arc::new(Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, vnode_range)),
+            )))
+        }
+
+        fn assert_vnodes(vnodes: Bitmap, expected: std::ops::Range<usize>) {
+            assert_eq!(vnodes.count_ones(), expected.len());
+            for vnode in expected {
+                assert!(vnodes.is_set(vnode));
+            }
+        }
+
+        let table_id = TableId::new(233);
+        let other_table_id = TableId::new(234);
+        let committed_version = RecentVersions::new(
+            pinned_version_for_test(1),
+            10,
+            Arc::new(HummockStateStoreMetrics::unused()),
+        )
+        .latest_version()
+        .clone();
+        let read_version_1 = read_version(table_id, 1, &committed_version, 0..8);
+        let read_version_2 = read_version(table_id, 2, &committed_version, 8..16);
+        let other_read_version = read_version(other_table_id, 3, &committed_version, 32..40);
+
+        let mut local_read_versions = super::LocalReadVersions::default();
+        local_read_versions.insert(1, table_id, read_version_1.clone());
+        local_read_versions.insert(2, table_id, read_version_2);
+        local_read_versions.insert(3, other_table_id, other_read_version);
+
+        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 0..16);
+        assert_vnodes(
+            local_read_versions.table_vnodes(other_table_id).unwrap(),
+            32..40,
         );
-        assert!(!context.serving.contains_key(&table_id));
-        assert_eq!(
-            context.serving_table_vnode_mapping.get(&table_id),
-            Some(&serving_vnodes)
-        );
+
+        read_version_1
+            .write()
+            .update_vnode_bitmap(Arc::new(Bitmap::from_range(
+                VirtualNode::COUNT_FOR_TEST,
+                16..24,
+            )));
+        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 8..24);
+
+        let (removed_table_id, removed_read_version) = local_read_versions.remove(1);
+        assert_eq!(removed_table_id, table_id);
+        assert!(Arc::ptr_eq(&removed_read_version, &read_version_1));
+        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 8..16);
+
+        local_read_versions.remove(2);
+        assert!(local_read_versions.table_vnodes(table_id).is_none());
+        assert!(!local_read_versions.is_empty());
+        local_read_versions.remove(3);
+        assert!(local_read_versions.is_empty());
     }
 
     #[tokio::test]
