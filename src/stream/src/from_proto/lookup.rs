@@ -27,6 +27,8 @@ use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
+impl_stream_node_body!(Lookup(LookupNode) => LookupExecutorBuilder);
+
 impl ExecutorBuilder for LookupExecutorBuilder {
     type Node = LookupNode;
 
