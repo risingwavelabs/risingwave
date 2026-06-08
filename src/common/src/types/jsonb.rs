@@ -579,27 +579,6 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
     }
 }
 
-impl ToSql for JsonbVal {
-    accepts!(JSON, JSONB);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        if matches!(*ty, Type::JSONB) {
-            out.put_u8(1);
-        }
-        write!(out, "{}", self.0).unwrap();
-        Ok(IsNull::No)
-    }
-}
-
 impl<'a> FromSql<'a> for JsonbVal {
     accepts!(JSON, JSONB);
 
@@ -655,5 +634,26 @@ impl ToSql for JsonbRef<'_> {
         }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_backward_compatible() {
+        use std::hash::Hasher as _;
+
+        // Hash of sample input `"foo"` required to be the the magic number below.
+        // See #25336 for how the backward compatibility is doomed.
+        let s = r#""foo""#;
+        let j: JsonbVal = s.parse().unwrap();
+        let expected = expect_test::expect!["10172337927241793445"];
+
+        let mut state = std::hash::DefaultHasher::new();
+        j.hash(&mut state);
+        let actual = state.finish();
+        expected.assert_eq(&actual.to_string());
     }
 }

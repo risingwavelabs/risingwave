@@ -22,9 +22,9 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -35,7 +35,11 @@ use tracing::{info, warn};
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
+use crate::barrier::checkpoint::{
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+};
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
@@ -46,7 +50,9 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
-use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
+use crate::stream::{
+    SourceChange, StreamFragmentGraph, UpstreamSinkInfo, cleanup_dropped_streaming_jobs,
+};
 
 #[derive(Debug)]
 pub(crate) struct UpstreamSinkRecoveryInfo {
@@ -77,26 +83,116 @@ pub struct RenderedDatabaseRuntimeInfo {
     pub job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
     pub stream_actors: HashMap<ActorId, StreamActor>,
     pub source_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    /// Batch refresh jobs rendered during `render_runtime_info`.
+    pub batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
 }
 
 pub fn render_runtime_info(
     actor_id_generator: &AtomicU32,
     worker_nodes: &ActiveStreamingWorkerNodes,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     recovery_context: &LoadedRecoveryContext,
     database_id: DatabaseId,
 ) -> MetaResult<Option<RenderedDatabaseRuntimeInfo>> {
-    let Some(per_database_context) = recovery_context.fragment_context.for_database(database_id)
+    let Some(mut per_database_context) =
+        recovery_context.fragment_context.for_database(database_id)
     else {
         return Ok(None);
     };
 
     assert!(!per_database_context.is_empty());
 
+    // Extract batch refresh jobs before rendering via `render_actor_assignments`.
+    // They will be rendered independently using the unified `render_actors_and_build_job_info`.
+    let batch_refresh_job_ids: HashSet<JobId> = per_database_context
+        .job_map
+        .iter()
+        .filter(|(_, model)| model.refresh_interval_sec.is_some())
+        .map(|(job_id, _)| *job_id)
+        .collect();
+
+    let mut batch_refresh_logical = HashMap::new();
+    if !batch_refresh_job_ids.is_empty() {
+        let batch_refresh_fragment_ids: HashSet<FragmentId> = batch_refresh_job_ids
+            .iter()
+            .flat_map(|job_id| {
+                per_database_context
+                    .job_fragments
+                    .get(job_id)
+                    .unwrap()
+                    .keys()
+                    .copied()
+            })
+            .collect();
+
+        for &job_id in &batch_refresh_job_ids {
+            let fragments = per_database_context.job_fragments.remove(&job_id).unwrap();
+            let downstreams = fragments
+                .keys()
+                .filter_map(|fid| {
+                    recovery_context
+                        .fragment_relations
+                        .get(fid)
+                        .map(|r| (*fid, r.clone()))
+                })
+                .collect();
+            batch_refresh_logical.insert(
+                job_id,
+                BatchRefreshLogicalFragments {
+                    fragments,
+                    downstreams,
+                },
+            );
+        }
+
+        // Remove ensembles that only contain batch refresh fragments.
+        per_database_context.ensembles.retain(|ensemble| {
+            !ensemble
+                .component_fragments()
+                .all(|fid| batch_refresh_fragment_ids.contains(&fid))
+        });
+    }
+
+    // Render actors for each batch refresh job.
+    let mut batch_refresh = HashMap::new();
+    for (job_id, logical) in batch_refresh_logical {
+        let extra = recovery_context
+            .job_extra_info
+            .get(&job_id)
+            .expect("should have extra info");
+        let streaming_job_model = per_database_context
+            .job_map
+            .get(&job_id)
+            .expect("should have streaming job model");
+        let database_model = &per_database_context.database_map[&database_id];
+        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+
+        let render_result = BatchRefreshJobCheckpointControl::render_actors_and_build_job_info(
+            &logical.fragments,
+            &logical.downstreams,
+            &extra.job_definition,
+            actor_id_generator,
+            worker_nodes.current(),
+            &database_model.resource_group,
+            streaming_job_model,
+            partial_graph_id,
+        )?;
+
+        batch_refresh.insert(job_id, render_result);
+    }
+
+    // If all fragments were batch refresh, no normal rendering needed.
+    if per_database_context.ensembles.is_empty() {
+        return Ok(Some(RenderedDatabaseRuntimeInfo {
+            job_infos: HashMap::new(),
+            stream_actors: HashMap::new(),
+            source_splits: HashMap::new(),
+            batch_refresh,
+        }));
+    }
+
     let RenderedGraph { mut fragments, .. } = render_actor_assignments(
         actor_id_generator,
         worker_nodes.current(),
-        adaptive_parallelism_strategy,
         &per_database_context,
     )?;
 
@@ -129,6 +225,7 @@ pub fn render_runtime_info(
         job_infos,
         stream_actors,
         source_splits,
+        batch_refresh,
     }))
 }
 
@@ -213,17 +310,49 @@ fn build_stream_actors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn apply_pre_applied_drop_cancel(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<bool> {
+        let drop_cancel = self.scheduled_barriers.pre_apply_drop_cancel(database_id);
+        let has_drop_streaming_jobs = !drop_cancel.streaming_job_ids.is_empty();
+        cleanup_dropped_streaming_jobs(
+            &self.refresh_manager,
+            &self.hummock_manager,
+            &self.metadata_manager,
+            drop_cancel.streaming_job_ids,
+            drop_cancel.dropped_state_table_ids,
+            "drop_streaming_jobs",
+        )
+        .await?;
+        Ok(has_drop_streaming_jobs)
+    }
+
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
         self.metadata_manager
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let dirty_associated_source_ids = self
+
+        let cleaned_dirty_jobs = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        if database_id.is_some() {
+            // Per-database recovery does not run the global Hummock purge below. Unregister the
+            // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
+            cleanup_dropped_streaming_jobs(
+                &self.refresh_manager,
+                &self.hummock_manager,
+                &self.metadata_manager,
+                cleaned_dirty_jobs.streaming_job_ids,
+                cleaned_dirty_jobs.dropped_table_ids,
+                "clean_dirty_creating_jobs",
+            )
+            .await?;
+        }
         self.metadata_manager
             .reset_all_refresh_jobs_to_idle()
             .await?;
@@ -231,7 +360,7 @@ impl GlobalBarrierWorkerContextImpl {
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
-                dropped_source_ids: dirty_associated_source_ids,
+                dropped_source_ids: cleaned_dirty_jobs.source_ids,
             })
             .await;
 
@@ -441,6 +570,7 @@ impl GlobalBarrierWorkerContextImpl {
     fn resolve_hummock_version_epochs(
         background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
+        table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
         HashMap<TableId, u64>,
         HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -527,8 +657,7 @@ impl GlobalBarrierWorkerContextImpl {
                     continue;
                 }
                 Ordering::Greater => {
-                    if let Some(table_change_log) = version.table_change_log.get(&upstream_table_id)
-                    {
+                    if let Some(table_change_log) = table_change_log.get(&upstream_table_id) {
                         let epochs = table_change_log
                             .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
                             .map(|epoch_log| {
@@ -594,7 +723,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    let _ = self.apply_pre_applied_drop_cancel(None).await?;
                     self.metadata_manager
                         .catalog_controller
                         .cleanup_dropped_tables()
@@ -652,12 +781,7 @@ impl GlobalBarrierWorkerContextImpl {
                     }
 
                     let mut recovery_context = self.load_recovery_context(None).await?;
-                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
-                    if !dropped_table_ids.is_empty() {
-                        self.metadata_manager
-                            .catalog_controller
-                            .complete_dropped_tables(dropped_table_ids)
-                            .await;
+                    if self.apply_pre_applied_drop_cancel(None).await? {
                         recovery_context = self.load_recovery_context(None).await?;
                     }
 
@@ -675,7 +799,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
-                        .on_current_version(|version| {
+                        .on_current_version_and_table_change_log(|version, table_change_log| {
                             Self::resolve_hummock_version_epochs(
                                 recovery_context
                                     .fragment_context
@@ -687,6 +811,7 @@ impl GlobalBarrierWorkerContextImpl {
                                             .then_some((*job_id, job))
                                     }),
                                 version,
+                                table_change_log,
                             )
                         })
                         .await?;
@@ -766,13 +891,9 @@ impl GlobalBarrierWorkerContextImpl {
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-        let dropped_table_ids = self
-            .scheduled_barriers
-            .pre_apply_drop_cancel(Some(database_id));
-        self.metadata_manager
-            .catalog_controller
-            .complete_dropped_tables(dropped_table_ids)
-            .await;
+        let _ = self
+            .apply_pre_applied_drop_cancel(Some(database_id))
+            .await?;
 
         let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 
@@ -796,7 +917,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
-            .on_current_version(|version| {
+            .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
                     background_jobs.iter().filter_map(|job_id| {
                         recovery_context
@@ -806,6 +927,7 @@ impl GlobalBarrierWorkerContextImpl {
                             .map(|job| (*job_id, job))
                     }),
                     version,
+                    table_change_log,
                 )
             })
             .await?;
@@ -964,9 +1086,9 @@ mod tests {
             StreamingJobExtraInfo {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
-                adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
+                refresh_interval_sec: None,
             },
         )]);
 

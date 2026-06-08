@@ -604,7 +604,11 @@ fn create_upsert_sql(
         })
         .collect_vec()
         .join(", ");
-    format!("{insert_sql} on conflict ({pk_columns}) do update set {update_parameters}")
+    if update_parameters.is_empty() {
+        format!("{insert_sql} on conflict ({pk_columns}) do nothing")
+    } else {
+        format!("{insert_sql} on conflict ({pk_columns}) do update set {update_parameters}")
+    }
 }
 
 /// Quote an identifier for PostgreSQL.
@@ -715,6 +719,36 @@ mod tests {
             sql,
             expect![[
                 r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2) on conflict ("b") do update set "a" = EXCLUDED."a""#
+            ]],
+        );
+    }
+
+    #[test]
+    fn test_create_upsert_sql_all_columns_are_primary_keys() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "user_id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "client_id".to_owned(),
+            },
+        ]);
+        let schema_name = "test_schema";
+        let table_name = "test_table";
+        let pk_indices_lookup = HashSet::from_iter([0, 1]);
+        let sql = create_upsert_sql(
+            &schema,
+            schema_name,
+            table_name,
+            &[0, 1],
+            &pk_indices_lookup,
+        );
+        check(
+            sql,
+            expect![[
+                r#"INSERT INTO "test_schema"."test_table" ("user_id", "client_id") VALUES ($1, $2) on conflict ("user_id", "client_id") do nothing"#
             ]],
         );
     }

@@ -69,7 +69,7 @@ impl Strong {
             ExprImpl::WindowFunction(_) => false,
             ExprImpl::UserDefinedFunction(_) => false,
             ExprImpl::Parameter(_) => false,
-            ExprImpl::Now(_) => false,
+            ExprImpl::Now(_) | ExprImpl::SecretRef(_) => false,
         }
     }
 
@@ -285,6 +285,7 @@ impl Strong {
             | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
+            | ExprType::ArrayOverlaps
             | ExprType::ArrayFlatten
             | ExprType::HexToInt256
             | ExprType::JsonbAccess

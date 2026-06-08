@@ -3,6 +3,11 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+# Defaults for fuzz test parameters (can be overridden by wrapper scripts)
+export RUN_SQLSMITH_FRONTEND="${RUN_SQLSMITH_FRONTEND:-0}"
+export RUN_SQLSMITH="${RUN_SQLSMITH:-1}"
+export SQLSMITH_COUNT="${SQLSMITH_COUNT:-100}"
+
 export LOGDIR=.risingwave/log
 export RUST_LOG=info
 

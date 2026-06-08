@@ -19,21 +19,17 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
-use risingwave_common::hash::{
-    ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
-};
+use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
-use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId, fragment};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::{ActorInfo, PbActorLocation};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
-use risingwave_pb::meta::table_fragments::{ActorStatus, PbFragment, State};
+use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, State};
 use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
@@ -194,7 +190,6 @@ pub struct Fragment {
     pub fragment_id: FragmentId,
     pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
-    pub actors: Vec<StreamActor>,
     pub state_table_ids: Vec<TableId>,
     pub maybe_vnode_count: Option<u32>,
     pub nodes: StreamNode,
@@ -203,6 +198,7 @@ pub struct Fragment {
 impl Fragment {
     pub fn to_protobuf(
         &self,
+        actors: &[StreamActor],
         upstream_fragments: impl Iterator<Item = FragmentId>,
         dispatchers: Option<&HashMap<ActorId, Vec<Dispatcher>>>,
     ) -> PbFragment {
@@ -210,8 +206,7 @@ impl Fragment {
             fragment_id: self.fragment_id,
             fragment_type_mask: self.fragment_type_mask.into(),
             distribution_type: self.distribution_type as _,
-            actors: self
-                .actors
+            actors: actors
                 .iter()
                 .map(|actor| {
                     actor.to_protobuf(
@@ -243,6 +238,19 @@ impl IsSingleton for Fragment {
     }
 }
 
+impl From<fragment::Model> for Fragment {
+    fn from(model: fragment::Model) -> Self {
+        Self {
+            fragment_id: model.fragment_id,
+            fragment_type_mask: FragmentTypeMask::from(model.fragment_type_mask),
+            distribution_type: model.distribution_type.into(),
+            state_table_ids: model.state_table_ids.into_inner(),
+            maybe_vnode_count: VnodeCount::set(model.vnode_count).to_protobuf(),
+            nodes: model.stream_node.to_protobuf(),
+        }
+    }
+}
+
 /// Fragments of a streaming job. Corresponds to [`PbTableFragments`].
 /// (It was previously called `TableFragments` due to historical reasons.)
 ///
@@ -259,14 +267,8 @@ pub struct StreamJobFragments {
     /// The table fragments.
     pub fragments: BTreeMap<FragmentId, Fragment>,
 
-    /// The status of actors
-    pub actor_status: BTreeMap<ActorId, ActorStatus>,
-
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
-
-    /// The parallelism assigned to this table fragments
-    pub assigned_parallelism: TableParallelism,
 
     /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
     ///
@@ -288,9 +290,6 @@ pub struct StreamContext {
 
     /// The partial config of this job to override the global config.
     pub config_override: Arc<str>,
-
-    /// The adaptive parallelism strategy for this job if it overrides the system default.
-    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -298,11 +297,6 @@ impl StreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
             config_override: self.config_override.to_string(),
-            adaptive_parallelism_strategy: self
-                .adaptive_parallelism_strategy
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
         }
     }
 
@@ -322,14 +316,6 @@ impl StreamContext {
                 Some(prost.get_timezone().clone())
             },
             config_override: prost.get_config_override().as_str().into(),
-            adaptive_parallelism_strategy: if prost.get_adaptive_parallelism_strategy().is_empty() {
-                None
-            } else {
-                Some(
-                    parse_strategy(prost.get_adaptive_parallelism_strategy())
-                        .expect("adaptive parallelism strategy should be validated in frontend"),
-                )
-            },
         }
     }
 }
@@ -340,9 +326,6 @@ impl risingwave_meta_model::streaming_job::Model {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone().unwrap_or_default().into(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
         }
     }
 }
@@ -350,8 +333,10 @@ impl risingwave_meta_model::streaming_job::Model {
 impl StreamJobFragments {
     pub fn to_protobuf(
         &self,
+        fragment_actors: &HashMap<FragmentId, Vec<StreamActor>>,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
         fragment_dispatchers: &FragmentActorDispatchers,
+        actor_status: HashMap<ActorId, PbActorStatus>,
     ) -> PbTableFragments {
         PbTableFragments {
             table_id: self.stream_job_id,
@@ -360,26 +345,66 @@ impl StreamJobFragments {
                 .fragments
                 .iter()
                 .map(|(id, fragment)| {
+                    let actors = fragment_actors.get(id).map(|a| a.as_slice()).unwrap_or(&[]);
                     (
                         *id,
                         fragment.to_protobuf(
+                            actors,
                             fragment_upstreams.get(id).into_iter().flatten().cloned(),
                             fragment_dispatchers.get(id),
                         ),
                     )
                 })
                 .collect(),
-            actor_status: self
-                .actor_status
-                .iter()
-                .map(|(actor_id, status)| (*actor_id, *status))
-                .collect(),
+            actor_status,
             ctx: Some(self.ctx.to_protobuf()),
-            parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_context_protobuf_round_trip() {
+        let context = StreamContext {
+            timezone: Some("UTC".to_owned()),
+            config_override: "{\"a\":1}".into(),
+        };
+
+        let prost = context.to_protobuf();
+
+        let round_trip = StreamContext::from_protobuf(&prost);
+        assert_eq!(round_trip.timezone, Some("UTC".to_owned()));
+        assert_eq!(&*round_trip.config_override, "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_stream_context_from_model() {
+        let model = risingwave_meta_model::streaming_job::Model {
+            job_id: 1.into(),
+            job_status: risingwave_meta_model::JobStatus::Created,
+            create_type: risingwave_meta_model::CreateType::Foreground,
+            timezone: Some("Asia/Shanghai".to_owned()),
+            config_override: Some("{\"parallelism\":2}".to_owned()),
+            adaptive_parallelism_strategy: Some("AUTO".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("RATIO(0.25)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 32,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+            refresh_interval_sec: None,
+        };
+
+        let context = model.stream_context();
+        assert_eq!(context.timezone, Some("Asia/Shanghai".to_owned()));
+        assert_eq!(&*context.config_override, "{\"parallelism\":2}");
     }
 }
 
@@ -401,42 +426,23 @@ impl StreamJobFragments {
         Self::new(
             job_id,
             fragments,
-            &BTreeMap::new(),
             StreamContext::default(),
-            TableParallelism::Adaptive,
             VirtualNode::COUNT_FOR_TEST,
         )
     }
 
-    /// Create a new `TableFragments` with state of `Initial`, recording actor locations on the given
-    /// workers.
+    /// Create a new `TableFragments` with state of `Initial`.
     pub fn new(
         stream_job_id: JobId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
-        table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
-        let actor_status = actor_locations
-            .iter()
-            .map(|(&actor_id, alignment_id)| {
-                (
-                    actor_id,
-                    ActorStatus {
-                        location: PbActorLocation::from_worker(alignment_id.worker_id()),
-                    },
-                )
-            })
-            .collect();
-
         Self {
             stream_job_id,
             state: State::Initial,
             fragments,
-            actor_status,
             ctx,
-            assigned_parallelism: table_parallelism,
             max_parallelism,
         }
     }
@@ -447,13 +453,6 @@ impl StreamJobFragments {
 
     pub fn fragments(&self) -> impl Iterator<Item = &Fragment> {
         self.fragments.values()
-    }
-
-    pub fn fragment_actors(&self, fragment_id: FragmentId) -> &[StreamActor] {
-        self.fragments
-            .get(&fragment_id)
-            .map(|f| f.actors.as_slice())
-            .unwrap_or_default()
     }
 
     /// Returns the table id.
@@ -471,34 +470,6 @@ impl StreamJobFragments {
         self.state == State::Created
     }
 
-    /// Returns actor ids associated with this table.
-    pub fn actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
-        self.fragments
-            .values()
-            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-    }
-
-    pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
-        self.fragments
-            .values()
-            .flat_map(|fragment| {
-                fragment
-                    .actors
-                    .iter()
-                    .map(|actor| (actor.actor_id, fragment.fragment_id))
-            })
-            .collect()
-    }
-
-    /// Returns actors associated with this table.
-    #[cfg(test)]
-    pub fn actors(&self) -> Vec<StreamActor> {
-        self.fragments
-            .values()
-            .flat_map(|fragment| fragment.actors.clone())
-            .collect()
-    }
-
     /// Returns mview fragment ids.
     #[cfg(test)]
     pub fn mview_fragment_ids(&self) -> Vec<FragmentId> {
@@ -511,15 +482,6 @@ impl StreamJobFragments {
             })
             .map(|fragment| fragment.fragment_id)
             .collect()
-    }
-
-    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
-        Self::tracking_progress_actor_ids_impl(self.fragments.values().map(|fragment| {
-            (
-                fragment.fragment_type_mask,
-                fragment.actors.iter().map(|actor| actor.actor_id),
-            )
-        }))
     }
 
     /// Returns actor ids that need to be tracked when creating MV.
@@ -703,41 +665,6 @@ impl StreamJobFragments {
         table_ids
     }
 
-    /// Returns actor locations group by worker id.
-    pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
-        let mut map = BTreeMap::default();
-        for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id();
-            map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
-        }
-        map
-    }
-
-    pub fn actors_to_create(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            FragmentId,
-            &StreamNode,
-            impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
-        ),
-    > + '_ {
-        self.fragments.values().map(move |fragment| {
-            (
-                fragment.fragment_id,
-                &fragment.nodes,
-                fragment.actors.iter().map(move |actor| {
-                    let worker_id: WorkerId = self
-                        .actor_status
-                        .get(&actor.actor_id)
-                        .expect("should exist")
-                        .worker_id();
-                    (actor, worker_id)
-                }),
-            )
-        })
-    }
-
     pub fn mv_table_id(&self) -> Option<TableId> {
         self.fragments
             .values()
@@ -777,18 +704,6 @@ impl StreamJobFragments {
         self.fragments
             .values()
             .flat_map(|f| f.state_table_ids.clone())
-    }
-
-    /// Fill the `expr_context` in `StreamActor`. Used for compatibility.
-    pub fn fill_expr_context(mut self) -> Self {
-        self.fragments.values_mut().for_each(|fragment| {
-            fragment.actors.iter_mut().for_each(|actor| {
-                if actor.expr_context.is_none() {
-                    actor.expr_context = Some(self.ctx.to_expr_context());
-                }
-            });
-        });
-        self
     }
 }
 

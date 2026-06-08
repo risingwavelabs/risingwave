@@ -32,6 +32,7 @@ mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
+mod iceberg_with_pk_index;
 mod locality_provider;
 mod lookup;
 mod lookup_union;
@@ -91,6 +92,7 @@ use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
+use self::iceberg_with_pk_index::*;
 use self::locality_provider::*;
 use self::lookup::*;
 use self::lookup_union::*;
@@ -213,5 +215,7 @@ pub async fn create_executor(
         NodeBody::EowcGapFill => EowcGapFillExecutorBuilder,
         NodeBody::GapFill => GapFillExecutorBuilder,
         NodeBody::VectorIndexLookupJoin => VectorIndexLookupJoinBuilder,
+        NodeBody::IcebergWithPkIndexWriter => IcebergWithPkIndexWriterExecutorBuilder,
+        NodeBody::IcebergWithPkIndexDvMerger => IcebergWithPkIndexDvMergerExecutorBuilder,
     }
 }

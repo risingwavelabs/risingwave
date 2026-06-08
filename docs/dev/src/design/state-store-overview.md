@@ -87,7 +87,7 @@ The final written key (aka. full key) is encoded by appending the 8-byte epoch a
 
 The Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatible service. An SST consists of two files:
 - `<id>.data`: Data file composed of ~64KB blocks, each of which contains the actual key-value pairs.
-- `<id>.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
+- `<id>.meta`: Meta file containing large metadata including min-max index, SST filter as well as data block metadata.
 
 After the SST is uploaded to an S3-compatible service, the Hummock client will let the Hummock manager know there's a new table.
 The list of all SSTs along with some metadata forms a ***version***. When the Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.
@@ -100,7 +100,7 @@ To read from Hummock, we need a ***version*** (a consistent state of list of SST
 
 For every read operation (`scan`, `get`), we will first select SSTs that might contain the required keys.
 
-For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by Bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epochs. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform a snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
+For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by the SST filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epochs. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform a snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
 
 ![Read Path](../images/state-store-overview/state-store-overview-03.svg)
 

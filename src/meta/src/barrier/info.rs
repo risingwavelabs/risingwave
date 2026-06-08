@@ -28,6 +28,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
@@ -36,6 +37,7 @@ use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
@@ -54,7 +56,7 @@ use crate::barrier::{
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
-use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments};
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaError, MetaResult};
 
@@ -217,7 +219,7 @@ impl SharedActorInfos {
                 .collect_vec();
             if !mapping.is_empty() {
                 self.notification_manager
-                    .notify_fragment_mapping(Operation::Delete, mapping);
+                    .notify_streaming_fragment_mapping(Operation::Delete, mapping);
             }
         }
     }
@@ -237,7 +239,7 @@ impl SharedActorInfos {
         }
         if !mapping.is_empty() {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 
@@ -351,15 +353,15 @@ impl SharedActorInfoWriter<'_> {
     pub(super) fn finish(self) {
         if let Some(mapping) = self.added_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Add, mapping);
+                .notify_streaming_fragment_mapping(Operation::Add, mapping);
         }
         if let Some(mapping) = self.updated_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Update, mapping);
+                .notify_streaming_fragment_mapping(Operation::Update, mapping);
         }
         if let Some(mapping) = self.deleted_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 }
@@ -604,7 +606,7 @@ impl InflightDatabaseInfo {
     pub(super) fn apply_collected_command(
         &mut self,
         command: &PostCollectCommand,
-        resps: &[BarrierCompleteResponse],
+        resps: &HashMap<WorkerId, BarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
     ) {
         if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = command {
@@ -615,7 +617,11 @@ impl InflightDatabaseInfo {
                         let CreateStreamingJobStatus::Init = replace(
                             &mut job_info.status,
                             CreateStreamingJobStatus::Creating {
-                                tracker: CreateMviewProgressTracker::new(info, version_stats),
+                                tracker: CreateMviewProgressTracker::new(
+                                    info,
+                                    version_stats,
+                                    &job_info.fragment_infos,
+                                ),
                             },
                         ) else {
                             unreachable!("should be init before collect the first barrier")
@@ -624,8 +630,9 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill(_)
+                | CreateStreamingJobType::BatchRefresh(_) => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -652,7 +659,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        for progress in resps.iter().flat_map(|resp| &resp.create_mview_progress) {
+        for progress in resps.values().flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(
                     "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
@@ -674,7 +681,7 @@ impl InflightDatabaseInfo {
             tracker.apply_progress(progress, version_stats);
         }
         for progress in resps
-            .iter()
+            .values()
             .flat_map(|resp| &resp.cdc_table_backfill_progress)
         {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
@@ -696,7 +703,7 @@ impl InflightDatabaseInfo {
         }
         // Handle CDC source offset updated events
         for cdc_offset_updated in resps
-            .iter()
+            .values()
             .flat_map(|resp| &resp.cdc_source_offset_updated)
         {
             use risingwave_common::id::SourceId;
@@ -788,20 +795,17 @@ impl InflightDatabaseInfo {
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
-    pub fn max_subscription_retention(&self) -> HashMap<TableId, u64> {
-        self.jobs
-            .iter()
-            .filter_map(|(job_id, info)| {
-                info.subscribers
-                    .values()
-                    .filter_map(|subscriber| match subscriber {
-                        SubscriberType::Subscription(retention) => Some(*retention),
-                        SubscriberType::SnapshotBackfill => None,
-                    })
-                    .max()
-                    .map(|max_subscription| (job_id.as_mv_table_id(), max_subscription))
-            })
-            .collect()
+    pub fn max_subscription_retention(&self) -> impl Iterator<Item = (TableId, u64)> + '_ {
+        self.jobs.iter().filter_map(|(job_id, info)| {
+            info.subscribers
+                .values()
+                .filter_map(|subscriber| match subscriber {
+                    SubscriberType::Subscription(retention) => Some(*retention),
+                    SubscriberType::SnapshotBackfill => None,
+                })
+                .max()
+                .map(|max_subscription| (job_id.as_mv_table_id(), max_subscription))
+        })
     }
 
     pub fn register_subscriber(
@@ -1103,6 +1107,14 @@ impl InflightDatabaseInfo {
         fragment_id: FragmentId,
         drop_upstream_fragment_ids: &[FragmentId],
     ) {
+        if !self.fragment_location.contains_key(&fragment_id) {
+            warn!(
+                target_fragment_id = %fragment_id,
+                drop_upstream_fragment_ids = ?drop_upstream_fragment_ids,
+                "skip dropping upstream sink fragments for non-existing target fragment"
+            );
+            return;
+        }
         {
             {
                 {
@@ -1141,6 +1153,51 @@ impl InflightDatabaseInfo {
         }
     }
 
+    /// Sync inflight `nodes.rate_limit` so a later reschedule won't materialize new actors
+    /// from stale data. Mirrors `controller/streaming_job.rs::update_*_rate_limit_by_*`.
+    pub(crate) fn pre_apply_throttle(&mut self, fragment_id: FragmentId, config: &ThrottleConfig) {
+        // Snapshot-backfill creating jobs live outside main inflight; their throttles
+        // flow through `on_new_upstream_barrier`.
+        if !self.fragment_location.contains_key(&fragment_id) {
+            return;
+        }
+        let throttle_type = config.throttle_type();
+        let rate_limit = config.rate_limit;
+        let (info, _) = self.fragment_mut(fragment_id);
+
+        visit_stream_node_mut(&mut info.nodes, |node| match throttle_type {
+            ThrottleType::Source => {
+                if let NodeBody::Source(node) = node
+                    && let Some(node_inner) = &mut node.source_inner
+                {
+                    node_inner.rate_limit = rate_limit;
+                }
+                if let NodeBody::StreamFsFetch(node) = node
+                    && let Some(node_inner) = &mut node.node_inner
+                {
+                    node_inner.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Backfill => match node {
+                NodeBody::StreamCdcScan(node) => node.rate_limit = rate_limit,
+                NodeBody::StreamScan(node) => node.rate_limit = rate_limit,
+                NodeBody::SourceBackfill(node) => node.rate_limit = rate_limit,
+                _ => {}
+            },
+            ThrottleType::Sink => {
+                if let NodeBody::Sink(node) = node {
+                    node.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Dml => {
+                if let NodeBody::Dml(node) = node {
+                    node.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Unspecified => {}
+        });
+    }
+
     /// Update split assignments for actors in fragments.
     pub(crate) fn pre_apply_split_assignments(
         &mut self,
@@ -1171,6 +1228,8 @@ impl InflightDatabaseInfo {
         replace_job: Option<&ReplaceStreamJobPlan>,
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
+        stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
+        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> FragmentEdgeBuildResult {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
@@ -1214,37 +1273,25 @@ impl InflightDatabaseInfo {
                 info.stream_job_fragments
                     .fragments
                     .values()
-                    .map(move |fragment| {
-                        (
-                            partial_graph_id,
-                            fragment,
-                            &info.stream_job_fragments.actor_status,
-                        )
-                    })
+                    .map(move |fragment| (partial_graph_id, fragment))
             })
             .chain(replace_job.into_iter().flat_map(|replace_job| {
                 replace_job
                     .new_fragments
                     .fragments
                     .values()
-                    .map(|fragment| (fragment, &replace_job.new_fragments.actor_status))
                     .chain(
                         replace_job
                             .auto_refresh_schema_sinks
                             .as_ref()
                             .into_iter()
-                            .flat_map(move |sinks| {
-                                sinks
-                                    .iter()
-                                    .map(|sink| (&sink.new_fragment, &sink.actor_status))
-                            }),
+                            .flat_map(move |sinks| sinks.iter().map(|sink| &sink.new_fragment)),
                     )
-                    .map(|(fragment, actor_status)| {
+                    .map(|fragment| {
                         (
                             // we assume that replace job only happens in database partial graph
                             to_partial_graph_id(self.database_id, None),
                             fragment,
-                            actor_status,
                         )
                     })
             }));
@@ -1263,19 +1310,18 @@ impl InflightDatabaseInfo {
                     )
                 })
                 // New fragments from create/replace jobs
-                .chain(
-                    new_fragments.map(|(partial_graph_id, fragment, actor_status)| {
-                        (
-                            fragment.fragment_id,
-                            EdgeBuilderFragmentInfo::from_fragment(
-                                fragment,
-                                actor_status,
-                                partial_graph_id,
-                                control_stream_manager,
-                            ),
-                        )
-                    }),
-                ),
+                .chain(new_fragments.map(|(partial_graph_id, fragment)| {
+                    (
+                        fragment.fragment_id,
+                        EdgeBuilderFragmentInfo::from_fragment(
+                            fragment,
+                            stream_actors,
+                            actor_location,
+                            partial_graph_id,
+                            control_stream_manager,
+                        ),
+                    )
+                })),
         );
         if let Some((info, _)) = info {
             builder.add_relations(&info.upstream_fragment_downstreams);
@@ -1365,6 +1411,23 @@ impl InflightDatabaseInfo {
             }
         }
         shared_actor_writer.finish();
+    }
+
+    pub(crate) fn post_apply_remove_job(
+        &mut self,
+        job_id: JobId,
+    ) -> Option<InflightStreamingJobInfo> {
+        let job = self.jobs.remove(&job_id)?;
+        let inner = self.shared_actor_infos.clone();
+        let mut shared_actor_writer = inner.start_writer(self.database_id);
+        for (fragment_id, fragment) in &job.fragment_infos {
+            self.fragment_location
+                .remove(fragment_id)
+                .expect("should exist");
+            shared_actor_writer.remove(fragment);
+        }
+        shared_actor_writer.finish();
+        Some(job)
     }
 }
 

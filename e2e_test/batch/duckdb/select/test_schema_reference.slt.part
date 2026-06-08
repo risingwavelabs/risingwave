@@ -18,16 +18,13 @@ CREATE TABLE s1.tbl(i INTEGER)
 statement ok
 SELECT s1.tbl.i FROM s1.tbl;
 
-# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
-# schema mismatch
-# statement error
-# SELECT s2.tbl.i FROM s1.tbl;
+statement error
+SELECT s2.tbl.i FROM s1.tbl;
 
-# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
 # no schema present
 # (original query) SELECT a.tbl.i FROM range(10) tbl(i)
-# statement error
-# SELECT a.tbl.i FROM range(0, 10, 1) tbl(i)
+statement error
+SELECT a.tbl.i FROM range(0, 10, 1) tbl(i)
 
 statement ok
 DROP TABLE s1.tbl;

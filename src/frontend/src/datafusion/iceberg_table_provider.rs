@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -25,6 +26,9 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::*;
 use risingwave_common::array::ArrayError;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::catalog::{
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergProperties};
 
@@ -91,15 +95,42 @@ impl IcebergTableProvider {
         };
         let iceberg_properties = Arc::from(iceberg_properties);
 
+        // For decimal types, catalog schema doesn't contain precision and scale information, we need to get the full schema from iceberg file scan tasks.
+        let iceberg_schema = schema_from_tasks(plan)?;
+        let iceberg_field_map = iceberg_schema
+            .fields()
+            .iter()
+            .map(|field| (field.name().clone(), field.clone()))
+            .collect::<HashMap<_, _>>();
+
         let arrow_fields: ArrowFields = plan
             .core
             .column_catalog
             .iter()
             .map(|column| {
                 let column_desc = &column.column_desc;
-                let field = IcebergArrowConvert
-                    .to_arrow_field(&column_desc.name, &column_desc.data_type)?;
-                Ok(field.with_nullable(column_desc.nullable))
+                let field = match iceberg_field_map.get(&column_desc.name) {
+                    Some(field) => field.clone(),
+                    None => {
+                        let is_metadata_column = matches!(
+                            column_desc.name.as_str(),
+                            ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+                                | ICEBERG_FILE_PATH_COLUMN_NAME
+                                | ICEBERG_FILE_POS_COLUMN_NAME
+                        );
+                        if !is_metadata_column {
+                            return Err(ArrayError::internal(format!(
+                                "field {} not found in iceberg schema",
+                                column_desc.name
+                            )));
+                        }
+                        let field = IcebergArrowConvert
+                            .to_arrow_field(&column_desc.name, &column_desc.data_type)?
+                            .with_nullable(column_desc.nullable);
+                        Arc::new(field)
+                    }
+                };
+                Ok(field)
             })
             .collect::<Result<_, ArrayError>>()?;
         let arrow_schema = Arc::new(ArrowSchema::new(arrow_fields));
@@ -110,4 +141,19 @@ impl IcebergTableProvider {
             task: plan.task.clone(),
         })
     }
+}
+
+fn schema_from_tasks(plan: &LogicalIcebergScan) -> RwResult<ArrowSchema> {
+    let tasks = match &plan.task {
+        IcebergFileScanTask::Data(tasks) => tasks,
+        IcebergFileScanTask::EqualityDelete(tasks) => tasks,
+        IcebergFileScanTask::PositionDelete(tasks) => tasks,
+    };
+    let schema = tasks
+        .first()
+        .ok_or_else(|| ErrorCode::InternalError("Iceberg file scan tasks are missing".into()))?
+        .schema();
+    let schema = iceberg::arrow::schema_to_arrow_schema(schema)
+        .map_err(|e| ErrorCode::ConnectorError(Box::new(e)))?;
+    Ok(schema)
 }

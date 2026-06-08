@@ -1,0 +1,167 @@
+control substitution on
+
+statement ok
+SET streaming_parallelism TO 1;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_alter_watermark_test;
+    CREATE TABLE mysql_alter_watermark_test (
+        id INT NOT NULL PRIMARY KEY,
+        ts INT NOT NULL,
+        v VARCHAR(50) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+    INSERT INTO mysql_alter_watermark_test (id, ts, v) VALUES
+        (1, 100, 'a'),
+        (2, 200, 'b'),
+        (3, 150, 'c');
+"
+
+statement ok
+create source s_mysql_alter_wm with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev'
+);
+
+sleep 2s
+
+statement ok
+create table rw_alter_wm (
+  id INT,
+  ts INT,
+  v VARCHAR,
+  PRIMARY KEY (id),
+  WATERMARK FOR ts AS ts - 1000 WITH TTL
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 1,
+  backfill.parallelism = 1
+) from s_mysql_alter_wm table 'risedev.mysql_alter_watermark_test';
+
+statement ok
+create materialized view mv_cdc as select * from rw_alter_wm;
+
+# Backfill completes — all rows present (watermark = max(ts) - 1000 is well below any row's ts).
+query IIT retry 10 backoff 1s
+select id, ts, v from rw_alter_wm order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+
+query IIT retry 10 backoff 1s
+select id, ts, v from mv_cdc order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+
+# Downstream MV state and the source's CDC pipeline must survive the replace.
+statement ok
+alter table rw_alter_wm alter watermark for ts as ts - 10 with ttl;
+
+# Existing rows from backfill are still visible after ALTER (state preserved on
+# both the table and the downstream MV).
+query IIT retry 10 backoff 1s
+select id, ts, v from rw_alter_wm order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+
+query IIT
+select id, ts, v from mv_cdc order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+
+# CDC keeps flowing after ALTER. A new MySQL insert above the new watermark
+# (ts=300, new wm = 290) is visible at the table and propagates to the MV.
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_alter_watermark_test (id, ts, v) VALUES (4, 300, 'd');
+"
+
+query IIT retry 10 backoff 1s
+select id, ts, v from rw_alter_wm order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+4 300 d
+
+query IIT retry 10 backoff 1s
+select id, ts, v from mv_cdc order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+4 300 d
+
+# A row whose ts falls below the new (post-insert) watermark of 290 is dropped
+# by the watermark filter. Under the old (ts - 1000) expression the watermark
+# would still be far below, so this row would have been kept — proving the
+# new expression is the one being applied.
+#
+# Sentinel pattern: id=5 should be filtered, id=6 should propagate. Inserting
+# both in the same MySQL statement guarantees they hit the binlog in order;
+# CDC preserves that order. Waiting on id=6 to appear proves id=5 has already
+# been processed, so the subsequent absence assertion is meaningful (rather
+# than racing CDC propagation lag).
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_alter_watermark_test (id, ts, v) VALUES
+        (5, 50, 'filtered'),
+        (6, 400, 'sentinel');
+"
+
+query IIT retry 10 backoff 1s
+select id, ts, v from mv_cdc where id = 6;
+----
+6 400 sentinel
+
+query IIT
+select id, ts, v from rw_alter_wm order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+4 300 d
+6 400 sentinel
+
+query IIT
+select id, ts, v from mv_cdc order by id;
+----
+1 100 a
+2 200 b
+3 150 c
+4 300 d
+6 400 sentinel
+
+statement error toggling WITH TTL
+alter table rw_alter_wm alter watermark for ts as ts - 10;
+
+statement ok
+drop materialized view mv_cdc;
+
+statement ok
+drop table rw_alter_wm;
+
+statement ok
+drop source s_mysql_alter_wm cascade;
+
+statement ok
+SET streaming_parallelism TO DEFAULT;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_alter_watermark_test;
+"

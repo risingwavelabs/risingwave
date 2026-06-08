@@ -21,13 +21,16 @@ use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::BaseConsumer;
+#[cfg(not(madsim))]
+use rdkafka::consumer::Consumer;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::id::FragmentId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use thiserror_ext::AsReport;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -129,6 +132,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
+        // The meta-side split enumerator does not export librdkafka native stats, so disable
+        // periodic statistics callbacks here even if the source properties enable them for
+        // compute-side readers.
+        config.set("statistics.interval.ms", "0");
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -182,6 +189,32 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        // `KafkaSplitEnumerator` uses `BaseConsumer`, which does not have a background polling
+        // thread. Poll once per `list_splits` invocation so meta's periodic source-manager tick
+        // can serve queued callbacks like librdkafka statistics events.
+        //
+        // This meta-side enumerator does not have a fragment id, so it cannot derive the
+        // compute-side consumer group id. Polling this no-group client may therefore return
+        // `UnknownGroup`, which is expected and intentionally filtered below. Other poll errors
+        // are still logged as warnings.
+        if let Some(Err(poll_err)) = {
+            #[cfg(not(madsim))]
+            {
+                self.client.poll(Duration::ZERO)
+            }
+            #[cfg(madsim)]
+            {
+                self.client.poll(Duration::ZERO).await
+            }
+        } && !is_expected_no_group_poll_error(&poll_err)
+        {
+            tracing::warn!(
+                error = %poll_err.as_report(),
+                topic = self.topic,
+                broker_address = self.broker_address,
+                "failed to poll kafka client");
+        }
+
         let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
@@ -218,6 +251,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         self.drop_consumer_groups(fragment_ids).await
     }
+}
+
+fn is_expected_no_group_poll_error(error: &KafkaError) -> bool {
+    matches!(
+        error,
+        KafkaError::MessageConsumption(RDKafkaErrorCode::UnknownGroup)
+    )
 }
 
 async fn build_kafka_client(

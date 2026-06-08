@@ -259,7 +259,7 @@ impl RowIdGenerator {
     /// Generate a new `RowId`.
     ///
     /// This may block for a while if too many IDs are generated in one millisecond.
-    #[allow(clippy::should_implement_trait)]
+    #[expect(clippy::should_implement_trait)]
     pub fn next(&mut self) -> RowId {
         self.try_update_timestamp();
 
@@ -349,8 +349,7 @@ mod tests {
 
     use super::*;
 
-    #[allow(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
-    async fn test_generator_with_vnode_count(vnode_count: usize) {
+    fn test_generator_with_vnode_count(vnode_count: usize) {
         let mut generator = RowIdGenerator::new([VirtualNode::from_index(0)], vnode_count);
         let sequence_upper_bound = generator.sequence_upper_bound();
 
@@ -388,8 +387,7 @@ mod tests {
         );
     }
 
-    #[allow(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
-    async fn test_generator_multiple_vnodes_with_vnode_count(vnode_count: usize) {
+    fn test_generator_multiple_vnodes_with_vnode_count(vnode_count: usize) {
         assert!(vnode_count >= 20);
 
         let vnodes = || {
@@ -429,12 +427,12 @@ mod tests {
         ($vnode_count:expr, $name:ident, $name_mul:ident) => {
             #[tokio::test]
             async fn $name() {
-                test_generator_with_vnode_count($vnode_count).await;
+                test_generator_with_vnode_count($vnode_count);
             }
 
             #[tokio::test]
             async fn $name_mul() {
-                test_generator_multiple_vnodes_with_vnode_count($vnode_count).await;
+                test_generator_multiple_vnodes_with_vnode_count($vnode_count);
             }
         };
     }

@@ -167,7 +167,10 @@ pub fn update_filter_key_extractor_for_table_ids(
     for table_id in table_ids {
         let mock_table = PbTable {
             id: *table_id,
-            read_prefix_len_hint: 0,
+            // The low-level hummock tests register table IDs without a real table catalog, but
+            // some of them still pass full-key prefix hints explicitly. Use an invalid prefix
+            // length to keep the legacy full-key filter extractor in these tests.
+            read_prefix_len_hint: 1,
             maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
             ..Default::default()
         };

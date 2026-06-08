@@ -223,6 +223,11 @@ pub struct StreamingMetrics {
     pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
     pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
 
+    // SQL Server CDC LSN monitoring
+    pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_commit_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
@@ -340,6 +345,30 @@ impl StreamingMetrics {
         let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
             "stream_mysql_cdc_state_binlog_position",
             "Current binlog position stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_change_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_change_lsn",
+            "Current change_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_commit_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_commit_lsn",
+            "Current commit_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_jni_commit_offset_lsn",
+            "LSN value when JNI commit offset is called for SQL Server CDC",
             &["source_id"],
             registry,
         )
@@ -1398,6 +1427,9 @@ impl StreamingMetrics {
             pg_cdc_jni_commit_offset_lsn,
             mysql_cdc_state_binlog_file_seq,
             mysql_cdc_state_binlog_position,
+            sqlserver_cdc_state_change_lsn,
+            sqlserver_cdc_state_commit_lsn,
+            sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
             state_table_iter_count,
             state_table_get_count,

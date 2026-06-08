@@ -31,21 +31,37 @@ full-without-monitoring:
       address: message_queue
       port: 29092
 EOF
+  elif version_lt "$VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
+    cat <<EOF > risedev-profiles.user.yml
+full-without-monitoring:
+  steps:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+      meta-backend: etcd
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: kafka
+      user-managed: true
+      address: message_queue
+      port: 29092
+EOF
   else
     cat <<EOF > risedev-profiles.user.yml
- full-without-monitoring:
-   steps:
-     - use: minio
-     - use: etcd
-     - use: meta-node
-       meta-backend: etcd
-     - use: compute-node
-     - use: frontend
-     - use: compactor
-     - use: kafka
-       user-managed: true
-       address: message_queue
-       port: 29092
+full-without-monitoring:
+  steps:
+    - use: minio
+    - use: sqlite
+    - use: meta-node
+      meta-backend: sqlite
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: kafka
+      user-managed: true
+      address: message_queue
+      port: 29092
 EOF
   fi
 

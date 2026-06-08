@@ -12,15 +12,29 @@ def _(outer_panels: Panels):
                 panels.subheader("Source Offsets"),
                 panels.timeseries_count(
                     "Kafka high watermark and source latest message",
-                    "Kafka high watermark by source and partition and source latest message by partition, source and actor",
+                    "Kafka high watermark, resolved EOF offset, and source latest message by partition.",
                     [
                         panels.target(
                             f"{metric('source_kafka_high_watermark')}",
                             "high watermark: source={{source_id}} partition={{partition}}",
                         ),
                         panels.target(
+                            f"{metric('source_partition_eof_offset')}",
+                            "resolved eof: source={{source_id}} partition={{partition}} fragment={{fragment_id}}",
+                        ),
+                        panels.target(
                             f"{metric('source_latest_message_id')}",
                             "latest msg: source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Kafka Partition EOF Events",
+                    "Rate of Kafka partition EOF events observed by the source reader.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('source_partition_eof_count')}[$__rate_interval])) by (source_id, partition, source_name, fragment_id)",
+                            "{{source_name}} source={{source_id}} partition={{partition}} fragment={{fragment_id}}",
                         ),
                     ],
                 ),

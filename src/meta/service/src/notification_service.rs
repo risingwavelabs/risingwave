@@ -230,10 +230,7 @@ impl NotificationServiceImpl {
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let table_cache_refill_policies =
             catalog_guard.table_cache_refill_policies_snapshot().await?;
-        let streaming_parallelisms = self
-            .metadata_manager
-            .catalog_controller
-            .running_fragment_parallelisms(None)?;
+        let streaming_parallelisms = catalog_guard.fragment_parallelisms().await?;
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((
             tables,

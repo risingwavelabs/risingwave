@@ -25,8 +25,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::Event as Respon
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
-use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventResponse;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+use risingwave_pb::iceberg_compaction::{
+    CancelCompactTask as IcebergCancelCompactTask, SubscribeIcebergCompactionEventResponse,
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::MetaResult;
@@ -512,6 +514,12 @@ impl IcebergCompactor {
 
         Ok(())
     }
+
+    pub fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
+        self.send_event(IcebergResponseEvent::CancelCompactTask(
+            IcebergCancelCompactTask { task_id },
+        ))
+    }
 }
 
 pub struct IcebergCompactorManagerInner {
@@ -582,6 +590,7 @@ mod tests {
 
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
+    use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
     use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compaction::selector::default_compaction_selector;
@@ -684,15 +693,22 @@ mod tests {
                 .get_compactor(iceberg_context_id)
                 .is_none()
         );
-        iceberg_compactor_manager.add_compactor(iceberg_context_id);
+        let mut receiver = iceberg_compactor_manager.add_compactor(iceberg_context_id);
         assert_eq!(iceberg_compactor_manager.compactor_num(), 1);
-        assert_eq!(
-            iceberg_compactor_manager
-                .get_compactor(iceberg_context_id)
-                .unwrap()
-                .context_id(),
-            iceberg_context_id
-        );
+        let compactor = iceberg_compactor_manager
+            .get_compactor(iceberg_context_id)
+            .unwrap();
+        assert_eq!(compactor.context_id(), iceberg_context_id);
+
+        compactor.cancel_task(42).unwrap();
+        let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+        match event {
+            IcebergResponseEvent::CancelCompactTask(cancel_task) => {
+                assert_eq!(cancel_task.task_id, 42);
+            }
+            other => panic!("unexpected iceberg compactor event: {other:?}"),
+        }
+
         // Test remove
         iceberg_compactor_manager.remove_compactor(iceberg_context_id);
         assert_eq!(iceberg_compactor_manager.compactor_num(), 0);

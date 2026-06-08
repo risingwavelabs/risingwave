@@ -20,7 +20,6 @@
 //! risingwave_expr_impl::enable!();
 //! ```
 
-#![allow(non_snake_case)] // for `ctor` generated code
 #![feature(assert_matches)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]
@@ -32,6 +31,7 @@
 mod aggregate;
 mod scalar;
 mod table_function;
+#[cfg(feature = "udf")]
 mod udf;
 mod window_function;
 

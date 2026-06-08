@@ -48,6 +48,16 @@
   expected_outputs:
     - explain_output
 
+- id: watermark ttl timestamptz with day interval
+  sql: |
+    explain create table t (
+      id int primary key,
+      max_event_time timestamptz,
+      watermark for max_event_time as max_event_time - interval '7' day with ttl
+    );
+  expected_outputs:
+    - explain_output
+
 - id: watermark ttl scan keeps stream key columns
   sql: |
     create table t (

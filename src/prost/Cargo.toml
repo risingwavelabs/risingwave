@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum"]
+ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum", "tonic-prost"]
 
 [dependencies]
 enum-as-inner = "0.7"
@@ -19,7 +19,7 @@ prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
 sea-orm  = { workspace = true }
 serde = { workspace = true }
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tonic = { workspace = true }
@@ -33,7 +33,7 @@ workspace-hack = { path = "../workspace-hack" }
 static_assertions = "1"
 
 [build-dependencies]
-fs-err = "3.2"
+fs-err = "3.3"
 pbjson-build = "0.9"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
