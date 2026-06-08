@@ -40,7 +40,6 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
-use risingwave_pb::meta::subscribe_response::Operation;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -271,7 +270,13 @@ pub struct TableCacheRefillContext {
     pub default_policy: CacheRefillPolicy,
 
     pub read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
-    pub serving_table_vnode_mapping: Arc<RwLock<HashMap<TableId, Bitmap>>>,
+    pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
+}
+
+fn vnode_range_bitmap(num_bits: usize, vnode_range: (usize, usize)) -> Bitmap {
+    let start = vnode_range.0.min(num_bits);
+    let end = vnode_range.1.min(num_bits);
+    Bitmap::from_range(num_bits, start..end)
 }
 
 impl TableCacheRefillContext {
@@ -309,7 +314,7 @@ impl TableCacheRefillContext {
         if num_bits == 0 {
             return false;
         }
-        let bitmap = Bitmap::from_range(num_bits, vnode_range.0..vnode_range.1 + 1);
+        let bitmap = vnode_range_bitmap(num_bits, vnode_range);
         if let Some(streaming_bitmap) = streaming_bitmap
             && (&bitmap & streaming_bitmap).any()
         {
@@ -347,14 +352,13 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let serving_table_vnode_mapping = Arc::new(RwLock::new(HashMap::new()));
         let table_cache_refill_context = Arc::new(RwLock::new(TableCacheRefillContext {
             streaming: HashMap::new(),
             serving: HashMap::new(),
             policies: HashMap::new(),
             default_policy: config.table_cache_refill_default_policy,
             read_version_mapping,
-            serving_table_vnode_mapping,
+            serving_table_vnode_mapping: HashMap::new(),
         }));
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
@@ -408,64 +412,37 @@ impl CacheRefiller {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    pub(crate) fn update_table_cache_refill_policies(
+    pub(crate) fn replace_table_cache_refill_policies(
         &mut self,
-        policies: HashMap<TableId, Option<CacheRefillPolicy>>,
+        policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
-        for (table_id, policy) in policies {
-            if let Some(policy) = policy {
-                table_cache_refill_context.policies.insert(table_id, policy);
-            } else {
-                table_cache_refill_context.policies.remove(&table_id);
-            }
+        let table_ids = table_cache_refill_context
+            .policies
+            .keys()
+            .chain(policies.keys())
+            .copied()
+            .collect::<HashSet<_>>();
+        table_cache_refill_context.policies = policies;
+        for table_id in table_ids {
             self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
     }
 
-    pub(crate) fn update_serving_table_vnode_mapping(
+    pub(crate) fn replace_serving_table_vnode_mapping(
         &mut self,
-        op: Operation,
         mapping: HashMap<TableId, Bitmap>,
     ) {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
-        match op {
-            Operation::Snapshot => {
-                *table_cache_refill_context
-                    .serving_table_vnode_mapping
-                    .write() = mapping.clone();
-                for table_id in mapping.keys() {
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        *table_id,
-                    );
-                }
-            }
-            Operation::Update => {
-                for (table_id, bitmap) in mapping {
-                    table_cache_refill_context
-                        .serving_table_vnode_mapping
-                        .write()
-                        .insert(table_id, bitmap);
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        table_id,
-                    );
-                }
-            }
-            Operation::Delete => {
-                for table_id in mapping.keys() {
-                    table_cache_refill_context
-                        .serving_table_vnode_mapping
-                        .write()
-                        .remove(table_id);
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        *table_id,
-                    );
-                }
-            }
-            _ => unreachable!(),
+        let mut table_ids = table_cache_refill_context
+            .serving_table_vnode_mapping
+            .keys()
+            .chain(mapping.keys())
+            .copied()
+            .collect::<HashSet<_>>();
+        table_cache_refill_context.serving_table_vnode_mapping = mapping;
+        for table_id in table_ids.drain() {
+            self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
     }
 
@@ -499,15 +476,14 @@ impl CacheRefiller {
             }
         }
 
-        if self.role.for_serving() && policy.for_serving() {
-            let serving_table_vnode_mapping = table_cache_refill_context
+        if self.role.for_serving()
+            && policy.for_serving()
+            && let Some(vnodes) = table_cache_refill_context
                 .serving_table_vnode_mapping
-                .clone();
-            if let Some(vnodes) = serving_table_vnode_mapping.read().get(&table_id) {
-                table_cache_refill_context
-                    .serving
-                    .insert(table_id, vnodes.clone());
-            }
+                .get(&table_id)
+                .cloned()
+        {
+            table_cache_refill_context.serving.insert(table_id, vnodes);
         }
     }
 
@@ -1009,5 +985,165 @@ impl Ord for SstableUnit {
 impl PartialOrd for SstableUnit {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use parking_lot::RwLock;
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::config::Role;
+    use risingwave_common::config::streaming::CacheRefillPolicy;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_pb::id::TableId;
+
+    use super::{CacheRefillConfig, CacheRefiller, vnode_range_bitmap};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+
+    fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
+        CacheRefillConfig {
+            timeout: Duration::from_secs(1),
+            data_refill_levels: HashSet::new(),
+            meta_refill_concurrency: 1,
+            concurrency: 1,
+            unit: 1,
+            threshold: 0.0,
+            skip_recent_filter: true,
+            skip_inheritance_filter: true,
+            table_cache_refill_default_policy: default_policy,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_serving_snapshot_restores_table_cache_refill_vnodes() {
+        let table_id = TableId::from(233);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+            read_version_mapping,
+        );
+
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Serving,
+        )]));
+        assert!(
+            refiller
+                .table_cache_refill_context()
+                .read()
+                .serving
+                .is_empty()
+        );
+
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            table_id,
+            serving_vnodes.clone(),
+        )]));
+
+        let context = refiller.table_cache_refill_context().read();
+        assert!(context.streaming.is_empty());
+        assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+    }
+
+    #[tokio::test]
+    async fn test_serving_snapshot_replaces_existing_vnodes() {
+        let table_id = TableId::from(233);
+        let removed_table_id = TableId::from(234);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+            read_version_mapping,
+        );
+
+        refiller.replace_table_cache_refill_policies(HashMap::from([
+            (table_id, CacheRefillPolicy::Serving),
+            (removed_table_id, CacheRefillPolicy::Serving),
+        ]));
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([
+            (table_id, serving_vnodes.clone()),
+            (removed_table_id, serving_vnodes.clone()),
+        ]));
+        assert!(
+            refiller
+                .table_cache_refill_context()
+                .read()
+                .serving
+                .contains_key(&removed_table_id)
+        );
+
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            table_id,
+            serving_vnodes.clone(),
+        )]));
+
+        let context = refiller.table_cache_refill_context().read();
+        assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+        assert!(!context.serving.contains_key(&removed_table_id));
+        assert!(
+            !context
+                .serving_table_vnode_mapping
+                .contains_key(&removed_table_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_policy_snapshot_replaces_existing_policies() {
+        let table_id = TableId::from(233);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+            read_version_mapping,
+        );
+
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, serving_vnodes)]));
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Serving,
+        )]));
+        assert!(
+            refiller
+                .table_cache_refill_context()
+                .read()
+                .serving
+                .contains_key(&table_id)
+        );
+
+        refiller.replace_table_cache_refill_policies(HashMap::new());
+
+        let context = refiller.table_cache_refill_context().read();
+        assert!(context.policies.is_empty());
+        assert!(context.serving.is_empty());
+    }
+
+    #[test]
+    fn test_vnode_range_bitmap_uses_right_exclusive_end() {
+        let bitmap = vnode_range_bitmap(VirtualNode::COUNT_FOR_TEST, (10, 12));
+        assert_eq!(bitmap.count_ones(), 2);
+        assert!(bitmap.is_set(10));
+        assert!(bitmap.is_set(11));
+        assert!(!bitmap.is_set(12));
+
+        let last = vnode_range_bitmap(
+            VirtualNode::COUNT_FOR_TEST,
+            (VirtualNode::COUNT_FOR_TEST - 1, VirtualNode::COUNT_FOR_TEST),
+        );
+        assert_eq!(last.count_ones(), 1);
+        assert!(last.is_set(VirtualNode::COUNT_FOR_TEST - 1));
     }
 }

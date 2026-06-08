@@ -52,7 +52,8 @@ use crate::hummock::compactor::{
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::refiller::TableCacheRefillContext;
 use crate::hummock::event_handler::{
-    HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
+    HummockEvent, HummockEventHandler, HummockObserverEvent, HummockVersionUpdate,
+    ReadOnlyReadVersionMapping,
 };
 use crate::hummock::iterator::change_log::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_version_worker};
@@ -92,8 +93,8 @@ impl Drop for HummockStorageShutdownGuard {
 #[derive(Clone)]
 pub struct HummockStorage {
     hummock_event_sender: HummockEventSender,
-    // only used in test for setting hummock version in uploader
-    _version_update_sender: UnboundedSender<HummockVersionUpdate>,
+    // Only used in tests to inject observer events such as version updates.
+    _observer_event_sender: UnboundedSender<HummockObserverEvent>,
 
     context: CompactorContext,
 
@@ -176,31 +177,27 @@ impl HummockStorage {
         .await
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
-        let (version_update_tx, mut version_update_rx) = unbounded_channel();
-        let (cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
-        let (serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
-
+        let (observer_event_tx, mut observer_event_rx) = unbounded_channel();
         let observer_manager = ObserverManager::new(
             notification_client,
             HummockObserverNode::new(
                 compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
-                version_update_tx.clone(),
-                cache_refill_policy_tx,
-                serving_table_vnode_mapping_tx,
+                observer_event_tx.clone(),
                 write_limiter.clone(),
             ),
         )
         .await;
         observer_manager.start().await;
 
-        let hummock_version = match version_update_rx.recv().await {
-            Some(HummockVersionUpdate::PinnedVersion(version)) => *version,
+        let hummock_version = match observer_event_rx.recv().await {
+            Some(HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(
+                version,
+            ))) => *version,
             _ => unreachable!(
                 "the hummock observer manager is the first one to take the event tx. Should be full hummock version"
             ),
         };
-
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
         let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
@@ -220,9 +217,7 @@ impl HummockStorage {
 
         let hummock_event_handler = HummockEventHandler::new(
             role,
-            version_update_rx,
-            cache_refill_policy_rx,
-            serving_table_vnode_mapping_rx,
+            observer_event_rx,
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
@@ -239,7 +234,7 @@ impl HummockStorage {
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             hummock_event_sender: event_tx.clone(),
-            _version_update_sender: version_update_tx,
+            _observer_event_sender: observer_event_tx,
             recent_versions: hummock_event_handler.recent_versions(),
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
@@ -964,8 +959,10 @@ impl HummockStorage {
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
-        self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
+        self._observer_event_sender
+            .send(HummockObserverEvent::VersionUpdate(
+                HummockVersionUpdate::PinnedVersion(Box::new(version)),
+            ))
             .unwrap();
         loop {
             if self.recent_versions.load().latest_version().id() >= version_id {
