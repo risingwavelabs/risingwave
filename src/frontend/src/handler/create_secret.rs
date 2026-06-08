@@ -41,9 +41,16 @@ const SUPPORTED_SECRET_BACKENDS: [&str; 3] = [
     SECRET_BACKEND_AWS_SECRETS_MANAGER,
 ];
 
-const AWS_ACCESS_KEY_ID_KEYS: [&str; 2] = ["access_key_id", "aws.credentials.access_key_id"];
-const AWS_SECRET_ACCESS_KEY_KEYS: [&str; 2] =
-    ["secret_access_key", "aws.credentials.secret_access_key"];
+const AWS_ACCESS_KEY_ID_KEYS: [&str; 3] = [
+    "s3.credentials.access",
+    "access_key_id",
+    "aws.credentials.access_key_id",
+];
+const AWS_SECRET_ACCESS_KEY_KEYS: [&str; 3] = [
+    "s3.credentials.secret",
+    "secret_access_key",
+    "aws.credentials.secret_access_key",
+];
 const AWS_SESSION_TOKEN_KEYS: [&str; 2] = ["session_token", "aws.credentials.session_token"];
 
 pub async fn handle_create_secret(
@@ -245,7 +252,7 @@ fn build_aws_secrets_manager_config(
         .into());
     }
     config.set_credential_refs(access_key_id_ref, secret_access_key_ref, session_token_ref);
-    if config.endpoint_url.is_some() && config.session_token_ref.is_some() {
+    if config.aws_config.endpoint_url.is_some() && config.aws_config.session_token_ref.is_some() {
         return Err(ErrorCode::InvalidParameterValue(
             "session_token SECRET reference cannot be used with endpoint_url".to_owned(),
         )
@@ -299,17 +306,24 @@ fn canonical_aws_option_key(key: &str) -> Option<&'static str> {
     match key {
         SECRET_BACKEND_KEY => None,
         "secret_id" => Some("secret_id"),
-        "region" | "aws.region" => Some("region"),
+        "s3.region_name" | "region" | "aws.region" => Some("region"),
         "field" => Some("field"),
         "version_id" => Some("version_id"),
         "version_stage" => Some("version_stage"),
-        "endpoint_url" | "aws.endpoint_url" => Some("endpoint_url"),
-        "access_key_id" | "aws.credentials.access_key_id" => Some("access_key_id"),
-        "secret_access_key" | "aws.credentials.secret_access_key" => Some("secret_access_key"),
+        "s3.endpoint_url" | "s3.endpoint" | "endpoint_url" | "aws.endpoint_url" => {
+            Some("endpoint_url")
+        }
+        "s3.credentials.access" | "access_key_id" | "aws.credentials.access_key_id" => {
+            Some("access")
+        }
+        "s3.credentials.secret" | "secret_access_key" | "aws.credentials.secret_access_key" => {
+            Some("secret")
+        }
         "session_token" | "aws.credentials.session_token" => Some("session_token"),
-        "role_arn" | "aws.credentials.role.arn" => Some("role_arn"),
+        "s3.assume_role" | "role_arn" | "aws.credentials.role.arn" => Some("assume_role"),
         "external_id" | "aws.credentials.role.external_id" => Some("external_id"),
         "profile" | "aws.profile" => Some("profile"),
+        "enable_config_load" => Some("enable_config_load"),
         _ => None,
     }
 }

@@ -25,7 +25,7 @@ use aws_types::SdkConfig;
 use aws_types::region::Region;
 use risingwave_pb::secret;
 use risingwave_pb::secret::PbSecretRef;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::LocalSecretManager;
@@ -42,44 +42,52 @@ const AWS_SECRETS_MANAGER_SESSION_NAME: &str = "RisingWave";
 #[serde(deny_unknown_fields)]
 pub struct AwsSecretsManagerConfig {
     pub secret_id: String,
-    #[serde(default, alias = "aws.region")]
-    pub region: Option<String>,
     #[serde(default)]
     pub field: Option<String>,
     #[serde(default)]
     pub version_id: Option<String>,
     #[serde(default)]
     pub version_stage: Option<String>,
+    #[serde(flatten)]
+    pub aws_config: AwsSecretsManagerAwsConfig,
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AwsSecretsManagerAwsConfig {
+    #[serde(rename = "s3.region_name", alias = "aws.region", alias = "region")]
+    pub region_name: Option<String>,
     #[serde(default, rename = "endpoint_url", alias = "aws.endpoint_url")]
+    #[serde(alias = "s3.endpoint_url", alias = "s3.endpoint")]
     pub endpoint_url: Option<String>,
+    #[serde(rename = "s3.credentials.access")]
+    #[serde(alias = "access_key_id", alias = "aws.credentials.access_key_id")]
+    pub access: Option<String>,
+    #[serde(rename = "s3.credentials.secret")]
     #[serde(
-        default,
-        rename = "access_key_id",
-        alias = "aws.credentials.access_key_id"
-    )]
-    pub access_key_id: Option<String>,
-    #[serde(
-        default,
-        rename = "secret_access_key",
+        alias = "secret_access_key",
         alias = "aws.credentials.secret_access_key"
     )]
-    pub secret_access_key: Option<String>,
+    pub secret: Option<String>,
     #[serde(
         default,
         rename = "session_token",
         alias = "aws.credentials.session_token"
     )]
     pub session_token: Option<String>,
-    #[serde(default, rename = "role_arn", alias = "aws.credentials.role.arn")]
-    pub role_arn: Option<String>,
+    #[serde(rename = "s3.assume_role")]
+    #[serde(alias = "role_arn", alias = "aws.credentials.role.arn")]
+    pub assume_role: Option<String>,
     #[serde(default, alias = "aws.credentials.role.external_id")]
     pub external_id: Option<String>,
     #[serde(default, alias = "aws.profile")]
     pub profile: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(skip)]
-    pub access_key_id_ref: Option<PbSecretRef>,
+    pub access_ref: Option<PbSecretRef>,
     #[serde(skip)]
-    pub secret_access_key_ref: Option<PbSecretRef>,
+    pub secret_ref: Option<PbSecretRef>,
     #[serde(skip)]
     pub session_token_ref: Option<PbSecretRef>,
 }
@@ -93,40 +101,31 @@ impl AwsSecretsManagerConfig {
     pub fn from_protobuf(backend: &secret::SecretAwsSecretsManagerBackend) -> Self {
         Self {
             secret_id: backend.secret_id.clone(),
-            region: non_empty_string(&backend.region),
             field: non_empty_string(&backend.field),
             version_id: non_empty_string(&backend.version_id),
             version_stage: non_empty_string(&backend.version_stage),
-            endpoint_url: non_empty_string(&backend.endpoint_url),
-            access_key_id: non_empty_string(&backend.access_key_id),
-            secret_access_key: non_empty_string(&backend.secret_access_key),
-            session_token: non_empty_string(&backend.session_token),
-            role_arn: non_empty_string(&backend.role_arn),
-            external_id: non_empty_string(&backend.external_id),
-            profile: non_empty_string(&backend.profile),
-            access_key_id_ref: backend.access_key_id_ref,
-            secret_access_key_ref: backend.secret_access_key_ref,
-            session_token_ref: backend.session_token_ref,
+            aws_config: AwsSecretsManagerAwsConfig::from_protobuf(backend),
         }
     }
 
     pub fn to_protobuf(&self) -> secret::SecretAwsSecretsManagerBackend {
         secret::SecretAwsSecretsManagerBackend {
             secret_id: self.secret_id.clone(),
-            region: self.region.clone().unwrap_or_default(),
             field: self.field.clone().unwrap_or_default(),
             version_id: self.version_id.clone().unwrap_or_default(),
             version_stage: self.version_stage.clone().unwrap_or_default(),
-            endpoint_url: self.endpoint_url.clone().unwrap_or_default(),
-            access_key_id: self.access_key_id.clone().unwrap_or_default(),
-            secret_access_key: self.secret_access_key.clone().unwrap_or_default(),
-            session_token: self.session_token.clone().unwrap_or_default(),
-            role_arn: self.role_arn.clone().unwrap_or_default(),
-            external_id: self.external_id.clone().unwrap_or_default(),
-            profile: self.profile.clone().unwrap_or_default(),
-            access_key_id_ref: self.access_key_id_ref,
-            secret_access_key_ref: self.secret_access_key_ref,
-            session_token_ref: self.session_token_ref,
+            region_name: self.aws_config.region_name.clone().unwrap_or_default(),
+            endpoint_url: self.aws_config.endpoint_url.clone().unwrap_or_default(),
+            access: self.aws_config.access.clone().unwrap_or_default(),
+            secret: self.aws_config.secret.clone().unwrap_or_default(),
+            session_token: self.aws_config.session_token.clone().unwrap_or_default(),
+            assume_role: self.aws_config.assume_role.clone().unwrap_or_default(),
+            external_id: self.aws_config.external_id.clone().unwrap_or_default(),
+            profile: self.aws_config.profile.clone().unwrap_or_default(),
+            access_ref: self.aws_config.access_ref,
+            secret_ref: self.aws_config.secret_ref,
+            session_token_ref: self.aws_config.session_token_ref,
+            enable_config_load: self.aws_config.enable_config_load.unwrap_or(false),
         }
     }
 
@@ -136,32 +135,32 @@ impl AwsSecretsManagerConfig {
         secret_access_key_ref: Option<PbSecretRef>,
         session_token_ref: Option<PbSecretRef>,
     ) {
-        self.access_key_id_ref = access_key_id_ref;
-        self.secret_access_key_ref = secret_access_key_ref;
-        self.session_token_ref = session_token_ref;
+        self.aws_config.access_ref = access_key_id_ref;
+        self.aws_config.secret_ref = secret_access_key_ref;
+        self.aws_config.session_token_ref = session_token_ref;
     }
 
     async fn build_sdk_config(&self) -> Result<SdkConfig> {
         if self.secret_id.is_empty() {
             bail!("secret_id must not be empty");
         }
-        if default_credential_disabled() && self.profile.is_some() {
-            bail!("profile is not allowed when default AWS credential loading is disabled");
+        if !self.aws_config.enable_config_load() && self.aws_config.profile.is_some() {
+            bail!("profile is not allowed when AWS config loading is disabled");
         }
         let region = self.build_region().await?;
         let explicit_credentials = self.build_explicit_credentials()?;
-        if explicit_credentials.is_none() && default_credential_disabled() {
+        if explicit_credentials.is_none() && !self.aws_config.enable_config_load() {
             bail!(
-                "default AWS credential loading is disabled in this environment; please provide both access_key_id and secret_access_key, or use SECRET references for them"
+                "AWS config loading is disabled; please provide both s3.credentials.access and s3.credentials.secret, use SECRET references for them, or set enable_config_load = true"
             );
         }
 
         let mut config_loader =
             aws_config::defaults(BehaviorVersion::latest()).region(region.clone());
-        if let Some(profile) = &self.profile {
+        if let Some(profile) = &self.aws_config.profile {
             config_loader = config_loader.profile_name(profile);
         }
-        if let Some(endpoint_url) = &self.endpoint_url {
+        if let Some(endpoint_url) = &self.aws_config.endpoint_url {
             config_loader = config_loader.endpoint_url(endpoint_url);
         }
         if let Some(credentials) = explicit_credentials {
@@ -169,7 +168,7 @@ impl AwsSecretsManagerConfig {
         }
 
         let mut sdk_config = config_loader.load().await;
-        if let Some(role_arn) = &self.role_arn {
+        if let Some(role_arn) = &self.aws_config.assume_role {
             let source_credentials = sdk_config
                 .credentials_provider()
                 .ok_or_else(|| anyhow!("missing AWS credentials_provider for assume role"))?;
@@ -177,14 +176,14 @@ impl AwsSecretsManagerConfig {
             let mut role_builder = AssumeRoleProvider::builder(role_arn)
                 .session_name(AWS_SECRETS_MANAGER_SESSION_NAME)
                 .region(role_region);
-            if let Some(external_id) = &self.external_id {
+            if let Some(external_id) = &self.aws_config.external_id {
                 role_builder = role_builder.external_id(external_id);
             }
             let role_provider = role_builder.build_from_provider(source_credentials).await;
             let mut role_config_loader = aws_config::defaults(BehaviorVersion::latest())
                 .region(region)
                 .credentials_provider(SharedCredentialsProvider::new(role_provider));
-            if let Some(endpoint_url) = &self.endpoint_url {
+            if let Some(endpoint_url) = &self.aws_config.endpoint_url {
                 role_config_loader = role_config_loader.endpoint_url(endpoint_url);
             }
             sdk_config = role_config_loader.load().await;
@@ -194,14 +193,14 @@ impl AwsSecretsManagerConfig {
     }
 
     async fn build_region(&self) -> Result<Region> {
-        if let Some(region) = &self.region {
+        if let Some(region) = &self.aws_config.region_name {
             return Ok(Region::new(region.clone()));
         }
-        if default_credential_disabled() {
-            bail!("region must be provided when default AWS config loading is disabled");
+        if !self.aws_config.enable_config_load() {
+            bail!("s3.region_name must be provided when AWS config loading is disabled");
         }
         let mut region_chain = DefaultRegionChain::builder();
-        if let Some(profile) = &self.profile {
+        if let Some(profile) = &self.aws_config.profile {
             region_chain = region_chain.profile_name(profile);
         }
         region_chain
@@ -212,22 +211,20 @@ impl AwsSecretsManagerConfig {
     }
 
     fn build_explicit_credentials(&self) -> Result<Option<SharedCredentialsProvider>> {
-        let access_key_id = self.resolve_optional_secret_ref(&self.access_key_id_ref)?;
-        let secret_access_key = self.resolve_optional_secret_ref(&self.secret_access_key_ref)?;
-        let session_token = self.resolve_optional_secret_ref(&self.session_token_ref)?;
+        let access = self.resolve_optional_secret_ref(&self.aws_config.access_ref)?;
+        let secret = self.resolve_optional_secret_ref(&self.aws_config.secret_ref)?;
+        let session_token = self.resolve_optional_secret_ref(&self.aws_config.session_token_ref)?;
 
-        let access_key_id = access_key_id.or_else(|| self.access_key_id.clone());
-        let secret_access_key = secret_access_key.or_else(|| self.secret_access_key.clone());
-        let session_token = session_token.or_else(|| self.session_token.clone());
+        let access = access.or_else(|| self.aws_config.access.clone());
+        let secret = secret.or_else(|| self.aws_config.secret.clone());
+        let session_token = session_token.or_else(|| self.aws_config.session_token.clone());
 
-        match (access_key_id, secret_access_key) {
-            (Some(access_key_id), Some(secret_access_key)) => {
-                Ok(Some(SharedCredentialsProvider::new(
-                    Credentials::from_keys(access_key_id, secret_access_key, session_token),
-                )))
-            }
+        match (access, secret) {
+            (Some(access), Some(secret)) => Ok(Some(SharedCredentialsProvider::new(
+                Credentials::from_keys(access, secret, session_token),
+            ))),
             (None, None) => Ok(None),
-            _ => bail!("access_key_id and secret_access_key must be provided together"),
+            _ => bail!("s3.credentials.access and s3.credentials.secret must be provided together"),
         }
     }
 
@@ -239,6 +236,32 @@ impl AwsSecretsManagerConfig {
             .map(|secret_ref| LocalSecretManager::global().fill_secret(secret_ref))
             .transpose()
             .map_err(Into::into)
+    }
+}
+
+impl AwsSecretsManagerAwsConfig {
+    fn from_protobuf(backend: &secret::SecretAwsSecretsManagerBackend) -> Self {
+        Self {
+            region_name: non_empty_string(&backend.region_name),
+            endpoint_url: non_empty_string(&backend.endpoint_url),
+            access: non_empty_string(&backend.access),
+            secret: non_empty_string(&backend.secret),
+            session_token: non_empty_string(&backend.session_token),
+            assume_role: non_empty_string(&backend.assume_role),
+            external_id: non_empty_string(&backend.external_id),
+            profile: non_empty_string(&backend.profile),
+            enable_config_load: backend.enable_config_load.then_some(true),
+            access_ref: backend.access_ref,
+            secret_ref: backend.secret_ref,
+            session_token_ref: backend.session_token_ref,
+        }
+    }
+
+    fn enable_config_load(&self) -> bool {
+        if default_credential_disabled() {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
     }
 }
 
@@ -321,4 +344,16 @@ fn default_credential_disabled() -> bool {
                 .any(|s| value.eq_ignore_ascii_case(s))
         })
         .unwrap_or(false)
+}
+
+fn deserialize_optional_bool_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    value
+        .map(|value| value.parse().map_err(serde::de::Error::custom))
+        .transpose()
 }

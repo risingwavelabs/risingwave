@@ -125,8 +125,8 @@ pub fn get_referred_secret_ids_from_secret_payload(
     let mut secret_ids = HashSet::new();
     if let Some(SecretBackend::AwsSecretsManager(backend)) = secret.secret_backend {
         for secret_ref in [
-            backend.access_key_id_ref,
-            backend.secret_access_key_ref,
+            backend.access_ref,
+            backend.secret_ref,
             backend.session_token_ref,
         ]
         .into_iter()
