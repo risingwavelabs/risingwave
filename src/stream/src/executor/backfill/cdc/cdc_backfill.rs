@@ -21,6 +21,7 @@ use futures::stream;
 use futures::stream::select_with_strategy;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
@@ -155,19 +156,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             return Ok((vec![], 0, None));
         };
 
-        let mut buffered_chunks = std::mem::take(upstream_chunk_buffer).into_iter();
+        let buffered_chunks = std::mem::take(upstream_chunk_buffer);
         let mut emitted_chunks = Vec::with_capacity(buffered_chunks.len());
         let mut upstream_processed_row_count = 0;
         let mut consumed_binlog_offset = None;
-        let mut retained_chunks = Vec::with_capacity(emitted_chunks.capacity());
+        let mut retained_chunks = Vec::with_capacity(buffered_chunks.len());
 
-        while let Some(chunk) = buffered_chunks.next() {
-            let data_types = chunk.data_types();
-            let mut emitted_rows = Vec::new();
-            let mut retain_from = None;
+        for chunk in buffered_chunks {
+            let mut emitted_vis = BitmapBuilder::zeroed(chunk.capacity());
+            let mut retained_vis = BitmapBuilder::zeroed(chunk.capacity());
             for idx in 0..chunk.capacity() {
                 let (op, row, visible) = chunk.row_at(idx);
-                debug_assert!(visible, "buffered chunk should have compact visibility");
+                if !visible {
+                    continue;
+                }
                 let event_offset = (*offset_parse_func)(
                     row.iter()
                         .last()
@@ -185,17 +187,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         .is_le();
 
                 if in_binlog_range && !reached_current_pos {
-                    retain_from = Some(idx);
-                    break;
+                    retained_vis.set(idx, true);
                 }
 
                 match op {
                     Op::Insert | Op::Delete => {
-                        if in_binlog_range {
-                            emitted_rows.push((op, row.into_owned_row()));
+                        if in_binlog_range && reached_current_pos {
+                            emitted_vis.set(idx, true);
                             consumed_binlog_offset = Some(event_offset);
+                            upstream_processed_row_count += 1;
                         }
-                        upstream_processed_row_count += 1;
                     }
                     Op::UpdateDelete | Op::UpdateInsert => {
                         unreachable!("CDC buffered chunks should not contain update pairs")
@@ -203,21 +204,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            if !emitted_rows.is_empty() {
-                emitted_chunks.push(mapping_chunk(
-                    StreamChunk::from_rows(&emitted_rows, &data_types),
-                    output_indices,
-                ));
+            let emitted_vis = emitted_vis.finish();
+            if emitted_vis.count_ones() > 0 {
+                emitted_chunks.push(mapping_chunk(chunk.clone_with_vis(emitted_vis), output_indices));
             }
 
-            if let Some(retain_from) = retain_from {
-                let retained_rows = chunk
-                    .rows_in(retain_from..chunk.capacity())
-                    .map(|(op, row)| (op, row.into_owned_row()))
-                    .collect_vec();
-                retained_chunks.push(StreamChunk::from_rows(&retained_rows, &data_types));
-                retained_chunks.extend(buffered_chunks);
-                break;
+            let retained_vis = retained_vis.finish();
+            if retained_vis.count_ones() > 0 {
+                retained_chunks.push(chunk.clone_with_vis(retained_vis));
             }
         }
 
@@ -1366,7 +1360,98 @@ mod tests {
     }
 
     #[test]
-    fn test_consume_upstream_chunk_buffer_bulk_retains_remaining_chunks() {
+    fn test_consume_upstream_chunk_buffer_handles_non_monotonic_pk_within_chunk() {
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
+            &[
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(1)),
+                        Some(ScalarImpl::Int64(100)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(6)),
+                        Some(ScalarImpl::Int64(600)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(2)),
+                        Some(ScalarImpl::Int64(200)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":5},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+            ],
+            &[DataType::Int64, DataType::Int64, DataType::Varchar],
+        )];
+
+        let (emitted_chunks, drained_row_count, drained_offset) =
+            CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                &MockExternalTableReader::get_cdc_offset_parser(),
+                &mut upstream_chunk_buffer,
+                Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+                &[0],
+                &[OrderType::ascending()],
+                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &[0, 1],
+            )
+            .unwrap();
+
+        assert_eq!(drained_row_count, 2);
+        assert_eq!(
+            drained_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
+        );
+        assert_eq!(emitted_chunks.len(), 1);
+        assert_eq!(emitted_chunks[0].rows().count(), 2);
+        assert_eq!(
+            emitted_chunks[0]
+                .rows()
+                .map(|(_, row)| row.to_owned_row())
+                .collect::<Vec<_>>(),
+            vec![
+                OwnedRow::new(vec![Some(ScalarImpl::Int64(1)), Some(ScalarImpl::Int64(100))]),
+                OwnedRow::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(200))]),
+            ]
+        );
+
+        assert_eq!(upstream_chunk_buffer.len(), 1);
+        assert_eq!(upstream_chunk_buffer[0].rows().count(), 1);
+        assert_eq!(
+            upstream_chunk_buffer[0]
+                .rows()
+                .next()
+                .unwrap()
+                .1
+                .to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(6)),
+                Some(ScalarImpl::Int64(600)),
+                Some(ScalarImpl::Utf8(
+                    r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                        .into(),
+                )),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_consume_upstream_chunk_buffer_processes_following_chunks_after_future_row() {
         let mut upstream_chunk_buffer = vec![
             StreamChunk::from_rows(
                 &[
@@ -1399,8 +1484,8 @@ mod tests {
                 &[(
                     Op::Insert,
                     OwnedRow::new(vec![
-                        Some(ScalarImpl::Int64(7)),
-                        Some(ScalarImpl::Int64(700)),
+                        Some(ScalarImpl::Int64(2)),
+                        Some(ScalarImpl::Int64(200)),
                         Some(ScalarImpl::Utf8(
                             r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":5},"isHeartbeat":false}"#
                                 .into(),
@@ -1411,7 +1496,7 @@ mod tests {
             ),
         ];
 
-        let (_, drained_row_count, drained_offset) =
+        let (emitted_chunks, drained_row_count, drained_offset) =
             CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
                 &MockExternalTableReader::get_cdc_offset_parser(),
                 &mut upstream_chunk_buffer,
@@ -1423,12 +1508,20 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(drained_row_count, 1);
+        assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
         );
-        assert_eq!(upstream_chunk_buffer.len(), 2);
+        assert_eq!(emitted_chunks.len(), 2);
+        assert_eq!(emitted_chunks[0].rows().count(), 1);
+        assert_eq!(emitted_chunks[1].rows().count(), 1);
+        assert_eq!(
+            emitted_chunks[1].rows().next().unwrap().1.to_owned_row(),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(200))])
+        );
+
+        assert_eq!(upstream_chunk_buffer.len(), 1);
         assert_eq!(
             upstream_chunk_buffer[0]
                 .rows()
@@ -1441,22 +1534,6 @@ mod tests {
                 Some(ScalarImpl::Int64(600)),
                 Some(ScalarImpl::Utf8(
                     r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
-                        .into(),
-                )),
-            ])
-        );
-        assert_eq!(
-            upstream_chunk_buffer[1]
-                .rows()
-                .next()
-                .unwrap()
-                .1
-                .to_owned_row(),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(7)),
-                Some(ScalarImpl::Int64(700)),
-                Some(ScalarImpl::Utf8(
-                    r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":5},"isHeartbeat":false}"#
                         .into(),
                 )),
             ])
