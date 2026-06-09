@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Arrow conversion for LanceDB sink.
+//! Arrow conversion for `LanceDB` sink.
 //!
-//! LanceDB uses arrow-57, same as the `arrow_57` module.
-//! This module re-exports the arrow-57 types and provides a `LanceDbConvert` struct
+//! `LanceDB` uses arrow-58, same as the `arrow_58` module.
+//! This module re-exports the arrow-58 types and provides a `LanceDbConvert` struct
 //! with a `to_record_batch` method (same pattern as `DeltaLakeConvert`).
 
-pub use super::arrow_56::{
+pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, DataChunk};
@@ -27,7 +27,7 @@ use crate::catalog::Schema;
 pub struct LanceDbConvert;
 
 impl LanceDbConvert {
-    /// Convert a RisingWave DataChunk to an Arrow RecordBatch.
+    /// Convert a RisingWave `DataChunk` to an Arrow `RecordBatch`.
     pub fn to_record_batch(
         &self,
         schema: arrow_schema::SchemaRef,
@@ -50,9 +50,9 @@ impl LanceDbConvert {
     }
 }
 
-/// Use the default ToArrow implementation (no overrides needed for LanceDB initially).
-/// DeltaLake overrides `decimal_to_arrow` because of special Inf/NaN handling.
-/// LanceDB can use the default behavior. If custom type mapping is needed later
-/// (e.g., Vector → FixedSizeList), add overrides here.
+/// Use the default `ToArrow` implementation (no overrides needed for `LanceDB` initially).
+/// `DeltaLake` overrides `decimal_to_arrow` because of special Inf/NaN handling.
+/// `LanceDB` can use the default behavior. If custom type mapping is needed later
+/// (e.g., Vector → `FixedSizeList`), add overrides here.
 impl ToArrow for LanceDbConvert {}
 impl FromArrow for LanceDbConvert {}
