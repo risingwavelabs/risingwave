@@ -21,8 +21,8 @@ use futures::stream;
 use futures::stream::select_with_strategy;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
-use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::bail;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
@@ -213,7 +213,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             let emitted_vis = emitted_vis.finish();
             if emitted_vis.count_ones() > 0 {
-                emitted_chunks.push(mapping_chunk(chunk.clone_with_vis(emitted_vis), output_indices));
+                emitted_chunks.push(mapping_chunk(
+                    chunk.clone_with_vis(emitted_vis),
+                    output_indices,
+                ));
             }
 
             let retained_vis = retained_vis.finish();
@@ -610,7 +613,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         )?;
                                         cur_barrier_upstream_processed_rows +=
                                             consumed_upstream_row_count;
-                                        if let Some(consumed_binlog_offset) = consumed_binlog_offset {
+                                        if let Some(consumed_binlog_offset) = consumed_binlog_offset
+                                        {
                                             last_binlog_offset = Some(consumed_binlog_offset);
                                         }
                                         for chunk in emitted_upstream_chunks {
@@ -1432,8 +1436,14 @@ mod tests {
                 .map(|(_, row)| row.to_owned_row())
                 .collect::<Vec<_>>(),
             vec![
-                OwnedRow::new(vec![Some(ScalarImpl::Int64(1)), Some(ScalarImpl::Int64(100))]),
-                OwnedRow::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(200))]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(1)),
+                    Some(ScalarImpl::Int64(100))
+                ]),
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(2)),
+                    Some(ScalarImpl::Int64(200))
+                ]),
             ]
         );
 
@@ -1525,7 +1535,10 @@ mod tests {
         assert_eq!(emitted_chunks[1].rows().count(), 1);
         assert_eq!(
             emitted_chunks[1].rows().next().unwrap().1.to_owned_row(),
-            OwnedRow::new(vec![Some(ScalarImpl::Int64(2)), Some(ScalarImpl::Int64(200))])
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(2)),
+                Some(ScalarImpl::Int64(200))
+            ])
         );
 
         assert_eq!(upstream_chunk_buffer.len(), 1);
