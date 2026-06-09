@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::BytesMut;
-use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -714,12 +713,10 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 .fields
                 .iter()
                 .map(|f| {
-                    (
-                        f.name.clone(),
-                        DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                    )
+                    let data_type = DataType::from(f.data_type.as_ref().unwrap());
+                    Ok((f.name.clone(), convert_redshift_data_type(&data_type)?))
                 })
-                .collect_vec(),
+                .collect::<Result<Vec<_>>>()?,
         );
         let check_column_exists = |e: anyhow::Error| {
             let err_str = e.to_report_string();
@@ -744,18 +741,19 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 ))
             })?;
             let sql = build_alter_add_column_sql(
-                self.config.schema.as_deref(),
+                self.config
+                    .intermediate_schema
+                    .as_deref()
+                    .or(self.config.schema.as_deref()),
                 cdc_table_name,
                 &add_columns
                     .fields
                     .iter()
                     .map(|f| {
-                        (
-                            f.name.clone(),
-                            DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                        )
+                        let data_type = DataType::from(f.data_type.as_ref().unwrap());
+                        Ok((f.name.clone(), convert_redshift_data_type(&data_type)?))
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>>>()?,
             );
             self.client
                 .execute_sql_sync(vec![sql.clone()])
