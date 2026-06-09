@@ -666,6 +666,9 @@ impl CatalogController {
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let object_type = PbObjectType::try_from(comment.object_type)
             .map_err(|_| MetaError::invalid_parameter("comment object type"))?;
+        if object_type == PbObjectType::Unspecified {
+            return Err(MetaError::invalid_parameter("comment object type"));
+        }
 
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
