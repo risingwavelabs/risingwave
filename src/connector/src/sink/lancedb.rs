@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use core::num::NonZeroU64;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use lance::dataset::CommitBuilder;
 use lance::dataset::fragment::FileFragment;
-use lance::dataset::transaction::Operation;
+use lance::dataset::transaction::{Operation, TransactionBuilder};
 use lance::Dataset;
 use lance_table::format::Fragment;
 use lancedb::Connection as LanceDbConnection;
@@ -30,7 +31,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use serde::Deserialize;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
@@ -43,10 +45,13 @@ use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriterParam,
+    SinkWriterParam, TwoPhaseCommitCoordinator,
 };
 
 pub const LANCEDB_SINK: &str = "lancedb";
+
+const RW_SINK_ID_TRANSACTION_PROPERTY: &str = "risingwave.sink_id";
+const RW_EPOCH_TRANSACTION_PROPERTY: &str = "risingwave.epoch";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -55,11 +60,11 @@ pub const LANCEDB_SINK: &str = "lancedb";
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct LanceDbCommon {
-    /// URI of the LanceDB database (e.g., "/tmp/lancedb", "s3://bucket/path/db")
+    /// URI of the `LanceDB` database (e.g., `/tmp/lancedb`, `<s3://bucket/path/db>`)
     #[serde(rename = "lancedb.uri")]
     pub uri: String,
 
-    /// Table name in the LanceDB database
+    /// Table name in the `LanceDB` database
     #[serde(rename = "lancedb.table")]
     pub table: String,
 
@@ -81,7 +86,7 @@ impl LanceDbCommon {
     }
 
     /// Get the lance Dataset URI for the table.
-    /// LanceDB stores each table as a lance dataset at `{db_uri}/{table_name}.lance`.
+    /// `LanceDB` stores each table as a Lance dataset at `{db_uri}/{table_name}.lance`.
     pub fn dataset_uri(&self) -> String {
         format!("{}/{}.lance", self.uri.trim_end_matches('/'), self.table)
     }
@@ -94,6 +99,11 @@ pub struct LanceDbConfig {
     pub common: LanceDbCommon,
 
     pub r#type: String,
+
+    /// Whether to use RisingWave's two-phase commit framework for exactly-once commits.
+    /// Defaults to true. Set to false to use single-phase commits.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub is_exactly_once: Option<bool>,
 }
 
 impl LanceDbConfig {
@@ -137,8 +147,7 @@ impl Sink for LanceDbSink {
     const SINK_NAME: &'static str = LANCEDB_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let inner =
-            LanceDbSinkWriter::new(self.config.clone(), self.param.schema().clone()).await?;
+        let inner = LanceDbSinkWriter::new(self.config.clone(), self.param.schema())?;
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
@@ -243,8 +252,13 @@ impl Sink for LanceDbSink {
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<SinkCommitCoordinator> {
-        let committer = LanceDbSinkCommitter::new(self.config.clone()).await?;
-        Ok(SinkCommitCoordinator::SinglePhase(Box::new(committer)))
+        let committer =
+            LanceDbSinkCommitter::new(self.config.clone(), self.param.sink_id.to_string()).await?;
+        if self.config.is_exactly_once.unwrap_or(true) {
+            Ok(SinkCommitCoordinator::TwoPhase(Box::new(committer)))
+        } else {
+            Ok(SinkCommitCoordinator::SinglePhase(Box::new(committer)))
+        }
     }
 }
 
@@ -268,8 +282,7 @@ use risingwave_common::array::arrow::arrow_schema_lancedb as arrow_schema;
 /// The writer writes data files directly to the Lance dataset storage using the
 /// low-level `FileFragment::create_fragments()` API. On checkpoint, it returns
 /// lightweight `Fragment` metadata (file paths + row counts) instead of the
-/// actual data payload. The coordinator then commits these fragments atomically
-/// via `Dataset::commit()`.
+/// actual data payload. The coordinator then commits these fragments atomically.
 ///
 /// This follows the same pattern as the Iceberg sink, where writers handle I/O
 /// and the coordinator only performs a metadata-only commit.
@@ -278,14 +291,14 @@ pub struct LanceDbSinkWriter {
     #[expect(dead_code)]
     schema: Schema,
     arrow_schema: Arc<arrow_schema::Schema>,
-    /// Dataset URI for the target Lance table (e.g., "/tmp/lancedb/my_table.lance")
+    /// Dataset URI for the target Lance table (e.g., `/tmp/lancedb/my_table.lance`)
     dataset_uri: String,
     /// Buffered record batches for the current epoch
     batches: Vec<arrow_array::RecordBatch>,
 }
 
 impl LanceDbSinkWriter {
-    pub async fn new(config: LanceDbConfig, schema: Schema) -> Result<Self> {
+    pub fn new(config: LanceDbConfig, schema: Schema) -> Result<Self> {
         let arrow_schema = LanceDbConvert
             .rw_schema_to_arrow_schema(&schema)
             .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
@@ -353,16 +366,8 @@ impl SinkWriter for LanceDbSinkWriter {
             return Ok(None);
         }
 
-        if self.batches.is_empty() {
-            return Ok(None);
-        }
-
         // Write data files directly to storage and get fragment metadata.
         let fragments = self.flush_to_fragments().await?;
-
-        if fragments.is_empty() {
-            return Ok(None);
-        }
 
         // Serialize fragment metadata as JSON — this is lightweight (file paths + row counts).
         let metadata = serde_json::to_vec(&fragments)
@@ -380,36 +385,27 @@ impl SinkWriter for LanceDbSinkWriter {
 // ---------------------------------------------------------------------------
 
 /// The coordinator collects lightweight `Fragment` metadata from all writers
-/// and commits them atomically via `Dataset::commit(Operation::Append { fragments })`.
+/// and commits them atomically via `CommitBuilder`.
 /// No data payload flows through the coordinator — only file-level metadata.
 pub struct LanceDbSinkCommitter {
     config: LanceDbConfig,
     conn: LanceDbConnection,
+    sink_id: String,
 }
 
 impl LanceDbSinkCommitter {
-    pub async fn new(config: LanceDbConfig) -> Result<Self> {
+    pub async fn new(config: LanceDbConfig, sink_id: String) -> Result<Self> {
         let conn = config.common.create_connection().await?;
-        Ok(Self { config, conn })
-    }
-}
-
-#[async_trait::async_trait]
-impl SinglePhaseCommitCoordinator for LanceDbSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
-        tracing::info!(
-            "LanceDB commit coordinator initialized for table '{}'",
-            self.config.common.table
-        );
-        Ok(())
+        Ok(Self {
+            config,
+            conn,
+            sink_id,
+        })
     }
 
-    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        tracing::debug!("Starting LanceDB commit in epoch {epoch}.");
-
-        // Collect all Fragment metadata from all writers.
-        let mut all_fragments: Vec<Fragment> = Vec::new();
-        for meta in &metadata {
+    fn collect_fragments(metadata: &[SinkMetadata]) -> Result<Vec<Fragment>> {
+        let mut all_fragments = Vec::new();
+        for meta in metadata {
             if let Some(Serialized(s)) = &meta.metadata {
                 let fragments: Vec<Fragment> = serde_json::from_slice(&s.metadata)
                     .context("failed to deserialize fragment metadata")
@@ -417,8 +413,50 @@ impl SinglePhaseCommitCoordinator for LanceDbSinkCommitter {
                 all_fragments.extend(fragments);
             }
         }
+        Ok(all_fragments)
+    }
 
-        if all_fragments.is_empty() {
+    async fn is_epoch_committed(
+        &self,
+        dataset: &Dataset,
+        target_sink_id: &str,
+        target_epoch: u64,
+    ) -> Result<bool> {
+        let target_epoch = target_epoch.to_string();
+        let latest_version = dataset.version().version;
+
+        for version in 1..=latest_version {
+            let Some(transaction) = dataset
+                .read_transaction_by_version(version)
+                .await
+                .context("failed to read Lance transaction history")
+                .map_err(SinkError::LanceDb)?
+            else {
+                continue;
+            };
+
+            if let Some(properties) = transaction.transaction_properties
+                && properties
+                    .get(RW_SINK_ID_TRANSACTION_PROPERTY)
+                    .is_some_and(|sink_id| sink_id == target_sink_id)
+                && properties
+                    .get(RW_EPOCH_TRANSACTION_PROPERTY)
+                    .is_some_and(|epoch| epoch == &target_epoch)
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn commit_fragments(
+        &mut self,
+        epoch: u64,
+        fragments: Vec<Fragment>,
+        transaction_properties: Option<HashMap<String, String>>,
+    ) -> Result<()> {
+        if fragments.is_empty() {
             tracing::debug!("No fragments to commit in epoch {epoch}, skipping.");
             return Ok(());
         }
@@ -442,41 +480,167 @@ impl SinglePhaseCommitCoordinator for LanceDbSinkCommitter {
             .get()
             .await
             .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
-
-        let read_version = dataset_guard.version().version;
-        let session = dataset_guard.session();
-
-        // Drop the read guard before commit to avoid holding the lock.
+        let dataset = (*dataset_guard).clone();
         drop(dataset_guard);
 
-        // Commit fragments via low-level Dataset::commit with Operation::Append.
+        if let Some(properties) = &transaction_properties
+            && let Some(sink_id) = properties.get(RW_SINK_ID_TRANSACTION_PROPERTY)
+            && self.is_epoch_committed(&dataset, sink_id, epoch).await?
+        {
+            tracing::info!(
+                "LanceDB epoch {epoch} has already been committed, skipping duplicate commit."
+            );
+            return Ok(());
+        }
+
+        // Commit fragments via low-level Lance transaction with Operation::Append.
         // This is a metadata-only operation — the data files were already written by workers.
-        let operation = Operation::Append {
-            fragments: all_fragments,
-        };
+        let operation = Operation::Append { fragments };
 
-        let dataset_uri = self.config.common.dataset_uri();
+        let mut transaction_builder =
+            TransactionBuilder::new(dataset.version().version, operation);
+        if let Some(transaction_properties) = transaction_properties {
+            transaction_builder = transaction_builder
+                .transaction_properties(Some(Arc::new(transaction_properties)));
+        }
+        let transaction = transaction_builder.build();
 
-        let new_dataset = Dataset::commit(
-            &dataset_uri as &str,
-            operation,
-            Some(read_version),
-            None, // store_params
-            None, // commit_handler
-            session,
-            false, // enable_v2_manifest_paths
-        )
-        .await
-        .context("failed to commit fragments to lance dataset")
-        .map_err(SinkError::LanceDb)?;
+        let new_dataset = CommitBuilder::new(Arc::new(dataset))
+            .execute(transaction)
+            .await
+            .context("failed to commit fragments to lance dataset")
+            .map_err(SinkError::LanceDb)?;
 
         // Update the lancedb Table's internal dataset to the new version.
-        dataset_wrapper.set_latest(new_dataset).await;
+        dataset_wrapper.update(new_dataset);
 
         tracing::debug!(
             "Succeeded to commit fragments to LanceDB table in epoch {epoch}."
         );
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl SinglePhaseCommitCoordinator for LanceDbSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!(
+            "LanceDB commit coordinator initialized for table '{}'",
+            self.config.common.table
+        );
+        Ok(())
+    }
+
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        tracing::debug!("Starting LanceDB single-phase commit in epoch {epoch}.");
+
+        let fragments = Self::collect_fragments(&metadata)?;
+        self.commit_fragments(epoch, fragments, None).await
+    }
+}
+
+#[async_trait::async_trait]
+impl TwoPhaseCommitCoordinator for LanceDbSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!(
+            "LanceDB commit coordinator initialized for table '{}'",
+            self.config.common.table
+        );
+        Ok(())
+    }
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<Option<Vec<u8>>> {
+        if schema_change.is_some() {
+            return Err(SinkError::LanceDb(anyhow!(
+                "LanceDB sink does not support schema change"
+            )));
+        }
+
+        let fragments = Self::collect_fragments(&metadata)?;
+        if fragments.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(
+            LanceDbPreCommitMetadata {
+                sink_id: self.sink_id.clone(),
+                epoch,
+                fragments,
+            }
+            .try_into_bytes()?,
+        ))
+    }
+
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
+        tracing::debug!("Starting LanceDB two-phase commit in epoch {epoch}.");
+
+        if commit_metadata.is_empty() {
+            return Ok(());
+        }
+
+        let pre_commit_metadata = LanceDbPreCommitMetadata::try_from_bytes(&commit_metadata)?;
+        if pre_commit_metadata.epoch != epoch {
+            return Err(SinkError::LanceDb(anyhow!(
+                "LanceDB pre-commit epoch {} does not match commit epoch {}",
+                pre_commit_metadata.epoch,
+                epoch
+            )));
+        }
+        if pre_commit_metadata.sink_id != self.sink_id {
+            return Err(SinkError::LanceDb(anyhow!(
+                "LanceDB pre-commit sink id {} does not match coordinator sink id {}",
+                pre_commit_metadata.sink_id,
+                self.sink_id
+            )));
+        }
+
+        let transaction_properties = pre_commit_metadata.transaction_properties();
+        self.commit_fragments(
+            epoch,
+            pre_commit_metadata.fragments,
+            Some(transaction_properties),
+        )
+        .await
+    }
+
+    async fn abort(&mut self, epoch: u64, _commit_metadata: Vec<u8>) {
+        tracing::debug!("Abort not implemented for LanceDB epoch {epoch}");
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct LanceDbPreCommitMetadata {
+    sink_id: String,
+    epoch: u64,
+    fragments: Vec<Fragment>,
+}
+
+impl LanceDbPreCommitMetadata {
+    fn try_into_bytes(self) -> Result<Vec<u8>> {
+        serde_json::to_vec(&self)
+            .context("cannot serialize LanceDB pre-commit metadata")
+            .map_err(SinkError::LanceDb)
+    }
+
+    fn try_from_bytes(value: &[u8]) -> Result<Self> {
+        serde_json::from_slice(value)
+            .context("cannot deserialize LanceDB pre-commit metadata")
+            .map_err(SinkError::LanceDb)
+    }
+
+    fn transaction_properties(&self) -> HashMap<String, String> {
+        HashMap::from([
+            (
+                RW_SINK_ID_TRANSACTION_PROPERTY.to_owned(),
+                self.sink_id.clone(),
+            ),
+            (RW_EPOCH_TRANSACTION_PROPERTY.to_owned(), self.epoch.to_string()),
+        ])
     }
 }
 
@@ -501,7 +665,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::SinglePhaseCommitCoordinator;
+    use crate::sink::{SinglePhaseCommitCoordinator, TwoPhaseCommitCoordinator};
     use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
@@ -525,9 +689,7 @@ mod tests {
             vec![Arc::new(id_array), Arc::new(name_array)],
         )
         .unwrap();
-        let reader =
-            arrow_array::RecordBatchIterator::new(vec![Ok(init_batch)], arrow_schema.clone());
-        conn.create_table("test_table", reader)
+        conn.create_table("test_table", init_batch)
             .execute()
             .await
             .unwrap();
@@ -553,7 +715,8 @@ mod tests {
         ]);
 
         let config = LanceDbConfig::from_btreemap(properties).unwrap();
-        let mut writer = LanceDbSinkWriter::new(config.clone(), schema).await.unwrap();
+        assert_eq!(config.is_exactly_once, None);
+        let mut writer = LanceDbSinkWriter::new(config.clone(), schema.clone()).unwrap();
 
         // 4. Write a chunk
         let chunk = StreamChunk::new(
@@ -582,15 +745,72 @@ mod tests {
             panic!("expected serialized metadata");
         }
 
-        // 6. Commit via coordinator (metadata-only commit)
-        let mut committer = LanceDbSinkCommitter::new(config).await.unwrap();
-        committer.init().await.unwrap();
-        committer.commit_data(1, vec![metadata]).await.unwrap();
+        // 6. Commit via two-phase coordinator (metadata-only commit)
+        let mut committer = LanceDbSinkCommitter::new(config.clone(), "test-sink".to_owned())
+            .await
+            .unwrap();
+        TwoPhaseCommitCoordinator::init(&mut committer)
+            .await
+            .unwrap();
+        let commit_metadata = TwoPhaseCommitCoordinator::pre_commit(
+            &mut committer,
+            1,
+            vec![metadata],
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        TwoPhaseCommitCoordinator::commit_data(
+            &mut committer,
+            1,
+            commit_metadata.clone(),
+        )
+        .await
+        .unwrap();
 
         // 7. Verify data was written by reading back
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
         // 1 initial row + 3 new rows = 4
         assert_eq!(count, 4);
+
+        // 8. Retrying the same committed epoch should be idempotent in two-phase mode.
+        TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, commit_metadata)
+            .await
+            .unwrap();
+        let table = conn.open_table("test_table").execute().await.unwrap();
+        let count = table.count_rows(None).await.unwrap();
+        assert_eq!(count, 4);
+
+        // 9. Single-phase commit remains available when exactly-once is disabled.
+        let mut writer = LanceDbSinkWriter::new(config.clone(), schema).unwrap();
+        let chunk = StreamChunk::new(
+            vec![Op::Insert],
+            vec![
+                I32Array::from_iter(vec![4]).into_ref(),
+                Utf8Array::from_iter(vec!["David"]).into_ref(),
+            ],
+        );
+        writer.write_batch(chunk).await.unwrap();
+        let metadata = writer.barrier(true).await.unwrap().unwrap();
+
+        let mut single_phase_committer =
+            LanceDbSinkCommitter::new(config, "test-sink".to_owned())
+                .await
+                .unwrap();
+        SinglePhaseCommitCoordinator::init(&mut single_phase_committer)
+            .await
+            .unwrap();
+        SinglePhaseCommitCoordinator::commit_data(
+            &mut single_phase_committer,
+            2,
+            vec![metadata],
+        )
+        .await
+        .unwrap();
+        let table = conn.open_table("test_table").execute().await.unwrap();
+        let count = table.count_rows(None).await.unwrap();
+        assert_eq!(count, 5);
     }
 }
