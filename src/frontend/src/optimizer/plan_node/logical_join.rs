@@ -22,7 +22,7 @@ use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
 use risingwave_pb::stream_plan::StreamScanType;
-use risingwave_sqlparser::ast::AsOf;
+use risingwave_sqlparser::ast::{AsOf, Expr as SqlExpr};
 
 use super::generic::{
     GenericPlanNode, GenericPlanRef, push_down_into_join, push_down_join_condition,
@@ -174,6 +174,16 @@ impl LogicalJoin {
     /// Get the output indices of the logical join.
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
+    }
+
+    /// Get the left-side event-time expression used by temporal join.
+    pub fn temporal_event_time_as_of(&self) -> Option<&ExprImpl> {
+        self.core.temporal_event_time_as_of.as_ref()
+    }
+
+    /// Set the left-side event-time expression used by temporal join.
+    pub fn set_temporal_event_time_as_of(&mut self, as_of: Option<ExprImpl>) {
+        self.core.temporal_event_time_as_of = as_of;
     }
 
     /// Clone with new output indices
@@ -656,6 +666,9 @@ impl ColPrunable for LogicalJoin {
         // to those that are required in the output
         let mut visitor = CollectInputRef::new(resized_required_cols);
         self.on().visit_expr(&mut visitor);
+        if let Some(as_of) = &self.core.temporal_event_time_as_of {
+            visitor.visit_expr(as_of);
+        }
         let left_right_required_cols = FixedBitSet::from(visitor).ones().collect_vec();
 
         let mut left_required_cols = Vec::new();
@@ -672,6 +685,11 @@ impl ColPrunable for LogicalJoin {
         let mut mapping =
             ColIndexMapping::with_remaining_columns(&left_right_required_cols, total_len);
         on = on.rewrite_expr(&mut mapping);
+        let temporal_event_time_as_of = self
+            .core
+            .temporal_event_time_as_of
+            .clone()
+            .map(|as_of| mapping.rewrite_expr(as_of));
 
         let new_output_indices = {
             let required_inputs_in_output = if self.is_left_join() {
@@ -687,14 +705,15 @@ impl ColPrunable for LogicalJoin {
             required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
-        LogicalJoin::with_output_indices(
+        let mut core = generic::Join::new(
             self.left().prune_col(&left_required_cols, ctx),
             self.right().prune_col(&right_required_cols, ctx),
-            self.join_type(),
             on,
+            self.join_type(),
             new_output_indices,
-        )
-        .into()
+        );
+        core.temporal_event_time_as_of = temporal_event_time_as_of;
+        LogicalJoin::with_core(core).into()
     }
 }
 
@@ -933,13 +952,14 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left().predicate_pushdown(left_predicate, ctx);
         let new_right = self.right().predicate_pushdown(right_predicate, ctx);
-        let new_join = LogicalJoin::with_output_indices(
+        let mut new_join = LogicalJoin::with_output_indices(
             new_left,
             new_right,
             join_type,
             new_on,
             self.output_indices().clone(),
         );
+        new_join.core.temporal_event_time_as_of = self.core.temporal_event_time_as_of.clone();
 
         let mut mapping = self.core.i2o_col_mapping();
         predicate = predicate.rewrite_expr(&mut mapping);
@@ -1084,10 +1104,33 @@ impl LogicalJoin {
         self.temporal_join_on().is_some()
     }
 
+    fn resolve_event_time_as_of(&self, expr: &SqlExpr) -> Option<ExprImpl> {
+        let column_name = match expr {
+            SqlExpr::Identifier(ident) => ident.real_value(),
+            SqlExpr::CompoundIdentifier(idents) => idents.last()?.real_value(),
+            _ => return None,
+        };
+
+        let left = self.left();
+        let fields = left.schema().fields();
+        let mut matched = fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| field.name.eq_ignore_ascii_case(&column_name));
+        let (idx, field) = matched.next()?;
+        if matched.next().is_some() {
+            return None;
+        }
+        Some(InputRef::new(idx, field.data_type.clone()).into())
+    }
+
     fn temporal_join_on(&self) -> Option<TemporalJoinScan<'_>> {
         if let Some(logical_scan) = self.core.right.as_logical_scan() {
-            matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
-                .then_some(TemporalJoinScan(logical_scan))
+            matches!(
+                logical_scan.as_of(),
+                Some(AsOf::ProcessTime | AsOf::EventTime(_))
+            )
+            .then_some(TemporalJoinScan(logical_scan))
         } else {
             None
         }
@@ -1125,6 +1168,9 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan: Result<StreamTemporalJoin> =
             self.to_stream_temporal_join(logical_scan, predicate.clone(), ctx);
+        if matches!(logical_scan.as_of(), Some(AsOf::EventTime(_))) {
+            return result_plan.map(|x| x.into());
+        }
         // Return directly if this temporal join can match the pk of its right table.
         if let Ok(temporal_join) = &result_plan
             && temporal_join.eq_join_predicate().eq_indexes().len()
@@ -1178,7 +1224,7 @@ impl LogicalJoin {
         left_schema_len: usize,
     ) -> Result<(StreamTableScan, EqJoinPredicate, Condition, Vec<usize>)> {
         // Extract the predicate from logical scan. Only pure scan is supported.
-        let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
+        let (mut new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
         // Construct output column to require column mapping
         let o2r = if let Some(project_expr) = project_expr {
             project_expr
@@ -1228,6 +1274,21 @@ impl LogicalJoin {
             })
             .collect_vec();
 
+        if matches!(new_scan.as_of, Some(AsOf::EventTime(_))) {
+            let watermark_columns = new_scan
+                .table_catalog
+                .watermark_columns
+                .ones()
+                .collect_vec();
+            if let [right_event_time_idx] = watermark_columns.as_slice()
+                && !new_scan.output_col_idx.contains(right_event_time_idx)
+            {
+                let mut output_col_idx = new_scan.output_col_idx.clone();
+                output_col_idx.push(*right_event_time_idx);
+                new_scan.output_col_idx = output_col_idx;
+            }
+        }
+
         let new_stream_table_scan =
             StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         Ok((
@@ -1247,69 +1308,109 @@ impl LogicalJoin {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
+        let is_event_time = matches!(logical_scan.as_of(), Some(AsOf::EventTime(_)));
+        let mut temporal_event_time_as_of = match logical_scan.as_of() {
+            Some(AsOf::EventTime(expr)) => self
+                .core
+                .temporal_event_time_as_of
+                .clone()
+                .or_else(|| self.resolve_event_time_as_of(&expr))
+                .into(),
+            _ => None,
+        };
 
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
 
-        // Verify that the right join key columns are the the prefix of the primary key and
-        // also contain the distribution key.
-        let order_col_ids = table.order_column_ids();
-        let dist_key = table.distribution_key.clone();
+        let (lookup_prefix_len, predicate, required_dist) = if is_event_time {
+            let left_eq_indexes = predicate.left_eq_indexes();
+            (
+                predicate.eq_indexes().len(),
+                predicate,
+                RequiredDist::hash_shard(&left_eq_indexes),
+            )
+        } else {
+            // Verify that the right join key columns are the the prefix of the primary key and
+            // also contain the distribution key.
+            let order_col_ids = table.order_column_ids();
+            let dist_key = table.distribution_key.clone();
 
-        let mut dist_key_in_order_key_pos = vec![];
-        for d in dist_key {
-            let pos = table
-                .order_column_indices()
-                .position(|x| x == d)
-                .expect("dist_key must in order_key");
-            dist_key_in_order_key_pos.push(pos);
-        }
-        // The shortest prefix of order key that contains distribution key.
-        let shortest_prefix_len = dist_key_in_order_key_pos
-            .iter()
-            .max()
-            .map_or(0, |pos| pos + 1);
+            let mut dist_key_in_order_key_pos = vec![];
+            for d in dist_key {
+                let pos = table
+                    .order_column_indices()
+                    .position(|x| x == d)
+                    .expect("dist_key must in order_key");
+                dist_key_in_order_key_pos.push(pos);
+            }
+            // The shortest prefix of order key that contains distribution key.
+            let shortest_prefix_len = dist_key_in_order_key_pos
+                .iter()
+                .max()
+                .map_or(0, |pos| pos + 1);
 
-        // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
-        for order_col_id in order_col_ids {
-            let mut found = false;
-            for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-                if order_col_id == output_column_ids[eq_idx] {
-                    reorder_idx.push(i);
-                    found = true;
+            // Reorder the join equal predicate to match the order key.
+            let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
+            for order_col_id in order_col_ids {
+                let mut found = false;
+                for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                    if order_col_id == output_column_ids[eq_idx] {
+                        reorder_idx.push(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
                     break;
                 }
             }
-            if !found {
-                break;
+            if reorder_idx.len() < shortest_prefix_len {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
+                    concat!(
+                        "Use DESCRIBE <table_name> to view the table's key information.\n",
+                        "You can create an index on the lookup table to facilitate the temporal join if necessary."
+                    ).into(),
+                )));
             }
-        }
-        if reorder_idx.len() < shortest_prefix_len {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
-                concat!(
-                    "Use DESCRIBE <table_name> to view the table's key information.\n",
-                    "You can create an index on the lookup table to facilitate the temporal join if necessary."
-                ).into(),
-            )));
-        }
-        let lookup_prefix_len = reorder_idx.len();
-        let predicate = predicate.reorder(&reorder_idx);
+            let lookup_prefix_len = reorder_idx.len();
+            let predicate = predicate.reorder(&reorder_idx);
 
-        let required_dist = if dist_key_in_order_key_pos.is_empty() {
-            RequiredDist::single()
-        } else {
-            let left_eq_indexes = predicate.left_eq_indexes();
-            let left_dist_key = dist_key_in_order_key_pos
-                .iter()
-                .map(|pos| left_eq_indexes[*pos])
-                .collect_vec();
+            let required_dist = if dist_key_in_order_key_pos.is_empty() {
+                RequiredDist::single()
+            } else {
+                let left_eq_indexes = predicate.left_eq_indexes();
+                let left_dist_key = dist_key_in_order_key_pos
+                    .iter()
+                    .map(|pos| left_eq_indexes[*pos])
+                    .collect_vec();
 
-            RequiredDist::hash_shard(&left_dist_key)
+                RequiredDist::hash_shard(&left_dist_key)
+            };
+            (lookup_prefix_len, predicate, required_dist)
         };
 
-        let left = self.left().to_stream(ctx)?;
+        let left = if is_event_time {
+            let original_backfill_type = ctx.set_backfill_type(BackfillType::UpstreamOnly);
+            let left = self.left().to_stream(ctx);
+            ctx.set_backfill_type(original_backfill_type);
+            left?
+        } else {
+            self.left().to_stream(ctx)?
+        };
+        if is_event_time && temporal_event_time_as_of.is_none() {
+            let watermark_columns = left.watermark_columns().indices().collect_vec();
+            if let [left_event_time_idx] = watermark_columns.as_slice() {
+                let field = &left.schema().fields[*left_event_time_idx];
+                temporal_event_time_as_of =
+                    Some(InputRef::new(*left_event_time_idx, field.data_type.clone()).into());
+            } else {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "event-time temporal join requires AS OF to be a left input column".into(),
+                    "Use FOR SYSTEM_TIME AS OF <left_watermark_column>".into(),
+                )));
+            }
+        }
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.stream_enforce(left);
 
@@ -1342,6 +1443,7 @@ impl LogicalJoin {
 
         let mut new_logical_join = new_logical_join;
         new_logical_join.on = generic::JoinOn::EqPredicate(new_predicate);
+        new_logical_join.temporal_event_time_as_of = temporal_event_time_as_of;
         StreamTemporalJoin::new(new_logical_join, false)
     }
 

@@ -146,6 +146,18 @@ pub fn visit_stream_node_tables_inner<F>(
             }
             NodeBody::TemporalJoin(node) => {
                 optional!(node.memo_table, "TemporalJoinMemo");
+                optional!(
+                    node.event_time_left_time_table,
+                    "EventTimeTemporalJoinLeftTime"
+                );
+                optional!(
+                    node.event_time_right_key_table,
+                    "EventTimeTemporalJoinRightKey"
+                );
+                optional!(
+                    node.event_time_right_time_table,
+                    "EventTimeTemporalJoinRightTime"
+                );
             }
             NodeBody::DynamicFilter(node) => {
                 always!(node.left_table, "DynamicFilterLeft");

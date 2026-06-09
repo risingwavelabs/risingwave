@@ -506,7 +506,7 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
     };
     Feature::TimeTravel.check_available()?;
     let timestamp = match a {
-        AsOf::ProcessTime => {
+        AsOf::ProcessTime | AsOf::EventTime(_) => {
             return Err(ErrorCode::NotSupported(
                 "do not support as of proctime".to_owned(),
                 "please use as of timestamp".to_owned(),
@@ -608,7 +608,9 @@ pub fn to_iceberg_time_travel_as_of(
                 timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
             ))
         }
-        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+        Some(AsOf::ProcessTime)
+        | Some(AsOf::EventTime(_))
+        | Some(AsOf::ProcessTimeWithInterval(_)) => {
             unreachable!()
         }
         None => None,

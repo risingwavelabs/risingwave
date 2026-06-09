@@ -4436,8 +4436,9 @@ impl Parser<'_> {
                             .value(AsOf::ProcessTime),
                         literal_i64.map(AsOf::TimestampNum),
                         single_quoted_string.map(AsOf::TimestampString),
+                        Self::parse_expr.map(AsOf::EventTime),
                     ))
-                    .expect("proctime(), now(), number or string"),
+                    .expect("proctime(), now(), number, string or expression"),
                 ),
             ),
             preceded(

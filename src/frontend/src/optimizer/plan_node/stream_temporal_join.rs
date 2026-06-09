@@ -14,6 +14,9 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail;
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::TemporalJoinNode;
@@ -32,6 +35,7 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan, TryToStreamPb,
 };
+use crate::optimizer::property::WatermarkColumns;
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -42,6 +46,13 @@ pub struct StreamTemporalJoin {
     core: generic::Join<PlanRef>,
     append_only: bool,
     is_nested_loop: bool,
+    event_time: Option<EventTimeTemporalJoin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EventTimeTemporalJoin {
+    left_event_time_idx: usize,
+    right_event_time_idx: usize,
 }
 
 impl StreamTemporalJoin {
@@ -50,9 +61,14 @@ impl StreamTemporalJoin {
             .as_eq_predicate_ref()
             .expect("StreamTemporalJoin requires JoinOn::EqPredicate in core");
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        // TODO(kind): theoretically, the impl can handle upsert stream.
         let stream_kind = reject_upsert_input!(core.left);
-        let append_only = stream_kind.is_append_only();
+        let left_event_time_idx = core.temporal_event_time_as_of.as_ref().map(|as_of| {
+            as_of
+                .as_input_ref()
+                .expect("event-time temporal join AS OF should be a left input ref")
+                .index
+        });
+        let append_only = left_event_time_idx.is_some() || stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);
 
         let right = core.right.clone();
@@ -64,7 +80,34 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
+        let event_time = if let Some(left_event_time_idx) = left_event_time_idx {
+            assert!(matches!(scan.core().as_of, Some(AsOf::EventTime(_))));
+            assert!(!is_nested_loop, "event-time temporal join requires eq keys");
+            if !core.left.watermark_columns().contains(left_event_time_idx) {
+                bail!("event-time temporal join requires the AS OF column to have a watermark");
+            }
+            let right_watermark_indices = scan.core().watermark_columns().indices().collect_vec();
+            if right_watermark_indices.len() != 1 {
+                bail!(
+                    "event-time temporal join requires the right versioned table to have exactly one watermark column"
+                );
+            }
+            let right_event_time_idx = right_watermark_indices[0];
+            if core.left.schema()[left_event_time_idx].data_type
+                != scan.schema()[right_event_time_idx].data_type
+            {
+                bail!(
+                    "event-time temporal join requires left AS OF column and right version time column to have the same type"
+                );
+            }
+            Some(EventTimeTemporalJoin {
+                left_event_time_idx,
+                right_event_time_idx,
+            })
+        } else {
+            assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
+            None
+        };
 
         let dist = if is_nested_loop {
             // Use right side distribution directly if it's nested loop temporal join.
@@ -77,12 +120,26 @@ impl StreamTemporalJoin {
             l2o.rewrite_provided_distribution(core.left.distribution())
         };
 
-        // Use left side watermark directly.
-        let watermark_columns = core
-            .left
-            .watermark_columns()
-            .map_clone(&core.l2i_col_mapping())
-            .map_clone(&core.i2o_col_mapping());
+        let watermark_columns = if let Some(event_time) = &event_time {
+            let mut watermark_columns = WatermarkColumns::new();
+            if let Some(group) = core
+                .left
+                .watermark_columns()
+                .get_group(event_time.left_event_time_idx)
+            {
+                let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
+                if let Some(output_idx) = l2o.try_map(event_time.left_event_time_idx) {
+                    watermark_columns.insert(output_idx, group);
+                }
+            }
+            watermark_columns
+        } else {
+            // Use left side watermark directly.
+            core.left
+                .watermark_columns()
+                .map_clone(&core.l2i_col_mapping())
+                .map_clone(&core.i2o_col_mapping())
+        };
 
         let columns_monotonicity = core.i2o_col_mapping().rewrite_monotonicity_map(
             &core
@@ -104,6 +161,7 @@ impl StreamTemporalJoin {
             core,
             append_only,
             is_nested_loop,
+            event_time,
         })
     }
 
@@ -125,6 +183,10 @@ impl StreamTemporalJoin {
 
     pub fn is_nested_loop(&self) -> bool {
         self.is_nested_loop
+    }
+
+    pub fn is_event_time(&self) -> bool {
+        self.event_time.is_some()
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -173,6 +235,62 @@ impl StreamTemporalJoin {
         let internal_table_dist_keys =
             (right_scan_schema.len()..(right_scan_schema.len() + dist_key_len)).collect();
         internal_table_catalog_builder.build(internal_table_dist_keys, read_prefix_len_hint)
+    }
+
+    pub fn infer_event_time_table_catalogs(
+        &self,
+        right_scan: &StreamTableScan,
+    ) -> (TableCatalog, TableCatalog, TableCatalog) {
+        let event_time = self
+            .event_time
+            .as_ref()
+            .expect("event-time table catalogs require event-time temporal join");
+        let left_eq_indexes = self.eq_join_predicate().left_eq_indexes();
+        let right_eq_indexes = self.eq_join_predicate().right_eq_indexes();
+        let left = self.left();
+        let left_stream_key = left.stream_key().unwrap();
+
+        let mut left_time_table_builder = TableCatalogBuilder::default();
+        for field in left.schema().fields() {
+            left_time_table_builder.add_column(field);
+        }
+        left_time_table_builder
+            .add_order_column(event_time.left_event_time_idx, OrderType::ascending());
+        for idx in left_eq_indexes.iter().chain(left_stream_key.iter()) {
+            left_time_table_builder.add_order_column(*idx, OrderType::ascending());
+        }
+        left_time_table_builder.set_clean_watermark_indices(vec![event_time.left_event_time_idx]);
+        let left_time_table = left_time_table_builder.build(left_eq_indexes.clone(), 0);
+
+        let mut right_key_table_builder = TableCatalogBuilder::default();
+        for field in right_scan.schema().fields() {
+            right_key_table_builder.add_column(field);
+        }
+        right_key_table_builder.add_column(&Field::with_name(DataType::Boolean, "_rw_tombstone"));
+        for idx in right_eq_indexes.iter() {
+            right_key_table_builder.add_order_column(*idx, OrderType::ascending());
+        }
+        right_key_table_builder
+            .add_order_column(event_time.right_event_time_idx, OrderType::ascending());
+        let right_key_table =
+            right_key_table_builder.build(right_eq_indexes.clone(), right_eq_indexes.len());
+
+        let mut right_time_table_builder = TableCatalogBuilder::default();
+        let right_time_idx = right_time_table_builder
+            .add_column(&right_scan.schema()[event_time.right_event_time_idx]);
+        let right_time_join_key_indices = right_eq_indexes
+            .iter()
+            .map(|idx| right_time_table_builder.add_column(&right_scan.schema()[*idx]))
+            .collect_vec();
+        right_time_table_builder.add_order_column(right_time_idx, OrderType::ascending());
+        for idx in &right_time_join_key_indices {
+            right_time_table_builder.add_order_column(*idx, OrderType::ascending());
+        }
+        right_time_table_builder.set_clean_watermark_indices(vec![right_time_idx]);
+        let right_time_table =
+            right_time_table_builder.build(right_time_join_key_indices.clone(), 0);
+
+        (left_time_table, right_key_table, right_time_table)
     }
 }
 
@@ -247,6 +365,16 @@ impl TryToStreamPb for StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
+        let event_time_tables = if self.event_time.is_some() {
+            let (mut left_time, mut right_key, mut right_time) =
+                self.infer_event_time_table_catalogs(scan);
+            left_time = left_time.with_id(state.gen_table_id_wrapped());
+            right_key = right_key.with_id(state.gen_table_id_wrapped());
+            right_time = right_time.with_id(state.gen_table_id_wrapped());
+            Some((left_time, right_key, right_time))
+        } else {
+            None
+        };
 
         Ok(NodeBody::TemporalJoin(Box::new(TemporalJoinNode {
             join_type: self.core.join_type as i32,
@@ -276,6 +404,23 @@ impl TryToStreamPb for StreamTemporalJoin {
                 Some(memo_table.to_internal_table_prost())
             },
             is_nested_loop: self.is_nested_loop,
+            left_event_time_key: self
+                .event_time
+                .as_ref()
+                .map(|event_time| event_time.left_event_time_idx as u32),
+            right_event_time_key: self
+                .event_time
+                .as_ref()
+                .map(|event_time| event_time.right_event_time_idx as u32),
+            event_time_left_time_table: event_time_tables
+                .as_ref()
+                .map(|tables| tables.0.to_internal_table_prost()),
+            event_time_right_key_table: event_time_tables
+                .as_ref()
+                .map(|tables| tables.1.to_internal_table_prost()),
+            event_time_right_time_table: event_time_tables
+                .as_ref()
+                .map(|tables| tables.2.to_internal_table_prost()),
         })))
     }
 }

@@ -14,7 +14,8 @@
 
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
+    AsOf, BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins,
+    Value,
 };
 
 use crate::binder::bind_context::BindContext;
@@ -29,6 +30,7 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+    pub temporal_event_time_as_of: Option<ExprImpl>,
 }
 
 impl RewriteExprsRecursive for BoundJoin {
@@ -36,6 +38,9 @@ impl RewriteExprsRecursive for BoundJoin {
         self.left.rewrite_exprs_recursive(rewriter);
         self.right.rewrite_exprs_recursive(rewriter);
         self.cond = rewriter.rewrite_expr(self.cond.take());
+        if let Some(as_of) = self.temporal_event_time_as_of.take() {
+            self.temporal_event_time_as_of = Some(rewriter.rewrite_expr(as_of));
+        }
     }
 }
 
@@ -69,6 +74,7 @@ impl Binder {
                     left: root,
                     right,
                     cond: ExprImpl::literal_bool(true),
+                    temporal_event_time_as_of: None,
                 }))
             } else {
                 Relation::Join(Box::new(BoundJoin {
@@ -76,6 +82,7 @@ impl Binder {
                     left: root,
                     right,
                     cond: ExprImpl::literal_bool(true),
+                    temporal_event_time_as_of: None,
                 }))
             }
         }
@@ -105,9 +112,74 @@ impl Binder {
                 (cond, option_rel) =
                     self.bind_join_constraint(constraint, Some(&join.relation), join_type)?;
                 right = option_rel.unwrap();
+                if matches!(
+                    join.relation,
+                    TableFactor::Table {
+                        as_of: Some(AsOf::EventTime(_)),
+                        ..
+                    }
+                ) {
+                    return Err(ErrorCode::BindError(
+                        "event-time temporal join with USING/NATURAL is not supported yet"
+                            .to_owned(),
+                    )
+                    .into());
+                }
             } else {
+                let temporal_event_time_as_of = if let TableFactor::Table {
+                    as_of: Some(AsOf::EventTime(expr)),
+                    ..
+                } = &join.relation
+                {
+                    let clause = self.context.clause;
+                    self.context.clause = Some(Clause::JoinOn);
+                    let bound = self.bind_expr(expr)?;
+                    self.context.clause = clause;
+                    if !matches!(bound, ExprImpl::InputRef(_)) {
+                        return Err(ErrorCode::BindError(
+                            "event-time temporal join currently requires AS OF to be a left input column"
+                                .to_owned(),
+                        )
+                        .into());
+                    }
+                    Some(bound)
+                } else {
+                    None
+                };
                 right = self.bind_table_factor(&join.relation)?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
+                let is_lateral = match &right {
+                    Relation::Subquery(subquery) if subquery.lateral => true,
+                    Relation::TableFunction { .. } => true,
+                    _ => false,
+                };
+
+                root = if is_lateral {
+                    match join_type {
+                        JoinType::Inner | JoinType::LeftOuter => {}
+                        _ => {
+                            return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_owned())
+                                .into());
+                        }
+                    }
+
+                    Relation::Apply(Box::new(BoundJoin {
+                        join_type,
+                        left: root,
+                        right,
+                        cond,
+                        temporal_event_time_as_of,
+                    }))
+                } else {
+                    Relation::Join(Box::new(BoundJoin {
+                        join_type,
+                        left: root,
+                        right,
+                        cond,
+                        temporal_event_time_as_of,
+                    }))
+                };
+                continue;
             }
 
             let is_lateral = match &right {
@@ -130,6 +202,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
+                    temporal_event_time_as_of: None,
                 }))
             } else {
                 Relation::Join(Box::new(BoundJoin {
@@ -137,6 +210,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
+                    temporal_event_time_as_of: None,
                 }))
             };
         }

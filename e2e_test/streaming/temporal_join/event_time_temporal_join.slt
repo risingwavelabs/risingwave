@@ -1,0 +1,125 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+SET streaming_use_arrangement_backfill = false;
+
+statement ok
+create table orders (
+    order_id int primary key,
+    currency varchar,
+    amount int,
+    order_time timestamp,
+    watermark for order_time as order_time - interval '1' second with ttl
+);
+
+statement ok
+create table exchange_rates (
+    currency varchar,
+    rate_time timestamp,
+    cents_per_unit int,
+    watermark for rate_time as rate_time - interval '1' second with ttl,
+    primary key (currency, rate_time)
+);
+
+statement ok
+create materialized view order_amounts_inner as
+select
+    order_id,
+    orders.currency,
+    amount,
+    cents_per_unit,
+    amount * cents_per_unit as amount_cents,
+    order_time
+from orders
+join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+on orders.currency = exchange_rates.currency;
+
+statement ok
+create materialized view order_amounts_left as
+select
+    order_id,
+    orders.currency,
+    amount,
+    cents_per_unit,
+    amount * cents_per_unit as amount_cents,
+    order_time
+from orders
+left join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+on orders.currency = exchange_rates.currency;
+
+statement ok
+insert into exchange_rates values
+    ('USD', '2024-01-01 00:00:00', 100),
+    ('EUR', '2024-01-01 00:00:00', 110);
+
+statement ok
+insert into orders values (1, 'EUR', 10, '2024-01-01 00:05:00');
+
+# Close-before-watermark changes should be folded into the pending left record.
+statement ok
+update orders set amount = 20 where order_id = 1;
+
+statement ok
+insert into orders values (3, 'GBP', 10, '2024-01-01 00:06:00');
+
+statement ok
+insert into orders values (4, 'USD', 10, '2024-01-01 00:07:00');
+
+statement ok
+delete from orders where order_id = 4;
+
+statement ok
+insert into orders values (2, 'EUR', 10, '2024-01-01 00:12:00');
+
+# Advance both input watermarks. The join emits only after min(left_wm, right_wm)
+# passes the left event time.
+statement ok
+insert into exchange_rates values
+    ('EUR', '2024-01-01 00:10:00', 120),
+    ('USD', '2024-01-01 00:20:00', 100);
+
+statement ok
+insert into orders values (5, 'USD', 1, '2024-01-01 00:20:00');
+
+query ITIIIT rowsort retry 11 backoff 1s
+select * from order_amounts_inner;
+----
+1 EUR 20 110 2200 2024-01-01 00:05:00
+2 EUR 10 120 1200 2024-01-01 00:12:00
+
+query ITIIIT rowsort retry 11 backoff 1s
+select * from order_amounts_left;
+----
+1 EUR 20 110 2200 2024-01-01 00:05:00
+2 EUR 10 120 1200 2024-01-01 00:12:00
+3 GBP 10 NULL NULL 2024-01-01 00:06:00
+
+# A below-watermark update after the result was finalized must not retract or
+# update the append-only output.
+statement ok
+update orders set amount = 30 where order_id = 1;
+
+query ITIIIT rowsort retry 11 backoff 1s
+select * from order_amounts_inner;
+----
+1 EUR 20 110 2200 2024-01-01 00:05:00
+2 EUR 10 120 1200 2024-01-01 00:12:00
+
+statement ok
+drop materialized view order_amounts_inner;
+
+statement ok
+drop materialized view order_amounts_left;
+
+statement ok
+drop table orders;
+
+statement ok
+drop table exchange_rates;
+
+statement ok
+SET streaming_parallelism = 0;
