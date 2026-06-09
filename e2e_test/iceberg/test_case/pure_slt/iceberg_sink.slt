@@ -166,7 +166,7 @@ INSERT INTO t_auto_schema_bytea(id, v, email) VALUES (2, '\x6b32', 'bytea@exampl
 statement ok
 FLUSH;
 
-statement ok
+statement ok retry 6 backoff 1s
 CREATE SOURCE iceberg_auto_schema_bytea_source WITH (
     connector = 'iceberg',
     warehouse.path = 's3a://icebergdata',
@@ -232,7 +232,7 @@ INSERT INTO t_auto_schema_no_pk(id, name, email) VALUES (2, 'bob', 'bob@example.
 statement ok
 FLUSH;
 
-statement ok
+statement ok retry 6 backoff 1s
 CREATE SOURCE iceberg_auto_schema_no_pk_source WITH (
     connector = 'iceberg',
     warehouse.path = 's3a://icebergdata',
