@@ -276,6 +276,18 @@ pub struct TableCacheRefillContext {
     pub policy: CacheRefillPolicy,
 }
 
+/// Read-only data cloned from `CacheRefiller` for monitor/debugging APIs.
+///
+/// Streaming vnode mapping is the table-level union maintained by the refiller.
+#[derive(Clone)]
+pub struct TableCacheRefillMonitorSnapshot {
+    pub contexts: TableCacheRefillContextMap,
+    pub policies: HashMap<TableId, CacheRefillPolicy>,
+    pub default_policy: CacheRefillPolicy,
+    pub streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
+    pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
+}
+
 fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
     assert!(vnode_range.0 <= vnode_range.1);
     let start = vnode_range.0.min(bitmap.len());
@@ -555,10 +567,21 @@ impl CacheRefiller {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn table_cache_refill_context_map(
         &self,
     ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
         &self.table_cache_refill_context_map
+    }
+
+    pub(crate) fn table_cache_refill_monitor_snapshot(&self) -> TableCacheRefillMonitorSnapshot {
+        TableCacheRefillMonitorSnapshot {
+            contexts: self.table_cache_refill_context_map.read().clone(),
+            policies: self.table_cache_refill_policies.clone(),
+            default_policy: self.default_policy,
+            streaming_table_vnode_mapping: self.streaming_table_vnode_mapping.clone(),
+            serving_table_vnode_mapping: self.serving_table_vnode_mapping.clone(),
+        }
     }
 }
 

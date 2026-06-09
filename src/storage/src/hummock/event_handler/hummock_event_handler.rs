@@ -46,9 +46,9 @@ use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::{
-    CacheRefillerEvent, SpawnRefillTask, TableCacheRefillContextMap,
-};
+#[cfg(test)]
+use crate::hummock::event_handler::refiller::TableCacheRefillContextMap;
+use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -564,6 +564,7 @@ impl HummockEventHandler {
         self.uploader.buffer_tracker()
     }
 
+    #[cfg(test)]
     pub(crate) fn table_cache_refill_context_map(
         &self,
     ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
@@ -1052,6 +1053,13 @@ impl HummockEventHandler {
                     .send(self.uploader.min_uncommitted_object_id())
                     .inspect_err(|e| {
                         error!("unable to send get_min_uncommitted_sst_id result: {:?}", e);
+                    });
+            }
+            HummockEvent::GetTableCacheRefillMonitorSnapshot { result_tx } => {
+                let _ = result_tx
+                    .send(self.refiller.table_cache_refill_monitor_snapshot())
+                    .inspect_err(|_| {
+                        error!("unable to send table cache refill monitor snapshot result");
                     });
             }
             HummockEvent::RegisterVectorWriter {

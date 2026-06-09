@@ -20,7 +20,6 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::Role;
@@ -51,7 +50,7 @@ use crate::hummock::compactor::{
     CompactionAwaitTreeRegRef, CompactorContext, new_compaction_await_tree_reg_ref,
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
-use crate::hummock::event_handler::refiller::TableCacheRefillContextMap;
+use crate::hummock::event_handler::refiller::TableCacheRefillMonitorSnapshot;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockObserverEvent, HummockVersionUpdate,
     ReadOnlyReadVersionMapping,
@@ -125,8 +124,6 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
-
-    table_cache_refill_context_map: Arc<RwLock<TableCacheRefillContextMap>>,
 
     table_change_log_manager: Arc<TableChangeLogManager>,
 }
@@ -259,9 +256,6 @@ impl HummockStorage {
             simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
                 options.time_travel_version_cache_capacity,
             )),
-            table_cache_refill_context_map: hummock_event_handler
-                .table_cache_refill_context_map()
-                .clone(),
             table_change_log_manager,
         };
 
@@ -621,8 +615,16 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn table_cache_refill_context_map(&self) -> &Arc<RwLock<TableCacheRefillContextMap>> {
-        &self.table_cache_refill_context_map
+    pub async fn table_cache_refill_monitor_snapshot(
+        &self,
+    ) -> HummockResult<TableCacheRefillMonitorSnapshot> {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::GetTableCacheRefillMonitorSnapshot { result_tx: tx })
+            .map_err(|_| HummockError::other("failed to send table cache refill monitor query"))?;
+        rx.await.map_err(|_| {
+            HummockError::other("failed to receive table cache refill monitor snapshot")
+        })
     }
 
     pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
