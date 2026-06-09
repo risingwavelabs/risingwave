@@ -161,6 +161,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut upstream_processed_row_count = 0;
         let mut consumed_binlog_offset = None;
         let mut retained_chunks = Vec::with_capacity(buffered_chunks.len());
+        let mut can_advance_consumed_offset = true;
 
         for chunk in buffered_chunks {
             let mut emitted_vis = BitmapBuilder::zeroed(chunk.capacity());
@@ -195,10 +196,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     Op::Insert | Op::Delete => {
                         if should_emit {
                             emitted_vis.set(idx, true);
-                            consumed_binlog_offset = Some(event_offset);
+                            if can_advance_consumed_offset {
+                                consumed_binlog_offset = Some(event_offset);
+                            }
                             upstream_processed_row_count += 1;
                         } else {
                             retained_vis.set(idx, true);
+                            can_advance_consumed_offset = false;
                         }
                     }
                     Op::UpdateDelete | Op::UpdateInsert => {
@@ -593,8 +597,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     } else {
                                         let (
                                             emitted_upstream_chunks,
-                                            drained_upstream_row_count,
-                                            drained_binlog_offset,
+                                            consumed_upstream_row_count,
+                                            consumed_binlog_offset,
                                         ) = Self::consume_upstream_chunk_buffer(
                                             &offset_parse_func,
                                             &mut upstream_chunk_buffer,
@@ -605,9 +609,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             &self.output_indices,
                                         )?;
                                         cur_barrier_upstream_processed_rows +=
-                                            drained_upstream_row_count;
-                                        if let Some(drained_binlog_offset) = drained_binlog_offset {
-                                            last_binlog_offset = Some(drained_binlog_offset);
+                                            consumed_upstream_row_count;
+                                        if let Some(consumed_binlog_offset) = consumed_binlog_offset {
+                                            last_binlog_offset = Some(consumed_binlog_offset);
                                         }
                                         for chunk in emitted_upstream_chunks {
                                             yield Message::Chunk(chunk);
@@ -1418,7 +1422,7 @@ mod tests {
         assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 1);
         assert_eq!(emitted_chunks[0].rows().count(), 2);
@@ -1514,7 +1518,7 @@ mod tests {
         assert_eq!(drained_row_count, 2);
         assert_eq!(
             drained_offset,
-            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
         );
         assert_eq!(emitted_chunks.len(), 2);
         assert_eq!(emitted_chunks[0].rows().count(), 1);
@@ -1541,6 +1545,56 @@ mod tests {
                 )),
             ])
         );
+    }
+
+    #[test]
+    fn test_consume_buffer_advances_offset_after_preceding_rows_are_emitted() {
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
+            &[
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(6)),
+                        Some(ScalarImpl::Int64(600)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(2)),
+                        Some(ScalarImpl::Int64(200)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":5},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+            ],
+            &[DataType::Int64, DataType::Int64, DataType::Varchar],
+        )];
+
+        let (_, drained_row_count, drained_offset) =
+            CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                &MockExternalTableReader::get_cdc_offset_parser(),
+                &mut upstream_chunk_buffer,
+                Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])),
+                &[0],
+                &[OrderType::ascending()],
+                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3))),
+                &[0, 1],
+            )
+            .unwrap();
+
+        assert_eq!(drained_row_count, 2);
+        assert_eq!(
+            drained_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 5)))
+        );
+        assert!(upstream_chunk_buffer.is_empty());
     }
 
     #[tokio::test]
