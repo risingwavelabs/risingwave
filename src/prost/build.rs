@@ -1116,6 +1116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
         .type_attribute(
+            "stream_plan.StreamNode.node_body",
+            "#[derive(::prost_helpers::StreamNodeBodyVariants)]",
+        )
+        .type_attribute(
             "node_body",
             "#[strum_discriminants(derive(::strum::Display, Hash))]",
         )

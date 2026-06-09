@@ -35,6 +35,8 @@ use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutorBuilder;
 
+impl_stream_node_body!(TemporalJoin(TemporalJoinNode) => TemporalJoinExecutorBuilder);
+
 impl ExecutorBuilder for TemporalJoinExecutorBuilder {
     type Node = TemporalJoinNode;
 
