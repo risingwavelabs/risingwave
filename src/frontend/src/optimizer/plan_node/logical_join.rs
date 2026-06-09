@@ -1314,8 +1314,7 @@ impl LogicalJoin {
                 .core
                 .temporal_event_time_as_of
                 .clone()
-                .or_else(|| self.resolve_event_time_as_of(&expr))
-                .into(),
+                .or_else(|| self.resolve_event_time_as_of(&expr)),
             _ => None,
         };
 

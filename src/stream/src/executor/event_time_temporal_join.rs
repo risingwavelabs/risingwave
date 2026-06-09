@@ -134,7 +134,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         ready_watermark.is_some_and(|watermark| ts.default_cmp(watermark).is_lt())
     }
 
-    async fn apply_left_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    fn apply_left_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         for r in chunk.rows_with_holes() {
             let Some((op, row_ref)) = r else {
                 continue;
@@ -251,7 +251,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         Ok(())
     }
 
-    async fn apply_right_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    fn apply_right_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         for r in chunk.rows_with_holes() {
             let Some((op, row_ref)) = r else {
                 continue;
@@ -350,6 +350,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             .is_some_and(|datum| datum.into_bool())
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn append_joined_left_row(
         left_join_keys: &[usize],
         null_safe: &[bool],
@@ -617,10 +618,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             self.right_version_cache.evict();
             match msg? {
                 AlignedMessage::Left(chunk) => {
-                    self.apply_left_chunk(chunk).await?;
+                    self.apply_left_chunk(chunk)?;
                 }
                 AlignedMessage::Right(chunk) => {
-                    self.apply_right_chunk(chunk).await?;
+                    self.apply_right_chunk(chunk)?;
                 }
                 AlignedMessage::WatermarkLeft(watermark) => {
                     if let Some(ready) = self.update_input_watermark(true, watermark) {

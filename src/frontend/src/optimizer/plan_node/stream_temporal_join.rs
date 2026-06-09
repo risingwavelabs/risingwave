@@ -260,14 +260,14 @@ impl StreamTemporalJoin {
             left_time_table_builder.add_order_column(*idx, OrderType::ascending());
         }
         left_time_table_builder.set_clean_watermark_indices(vec![event_time.left_event_time_idx]);
-        let left_time_table = left_time_table_builder.build(left_eq_indexes.clone(), 0);
+        let left_time_table = left_time_table_builder.build(left_eq_indexes, 0);
 
         let mut right_key_table_builder = TableCatalogBuilder::default();
         for field in right_scan.schema().fields() {
             right_key_table_builder.add_column(field);
         }
         right_key_table_builder.add_column(&Field::with_name(DataType::Boolean, "_rw_tombstone"));
-        for idx in right_eq_indexes.iter() {
+        for idx in &right_eq_indexes {
             right_key_table_builder.add_order_column(*idx, OrderType::ascending());
         }
         right_key_table_builder
@@ -287,8 +287,7 @@ impl StreamTemporalJoin {
             right_time_table_builder.add_order_column(*idx, OrderType::ascending());
         }
         right_time_table_builder.set_clean_watermark_indices(vec![right_time_idx]);
-        let right_time_table =
-            right_time_table_builder.build(right_time_join_key_indices.clone(), 0);
+        let right_time_table = right_time_table_builder.build(right_time_join_key_indices, 0);
 
         (left_time_table, right_key_table, right_time_table)
     }
