@@ -68,11 +68,20 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .collect_vec();
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
-        if node.left_event_time_key.is_some() || node.right_event_time_key.is_some() {
-            let left_event_time_key = node.left_event_time_key.expect("checked") as usize;
-            let right_event_time_key =
-                node.right_event_time_key
-                    .expect("right event-time key should be set") as usize;
+        let event_time_keys = match (node.left_event_time_key, node.right_event_time_key) {
+            (Some(left_event_time_key), Some(right_event_time_key)) => {
+                Some((left_event_time_key as usize, right_event_time_key as usize))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "event-time temporal join requires both left and right event-time keys"
+                )
+                .into());
+            }
+        };
+
+        if let Some((left_event_time_key, right_event_time_key)) = event_time_keys {
             let vnodes = Arc::new(
                 params
                     .vnode_bitmap

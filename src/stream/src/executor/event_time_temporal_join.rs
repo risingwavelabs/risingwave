@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::ops::Bound;
 
+use anyhow::anyhow;
 use futures::{StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
@@ -141,7 +142,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             };
             let row = row_ref.into_owned_row();
             let Some(ts) = Self::row_time(&row, self.left_event_time_key) else {
-                continue;
+                return Err(anyhow!(
+                    "event-time temporal join left AS OF column should not be NULL"
+                )
+                .into());
             };
             if Self::is_finalized(&ts, self.ready_watermark.as_ref()) {
                 continue;
@@ -258,7 +262,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             };
             let row = row_ref.into_owned_row();
             let Some(ts) = Self::row_time(&row, self.right_event_time_key) else {
-                continue;
+                return Err(anyhow!(
+                    "event-time temporal join right version-time column should not be NULL"
+                )
+                .into());
             };
             if Self::is_late(&ts, self.right_watermark.as_ref()) {
                 continue;
