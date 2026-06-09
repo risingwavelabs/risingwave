@@ -28,11 +28,10 @@ use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::cmp_datum_iter;
 use risingwave_common_rate_limit::RateLimit;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use crate::common::table::state_table::{CommittedStateTableReader, StateTable};
+use crate::common::table::state_table::{FlushedStateTableReader, StateTable};
 use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
@@ -228,8 +227,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     /// Creates a snapshot stream that reads from state table in locality order
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
     async fn make_snapshot_stream(
-        reader: CommittedStateTableReader<S>,
-        read_epoch: HummockReadEpoch,
+        reader: FlushedStateTableReader<S>,
         backfill_state: LocalityBackfillState,
     ) where
         S: 'static,
@@ -264,7 +262,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             // Iterate over rows for this vnode
             let iter = reader
                 .iter_with_vnode(
-                    read_epoch,
                     vnode,
                     &range_bounds,
                     PrefetchOptions::prefetch_for_small_range_scan(),
@@ -465,7 +462,6 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
         // Initialize state tables
         state_table.init_epoch(first_epoch).await?;
         progress_table.init_epoch(first_epoch).await?;
-        let mut state_table_read_epoch = first_epoch.curr;
 
         // Load backfill state from progress table
         let mut backfill_state = Self::load_backfill_state(&progress_table).await?;
@@ -517,7 +513,6 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                         // Commit state tables
                         let post_commit1 = state_table.commit(epoch).await?;
                         let post_commit2 = progress_table.commit(epoch).await?;
-                        state_table_read_epoch = epoch.curr;
 
                         yield Message::Barrier(barrier);
                         post_commit1.post_yield_barrier(None).await?;
@@ -580,13 +575,9 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                 })
                 .collect();
 
-            let snapshot_reader = state_table.committed_reader();
-            let mut snapshot_stream: SnapshotStream = Self::make_snapshot_stream(
-                snapshot_reader.clone(),
-                HummockReadEpoch::NoWait(state_table_read_epoch),
-                backfill_state.clone(),
-            )
-            .boxed();
+            let snapshot_reader = state_table.flushed_snapshot_reader();
+            let mut snapshot_stream: SnapshotStream =
+                Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone()).boxed();
             let mut upstream_finished = false;
 
             'backfill_loop: loop {
@@ -712,7 +703,6 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
 
                 let barrier_epoch = barrier.epoch;
                 let post_commit1 = state_table.commit(barrier_epoch).await?;
-                state_table_read_epoch = barrier_epoch.curr;
 
                 // Update progress with current epoch and snapshot read count
                 // Report both consumed rows and buffered rows separately for precise progress
@@ -750,12 +740,9 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                 post_commit2.post_yield_barrier(None).await?;
 
                 if should_refresh_snapshot {
-                    snapshot_stream = Self::make_snapshot_stream(
-                        snapshot_reader.clone(),
-                        HummockReadEpoch::NoWait(state_table_read_epoch),
-                        backfill_state.clone(),
-                    )
-                    .boxed();
+                    snapshot_stream =
+                        Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone())
+                            .boxed();
                 }
             }
         }

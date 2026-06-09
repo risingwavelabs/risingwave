@@ -197,8 +197,6 @@ where
     /// State store for accessing snapshot data
     store: S,
 
-    table_option: TableOption,
-
     /// Current epoch
     epoch: Option<EpochPair>,
 
@@ -260,19 +258,37 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 
-#[derive(Clone)]
-pub struct CommittedStateTableReader<S, SD = BasicSerde>
+pub type FlushedStateTableReader<S, SD = BasicSerde> = StateTableFlushedSnapshotReader<
+    <<S as StateStore>::Local as LocalStateStore>::FlushedSnapshotReader,
+    SD,
+>;
+
+pub struct StateTableFlushedSnapshotReader<R, SD = BasicSerde>
 where
-    S: StateStore,
+    R: StateStoreRead,
     SD: ValueRowSerde,
 {
-    table_id: TableId,
-    store: S,
-    table_option: TableOption,
+    reader: Arc<R>,
     pk_serde: OrderedRowSerde,
     vnodes: Arc<Bitmap>,
     row_serde: Arc<SD>,
     metrics: Option<StateTableMetrics>,
+}
+
+impl<R, SD> Clone for StateTableFlushedSnapshotReader<R, SD>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    fn clone(&self) -> Self {
+        Self {
+            reader: self.reader.clone(),
+            pk_serde: self.pk_serde.clone(),
+            vnodes: self.vnodes.clone(),
+            row_serde: self.row_serde.clone(),
+            metrics: self.metrics.clone(),
+        }
+    }
 }
 
 // initialize
@@ -1056,7 +1072,6 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
                 metrics,
             },
             store: self.store,
-            table_option,
             epoch: None,
             pk_serde,
             pk_indices,
@@ -1190,11 +1205,9 @@ where
         self.distribution.vnodes()
     }
 
-    pub fn committed_reader(&self) -> CommittedStateTableReader<S, SD> {
-        CommittedStateTableReader {
-            table_id: self.table_id,
-            store: self.store.clone(),
-            table_option: self.table_option,
+    pub fn flushed_snapshot_reader(&self) -> FlushedStateTableReader<S, SD> {
+        StateTableFlushedSnapshotReader {
+            reader: Arc::new(self.row_store.state_store.new_flushed_snapshot_reader()),
             pk_serde: self.pk_serde.clone(),
             vnodes: self.distribution.vnodes().clone(),
             row_serde: self.row_store.row_serde.clone(),
@@ -1850,22 +1863,18 @@ impl FromVnodeBytes for () {
     fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
 }
 
-impl<S, SD> CommittedStateTableReader<S, SD>
+impl<R, SD> StateTableFlushedSnapshotReader<R, SD>
 where
-    S: StateStore,
+    R: StateStoreRead,
     SD: ValueRowSerde,
 {
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
     }
 
-    /// Scans committed state without borrowing the mutable [`StateTableInner`].
-    ///
-    /// This is useful for long-running snapshot scans that need to survive executor barrier
-    /// commits on the write-side state table.
+    /// Scans flushed local state without reading uncommitted mem-table data.
     pub async fn iter_with_vnode(
         &self,
-        read_epoch: HummockReadEpoch,
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
@@ -1875,17 +1884,8 @@ where
         }
 
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
-        let read_snapshot = self
-            .store
-            .new_read_snapshot(
-                read_epoch,
-                NewReadSnapshotOptions {
-                    table_id: self.table_id,
-                    table_option: self.table_option,
-                },
-            )
-            .await?;
-        let iter = read_snapshot
+        let iter = self
+            .reader
             .iter(
                 prefixed_range_with_vnode(memcomparable_range, vnode),
                 ReadOptions {
