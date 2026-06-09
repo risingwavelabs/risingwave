@@ -577,6 +577,50 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn emit_ready_watermark(
+        &mut self,
+        ready: Watermark,
+        full_schema: Vec<DataType>,
+        right_size: usize,
+        output_watermark_col_idx: Option<usize>,
+    ) {
+        let mut builder = StreamChunkBuilder::new(self.chunk_size, full_schema);
+        {
+            let left_rows = self
+                .left_buffer
+                .consume(ready.val.clone(), &mut self.left_pending_by_time);
+            pin_mut!(left_rows);
+            while let Some(left_row) = left_rows.try_next().await? {
+                if let Some(chunk) = Self::append_joined_left_row(
+                    &self.left_join_keys,
+                    &self.null_safe,
+                    self.left_event_time_key,
+                    self.right_event_time_key,
+                    &self.right_versions_by_key,
+                    &mut self.right_version_cache,
+                    self.condition.as_ref(),
+                    &self.output_indices,
+                    right_size,
+                    &mut builder,
+                    left_row,
+                )
+                .await?
+                {
+                    yield Message::Chunk(chunk);
+                }
+            }
+        }
+        if let Some(chunk) = builder.take() {
+            yield Message::Chunk(apply_indices_map(chunk, &self.output_indices));
+        }
+        self.cleanup_right_versions(ready.val.clone()).await?;
+        self.ready_watermark = Some(ready.val.clone());
+        if let Some(output_idx) = output_watermark_col_idx {
+            yield Message::Watermark(ready.with_idx(output_idx));
+        }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let left_schema = self.left.schema().clone();
         let right_schema = self.right.schema().clone();
@@ -630,81 +674,23 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
                 AlignedMessage::Right(chunk) => {
                     self.apply_right_chunk(chunk)?;
                 }
-                AlignedMessage::WatermarkLeft(watermark) => {
-                    if let Some(ready) = self.update_input_watermark(true, watermark) {
-                        let mut builder =
-                            StreamChunkBuilder::new(self.chunk_size, full_schema.clone());
-                        {
-                            let left_rows = self
-                                .left_buffer
-                                .consume(ready.val.clone(), &mut self.left_pending_by_time);
-                            pin_mut!(left_rows);
-                            while let Some(left_row) = left_rows.try_next().await? {
-                                if let Some(chunk) = Self::append_joined_left_row(
-                                    &self.left_join_keys,
-                                    &self.null_safe,
-                                    self.left_event_time_key,
-                                    self.right_event_time_key,
-                                    &self.right_versions_by_key,
-                                    &mut self.right_version_cache,
-                                    self.condition.as_ref(),
-                                    &self.output_indices,
-                                    right_size,
-                                    &mut builder,
-                                    left_row,
-                                )
-                                .await?
-                                {
-                                    yield Message::Chunk(chunk);
-                                }
-                            }
-                        }
-                        if let Some(chunk) = builder.take() {
-                            yield Message::Chunk(apply_indices_map(chunk, &self.output_indices));
-                        }
-                        self.cleanup_right_versions(ready.val.clone()).await?;
-                        self.ready_watermark = Some(ready.val.clone());
-                        if let Some(output_idx) = output_watermark_col_idx {
-                            yield Message::Watermark(ready.with_idx(output_idx));
-                        }
-                    }
-                }
-                AlignedMessage::WatermarkRight(watermark) => {
-                    if let Some(ready) = self.update_input_watermark(false, watermark) {
-                        let mut builder =
-                            StreamChunkBuilder::new(self.chunk_size, full_schema.clone());
-                        {
-                            let left_rows = self
-                                .left_buffer
-                                .consume(ready.val.clone(), &mut self.left_pending_by_time);
-                            pin_mut!(left_rows);
-                            while let Some(left_row) = left_rows.try_next().await? {
-                                if let Some(chunk) = Self::append_joined_left_row(
-                                    &self.left_join_keys,
-                                    &self.null_safe,
-                                    self.left_event_time_key,
-                                    self.right_event_time_key,
-                                    &self.right_versions_by_key,
-                                    &mut self.right_version_cache,
-                                    self.condition.as_ref(),
-                                    &self.output_indices,
-                                    right_size,
-                                    &mut builder,
-                                    left_row,
-                                )
-                                .await?
-                                {
-                                    yield Message::Chunk(chunk);
-                                }
-                            }
-                        }
-                        if let Some(chunk) = builder.take() {
-                            yield Message::Chunk(apply_indices_map(chunk, &self.output_indices));
-                        }
-                        self.cleanup_right_versions(ready.val.clone()).await?;
-                        self.ready_watermark = Some(ready.val.clone());
-                        if let Some(output_idx) = output_watermark_col_idx {
-                            yield Message::Watermark(ready.with_idx(output_idx));
+                watermark_msg @ (AlignedMessage::WatermarkLeft(_)
+                | AlignedMessage::WatermarkRight(_)) => {
+                    let (is_left, watermark) = match watermark_msg {
+                        AlignedMessage::WatermarkLeft(watermark) => (true, watermark),
+                        AlignedMessage::WatermarkRight(watermark) => (false, watermark),
+                        _ => unreachable!(),
+                    };
+                    if let Some(ready) = self.update_input_watermark(is_left, watermark) {
+                        let messages = self.emit_ready_watermark(
+                            ready,
+                            full_schema.clone(),
+                            right_size,
+                            output_watermark_col_idx,
+                        );
+                        pin_mut!(messages);
+                        while let Some(message) = messages.try_next().await? {
+                            yield message;
                         }
                     }
                 }
