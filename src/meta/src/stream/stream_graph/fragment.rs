@@ -464,7 +464,7 @@ pub(super) fn rewrite_stream_scan_and_merge(
     stream_scan_node: &mut StreamNode,
     upstream_table_change: &TableSchemaChange,
     upstream_table: &PbTable,
-    new_upstream_fragment_id: FragmentId,
+    upstream_table_fragment_id: FragmentId,
 ) -> MetaResult<Option<PropagatedSchemaChange>> {
     let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!(
@@ -612,7 +612,7 @@ pub(super) fn rewrite_stream_scan_and_merge(
             .to_prost()
         })
         .collect();
-    merge.upstream_fragment_id = new_upstream_fragment_id;
+    merge.upstream_fragment_id = upstream_table_fragment_id;
 
     let change = propagate_schema_change(newly_added_fields, removed_indices);
     Ok(change)

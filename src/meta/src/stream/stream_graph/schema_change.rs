@@ -100,7 +100,7 @@ pub(super) struct DropColumn {
 struct SinkSchemaChangeCollector<'a> {
     new_upstream_table: &'a PbTable,
     upstream_table_change: &'a TableSchemaChange,
-    new_upstream_fragment_id: FragmentId,
+    upstream_table_fragment_id: FragmentId,
     original_sink: &'a PbSink,
     new_sink_columns: &'a mut Option<Vec<PbColumnCatalog>>,
     updated_tables: &'a mut Vec<TableMetadataUpdate>,
@@ -111,7 +111,7 @@ impl<'a> SinkSchemaChangeCollector<'a> {
         SinkSchemaChangeCollector {
             new_upstream_table: self.new_upstream_table,
             upstream_table_change: self.upstream_table_change,
-            new_upstream_fragment_id: self.new_upstream_fragment_id,
+            upstream_table_fragment_id: self.upstream_table_fragment_id,
             original_sink: self.original_sink,
             new_sink_columns: &mut *self.new_sink_columns,
             updated_tables: &mut *self.updated_tables,
@@ -377,24 +377,6 @@ fn node_supports_schema_change(body: &NodeBody) -> bool {
     })
 }
 
-fn apply_node_schema_change(
-    body: NodeBody,
-    fields: Vec<PbField>,
-    input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
-    collector: SinkSchemaChangeCollector<'_>,
-) -> MetaResult<NodeSchemaRewrite> {
-    let node_name = node_body_name(&body);
-    if !node_supports_schema_change(&body) {
-        return Err(anyhow!("{} node does not support sink schema change", node_name).into());
-    }
-    let rewrite = dispatch_stream_node_body!(body, _NodeVariant, node => {
-        node.apply_schema_change(fields, input_changes, collector)
-    });
-    rewrite
-        .with_context(|| format!("failed to apply sink schema change on {} node", node_name))
-        .map_err(Into::into)
-}
-
 fn check_stream_node_schema_change_support(node: &StreamNode) -> MetaResult<()> {
     let body = node
         .node_body
@@ -425,7 +407,7 @@ fn rewrite_stream_node_for_sink_schema_change(
             &mut stream_scan_node,
             collector.upstream_table_change,
             collector.new_upstream_table,
-            collector.new_upstream_fragment_id,
+            collector.upstream_table_fragment_id,
         )?;
         return Ok((stream_scan_node, change));
     }
@@ -450,8 +432,16 @@ fn rewrite_stream_node_for_sink_schema_change(
         new_inputs.push(new_input);
         input_changes.push((input_change, input_fields));
     }
-    let rewrite = apply_node_schema_change(body, fields, input_changes, collector.reborrow())
-        .with_context(|| format!("failed to rewrite stream node {}", operator_id))?;
+    let node_name = node_body_name(&body);
+    let rewrite = dispatch_stream_node_body!(body, _NodeVariant, node => {
+        node.apply_schema_change(fields, input_changes, collector.reborrow())
+            .with_context(|| {
+                format!(
+                    "failed to rewrite {} stream node {}",
+                    node_name, operator_id
+                )
+            })
+    })?;
 
     Ok((
         StreamNode {
@@ -496,7 +486,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     let collector = SinkSchemaChangeCollector {
         new_upstream_table: upstream_table,
         upstream_table_change: &schema_change,
-        new_upstream_fragment_id: upstream_table_fragment_id,
+        upstream_table_fragment_id,
         original_sink: sink,
         new_sink_columns: &mut new_sink_columns,
         updated_tables: &mut updated_tables,
