@@ -582,6 +582,7 @@ pub fn start_iceberg_compactor(
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
+                                    .enable_prefetch(compactor_context.storage_opts.iceberg_compaction_enable_prefetch)
                                     .target_binpack_group_size_mb(
                                         compactor_context.storage_opts.iceberg_compaction_target_binpack_group_size_mb
                                     )
@@ -766,6 +767,7 @@ pub fn start_iceberg_compactor(
                                     cancel_compact_task.task_id,
                                     &mut task_queue,
                                     &shutdown_map,
+                                    &mut task_trackers,
                                 );
                             },
                         }
@@ -1417,12 +1419,14 @@ fn cancel_iceberg_task(
     task_id: u64,
     task_queue: &mut IcebergTaskQueue,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
+    task_trackers: &mut HashMap<u64, IcebergTaskTracker>,
 ) {
     // Meta assigns one task id to an Iceberg compact task, but the compactor
     // splits it into multiple plan runners tracked by `(task_id, plan_index)`.
     // A cancel event only carries `task_id`, so it must cancel all waiting and
     // running plan runners that belong to that task.
     let cancelled_waiting = task_queue.cancel_waiting_task(task_id);
+    let removed_tracker = task_trackers.remove(&task_id).is_some();
 
     let cancelled_running = {
         let mut shutdown_guard = shutdown_map.lock().unwrap();
@@ -1447,7 +1451,7 @@ fn cancel_iceberg_task(
         task_keys.len()
     };
 
-    if cancelled_waiting == 0 && cancelled_running == 0 {
+    if cancelled_waiting == 0 && cancelled_running == 0 && !removed_tracker {
         tracing::warn!(
             task_id = task_id,
             "Attempting to cancel non-existent iceberg compaction task"
@@ -1457,6 +1461,7 @@ fn cancel_iceberg_task(
             task_id = task_id,
             cancelled_waiting = cancelled_waiting,
             cancelled_running = cancelled_running,
+            removed_tracker = removed_tracker,
             "Cancelled iceberg compaction task"
         );
     }
@@ -1528,6 +1533,60 @@ fn handle_meta_task_pulling(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cancel_iceberg_task_removes_waiting_plans_and_tracker() {
+        let task_id = 42;
+        let mut task_queue = IcebergTaskQueue::new(10, 30);
+        assert_eq!(
+            task_queue.push(
+                iceberg_compaction::IcebergTaskMeta {
+                    task_id,
+                    plan_index: 0,
+                    required_parallelism: 3,
+                },
+                None,
+            ),
+            PushResult::Added
+        );
+        assert_eq!(
+            task_queue.push(
+                iceberg_compaction::IcebergTaskMeta {
+                    task_id,
+                    plan_index: 1,
+                    required_parallelism: 4,
+                },
+                None,
+            ),
+            PushResult::Added
+        );
+        assert_eq!(task_queue.waiting_parallelism_sum(), 7);
+
+        let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2))]);
+
+        cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
+
+        assert_eq!(task_queue.waiting_parallelism_sum(), 0);
+        assert!(!task_trackers.contains_key(&task_id));
+    }
+
+    #[test]
+    fn test_cancel_iceberg_task_shuts_down_running_plans_and_tracker() {
+        let task_id = 43;
+        let task_key = (task_id, 0);
+        let mut task_queue = IcebergTaskQueue::new(10, 30);
+        let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        shutdown_map.lock().unwrap().insert(task_key, shutdown_tx);
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1))]);
+
+        cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
+
+        assert!(shutdown_rx.try_recv().is_ok());
+        assert!(shutdown_map.lock().unwrap().is_empty());
+        assert!(!task_trackers.contains_key(&task_id));
+    }
 
     #[test]
     fn test_log_state_equality() {

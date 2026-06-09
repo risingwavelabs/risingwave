@@ -10,6 +10,13 @@ create materialized view ddl_mv as select v1 from ddl_t;
 statement ok
 create index ddl_index on ddl_t(v1);
 
+query TT
+select distinct ddl_type, name
+from rw_catalog.rw_fragment_id_to_ddl
+where ddl_type = 'index' and name = 'ddl_index';
+----
+index ddl_index
+
 statement error
 drop index ddl_mv;
 

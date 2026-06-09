@@ -90,6 +90,8 @@ impl MergeExecutorBuilder {
     }
 }
 
+impl_stream_node_body!(Merge(MergeNode) => MergeExecutorBuilder);
+
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;
 

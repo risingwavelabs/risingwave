@@ -26,6 +26,8 @@ use crate::executor::aggregate::{AggExecutorArgs, SimpleAggExecutor, SimpleAggEx
 
 pub struct SimpleAggExecutorBuilder;
 
+impl_stream_node_body!(SimpleAgg(SimpleAggNode) => SimpleAggExecutorBuilder);
+
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 

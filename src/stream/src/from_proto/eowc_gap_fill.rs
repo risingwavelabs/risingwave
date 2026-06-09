@@ -30,6 +30,8 @@ use crate::task::ExecutorParams;
 
 pub struct EowcGapFillExecutorBuilder;
 
+impl_stream_node_body!(EowcGapFill(EowcGapFillNode) => EowcGapFillExecutorBuilder);
+
 impl ExecutorBuilder for EowcGapFillExecutorBuilder {
     type Node = EowcGapFillNode;
 

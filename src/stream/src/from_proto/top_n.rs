@@ -23,6 +23,9 @@ use crate::executor::{AppendOnlyTopNExecutor, TopNExecutor};
 
 pub struct TopNExecutorBuilder<const APPEND_ONLY: bool>;
 
+impl_stream_node_body!(TopN(TopNNode) => TopNExecutorBuilder<false>);
+impl_stream_node_body!(AppendOnlyTopN(TopNNode) => TopNExecutorBuilder<true>);
+
 impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONLY> {
     type Node = TopNNode;
 

@@ -25,6 +25,8 @@ use crate::executor::{AsOfCpuEncoding, AsOfDesc, AsOfJoinType, AsOfMemoryEncodin
 
 pub struct AsOfJoinExecutorBuilder;
 
+impl_stream_node_body!(AsOfJoin(AsOfJoinNode) => AsOfJoinExecutorBuilder);
+
 impl ExecutorBuilder for AsOfJoinExecutorBuilder {
     type Node = AsOfJoinNode;
 

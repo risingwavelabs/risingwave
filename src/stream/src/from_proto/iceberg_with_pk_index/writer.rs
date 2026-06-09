@@ -33,6 +33,8 @@ use crate::task::ExecutorParams;
 
 pub struct IcebergWithPkIndexWriterExecutorBuilder;
 
+impl_stream_node_body!(IcebergWithPkIndexWriter(IcebergWithPkIndexWriterNode) => IcebergWithPkIndexWriterExecutorBuilder);
+
 impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
     type Node = IcebergWithPkIndexWriterNode;
 

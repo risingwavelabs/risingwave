@@ -40,7 +40,7 @@ use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 
 use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch};
-use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 use crate::sink::catalog::SinkId;
 use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommitCoordinator};
 
@@ -237,6 +237,54 @@ pub struct IcebergSinkCommitter {
 }
 
 impl IcebergSinkCommitter {
+    fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        self.table
+            .metadata()
+            .snapshot_for_ref(&branch)
+            .map(|snapshot| IcebergCommittedSnapshot {
+                branch,
+                snapshot_id: snapshot.snapshot_id(),
+                timestamp_ms: snapshot.timestamp_ms(),
+            })
+    }
+
+    fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
+        let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender else {
+            return;
+        };
+
+        let Some(observed_snapshot) = self.latest_observed_snapshot() else {
+            warn!(
+                sink_id = %self.sink_id,
+                "skip iceberg compaction update because no observed snapshot is available"
+            );
+            return;
+        };
+
+        let observed_snapshot_id = observed_snapshot.snapshot_id;
+        let observed_snapshot_timestamp_ms = observed_snapshot.timestamp_ms;
+        let observed_snapshot_branch = observed_snapshot.branch.clone();
+
+        if iceberg_compact_stat_sender
+            .send(IcebergSinkCompactionUpdate {
+                sink_id: self.sink_id,
+                force_compaction,
+                observed_snapshot,
+            })
+            .is_err()
+        {
+            warn!(
+                sink_id = %self.sink_id,
+                force_compaction,
+                observed_snapshot_id,
+                observed_snapshot_timestamp_ms,
+                observed_snapshot_branch = %observed_snapshot_branch,
+                "failed to send iceberg compaction update"
+            );
+        }
+    }
+
     // Reload table and guarantee current schema_id and partition_spec_id matches
     // given `schema_id` and `partition_spec_id`
     async fn reload_table(
@@ -615,16 +663,7 @@ impl IcebergSinkCommitter {
 
         tracing::debug!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-            && iceberg_compact_stat_sender
-                .send(IcebergSinkCompactionUpdate {
-                    sink_id: self.sink_id,
-                    force_compaction: false,
-                })
-                .is_err()
-        {
-            warn!("failed to send iceberg compaction stats");
-        }
+        self.notify_iceberg_compaction_scheduler(false);
 
         Ok(())
     }
@@ -689,42 +728,56 @@ impl IcebergSinkCommitter {
             return Ok(false);
         }
 
-        // We only support add_columns for now.
-        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
-            schema_change.op.as_ref()
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Unsupported sink schema change op in iceberg sink: {:?}",
-                schema_change.op
-            )));
+        let expected_after_change = match schema_change.op.as_ref() {
+            Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(
+                add_columns_op,
+            )) => {
+                let add_arrow_fields: Vec<ArrowField> = add_columns_op
+                    .fields
+                    .iter()
+                    .map(|pb_field| {
+                        let field = Field::from(pb_field);
+                        iceberg_arrow_convert
+                            .to_arrow_field(&field.name, &field.data_type)
+                            .context("Failed to convert field to arrow")
+                            .map_err(SinkError::Iceberg)
+                    })
+                    .collect::<Result<_>>()?;
+
+                let mut expected_after_change = original_arrow_fields;
+                expected_after_change.extend(add_arrow_fields);
+                expected_after_change
+            }
+            Some(risingwave_pb::stream_plan::sink_schema_change::Op::DropColumns(
+                drop_columns_op,
+            )) => original_arrow_fields
+                .into_iter()
+                .filter(|field| {
+                    !drop_columns_op
+                        .column_names
+                        .iter()
+                        .any(|name| name == field.name())
+                })
+                .collect_vec(),
+            _ => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Unsupported sink schema change op in iceberg sink: {:?}",
+                    schema_change.op
+                )));
+            }
         };
 
-        let add_arrow_fields: Vec<ArrowField> = add_columns_op
-            .fields
-            .iter()
-            .map(|pb_field| {
-                let field = Field::from(pb_field);
-                iceberg_arrow_convert
-                    .to_arrow_field(&field.name, &field.data_type)
-                    .context("Failed to convert field to arrow")
-                    .map_err(SinkError::Iceberg)
-            })
-            .collect::<Result<_>>()?;
-
-        let mut expected_after_change = original_arrow_fields;
-        expected_after_change.extend(add_arrow_fields);
-
-        // If current schema equals original_schema + add_columns, then schema change is applied.
+        // If current schema equals the changed schema, then schema change is applied.
         if schema_matches(&expected_after_change) {
             tracing::debug!(
-                "Current iceberg schema matches original_schema + add_columns ({} columns); schema change already applied",
+                "Current iceberg schema matches changed schema ({} columns); schema change already applied",
                 expected_after_change.len()
             );
             return Ok(true);
         }
 
         Err(SinkError::Iceberg(anyhow!(
-            "Current iceberg schema does not match either original_schema ({} cols) or original_schema + add_columns; cannot determine whether schema change is applied",
+            "Current iceberg schema does not match either original_schema ({} cols) or changed schema; cannot determine whether schema change is applied",
             schema_change.original_schema.len()
         )))
     }
@@ -735,17 +788,6 @@ impl IcebergSinkCommitter {
     async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
         use iceberg::spec::NestedField;
 
-        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
-            schema_change.op.as_ref()
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Unsupported sink schema change op in iceberg sink: {:?}",
-                schema_change.op
-            )));
-        };
-
-        let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
-
         // Step 1: Get current table metadata
         let metadata = self.table.metadata();
         let mut next_field_id = metadata.last_column_id() + 1;
@@ -755,31 +797,53 @@ impl IcebergSinkCommitter {
         let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
         let mut new_fields = Vec::new();
 
-        for field in &add_columns {
-            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
-            let arrow_field = iceberg_create_table_arrow_convert
-                .to_arrow_field(&field.name, &field.data_type)
-                .with_context(|| format!("Failed to convert field '{}' to arrow", field.name))
-                .map_err(SinkError::Iceberg)?;
+        let mut drop_column_names = Vec::new();
+        match schema_change.op.as_ref() {
+            Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(
+                add_columns_op,
+            )) => {
+                let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
+                for field in &add_columns {
+                    // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
+                    let arrow_field = iceberg_create_table_arrow_convert
+                        .to_arrow_field(&field.name, &field.data_type)
+                        .with_context(|| {
+                            format!("Failed to convert field '{}' to arrow", field.name)
+                        })
+                        .map_err(SinkError::Iceberg)?;
 
-            // Convert Arrow DataType to Iceberg Type
-            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
-                .map_err(|err| {
-                    SinkError::Iceberg(
-                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
-                    )
-                })?;
+                    // Convert Arrow DataType to Iceberg Type
+                    let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                        .map_err(|err| {
+                            SinkError::Iceberg(
+                                anyhow!(err)
+                                    .context("Failed to convert Arrow type to Iceberg type"),
+                            )
+                        })?;
 
-            // Create NestedField with the next available field ID
-            let nested_field = Arc::new(NestedField::optional(
-                next_field_id,
-                &field.name,
-                iceberg_type,
-            ));
+                    // Create NestedField with the next available field ID
+                    let nested_field = Arc::new(NestedField::optional(
+                        next_field_id,
+                        &field.name,
+                        iceberg_type,
+                    ));
 
-            new_fields.push(nested_field);
-            tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
-            next_field_id += 1;
+                    new_fields.push(nested_field);
+                    tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
+                    next_field_id += 1;
+                }
+            }
+            Some(risingwave_pb::stream_plan::sink_schema_change::Op::DropColumns(
+                drop_columns_op,
+            )) => {
+                drop_column_names = drop_columns_op.column_names.clone();
+            }
+            _ => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Unsupported sink schema change op in iceberg sink: {:?}",
+                    schema_change.op
+                )));
+            }
         }
 
         // Step 3: Create Transaction with UpdateSchemaAction
@@ -789,7 +853,11 @@ impl IcebergSinkCommitter {
         );
 
         let txn = Transaction::new(&self.table);
-        let action = txn.update_schema().add_fields(new_fields);
+        let action_fields_added = new_fields.len();
+        let action = txn
+            .update_schema()
+            .add_fields(new_fields)
+            .drop_fields(drop_column_names.clone());
 
         let updated_table = action
             .apply(txn)
@@ -803,8 +871,9 @@ impl IcebergSinkCommitter {
         self.table = updated_table;
 
         tracing::info!(
-            "Successfully committed schema change, added {} columns to iceberg table",
-            add_columns.len()
+            "Successfully committed schema change, added {} columns and dropped {} columns from iceberg table",
+            action_fields_added,
+            drop_column_names.len()
         );
 
         Ok(())
@@ -862,21 +931,12 @@ impl IcebergSinkCommitter {
                     max_snapshots
                 );
 
-                if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-                    && iceberg_compact_stat_sender
-                        .send(IcebergSinkCompactionUpdate {
-                            sink_id: self.sink_id,
-                            force_compaction: true,
-                        })
-                        .is_err()
-                {
-                    tracing::warn!("failed to send iceberg compaction stats");
-                }
+                self.notify_iceberg_compaction_scheduler(true);
 
                 // Wait for 30 seconds before checking again
                 tokio::time::sleep(Duration::from_secs(30)).await;
 
-                // Reload table to get latest snapshots
+                // Refresh table after the wait so the next check sees latest snapshots.
                 self.table = self.config.load_table().await?;
             }
         }

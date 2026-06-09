@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::config::SessionInitConfig;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
@@ -129,7 +129,7 @@ pub async fn rpc_serve(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
@@ -169,7 +169,7 @@ pub async fn rpc_serve(
         server_config,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         shutdown,
     ))
     .await
@@ -188,7 +188,7 @@ pub async fn rpc_serve_with_store(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     // TODO(shutdown): directly use cancellation token
@@ -252,7 +252,7 @@ pub async fn rpc_serve_with_store(
         max_cluster_heartbeat_interval,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         server_config,
         election_client,
         shutdown,
@@ -315,7 +315,7 @@ pub async fn start_service_as_election_leader(
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
@@ -325,7 +325,7 @@ pub async fn start_service_as_election_leader(
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
-        init_session_config,
+        session_init,
         meta_store_impl,
     )
     .await?;

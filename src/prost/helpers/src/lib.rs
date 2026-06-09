@@ -18,7 +18,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{Data, DataStruct, DeriveInput, Result, parse_macro_input};
+use syn::{Data, DataEnum, DataStruct, DeriveInput, Result, parse_macro_input};
 
 mod generate;
 
@@ -33,6 +33,61 @@ pub fn any_pb(input: TokenStream) -> TokenStream {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }
+}
+
+#[proc_macro_derive(StreamNodeBodyVariants)]
+pub fn stream_node_body_variants(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    match produce_stream_node_body_variants(&ast) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn produce_stream_node_body_variants(ast: &DeriveInput) -> Result<TokenStream2> {
+    if ast.ident != "NodeBody" {
+        return Err(syn::Error::new_spanned(
+            &ast.ident,
+            "StreamNodeBodyVariants can only be derived for stream_plan::stream_node::NodeBody",
+        ));
+    }
+
+    let Data::Enum(DataEnum { variants, .. }) = &ast.data else {
+        return Err(syn::Error::new_spanned(
+            ast,
+            "StreamNodeBodyVariants can only be derived for enums",
+        ));
+    };
+
+    let variants: Vec<_> = variants.iter().map(|variant| &variant.ident).collect();
+    let marker_types: Vec<_> = variants
+        .iter()
+        .map(|variant| format_ident!("{variant}Variant"))
+        .collect();
+    let dollar = quote!($);
+
+    Ok(quote! {
+        #(
+            #[derive(Debug, Clone, Copy)]
+            pub struct #marker_types;
+        )*
+
+        #[macro_export]
+        #[doc(hidden)]
+        macro_rules! __dispatch_stream_node_body {
+            (#dollar body:expr, #dollar node_body:ident, #dollar node:ident => #dollar call:expr) => {
+                match #dollar body {
+                    #(
+                        ::risingwave_pb::stream_plan::stream_node::NodeBody::#variants(#dollar node) => {
+                            type #dollar node_body = ::risingwave_pb::stream_plan::stream_node::#marker_types;
+                            #dollar call
+                        }
+                    )*
+                }
+            };
+        }
+    })
 }
 
 // Procedure macros can not be tested from the same crate.
@@ -100,5 +155,77 @@ pub fn version(input: TokenStream) -> TokenStream {
     match version_inner(&ast) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+    use syn::parse_quote;
+
+    use super::*;
+
+    fn normalize(tokens: TokenStream2) -> String {
+        tokens
+            .to_string()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn stream_node_body_variants_generates_markers_and_dispatch() {
+        let input = parse_quote! {
+            enum NodeBody {
+                Source(Box<SourceNode>),
+                Project(Box<ProjectNode>),
+            }
+        };
+
+        let dollar = quote!($);
+        let expected_code = quote! {
+            #[derive(Debug, Clone, Copy)]
+            pub struct SourceVariant;
+
+            #[derive(Debug, Clone, Copy)]
+            pub struct ProjectVariant;
+
+            #[macro_export]
+            #[doc(hidden)]
+            macro_rules! __dispatch_stream_node_body {
+                (#dollar body:expr, #dollar node_body:ident, #dollar node:ident => #dollar call:expr) => {
+                    match #dollar body {
+                        ::risingwave_pb::stream_plan::stream_node::NodeBody::Source(#dollar node) => {
+                            type #dollar node_body = ::risingwave_pb::stream_plan::stream_node::SourceVariant;
+                            #dollar call
+                        }
+                        ::risingwave_pb::stream_plan::stream_node::NodeBody::Project(#dollar node) => {
+                            type #dollar node_body = ::risingwave_pb::stream_plan::stream_node::ProjectVariant;
+                            #dollar call
+                        }
+                    }
+                };
+            }
+        };
+
+        assert_eq!(
+            normalize(produce_stream_node_body_variants(&input).unwrap()),
+            normalize(expected_code)
+        );
+    }
+
+    #[test]
+    fn stream_node_body_variants_rejects_unexpected_enum_name() {
+        let input = parse_quote! {
+            enum OtherBody {
+                Source(Box<SourceNode>),
+            }
+        };
+
+        let err = produce_stream_node_body_variants(&input).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "StreamNodeBodyVariants can only be derived for stream_plan::stream_node::NodeBody"
+        );
     }
 }
