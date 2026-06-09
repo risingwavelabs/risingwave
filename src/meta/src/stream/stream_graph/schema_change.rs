@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, dispatch_stream_node_body};
 use risingwave_pb::catalog::{PbSink, PbTable};
-use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     self, PbStreamScanType, ProjectNode, SinkNode, StreamNode, StreamScanNode,
@@ -30,11 +30,11 @@ use risingwave_pb::stream_plan::{
 use crate::MetaResult;
 use crate::controller::id::IdGeneratorManager;
 use crate::model::{Fragment, FragmentId};
-use crate::stream::TableMetadataUpdate;
 use crate::stream::stream_graph::fragment::{
     rewrite_project_node, rewrite_sink_node, rewrite_stream_scan_and_merge,
 };
 use crate::stream::stream_graph::id::GlobalFragmentIdGen;
+use crate::stream::{SinkMetadataChange, TableMetadataUpdate};
 
 pub fn check_sink_fragments_support_refresh_schema(
     fragments: &BTreeMap<FragmentId, Fragment>,
@@ -81,6 +81,57 @@ impl PropagatedSchemaChange {
     pub(super) fn is_drop_column(&self) -> bool {
         matches!(self, Self::DropColumn(_))
     }
+
+    fn apply_fields(&self, fields: &[PbField]) -> MetaResult<Vec<PbField>> {
+        match self {
+            Self::AddColumn(add_column) => {
+                let mut new_fields =
+                    Vec::with_capacity(fields.len() + add_column.added_fields.len());
+                new_fields.extend_from_slice(fields);
+                new_fields.extend_from_slice(&add_column.added_fields);
+                Ok(new_fields)
+            }
+            Self::DropColumn(drop_column) => {
+                for &index in &drop_column.removed_indices {
+                    if index >= fields.len() {
+                        bail!(
+                            "removed field index {} is out of range for fields {}",
+                            index,
+                            fields.len()
+                        );
+                    }
+                }
+                Ok(fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| !drop_column.removed_indices.contains(index))
+                    .map(|(_, field)| field.clone())
+                    .collect())
+            }
+        }
+    }
+
+    pub(super) fn remap_index(&self, old_index: usize, index_name: &str) -> MetaResult<usize> {
+        match self {
+            Self::AddColumn(_) => Ok(old_index),
+            Self::DropColumn(drop_column) => {
+                remap_index_after_drop(old_index, &drop_column.removed_indices).ok_or_else(|| {
+                    anyhow!("cannot drop {} column at index {}", index_name, old_index).into()
+                })
+            }
+        }
+    }
+}
+
+pub(super) fn remap_index_after_drop(old_index: usize, removed_indices: &[usize]) -> Option<usize> {
+    if removed_indices.contains(&old_index) {
+        return None;
+    }
+    let removed_before = removed_indices
+        .iter()
+        .filter(|&&removed_index| removed_index < old_index)
+        .count();
+    Some(old_index - removed_before)
 }
 
 #[derive(Clone, Debug)]
@@ -102,7 +153,7 @@ struct SinkSchemaChangeCollector<'a> {
     upstream_table_change: &'a TableSchemaChange,
     upstream_table_fragment_id: FragmentId,
     original_sink: &'a PbSink,
-    new_sink_columns: &'a mut Option<Vec<PbColumnCatalog>>,
+    sink_metadata_change: &'a mut Option<SinkMetadataChange>,
     updated_tables: &'a mut Vec<TableMetadataUpdate>,
 }
 
@@ -113,7 +164,7 @@ impl<'a> SinkSchemaChangeCollector<'a> {
             upstream_table_change: self.upstream_table_change,
             upstream_table_fragment_id: self.upstream_table_fragment_id,
             original_sink: self.original_sink,
-            new_sink_columns: &mut *self.new_sink_columns,
+            sink_metadata_change: &mut *self.sink_metadata_change,
             updated_tables: &mut *self.updated_tables,
         }
     }
@@ -159,7 +210,6 @@ pub(super) fn sink_node_supports_log_store_schema_change(sink_node: &SinkNode) -
 
 pub(super) struct NodeSchemaRewrite {
     pub body: NodeBody,
-    pub fields: Vec<PbField>,
     pub identity: Option<String>,
     pub change: Option<PropagatedSchemaChange>,
 }
@@ -171,7 +221,6 @@ trait SinkSchemaChangeSupport {
 
     fn apply_schema_change(
         self,
-        _fields: Vec<PbField>,
         _input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         _collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite>
@@ -193,7 +242,6 @@ impl SinkSchemaChangeSupport for stream_plan::MergeNode {
 
     fn apply_schema_change(
         self,
-        _fields: Vec<PbField>,
         _input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         _collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite> {
@@ -208,7 +256,6 @@ impl SinkSchemaChangeSupport for StreamScanNode {
 
     fn apply_schema_change(
         self,
-        _fields: Vec<PbField>,
         _input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         _collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite> {
@@ -223,7 +270,6 @@ impl SinkSchemaChangeSupport for ProjectNode {
 
     fn apply_schema_change(
         self,
-        fields: Vec<PbField>,
         input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         _collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite> {
@@ -240,12 +286,11 @@ impl SinkSchemaChangeSupport for ProjectNode {
         let Some(input_change) = input_change else {
             return Ok(NodeSchemaRewrite {
                 body: NodeBody::Project(Box::new(self)),
-                fields,
                 identity: None,
                 change: None,
             });
         };
-        rewrite_project_node(self, fields, input_change.clone(), input_fields.clone())
+        rewrite_project_node(self, input_change.clone(), input_fields)
     }
 }
 
@@ -256,7 +301,6 @@ impl SinkSchemaChangeSupport for SinkNode {
 
     fn apply_schema_change(
         self,
-        fields: Vec<PbField>,
         input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite> {
@@ -273,21 +317,20 @@ impl SinkSchemaChangeSupport for SinkNode {
         let Some(input_change) = input_change else {
             return Ok(NodeSchemaRewrite {
                 body: NodeBody::Sink(Box::new(self)),
-                fields,
                 identity: None,
                 change: None,
             });
         };
-        let (rewrite, sink_columns, updated_table) = rewrite_sink_node(
+        let (rewrite, sink_metadata_change, updated_table) = rewrite_sink_node(
             self,
             input_change.clone(),
-            input_fields.clone(),
+            input_fields,
             collector.original_sink,
         )?;
         if let Some(updated_table) = updated_table {
             collector.updated_tables.push(updated_table);
         }
-        *collector.new_sink_columns = Some(sink_columns);
+        *collector.sink_metadata_change = Some(sink_metadata_change);
         Ok(rewrite)
     }
 }
@@ -299,7 +342,6 @@ impl SinkSchemaChangeSupport for stream_plan::BatchPlanNode {
 
     fn apply_schema_change(
         self,
-        _fields: Vec<PbField>,
         _input_changes: Vec<(Option<PropagatedSchemaChange>, Vec<PbField>)>,
         _collector: SinkSchemaChangeCollector<'_>,
     ) -> MetaResult<NodeSchemaRewrite> {
@@ -403,12 +445,23 @@ fn rewrite_stream_node_for_sink_schema_change(
 ) -> MetaResult<(StreamNode, Option<PropagatedSchemaChange>)> {
     if matches!(node.node_body.as_ref(), Some(NodeBody::StreamScan(_))) {
         let mut stream_scan_node = node;
+        let old_stream_key = stream_scan_node.stream_key.clone();
         let change = rewrite_stream_scan_and_merge(
             &mut stream_scan_node,
             collector.upstream_table_change,
             collector.new_upstream_table,
             collector.upstream_table_fragment_id,
         )?;
+        if let Some(change) = &change {
+            stream_scan_node.stream_key = old_stream_key
+                .into_iter()
+                .map(|index| {
+                    change
+                        .remap_index(index as usize, "stream key")
+                        .map(|index| index as u32)
+                })
+                .collect::<MetaResult<_>>()?;
+        }
         return Ok((stream_scan_node, change));
     }
 
@@ -434,7 +487,7 @@ fn rewrite_stream_node_for_sink_schema_change(
     }
     let node_name = node_body_name(&body);
     let rewrite = dispatch_stream_node_body!(body, _NodeVariant, node => {
-        node.apply_schema_change(fields, input_changes, collector.reborrow())
+        node.apply_schema_change(input_changes, collector.reborrow())
             .with_context(|| {
                 format!(
                     "failed to rewrite {} stream node {}",
@@ -442,6 +495,21 @@ fn rewrite_stream_node_for_sink_schema_change(
                 )
             })
     })?;
+    let (fields, stream_key) = if let Some(change) = &rewrite.change {
+        (
+            change.apply_fields(&fields)?,
+            stream_key
+                .into_iter()
+                .map(|index| {
+                    change
+                        .remap_index(index as usize, "stream key")
+                        .map(|index| index as u32)
+                })
+                .collect::<MetaResult<_>>()?,
+        )
+    } else {
+        (fields, stream_key)
+    };
 
     Ok((
         StreamNode {
@@ -450,7 +518,7 @@ fn rewrite_stream_node_for_sink_schema_change(
             stream_key,
             stream_kind,
             identity: rewrite.identity.unwrap_or(identity),
-            fields: rewrite.fields,
+            fields,
             node_body: Some(rewrite.body),
         },
         rewrite.change,
@@ -464,7 +532,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
     id_generator_manager: &IdGeneratorManager,
-) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Vec<TableMetadataUpdate>)> {
+) -> MetaResult<(Fragment, SinkMetadataChange, Vec<TableMetadataUpdate>)> {
     let root_body = original_sink_fragment
         .nodes
         .node_body
@@ -480,7 +548,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
         .as_global_id();
-    let mut new_sink_columns = None;
+    let mut sink_metadata_change = None;
     let mut updated_tables = vec![];
 
     let collector = SinkSchemaChangeCollector {
@@ -488,7 +556,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         upstream_table_change: &schema_change,
         upstream_table_fragment_id,
         original_sink: sink,
-        new_sink_columns: &mut new_sink_columns,
+        sink_metadata_change: &mut sink_metadata_change,
         updated_tables: &mut updated_tables,
     };
     let (new_nodes, output_change) = rewrite_stream_node_for_sink_schema_change(
@@ -499,7 +567,12 @@ pub fn rewrite_refresh_schema_sink_fragment(
         tracing::warn!("sink schema change did not affect the Sink node while rewriting fragment");
     }
 
-    let new_sink_columns = new_sink_columns.unwrap_or_else(|| sink.columns.clone());
+    let sink_metadata_change = sink_metadata_change.unwrap_or_else(|| SinkMetadataChange {
+        columns: sink.columns.clone(),
+        plan_pk: sink.plan_pk.clone(),
+        distribution_key: sink.distribution_key.clone(),
+        downstream_pk: sink.downstream_pk.clone(),
+    });
     let new_sink_fragment = Fragment {
         fragment_id,
         fragment_type_mask: original_sink_fragment.fragment_type_mask,
@@ -508,5 +581,25 @@ pub fn rewrite_refresh_schema_sink_fragment(
         maybe_vnode_count: original_sink_fragment.maybe_vnode_count,
         nodes: new_nodes,
     };
-    Ok((new_sink_fragment, new_sink_columns, updated_tables))
+    Ok((new_sink_fragment, sink_metadata_change, updated_tables))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remap_index_after_drop;
+
+    #[test]
+    fn test_remap_index_after_drop() {
+        assert_eq!(remap_index_after_drop(0, &[1, 3]), Some(0));
+        assert_eq!(remap_index_after_drop(1, &[1, 3]), None);
+        assert_eq!(remap_index_after_drop(2, &[1, 3]), Some(1));
+        assert_eq!(remap_index_after_drop(3, &[1, 3]), None);
+        assert_eq!(remap_index_after_drop(4, &[1, 3]), Some(2));
+
+        assert_eq!(remap_index_after_drop(0, &[3, 1]), Some(0));
+        assert_eq!(remap_index_after_drop(1, &[3, 1]), None);
+        assert_eq!(remap_index_after_drop(2, &[3, 1]), Some(1));
+        assert_eq!(remap_index_after_drop(3, &[3, 1]), None);
+        assert_eq!(remap_index_after_drop(4, &[3, 1]), Some(2));
+    }
 }

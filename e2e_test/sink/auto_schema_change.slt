@@ -194,6 +194,77 @@ drop table t_with_pk;
 
 # end
 
+# test dropping a column before sink primary key remaps rewritten sink stream key
+
+statement ok
+create table t_stream_key_shift(v int, id int primary key, name int);
+
+statement ok
+create sink s_stream_key_shift
+from t_stream_key_shift
+with (
+    connector = 'blackhole',
+    primary_key = 'id',
+    auto.schema.change = 'true'
+);
+
+statement ok
+insert into t_stream_key_shift values (0, 1, 10);
+
+statement ok
+flush;
+
+statement ok
+alter table t_stream_key_shift drop column v;
+
+query TTTT
+describe s_stream_key_shift;
+----
+id integer false NULL
+name integer false NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description s_stream_key_shift NULL NULL
+
+statement ok
+update t_stream_key_shift set name = 20 where id = 1;
+
+statement ok
+flush;
+
+statement ok
+drop sink s_stream_key_shift;
+
+statement ok
+drop table t_stream_key_shift;
+
+# end
+
+# test dropping sink key columns is rejected
+
+statement ok
+create table t_drop_sink_key(id int primary key, name int);
+
+statement ok
+create sink s_drop_sink_key
+from t_drop_sink_key
+with (
+    connector = 'blackhole',
+    primary_key = 'id',
+    auto.schema.change = 'true'
+);
+
+statement error alter primary key
+alter table t_drop_sink_key drop column id;
+
+statement ok
+drop sink s_drop_sink_key;
+
+statement ok
+drop table t_drop_sink_key;
+
+# end
+
 # test auto schema change on empty table
 
 statement ok

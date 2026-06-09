@@ -97,7 +97,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
 };
-use crate::stream::{SplitAssignment, TableMetadataUpdate};
+use crate::stream::{SinkMetadataChange, SplitAssignment, TableMetadataUpdate};
 use crate::{MetaError, MetaResult};
 
 /// A planned fragment update for dependent sources when a connection's properties change.
@@ -1879,15 +1879,22 @@ impl CatalogController {
                     streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
                         .one(txn)
                         .await?;
-                let columns = ColumnCatalogArray::from(finish_sink_context.columns);
+                let sink_metadata_change = finish_sink_context.sink_metadata_change;
+                let columns = ColumnCatalogArray::from(sink_metadata_change.columns);
                 Sink::update(sink::ActiveModel {
                     sink_id: Set(finish_sink_context.original_sink_id),
                     columns: Set(columns.clone()),
+                    plan_pk: Set(sink_metadata_change.plan_pk.clone().into()),
+                    distribution_key: Set(sink_metadata_change.distribution_key.clone().into()),
+                    downstream_pk: Set(sink_metadata_change.downstream_pk.clone().into()),
                     ..Default::default()
                 })
                 .exec(txn)
                 .await?;
                 sink.columns = columns;
+                sink.plan_pk = sink_metadata_change.plan_pk.into();
+                sink.distribution_key = sink_metadata_change.distribution_key.into();
+                sink.downstream_pk = sink_metadata_change.downstream_pk.into();
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(
                         ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
@@ -3499,7 +3506,7 @@ pub struct SinkIntoTableContext {
 pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
-    pub columns: Vec<PbColumnCatalog>,
+    pub sink_metadata_change: SinkMetadataChange,
     pub updated_tables: Vec<TableMetadataUpdate>,
 }
 

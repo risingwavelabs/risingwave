@@ -1544,7 +1544,7 @@ impl DdlController {
                     let sink_ctx = sink_job_fragments.ctx;
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_schema, updated_tables) =
+                    let (new_sink_fragment, sink_metadata_change, updated_tables) =
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
@@ -1570,7 +1570,7 @@ impl DdlController {
                         tmp_sink_id,
                         original_sink: sink,
                         original_fragment: original_sink_fragment,
-                        new_schema,
+                        sink_metadata_change,
                         newly_add_fields: newly_added_columns
                             .iter()
                             .map(|col| Field::from(&col.column_desc))
@@ -1634,7 +1634,7 @@ impl DdlController {
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id,
-                            columns: sink.new_schema.clone(),
+                            sink_metadata_change: sink.sink_metadata_change.clone(),
                             updated_tables: sink.updated_tables.clone(),
                         })
                         .collect()
