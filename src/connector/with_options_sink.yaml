@@ -1805,10 +1805,10 @@ StarrocksConfig:
     field_type: String
     comments: Enable partial update
     required: false
-  - name: starrocks.max_batch_size_mb
+  - name: starrocks.max_batch_size_bytes
     field_type: u64
     comments: |-
-      The maximum size in MB for each `StarRocks` stream load request payload.
+      The maximum size in bytes for each `StarRocks` stream load request payload.
       If unset, RisingWave does not split the request by payload size.
     required: false
     default: Default::default
