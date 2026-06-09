@@ -298,7 +298,7 @@ impl RedShiftSinkWriter {
         config: RedShiftConfig,
         is_append_only: bool,
         writer_param: super::SinkWriterParam,
-        param: SinkParam,
+        mut param: SinkParam,
     ) -> Result<Self> {
         let schema = param.schema();
         if config.with_s3 {
@@ -312,11 +312,28 @@ impl RedShiftSinkWriter {
             )?;
             Ok(Self::S3(s3_writer))
         } else {
+            let (writer_schema, writer_table) = if is_append_only {
+                (config.schema.clone(), config.table.clone())
+            } else {
+                (
+                    config.intermediate_schema.clone().or(config.schema.clone()),
+                    config.cdc_table.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "intermediate.table.name is required for non-append-only sink"
+                        ))
+                    })?,
+                )
+            };
+            param.properties.remove("schema");
+            param.properties.remove("schema.name");
+            if let Some(writer_schema) = writer_schema {
+                param.properties.insert("schema".to_owned(), writer_schema);
+            }
             let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
                 is_append_only,
                 writer_param,
                 param,
-                build_full_table_name(config.schema.as_deref(), &config.table),
+                writer_table,
             )
             .await?;
             Ok(Self::Jdbc(jdbc_writer))
