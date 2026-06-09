@@ -19,7 +19,7 @@ use futures::{StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DefaultOrd, DefaultOrdered, ScalarImpl, ToOwnedDatum};
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
@@ -40,7 +40,7 @@ use crate::task::AtomicU64Ref;
 
 type RightVersionMap = EstimatedBTreeMap<DefaultOrdered<ScalarImpl>, OwnedRow>;
 type RightVersionCache = ManagedLruCache<OwnedRow, RightVersionMap>;
-const STATE_SCAN_BATCH_SIZE: usize = 1024;
+const RIGHT_CLEANUP_ANCHOR_BATCH_SIZE: usize = 4096;
 
 pub struct EventTimeTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
@@ -401,13 +401,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         Ok(chunk.map(|chunk| apply_indices_map(chunk, output_indices)))
     }
 
-    async fn scan_right_key_batch(
+    async fn scan_right_key_range(
         right_versions_by_key: &StateTable<S>,
         join_key: &OwnedRow,
-        lower_bound: Bound<OwnedRow>,
         upper_bound: Bound<OwnedRow>,
     ) -> StreamExecutorResult<Vec<OwnedRow>> {
-        let sub_range = (lower_bound, upper_bound);
+        let sub_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, upper_bound);
         let iter = right_versions_by_key
             .iter_with_prefix(
                 join_key,
@@ -417,8 +416,31 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             .await?;
         pin_mut!(iter);
 
-        let mut rows = Vec::with_capacity(STATE_SCAN_BATCH_SIZE);
-        while rows.len() < STATE_SCAN_BATCH_SIZE {
+        let mut rows = Vec::new();
+        while let Some(row) = iter.try_next().await? {
+            rows.push(row);
+        }
+        Ok(rows)
+    }
+
+    async fn scan_right_time_batch(
+        right_versions_by_time: &StateTable<S>,
+        vnode: VirtualNode,
+        lower_bound: Bound<OwnedRow>,
+        upper_bound: Bound<OwnedRow>,
+    ) -> StreamExecutorResult<Vec<OwnedRow>> {
+        let pk_range = (lower_bound, upper_bound);
+        let iter = right_versions_by_time
+            .iter_with_vnode(
+                vnode,
+                &pk_range,
+                PrefetchOptions::prefetch_for_small_range_scan(),
+            )
+            .await?;
+        pin_mut!(iter);
+
+        let mut rows = Vec::with_capacity(RIGHT_CLEANUP_ANCHOR_BATCH_SIZE);
+        while rows.len() < RIGHT_CLEANUP_ANCHOR_BATCH_SIZE {
             let Some(row) = iter.try_next().await? else {
                 break;
             };
@@ -432,81 +454,81 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         join_key: OwnedRow,
         anchor_ts: ScalarImpl,
     ) -> StreamExecutorResult<()> {
-        let mut lower_bound = Bound::Unbounded;
         let upper_bound = Bound::Excluded(OwnedRow::new(vec![Some(anchor_ts)]));
-        loop {
-            let rows = Self::scan_right_key_batch(
-                &self.right_versions_by_key,
-                &join_key,
-                lower_bound,
-                upper_bound.clone(),
-            )
-            .await?;
-            if rows.is_empty() {
-                break;
-            }
-
-            let next_lower_bound = Self::right_version_time_at(
-                self.right_event_time_key,
-                rows.last().expect("checked non-empty"),
-            )
-            .map(|ts| Bound::Excluded(OwnedRow::new(vec![Some(ts.into_inner())])))
-            .unwrap_or(Bound::Unbounded);
-            let is_synced = rows.len() < STATE_SCAN_BATCH_SIZE;
-            for row in rows {
-                self.delete_right_version_cache(&row);
-                self.right_versions_by_key.delete(row);
-            }
-            if is_synced {
-                break;
-            }
-            lower_bound = next_lower_bound;
+        let rows =
+            Self::scan_right_key_range(&self.right_versions_by_key, &join_key, upper_bound).await?;
+        for row in rows {
+            self.delete_right_version_cache(&row);
+            self.right_versions_by_key.delete(row);
         }
         Ok(())
     }
 
-    async fn cleanup_right_versions(&mut self, watermark: ScalarImpl) -> StreamExecutorResult<()> {
-        let lower_bound = self
-            .ready_watermark
-            .as_ref()
-            .map(|watermark| Bound::Included(OwnedRow::new(vec![Some(watermark.clone())])))
-            .unwrap_or(Bound::Unbounded);
-        let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-            lower_bound,
-            Bound::Excluded(OwnedRow::new(vec![Some(watermark.clone())])),
-        );
-        let mut anchors: HashMap<OwnedRow, ScalarImpl> = HashMap::new();
-        for vnode in self.right_versions_by_time.vnodes().iter_vnodes() {
-            let iter = self
-                .right_versions_by_time
-                .iter_with_vnode(
-                    vnode,
-                    &pk_range,
-                    PrefetchOptions::prefetch_for_small_range_scan(),
-                )
-                .await?;
-            pin_mut!(iter);
-            while let Some(row) = iter.try_next().await? {
-                let Some(ts) = row.datum_at(0).to_owned_datum() else {
-                    continue;
-                };
-                let join_key = row.slice(1..).into_owned_row();
-                anchors
-                    .entry(join_key)
-                    .and_modify(|anchor_ts| {
-                        if anchor_ts.default_cmp(&ts).is_lt() {
-                            *anchor_ts = ts.clone();
-                        }
-                    })
-                    .or_insert(ts);
-            }
+    async fn delete_right_versions_before_time_rows(
+        &mut self,
+        right_time_rows: Vec<OwnedRow>,
+    ) -> StreamExecutorResult<()> {
+        let mut anchors: HashMap<OwnedRow, ScalarImpl> =
+            HashMap::with_capacity(right_time_rows.len());
+        for row in right_time_rows {
+            let Some(ts) = row.datum_at(0).to_owned_datum() else {
+                continue;
+            };
+            let join_key = row.slice(1..).into_owned_row();
+            anchors
+                .entry(join_key)
+                .and_modify(|anchor_ts| {
+                    if anchor_ts.default_cmp(&ts).is_lt() {
+                        *anchor_ts = ts.clone();
+                    }
+                })
+                .or_insert(ts);
         }
-        self.right_versions_by_time.update_watermark(watermark);
 
         for (join_key, anchor_ts) in anchors {
             self.delete_right_versions_before_anchor(join_key, anchor_ts)
                 .await?;
         }
+        Ok(())
+    }
+
+    async fn cleanup_right_versions(&mut self, watermark: ScalarImpl) -> StreamExecutorResult<()> {
+        let initial_lower_bound = self
+            .ready_watermark
+            .as_ref()
+            .map(|watermark| Bound::Included(OwnedRow::new(vec![Some(watermark.clone())])))
+            .unwrap_or(Bound::Unbounded);
+        let upper_bound = Bound::Excluded(OwnedRow::new(vec![Some(watermark.clone())]));
+        let vnodes = self
+            .right_versions_by_time
+            .vnodes()
+            .iter_vnodes()
+            .collect_vec();
+        for vnode in vnodes {
+            let mut lower_bound = initial_lower_bound.clone();
+            loop {
+                let rows = Self::scan_right_time_batch(
+                    &self.right_versions_by_time,
+                    vnode,
+                    lower_bound,
+                    upper_bound.clone(),
+                )
+                .await?;
+                if rows.is_empty() {
+                    break;
+                }
+
+                let next_lower_bound =
+                    Bound::Excluded(rows.last().expect("checked non-empty").clone());
+                let is_synced = rows.len() < RIGHT_CLEANUP_ANCHOR_BATCH_SIZE;
+                self.delete_right_versions_before_time_rows(rows).await?;
+                if is_synced {
+                    break;
+                }
+                lower_bound = next_lower_bound;
+            }
+        }
+        self.right_versions_by_time.update_watermark(watermark);
 
         Ok(())
     }
