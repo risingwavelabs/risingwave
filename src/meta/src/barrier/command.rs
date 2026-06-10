@@ -791,17 +791,21 @@ fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
     columns
         .iter()
         .filter(|col| !col.is_hidden)
-        .map(|col| PbField {
-            data_type: Some(
-                col.column_desc
-                    .as_ref()
-                    .unwrap()
-                    .column_type
-                    .as_ref()
-                    .unwrap()
-                    .clone(),
-            ),
-            name: col.column_desc.as_ref().unwrap().name.clone(),
+        .map(|col| {
+            let column_desc = col
+                .column_desc
+                .as_ref()
+                .expect("sink column catalog should have a column descriptor");
+            PbField {
+                data_type: Some(
+                    column_desc
+                        .column_type
+                        .as_ref()
+                        .expect("sink column descriptor should have a column type")
+                        .clone(),
+                ),
+                name: column_desc.name.clone(),
+            }
         })
         .collect()
 }
