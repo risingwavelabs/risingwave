@@ -23,6 +23,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
 use crate::hummock::IcebergCompactorManager;
 use crate::manager::MetaOpts;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::rpc::metrics::MetaMetrics;
 
 async fn build_test_manager() -> Arc<IcebergCompactionManager> {
@@ -38,8 +39,14 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
     let metadata_manager = MetadataManager::new(cluster_ctl, catalog_ctl);
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
     let metrics = Arc::new(MetaMetrics::for_test(&Registry::new()));
-    let (manager, _) =
-        IcebergCompactionManager::build(env, metadata_manager, iceberg_compactor_manager, metrics);
+    let iceberg_v3_sink_manager = IcebergV3SinkManager::new(env.meta_store_ref().conn.clone());
+    let (manager, _) = IcebergCompactionManager::build(
+        env,
+        metadata_manager,
+        iceberg_compactor_manager,
+        metrics,
+        iceberg_v3_sink_manager,
+    );
     manager
 }
 
@@ -946,6 +953,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
 
     let guard = manager.inner.read();
@@ -1087,11 +1095,89 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 3);
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+/// A V3-coordinated report carrying the compaction output payload must be routed to the V3 sink
+/// manager AND must not short-circuit the normal compaction-task state machine.
+#[tokio::test]
+async fn test_handle_report_task_routes_v3_payload_and_finishes_track() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(47);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight(&mut track, 9, now);
+    record_commits(&mut track, 3);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    // Empty output-file list, two input file paths, and a read snapshot id.
+    let v3_output_files =
+        serde_json::to_vec(&Vec::<iceberg::spec::SerializedDataFile>::new()).unwrap();
+    let v3_input_files =
+        serde_json::to_vec(&vec!["a.parquet".to_owned(), "b.parquet".to_owned()]).unwrap();
+    manager.handle_report_task(IcebergReportTask {
+        task_id: 9,
+        sink_id: sink_id.as_raw_id(),
+        status: IcebergReportTaskStatus::Success as i32,
+        error_message: None,
+        v3_output_files: Some(v3_output_files),
+        v3_input_files: Some(v3_input_files),
+        v3_read_snapshot_id: Some(777),
+        ..Default::default()
+    });
+
+    // The payload was routed to (and stored by) the V3 sink manager stub.
+    let record = manager
+        .iceberg_v3_sink_manager()
+        .last_compaction_report(sink_id)
+        .expect("compaction report should have been routed to the v3 sink manager");
+    assert_eq!(record.output_file_count, 0);
+    assert_eq!(record.input_file_count, 2);
+    assert_eq!(record.read_snapshot_id, 777);
+
+    // The state machine still ran: the in-flight task finished and the track reset to Idle.
+    let guard = manager.inner.read();
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+/// A malformed V3 payload must be logged and skipped without disrupting the state machine
+/// (regression guard for the routing helper short-circuiting `handle_report_task`).
+#[tokio::test]
+async fn test_handle_report_task_malformed_v3_payload_still_finishes_track() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(48);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight(&mut track, 9, now);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    manager.handle_report_task(IcebergReportTask {
+        task_id: 9,
+        sink_id: sink_id.as_raw_id(),
+        status: IcebergReportTaskStatus::Success as i32,
+        error_message: None,
+        v3_output_files: Some(b"not valid json".to_vec()),
+        v3_read_snapshot_id: Some(1),
+        ..Default::default()
+    });
+
+    // No report stored (routing skipped on the deserialize error)...
+    assert!(
+        manager
+            .iceberg_v3_sink_manager()
+            .last_compaction_report(sink_id)
+            .is_none()
+    );
+    // ...but the in-flight task still finished and the track reset to Idle.
+    let guard = manager.inner.read();
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
 }
 
@@ -1116,6 +1202,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1147,6 +1234,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        ..Default::default()
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1180,6 +1268,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1210,6 +1299,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        ..Default::default()
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1314,6 +1404,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
     assert!(
         !manager
@@ -1492,6 +1583,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        ..Default::default()
     });
 
     let guard = manager.inner.read();
@@ -1519,6 +1611,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        ..Default::default()
     });
 
     let guard = manager.inner.read();

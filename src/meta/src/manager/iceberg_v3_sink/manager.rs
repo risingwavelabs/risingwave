@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use iceberg::spec::SerializedDataFile;
 use parking_lot::RwLock;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -25,6 +26,15 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use super::coordinator::IcebergV3Coordinator;
+
+/// A snapshot of the most recent compaction report received for one sink.
+/// Stored so integration tests can assert that the meta-side routing worked.
+#[derive(Clone, Debug)]
+pub struct CompactionReportRecord {
+    pub output_file_count: usize,
+    pub input_file_count: usize,
+    pub read_snapshot_id: i64,
+}
 
 type CoordinatorRef = Arc<Mutex<IcebergV3Coordinator>>;
 
@@ -39,6 +49,9 @@ struct ManagerInner {
     /// Read on every pre-commit/commit (only to clone out the `CoordinatorRef`, never held across an await);
     /// written only by register/unregister/reset, which are rare control-plane events.
     coordinators: RwLock<HashMap<SinkId, CoordinatorRef>>,
+    /// Stores the most recent compaction report per sink. Written by `receive_compaction_report`;
+    /// read by `last_compaction_report` (used in tests to observe routing).
+    compaction_reports: parking_lot::Mutex<HashMap<SinkId, CompactionReportRecord>>,
 }
 
 impl IcebergV3SinkManager {
@@ -47,6 +60,7 @@ impl IcebergV3SinkManager {
             inner: Arc::new(ManagerInner {
                 db,
                 coordinators: RwLock::new(HashMap::new()),
+                compaction_reports: parking_lot::Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -114,6 +128,38 @@ impl IcebergV3SinkManager {
         self.inner.coordinators.write().clear();
     }
 
+    /// Record a compaction report for `sink_id`. Stub: stores the record for test observation;
+    /// the actual iceberg transaction (overwrite commit) is wired up in a later phase.
+    pub fn receive_compaction_report(
+        &self,
+        sink_id: SinkId,
+        output_files: Vec<SerializedDataFile>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) {
+        let output_file_count = output_files.len();
+        let input_file_count = input_file_paths.len();
+        tracing::info!(
+            %sink_id,
+            output_file_count,
+            input_file_count,
+            read_snapshot_id,
+            "received V3 coordinated compaction report (stub — no iceberg commit yet)"
+        );
+        let record = CompactionReportRecord {
+            output_file_count,
+            input_file_count,
+            read_snapshot_id,
+        };
+        self.inner.compaction_reports.lock().insert(sink_id, record);
+    }
+
+    /// Return the last compaction report received for `sink_id`, if any.
+    /// Used by integration tests to verify that meta-side routing is correct.
+    pub fn last_compaction_report(&self, sink_id: SinkId) -> Option<CompactionReportRecord> {
+        self.inner.compaction_reports.lock().get(&sink_id).cloned()
+    }
+
     fn coordinator(&self, sink_id: SinkId) -> anyhow::Result<CoordinatorRef> {
         self.inner
             .coordinators
@@ -126,5 +172,57 @@ impl IcebergV3SinkManager {
                     sink_id
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that `receive_compaction_report` stores the record and `last_compaction_report`
+    /// retrieves it. This exercises the store→get round-trip used by integration tests.
+    #[test]
+    fn test_receive_and_read_compaction_report() {
+        // Use an in-memory SQLite URL; the test does not need a real DB because the compaction
+        // report path does not touch the database.
+        let manager = IcebergV3SinkManager {
+            inner: Arc::new(ManagerInner {
+                db: sea_orm::DatabaseConnection::Disconnected,
+                coordinators: parking_lot::RwLock::new(std::collections::HashMap::new()),
+                compaction_reports: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            }),
+        };
+
+        let sink_id = SinkId::from(42u32);
+
+        // No report yet.
+        assert!(manager.last_compaction_report(sink_id).is_none());
+
+        // Receive a report with empty file lists; the stub records the (0/0) counts and the
+        // snapshot id.
+        manager.receive_compaction_report(
+            sink_id,
+            vec![], // output_files: Vec<SerializedDataFile>
+            vec![], // input_file_paths: Vec<String>
+            12345,
+        );
+        let record = manager
+            .last_compaction_report(sink_id)
+            .expect("record should be present after receive");
+        assert_eq!(record.output_file_count, 0);
+        assert_eq!(record.input_file_count, 0);
+        assert_eq!(record.read_snapshot_id, 12345);
+
+        // A second call for the same sink_id overwrites the previous record.
+        manager.receive_compaction_report(
+            sink_id,
+            Vec::new(), // output_files: Vec<SerializedDataFile>
+            Vec::new(), // input_file_paths: Vec<String>
+            99999,
+        );
+        let record2 = manager
+            .last_compaction_report(sink_id)
+            .expect("record should be updated");
+        assert_eq!(record2.read_snapshot_id, 99999);
     }
 }

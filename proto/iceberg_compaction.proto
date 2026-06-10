@@ -27,6 +27,11 @@ message SubscribeIcebergCompactionEventRequest {
     Status status = 3;
     reserved 4, 5;
     optional string error_message = 6;
+    // Fields 7-9 are set only by V3 pk-index (enable_pk_index=true) sinks: the compactor
+    // rewrites files without committing, and meta performs the iceberg commit.
+    optional bytes v3_output_files = 7;    // serde_json of Vec<SerializedDataFile>
+    optional bytes v3_input_files = 8;     // serde_json of Vec<String> (consumed file paths)
+    optional int64 v3_read_snapshot_id = 9; // snapshot the rewrite read from
   }
 
   oneof event {
@@ -62,6 +67,9 @@ message IcebergCompactionTask {
 
   TaskType task_type = 3;
   uint32 sink_id = 4;
+  // When true, the compactor reports output/input files to meta instead of committing the
+  // iceberg transaction itself. Set for V3 pk-index sinks.
+  bool v3_coordinated = 5;
 }
 
 message CancelCompactTask {

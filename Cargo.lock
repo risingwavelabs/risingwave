@@ -13076,6 +13076,7 @@ dependencies = [
  "scopeguard",
  "serde",
  "serde_bytes",
+ "serde_json",
  "sled",
  "spin 0.10.0",
  "sync-point",

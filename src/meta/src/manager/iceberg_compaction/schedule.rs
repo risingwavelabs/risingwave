@@ -35,6 +35,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::*;
+use crate::manager::iceberg_v3_sink::is_iceberg_v3_sink;
 
 /// Compaction track states using type-safe state machine pattern
 #[derive(Debug, Clone)]
@@ -442,12 +443,18 @@ impl IcebergCompactionHandle {
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
+        // V3 pk-index sinks must use coordinated compaction: the compactor reports output/input
+        // files to meta rather than committing the iceberg transaction itself, avoiding corruption
+        // of the streaming PK index.
+        let v3_coordinated = is_iceberg_v3_sink(&param.properties);
+
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
                 task_id,
                 sink_id: self.sink_id.as_raw_id(),
                 props: param.properties,
                 task_type: self.task_type as i32,
+                v3_coordinated,
             }));
 
         if result.is_ok() {
@@ -1079,12 +1086,73 @@ impl IcebergCompactionManager {
         statuses
     }
 
+    /// Best-effort routing of a V3 coordinated-compaction payload to the V3 sink manager.
+    /// Any malformed/missing field is logged and ignored; this must never disrupt the normal
+    /// compaction-task state machine in [`Self::handle_report_task`].
+    fn route_v3_compaction_report(
+        &self,
+        report: &IcebergReportTask,
+        sink_id: SinkId,
+        task_id: u64,
+    ) {
+        let Some(v3_output_bytes) = &report.v3_output_files else {
+            return;
+        };
+        let Some(read_snapshot_id) = report.v3_read_snapshot_id else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "V3 compaction report carries output files but no read_snapshot_id; ignoring"
+            );
+            return;
+        };
+        let v3_input_bytes = report.v3_input_files.as_deref().unwrap_or(&[]);
+
+        let output_files: Vec<iceberg::spec::SerializedDataFile> = match serde_json::from_slice(
+            v3_output_bytes,
+        ) {
+            Ok(files) => files,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e,
+                    "Failed to deserialize v3_output_files from compaction report; skipping V3 routing"
+                );
+                return;
+            }
+        };
+        let input_file_paths: Vec<String> = match serde_json::from_slice(v3_input_bytes) {
+            Ok(paths) => paths,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e,
+                    "Failed to deserialize v3_input_files from compaction report; skipping V3 routing"
+                );
+                return;
+            }
+        };
+
+        self.iceberg_v3_sink_manager.receive_compaction_report(
+            sink_id,
+            output_files,
+            input_file_paths,
+            read_snapshot_id,
+        );
+    }
+
     pub fn handle_report_task(&self, report: IcebergReportTask) {
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let now = Instant::now();
+
+        // Route any V3 coordinated compaction payload to the V3 sink manager. Best-effort:
+        // failures here must NOT disrupt the compaction state-machine update below.
+        self.route_v3_compaction_report(&report, sink_id, task_id);
 
         let waiter = {
             let mut guard = self.inner.write();

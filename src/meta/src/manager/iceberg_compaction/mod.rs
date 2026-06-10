@@ -35,6 +35,7 @@ use super::MetaSrvEnv;
 use crate::MetaResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::rpc::metrics::MetaMetrics;
 
 pub type IcebergCompactionManagerRef = Arc<IcebergCompactionManager>;
@@ -60,6 +61,10 @@ pub struct IcebergCompactionManager {
     compactor_streams_change_tx: CompactorChangeTx,
 
     pub metrics: Arc<MetaMetrics>,
+
+    /// Manager for V3 sink commit coordinators. Routes compaction reports from the compactor to
+    /// the per-sink coordinator.
+    iceberg_v3_sink_manager: IcebergV3SinkManager,
 }
 
 struct IcebergCompactionManagerInner {
@@ -82,6 +87,7 @@ impl IcebergCompactionManager {
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -97,9 +103,15 @@ impl IcebergCompactionManager {
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,
                 metrics,
+                iceberg_v3_sink_manager,
             }),
             compactor_streams_change_rx,
         )
+    }
+
+    #[cfg(test)]
+    pub(super) fn iceberg_v3_sink_manager(&self) -> &IcebergV3SinkManager {
+        &self.iceberg_v3_sink_manager
     }
 
     async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {

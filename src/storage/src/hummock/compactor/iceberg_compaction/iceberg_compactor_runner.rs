@@ -17,11 +17,12 @@ use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::MAIN_BRANCH;
+use iceberg::spec::{MAIN_BRANCH, SerializedDataFile};
+use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
-    CompactionPlanner, CompactionResult,
+    CompactionPlanner, CompactionResult, RewriteResult,
 };
 use iceberg_compaction_core::config::{
     CompactionExecutionConfigBuilder, CompactionPlanningConfig, FileGroupScope,
@@ -44,7 +45,7 @@ use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::IcebergTaskMeta;
+use super::{IcebergTaskMeta, V3CompactionResult};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
@@ -126,6 +127,9 @@ pub struct IcebergCompactionPlanRunner {
     pub task_type: TaskType,
     branch: String,
     compaction_plan: CompactionPlan,
+    /// When true, run the rewrite without committing and report the result back to meta for V3
+    /// coordinated compaction. When false, behavior is unchanged (rewrite + commit).
+    v3_coordinated: bool,
 }
 
 impl IcebergCompactionPlanRunner {
@@ -177,7 +181,10 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
-    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
+    pub async fn compact(
+        self,
+        shutdown_rx: Receiver<()>,
+    ) -> HummockResult<(RewriteFilesStat, Option<V3CompactionResult>)> {
         let task_id = self.task_id;
         let unique_ident = self.unique_ident();
         let now = std::time::Instant::now();
@@ -193,6 +200,7 @@ impl IcebergCompactionPlanRunner {
             self.task_type,
             self.branch,
             self.compaction_plan,
+            self.v3_coordinated,
         );
 
         tokio::select! {
@@ -206,7 +214,7 @@ impl IcebergCompactionPlanRunner {
             }
             result = compact_task => {
                 match &result {
-                    Ok(stats) => {
+                    Ok((stats, _v3_result)) => {
                         tracing::info!(
                             task_id = task_id,
                             unique_ident = %unique_ident,
@@ -240,7 +248,8 @@ impl IcebergCompactionPlanRunner {
         task_type: TaskType,
         branch: String,
         compaction_plan: CompactionPlan,
-    ) -> HummockResult<RewriteFilesStat> {
+        v3_coordinated: bool,
+    ) -> HummockResult<(RewriteFilesStat, Option<V3CompactionResult>)> {
         if !compaction_plan.has_files() {
             tracing::info!(
                 task_id,
@@ -248,7 +257,7 @@ impl IcebergCompactionPlanRunner {
                 table = %table_ident,
                 "skip empty iceberg compaction plan"
             );
-            return Ok(RewriteFilesStat::default());
+            return Ok((RewriteFilesStat::default(), None));
         }
 
         let statistics = analyze_task_statistics(&compaction_plan);
@@ -308,6 +317,24 @@ impl IcebergCompactionPlanRunner {
                 metrics_guard.compact_task_pending_parallelism.sub(val as _);
             },
         );
+
+        if v3_coordinated {
+            // V3 coordinated compaction: rewrite the files but do NOT commit. The meta-side V3
+            // sink manager performs the actual iceberg transaction later, so here we only produce
+            // the rewrite output, resolve the input files, and report them back.
+            let table = catalog
+                .load_table(&table_ident)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            let rewrite_result = compaction
+                .rewrite_plan(compaction_plan, &compaction_execution_config, &table)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            let v3_result = build_v3_compaction_result(&table, rewrite_result)?;
+            return Ok((v3_result.stats, Some(v3_result.result)));
+        }
 
         let compaction_result = compaction
             .compact_with_plan(compaction_plan, &compaction_execution_config)
@@ -396,8 +423,65 @@ impl IcebergCompactionPlanRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         }
 
-        Ok(stats)
+        Ok((stats, None))
     }
+}
+
+/// Output of [`build_v3_compaction_result`]: the V3 report payload plus the rewrite stats.
+struct V3CompactionResultWithStats {
+    stats: RewriteFilesStat,
+    result: V3CompactionResult,
+}
+
+/// Builds the V3 report payload from a no-commit [`RewriteResult`].
+///
+/// - Output files come directly from `rewrite_result.output_data_files` and are converted to
+///   [`SerializedDataFile`] for JSON serialization.
+/// - Input file paths are collected directly from the plan's `FileGroup` (data + position-delete
+///   + equality-delete files). No manifest walk is needed — the `FileScanTask` already carries
+///   the path via its `data_file_path` field.
+/// - The read snapshot id is taken from the plan.
+fn build_v3_compaction_result(
+    table: &Table,
+    rewrite_result: RewriteResult,
+) -> HummockResult<V3CompactionResultWithStats> {
+    let RewriteResult {
+        output_data_files,
+        stats,
+        plan,
+        ..
+    } = rewrite_result;
+
+    let read_snapshot_id = plan.snapshot_id;
+    let partition_type = table.metadata().default_partition_type();
+    let format_version = table.metadata().format_version();
+
+    let output_files = output_data_files
+        .into_iter()
+        .map(|data_file| {
+            SerializedDataFile::try_from(data_file, partition_type, format_version)
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))
+        })
+        .collect::<HummockResult<Vec<_>>>()?;
+
+    // Collect input file paths directly from the plan's FileGroup — no manifest load needed.
+    let input_file_paths: Vec<String> = plan
+        .file_group
+        .data_files
+        .iter()
+        .chain(plan.file_group.position_delete_files.iter())
+        .chain(plan.file_group.equality_delete_files.iter())
+        .map(|task| task.data_file_path.clone())
+        .collect();
+
+    Ok(V3CompactionResultWithStats {
+        stats,
+        result: V3CompactionResult {
+            output_files,
+            input_file_paths,
+            read_snapshot_id,
+        },
+    })
 }
 
 fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatistics {
@@ -444,6 +528,7 @@ pub async fn create_task_execution(
         sink_id,
         props,
         task_type,
+        v3_coordinated,
     } = iceberg_compaction_task;
 
     let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
@@ -596,6 +681,7 @@ pub async fn create_task_execution(
             task_type: parsed_task_type,
             branch: branch.clone(),
             compaction_plan,
+            v3_coordinated,
         });
     }
 
