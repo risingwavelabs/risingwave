@@ -55,6 +55,20 @@ struct EventTimeTemporalJoin {
     right_event_time_idx: usize,
 }
 
+fn right_unique_key_table_indices(
+    scan: &StreamTableScan,
+    right_eq_indexes: &[usize],
+    right_event_time_idx: usize,
+) -> Vec<usize> {
+    right_eq_indexes
+        .iter()
+        .copied()
+        .chain(std::iter::once(right_event_time_idx))
+        .map(|idx| scan.core().output_col_idx[idx])
+        .unique()
+        .collect_vec()
+}
+
 impl StreamTemporalJoin {
     pub fn new(core: generic::Join<PlanRef>, is_nested_loop: bool) -> Result<Self> {
         core.on
@@ -74,8 +88,7 @@ impl StreamTemporalJoin {
         let right = core.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
-            .expect("should be a no shuffle stream exchange");
-        assert!(exchange.no_shuffle());
+            .expect("temporal join right side should be a stream exchange");
         let exchange_input = exchange.input();
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
@@ -100,11 +113,34 @@ impl StreamTemporalJoin {
                     "event-time temporal join requires left AS OF column and right version time column to have the same type"
                 );
             }
+            let right_unique_key = self::right_unique_key_table_indices(
+                scan,
+                &core
+                    .on
+                    .as_eq_predicate_ref()
+                    .expect("StreamTemporalJoin requires JoinOn::EqPredicate in core")
+                    .right_eq_indexes(),
+                right_event_time_idx,
+            );
+            if !scan
+                .core()
+                .primary_key()
+                .iter()
+                .all(|pk| right_unique_key.contains(&pk.column_index))
+            {
+                bail!(
+                    "event-time temporal join requires the right join key and right version time column to cover the primary key of the right versioned table"
+                );
+            }
             Some(EventTimeTemporalJoin {
                 left_event_time_idx,
                 right_event_time_idx,
             })
         } else {
+            assert!(
+                exchange.no_shuffle(),
+                "process-time temporal join right side should be a no shuffle stream exchange"
+            );
             assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
             None
         };
@@ -358,8 +394,13 @@ impl TryToStreamPb for StreamTemporalJoin {
         let right = self.right();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
-            .expect("should be a no shuffle stream exchange");
-        assert!(exchange.no_shuffle());
+            .expect("temporal join right side should be a stream exchange");
+        if self.event_time.is_none() {
+            assert!(
+                exchange.no_shuffle(),
+                "process-time temporal join right side should be a no shuffle stream exchange"
+            );
+        }
         let exchange_input = exchange.input();
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()

@@ -2,10 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET streaming_parallelism = 1;
-
-statement ok
-SET streaming_use_arrangement_backfill = false;
+SET streaming_parallelism = 4;
 
 statement ok
 create table orders (
@@ -24,6 +21,20 @@ create table exchange_rates (
     watermark for rate_time as rate_time - interval '1' second with ttl,
     primary key (currency, rate_time)
 );
+
+# Existing rows on both sides must be backfilled into the event-time temporal
+# join state. Later watermark-advancing inserts make these historical rows
+# eligible for output.
+statement ok
+insert into exchange_rates values
+    ('USD', '2024-01-01 00:00:00', 100),
+    ('EUR', '2024-01-01 00:00:00', 110),
+    ('EUR', '2024-01-01 00:10:00', 120);
+
+statement ok
+insert into orders values
+    (1, 'EUR', 10, '2024-01-01 00:05:00'),
+    (2, 'EUR', 10, '2024-01-01 00:12:00');
 
 statement ok
 create materialized view order_amounts_inner as
@@ -52,19 +63,17 @@ left join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
 on orders.currency = exchange_rates.currency;
 
 statement ok
-insert into exchange_rates values
-    ('USD', '2024-01-01 00:00:00', 100),
-    ('EUR', '2024-01-01 00:00:00', 110);
-
-statement ok
-insert into orders values (1, 'EUR', 10, '2024-01-01 00:05:00');
+flush;
 
 # Close-before-watermark changes should be folded into the pending left record.
 statement ok
-update orders set amount = 20 where order_id = 1;
+insert into orders values (6, 'EUR', 10, '2024-01-01 00:13:00');
 
 statement ok
-insert into orders values (3, 'GBP', 10, '2024-01-01 00:06:00');
+update orders set amount = 20 where order_id = 6;
+
+statement ok
+insert into orders values (3, 'GBP', 10, '2024-01-01 00:14:00');
 
 statement ok
 insert into orders values (4, 'USD', 10, '2024-01-01 00:07:00');
@@ -72,15 +81,15 @@ insert into orders values (4, 'USD', 10, '2024-01-01 00:07:00');
 statement ok
 delete from orders where order_id = 4;
 
-statement ok
-insert into orders values (2, 'EUR', 10, '2024-01-01 00:12:00');
-
 # Advance both input watermarks. The join emits only after min(left_wm, right_wm)
-# passes the left event time.
+# passes the left event time. The right input is hash-shuffled by join key, so
+# this also covers parallel event-time routing. A key with no right-side traffic
+# stays pending until a right-side watermark for the same hash partition arrives.
 statement ok
 insert into exchange_rates values
-    ('EUR', '2024-01-01 00:10:00', 120),
-    ('USD', '2024-01-01 00:20:00', 100);
+    ('USD', '2024-01-01 00:20:00', 100),
+    ('EUR', '2024-01-01 00:20:00', 130),
+    ('GBP', '2024-01-01 00:20:00', 999);
 
 statement ok
 insert into orders values (5, 'USD', 1, '2024-01-01 00:20:00');
@@ -88,26 +97,29 @@ insert into orders values (5, 'USD', 1, '2024-01-01 00:20:00');
 query ITIIIT rowsort retry 11 backoff 1s
 select * from order_amounts_inner;
 ----
-1 EUR 20 110 2200 2024-01-01 00:05:00
+1 EUR 10 110 1100 2024-01-01 00:05:00
 2 EUR 10 120 1200 2024-01-01 00:12:00
+6 EUR 20 120 2400 2024-01-01 00:13:00
 
 query ITIIIT rowsort retry 11 backoff 1s
 select * from order_amounts_left;
 ----
-1 EUR 20 110 2200 2024-01-01 00:05:00
+1 EUR 10 110 1100 2024-01-01 00:05:00
 2 EUR 10 120 1200 2024-01-01 00:12:00
-3 GBP 10 NULL NULL 2024-01-01 00:06:00
+3 GBP 10 NULL NULL 2024-01-01 00:14:00
+6 EUR 20 120 2400 2024-01-01 00:13:00
 
 # A below-watermark update after the result was finalized must not retract or
 # update the append-only output.
 statement ok
-update orders set amount = 30 where order_id = 1;
+update orders set amount = 30 where order_id = 6;
 
 query ITIIIT rowsort retry 11 backoff 1s
 select * from order_amounts_inner;
 ----
-1 EUR 20 110 2200 2024-01-01 00:05:00
+1 EUR 10 110 1100 2024-01-01 00:05:00
 2 EUR 10 120 1200 2024-01-01 00:12:00
+6 EUR 20 120 2400 2024-01-01 00:13:00
 
 statement ok
 drop materialized view order_amounts_inner;

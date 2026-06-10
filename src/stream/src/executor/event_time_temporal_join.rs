@@ -36,6 +36,7 @@ use super::temporal_join::apply_indices_map;
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::task::AtomicU64Ref;
 
@@ -208,10 +209,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         };
         let right_key_row = self.right_key_row(row, false);
         if let Some(mut versions) = self.right_version_cache.get_mut(&join_key) {
-            assert!(
-                versions.insert(version_time, right_key_row).is_none(),
-                "double inserting an event-time temporal join right version cache entry"
-            );
+            if versions
+                .insert(version_time.clone(), right_key_row)
+                .is_some()
+            {
+                consistency_panic!(
+                    ?join_key,
+                    ?version_time,
+                    "double inserting an event-time temporal join right version cache entry"
+                );
+            }
         }
     }
 
@@ -221,10 +228,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             return;
         };
         if let Some(mut versions) = self.right_version_cache.get_mut(&join_key) {
-            assert!(
-                versions.remove(&version_time).is_some(),
-                "removing an event-time temporal join right version cache entry but it is not in the cache"
-            );
+            if versions.remove(&version_time).is_none() {
+                consistency_panic!(
+                    ?join_key,
+                    ?version_time,
+                    "removing an event-time temporal join right version cache entry but it is not in the cache"
+                );
+            }
         }
     }
 
@@ -246,10 +256,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             let Some(version_time) = Self::right_version_time_at(right_event_time_key, &row) else {
                 continue;
             };
-            assert!(
-                versions.insert(version_time, row).is_none(),
-                "double inserting an event-time temporal join right version cache entry while refilling"
-            );
+            if versions.insert(version_time.clone(), row).is_some() {
+                consistency_panic!(
+                    ?join_key,
+                    ?version_time,
+                    "double inserting an event-time temporal join right version cache entry while refilling"
+                );
+            }
         }
         right_version_cache.put(join_key, versions);
         Ok(())

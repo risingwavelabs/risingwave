@@ -1141,7 +1141,9 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+            if let BackfillType::SnapshotBackfill = ctx.backfill_type()
+                && !matches!(scan.as_of(), Some(AsOf::EventTime(_)))
+            {
                 return Err(RwError::from(ErrorCode::NotSupported(
                     "Temporal join with snapshot backfill not supported".into(),
                     "Please use arrangement backfill".into(),
@@ -1289,8 +1291,13 @@ impl LogicalJoin {
             }
         }
 
+        let stream_scan_type = if matches!(new_scan.as_of, Some(AsOf::EventTime(_))) {
+            StreamScanType::Backfill
+        } else {
+            StreamScanType::UpstreamOnly
+        };
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, stream_scan_type);
         Ok((
             new_stream_table_scan,
             new_predicate,
@@ -1390,7 +1397,7 @@ impl LogicalJoin {
         };
 
         let left = if is_event_time {
-            let original_backfill_type = ctx.set_backfill_type(BackfillType::UpstreamOnly);
+            let original_backfill_type = ctx.set_backfill_type(BackfillType::Backfill);
             let left = self.left().to_stream(ctx);
             ctx.set_backfill_type(original_backfill_type);
             left?
@@ -1421,13 +1428,18 @@ impl LogicalJoin {
                 self.left().schema().len(),
             )?;
 
-        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
         if !new_predicate.has_eq() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a non trivial join condition".into(),
                 "Please remove the false condition of the join".into(),
             )));
         }
+        let right = if is_event_time {
+            RequiredDist::hash_shard(&new_predicate.right_eq_indexes())
+                .stream_enforce(new_stream_table_scan.into())
+        } else {
+            RequiredDist::no_shuffle(new_stream_table_scan.into())
+        };
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(

@@ -68,14 +68,20 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .collect_vec();
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
-        let event_time_keys = match (node.left_event_time_key, node.right_event_time_key) {
-            (Some(left_event_time_key), Some(right_event_time_key)) => {
+        let event_time_keys = match (
+            node.left_event_time_key,
+            node.right_event_time_key,
+            node.event_time_left_time_table.as_ref(),
+            node.event_time_right_key_table.as_ref(),
+            node.event_time_right_time_table.as_ref(),
+        ) {
+            (Some(left_event_time_key), Some(right_event_time_key), Some(_), Some(_), Some(_)) => {
                 Some((left_event_time_key as usize, right_event_time_key as usize))
             }
-            (None, None) => None,
+            (None, None, None, None, None) => None,
             _ => {
                 return Err(anyhow::anyhow!(
-                    "event-time temporal join requires both left and right event-time keys"
+                    "event-time temporal join requires both event-time keys and all event-time state tables"
                 )
                 .into());
             }
@@ -93,6 +99,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 store.clone(),
                 Some(vnodes.clone()),
             )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
@@ -101,6 +108,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 store.clone(),
                 Some(vnodes.clone()),
             )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
@@ -109,6 +117,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 store.clone(),
                 Some(vnodes),
             )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;

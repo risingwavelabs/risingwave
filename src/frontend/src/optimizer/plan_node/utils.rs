@@ -506,10 +506,17 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
     };
     Feature::TimeTravel.check_available()?;
     let timestamp = match a {
-        AsOf::ProcessTime | AsOf::EventTime(_) => {
+        AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of proctime".to_owned(),
+                "do not support AS OF PROCTIME in batch query".to_owned(),
                 "please use as of timestamp".to_owned(),
+            )
+            .into());
+        }
+        AsOf::EventTime(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support event-time AS OF in batch query".to_owned(),
+                "event-time AS OF is only supported in temporal joins".to_owned(),
             )
             .into());
         }

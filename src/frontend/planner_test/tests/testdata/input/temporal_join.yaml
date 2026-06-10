@@ -183,3 +183,48 @@
     select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
   expected_outputs:
     - stream_plan
+- name: event-time temporal join
+  sql: |
+    create table orders (
+      order_id int primary key,
+      currency varchar,
+      amount int,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table exchange_rates (
+      currency varchar,
+      rate_time timestamp,
+      cents_per_unit int,
+      watermark for rate_time as rate_time - interval '1' second with ttl,
+      primary key (currency, rate_time)
+    );
+    select order_id, orders.currency, amount, cents_per_unit, order_time
+    from orders
+    join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+    on orders.currency = exchange_rates.currency;
+  expected_outputs:
+    - stream_plan
+- name: event-time temporal join requires unique right version per join key and time
+  sql: |
+    create table orders (
+      order_id int primary key,
+      currency varchar,
+      amount int,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table exchange_rates (
+      currency varchar,
+      rate_time timestamp,
+      source varchar,
+      cents_per_unit int,
+      watermark for rate_time as rate_time - interval '1' second with ttl,
+      primary key (currency, rate_time, source)
+    );
+    select order_id, orders.currency, amount, cents_per_unit, order_time
+    from orders
+    join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+    on orders.currency = exchange_rates.currency;
+  expected_outputs:
+    - stream_error
