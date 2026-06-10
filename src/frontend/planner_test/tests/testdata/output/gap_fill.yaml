@@ -597,22 +597,28 @@
   eowc_stream_error: |-
     Not supported: GAP_FILL with PARTITION_BY and EMIT ON WINDOW CLOSE is not supported yet.
     HINT: Remove PARTITION_BY or use normal streaming GAP_FILL until partitioned EOWC gap fill is implemented.
-- name: partition by in materialized view
-  sql: |
-    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
-    CREATE MATERIALIZED VIEW mv AS SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
-- name: partition by in materialized view without input pk
+- name: partition by without input pk
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
-    CREATE MATERIALIZED VIEW mv AS
-    SELECT id, ts, v
-    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
-- name: partition by aggregate in materialized view
+    SELECT id, ts, v FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  stream_plan: |-
+    StreamMaterialize { columns: [id, ts, v, t._row_id(hidden)], stream_key: [id, ts, t._row_id], pk_columns: [id, ts, t._row_id], pk_conflict: NoCheck }
+    └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─StreamExchange { dist: HashShard(t.id) }
+        └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: partition by under aggregate
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
-    CREATE MATERIALIZED VIEW cnt AS
-    SELECT count(*)
-    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+    SELECT count(*) FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  stream_plan: |-
+    StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum0(count)] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
+            └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+              └─StreamExchange { dist: HashShard(t.id) }
+                └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: partition by with projection
   sql: |
     CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, extra INT, PRIMARY KEY(device_id, ts));

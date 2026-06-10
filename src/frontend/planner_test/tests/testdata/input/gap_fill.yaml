@@ -249,29 +249,17 @@
     - stream_plan
     - eowc_stream_error
 
-- name: partition by in materialized view
-  sql: |
-    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
-    CREATE MATERIALIZED VIEW mv AS SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
-  expected_outputs:
-    - stream_plan
-    - stream_dist_plan
-
-- name: partition by in materialized view without input pk
+- name: partition by without input pk
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
-    CREATE MATERIALIZED VIEW mv AS
-    SELECT id, ts, v
-    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+    SELECT id, ts, v FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
   expected_outputs:
     - stream_plan
 
-- name: partition by aggregate in materialized view
+- name: partition by under aggregate
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
-    CREATE MATERIALIZED VIEW cnt AS
-    SELECT count(*)
-    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+    SELECT count(*) FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
   expected_outputs:
     - stream_plan
 

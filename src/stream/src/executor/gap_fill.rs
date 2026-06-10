@@ -234,9 +234,9 @@ impl<S: StateStore> GapFillExecutor<S> {
     ///
     /// # Fill Strategy Application
     /// For each filled row, the function applies the specified `FillStrategy` for each column:
-    /// - `FillStrategy::Previous`: Uses the value from the previous row.
-    /// - `FillStrategy::Linear`: Interpolates linearly between the previous and current row values.
-    /// - Other strategies may be supported as defined in `FillStrategy`.
+    /// - `FillStrategy::Locf`: Carries the previous row's value forward.
+    /// - `FillStrategy::Interpolate`: Interpolates linearly between the previous and current row values.
+    /// - `FillStrategy::Null`: Leaves the column null.
     ///
     /// Returns a vector of `OwnedRow` representing the filled rows between `prev_row` and `curr_row`.
     fn generate_filled_rows_between_static(
