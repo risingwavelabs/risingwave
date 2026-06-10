@@ -402,9 +402,7 @@ impl CatalogController {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
                     .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
-                let schema_obj = schema_obj
-                    .into_iter()
-                    .exactly_one()
+                let schema_obj = Itertools::exactly_one(schema_obj.into_iter())
                     .expect("schema object not found");
                 to_notify_objs.push(schema_obj);
 

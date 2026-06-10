@@ -952,15 +952,12 @@ impl DdlController {
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
-        let stream_scan_fragment = table_fragments
-            .fragments
-            .values()
-            .filter(|f| {
+        let stream_scan_fragment =
+            Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
                     || f.fragment_type_mask
                         .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .exactly_one()
+            }))
             .ok()
             .with_context(|| {
                 format!(

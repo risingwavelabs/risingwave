@@ -150,9 +150,7 @@ mod upstream {
             );
 
             // Replace the single input.
-            *self = to_add
-                .into_iter()
-                .exactly_one()
+            *self = Itertools::exactly_one(to_add.into_iter())
                 .expect("receiver should have exactly one new upstream");
         }
     }

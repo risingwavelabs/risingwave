@@ -286,7 +286,7 @@ impl CatalogController {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| match &mut input.node_body {
                                 Some(NodeBody::Project(_)) => {
-                                    let body = input.input.iter().exactly_one().unwrap();
+                                    let body = Itertools::exactly_one(input.input.iter()).unwrap();
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };

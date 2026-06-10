@@ -20,7 +20,7 @@ use clippy_utils::macros::{
 };
 use clippy_utils::paths::{PathLookup, PathNS};
 use clippy_utils::ty::implements_trait;
-use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method};
+use clippy_utils::{is_in_cfg_test, is_in_test_function};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -154,7 +154,12 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 
         // `err.to_string()`
         if let ExprKind::MethodCall(_, receiver, [], to_string_span) = expr.kind
-            && is_trait_method(cx, expr, sym::ToString)
+            && cx.typeck_results()
+                .type_dependent_def_id(expr.hir_id)
+                .is_some_and(|did| {
+                    let Some(trait_id) = cx.tcx.trait_of_assoc(did) else { return false };
+                    cx.tcx.is_diagnostic_item(sym::ToString, trait_id)
+                })
         {
             check_to_string_call(cx, receiver, to_string_span);
         }

@@ -37,8 +37,6 @@
 #![feature(assert_matches)]
 #![feature(float_gamma)]
 #![feature(anonymous_lifetime_in_impl_trait)]
-#![feature(vec_into_raw_parts)]
-#![feature(exact_div)]
 #![feature(used_with_arg)]
 #![feature(iter_array_chunks)]
 #![feature(exact_size_is_empty)]

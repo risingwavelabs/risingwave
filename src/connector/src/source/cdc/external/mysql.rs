@@ -448,9 +448,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             self.mysql_version.1
         );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
-        let row = rs
-            .iter_mut()
-            .exactly_one()
+        let row = Itertools::exactly_one(rs.iter_mut())
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
         drop(conn);

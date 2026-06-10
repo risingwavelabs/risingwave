@@ -1632,17 +1632,15 @@ pub fn resolve_no_shuffle_actor_mapping<
                     bitmap
                 );
             };
-            let (source_actor_id, bitmap) = source_fragment_actors
-                .into_iter()
-                .exactly_one()
-                .ok()
-                .expect("Single distribution should have exactly one source actor");
+            let (source_actor_id, bitmap) =
+                Itertools::exactly_one(source_fragment_actors.into_iter())
+                    .ok()
+                    .expect("Single distribution should have exactly one source actor");
             assert_singleton(bitmap);
-            let (target_actor_id, bitmap) = target_fragment_actors
-                .into_iter()
-                .exactly_one()
-                .ok()
-                .expect("Single distribution should have exactly one target actor");
+            let (target_actor_id, bitmap) =
+                Itertools::exactly_one(target_fragment_actors.into_iter())
+                    .ok()
+                    .expect("Single distribution should have exactly one target actor");
             assert_singleton(bitmap);
             HashMap::from([(source_actor_id, target_actor_id)])
         }
@@ -1704,7 +1702,7 @@ pub fn resolve_no_shuffle_actor_mapping<
 pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
     let fragment_worker_slot_mapping = match fragment.distribution_type {
         DistributionType::Single => {
-            let actor = fragment.actors.values().exactly_one().unwrap();
+            let actor = Itertools::exactly_one(fragment.actors.values()).unwrap();
             WorkerSlotMapping::new_single(WorkerSlotId::new(actor.worker_id as _, 0))
         }
         DistributionType::Hash => {
