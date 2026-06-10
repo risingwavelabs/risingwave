@@ -21,6 +21,7 @@
 //! per-sink compaction will live alongside the per-sink commit coordinator here.
 
 pub mod backfill;
+mod compaction_resolver;
 mod coordinator;
 mod manager;
 

@@ -109,11 +109,6 @@ impl IcebergCompactionManager {
         )
     }
 
-    #[cfg(test)]
-    pub(super) fn iceberg_v3_sink_manager(&self) -> &IcebergV3SinkManager {
-        &self.iceberg_v3_sink_manager
-    }
-
     async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {
         let prost_sink_catalog = self
             .metadata_manager

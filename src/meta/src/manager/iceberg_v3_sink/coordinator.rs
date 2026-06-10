@@ -58,6 +58,7 @@ use thiserror_ext::AsReport;
 use tokio::time::timeout;
 
 use super::backfill::backfill_dv_partitions;
+use super::compaction_resolver::resolve_compaction;
 use crate::manager::exactly_once_util::{
     clean_aborted_records, commit_and_prune_epoch, list_sink_states_ordered_by_epoch,
     persist_pre_commit_metadata,
@@ -173,9 +174,9 @@ impl IcebergV3Coordinator {
         };
 
         let refreshed_table = commit_one_epoch(
-            self.catalog.clone(),
-            self.table.identifier().clone(),
-            self.target_branch.clone(),
+            &self.catalog,
+            &self.table,
+            &self.target_branch,
             &commit,
             self.retry_num,
         )
@@ -206,6 +207,88 @@ impl IcebergV3Coordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
+        Ok(())
+    }
+
+    /// Resolve and commit a V3 compaction in the serialized commit slot. The caller already holds the
+    /// per-sink coordinator mutex, so `self.table`'s current snapshot is the commit upper bound N.
+    /// The PK index is knowingly left stale here; repair is a later milestone (M3).
+    pub async fn commit_compaction(
+        &mut self,
+        output_files: Vec<SerializedDataFile>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+        pk_column_names: Vec<String>,
+    ) -> Result<()> {
+        let resolution = resolve_compaction(
+            &self.table,
+            self.catalog.as_ref(),
+            self.sink_id,
+            &output_files,
+            &input_file_paths,
+            read_snapshot_id,
+            &pk_column_names,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "resolve v3 compaction for sink {} read_snapshot {}",
+                self.sink_id, read_snapshot_id
+            )
+        })?;
+
+        // Generate the target snapshot id the same way the writer path does, so the overwrite below is
+        // idempotent against an already-applied retry.
+        let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
+
+        // The resolver bails on partitioned tables, so the rewrite output and its DV files live under
+        // the default (unpartitioned) spec/type. Materialize the `add` SerializedDataFiles to DataFiles
+        // exactly like the writer path; the `delete` set is already DataFiles from the resolver.
+        let schema = self.table.metadata().current_schema();
+        let partition_spec_id = self.table.metadata().default_partition_spec_id();
+        let partition_type = self.table.metadata().default_partition_type();
+        let mut add_files: Vec<DataFile> =
+            Vec::with_capacity(output_files.len() + resolution.output_dv_files.len());
+        for serialized in output_files.iter().chain(resolution.output_dv_files.iter()) {
+            let f = serialized
+                .clone()
+                .try_into(partition_spec_id, partition_type, schema)
+                .map_err(|err| {
+                    anyhow!(err).context("materialize v3 compaction SerializedDataFile")
+                })?;
+            add_files.push(f);
+        }
+
+        let miss_count = resolution.remap_rows.len();
+        let refreshed_table = commit_overwrite(
+            &self.catalog,
+            self.table.identifier().clone(),
+            self.table.metadata().current_schema_id(),
+            partition_spec_id,
+            &self.target_branch,
+            snapshot_id,
+            add_files,
+            resolution.input_files_to_delete,
+            self.retry_num,
+        )
+        .await
+        .map_err(|err| {
+            let err_report = match err {
+                CommitError::Commit(e) | CommitError::ReloadTable(e) => e,
+            };
+            anyhow!(err_report).context(format!(
+                "iceberg v3 compaction commit failed for sink {}",
+                self.sink_id
+            ))
+        })?;
+        self.table = refreshed_table;
+
+        tracing::info!(
+            sink_id = %self.sink_id,
+            snapshot_id,
+            miss_count,
+            "V3 compaction committed; PK index repair deferred to M3"
+        );
         Ok(())
     }
 
@@ -320,23 +403,89 @@ async fn recovery(
 }
 
 async fn commit_one_epoch(
-    catalog: Arc<dyn Catalog>,
-    table_ident: iceberg::TableIdent,
-    target_branch: String,
+    catalog: &Arc<dyn Catalog>,
+    table: &Table,
+    target_branch: &str,
     commit: &EpochCommit,
     retry_num: usize,
 ) -> Result<Table, CommitError> {
     let merged = commit.merged.clone();
-    let snapshot_id = commit.snapshot_id;
+
+    // Materialize the pre-committed `SerializedDataFile`s once against the current schema/partition
+    // type. `run_with_retry` (inside `commit_overwrite`) asserts the reloaded table keeps the same
+    // `schema_id`/`partition_spec_id` across attempts, so the materialization is stable across retries
+    // and matches what the previous in-loop materialization produced.
+    let schema = table.metadata().current_schema();
+    let partition_spec = table
+        .metadata()
+        .partition_spec_by_id(merged.partition_spec_id)
+        .ok_or_else(|| CommitError::Commit(anyhow!("partition spec not found")))?;
+    let partition_type = partition_spec
+        .partition_type(schema)
+        .map_err(|e| CommitError::Commit(anyhow!(e)))?;
+
+    let mut add_files: Vec<DataFile> = Vec::new();
+    let mut overwrite_files: Vec<DataFile> = Vec::new();
+    for serialized in merged.data_files.iter().chain(merged.delete_files.iter()) {
+        let f = serialized
+            .clone()
+            .try_into(merged.partition_spec_id, &partition_type, schema)
+            .map_err(|err| {
+                CommitError::Commit(anyhow!(err).context("materialize v3 SerializedDataFile"))
+            })?;
+        add_files.push(f);
+    }
+    for serialized in &merged.overwrite_files {
+        let f = serialized
+            .clone()
+            .try_into(merged.partition_spec_id, &partition_type, schema)
+            .map_err(|err| {
+                CommitError::Commit(anyhow!(err).context("materialize v3 SerializedDataFile"))
+            })?;
+        overwrite_files.push(f);
+    }
+
+    commit_overwrite(
+        catalog,
+        table.identifier().clone(),
+        merged.schema_id,
+        merged.partition_spec_id,
+        target_branch,
+        commit.snapshot_id,
+        add_files,
+        overwrite_files,
+        retry_num,
+    )
+    .await
+}
+
+/// Run an idempotent iceberg `overwrite_files` transaction for the given pre-materialized add/delete
+/// files, keyed on `snapshot_id`, with reload+retry. Shared by the writer commit path
+/// (`commit_one_epoch`) and the compaction path (`commit_compaction`) so the idempotency check and the
+/// transaction shape live in one place. Returns the committed table, or the (unchanged) reloaded table
+/// when `snapshot_id` was already applied.
+async fn commit_overwrite(
+    catalog: &Arc<dyn Catalog>,
+    table_ident: iceberg::TableIdent,
+    schema_id: i32,
+    partition_spec_id: i32,
+    target_branch: &str,
+    snapshot_id: i64,
+    add_files: Vec<DataFile>,
+    delete_files: Vec<DataFile>,
+    retry_num: usize,
+) -> Result<Table, CommitError> {
+    let target_branch = target_branch.to_owned();
 
     commit_retry::run_with_retry(
         catalog.clone(),
         table_ident,
-        merged.schema_id,
-        merged.partition_spec_id,
+        schema_id,
+        partition_spec_id,
         retry_num,
         |table| {
-            let merged = merged.clone();
+            let add_files = add_files.clone();
+            let delete_files = delete_files.clone();
             let catalog = catalog.clone();
             let target_branch = target_branch.clone();
             async move {
@@ -349,47 +498,13 @@ async fn commit_one_epoch(
                     return Ok(table);
                 }
 
-                let schema = table.metadata().current_schema();
-                let partition_spec = table
-                    .metadata()
-                    .partition_spec_by_id(merged.partition_spec_id)
-                    .ok_or_else(|| CommitError::Commit(anyhow!("partition spec not found")))?;
-                let partition_type = partition_spec
-                    .partition_type(schema)
-                    .map_err(|e| CommitError::Commit(anyhow!(e)))?;
-
-                let mut add_files: Vec<DataFile> = Vec::new();
-                let mut overwrite_files: Vec<DataFile> = Vec::new();
-                for serialized in merged.data_files.iter().chain(merged.delete_files.iter()) {
-                    let f = serialized
-                        .clone()
-                        .try_into(merged.partition_spec_id, &partition_type, schema)
-                        .map_err(|err| {
-                            CommitError::Commit(
-                                anyhow!(err).context("materialize v3 SerializedDataFile"),
-                            )
-                        })?;
-                    add_files.push(f);
-                }
-                for serialized in &merged.overwrite_files {
-                    let f = serialized
-                        .clone()
-                        .try_into(merged.partition_spec_id, &partition_type, schema)
-                        .map_err(|err| {
-                            CommitError::Commit(
-                                anyhow!(err).context("materialize v3 SerializedDataFile"),
-                            )
-                        })?;
-                    overwrite_files.push(f);
-                }
-
                 let txn = Transaction::new(&table);
                 let action = txn
                     .overwrite_files()
                     .set_snapshot_id(snapshot_id)
                     .set_target_branch(target_branch)
                     .add_data_files(add_files)
-                    .delete_files(overwrite_files);
+                    .delete_files(delete_files);
                 let txn = action.apply(txn).map_err(|err| {
                     CommitError::Commit(
                         anyhow!(err).context("apply iceberg v3 overwrite_files action"),

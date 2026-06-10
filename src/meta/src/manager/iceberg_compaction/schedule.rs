@@ -1087,16 +1087,22 @@ impl IcebergCompactionManager {
     }
 
     /// Best-effort routing of a V3 coordinated-compaction payload to the V3 sink manager.
-    /// Any malformed/missing field is logged and ignored; this must never disrupt the normal
-    /// compaction-task state machine in [`Self::handle_report_task`].
-    fn route_v3_compaction_report(
+    ///
+    /// Returns `true` if the iceberg overwrite commit succeeded, `false` if the payload was
+    /// malformed, the coordinator was not registered, or the commit itself failed. A `false`
+    /// result signals the caller to use `finish_failed` so the scheduler retries the task.
+    ///
+    /// This must never panic or propagate errors upward; all failure paths are logged and converted
+    /// to `false` so the compaction-task state machine in [`Self::handle_report_task`] always runs.
+    async fn route_v3_compaction_report(
         &self,
         report: &IcebergReportTask,
         sink_id: SinkId,
         task_id: u64,
-    ) {
+    ) -> bool {
         let Some(v3_output_bytes) = &report.v3_output_files else {
-            return;
+            // No V3 payload present; this is a non-V3 coordinated task. Nothing to do.
+            return false;
         };
         let Some(read_snapshot_id) = report.v3_read_snapshot_id else {
             tracing::warn!(
@@ -1104,7 +1110,7 @@ impl IcebergCompactionManager {
                 task_id,
                 "V3 compaction report carries output files but no read_snapshot_id; ignoring"
             );
-            return;
+            return false;
         };
         let v3_input_bytes = report.v3_input_files.as_deref().unwrap_or(&[]);
 
@@ -1119,7 +1125,7 @@ impl IcebergCompactionManager {
                     error = %e,
                     "Failed to deserialize v3_output_files from compaction report; skipping V3 routing"
                 );
-                return;
+                return false;
             }
         };
         let input_file_paths: Vec<String> = match serde_json::from_slice(v3_input_bytes) {
@@ -1131,28 +1137,92 @@ impl IcebergCompactionManager {
                     error = %e,
                     "Failed to deserialize v3_input_files from compaction report; skipping V3 routing"
                 );
-                return;
+                return false;
             }
         };
 
-        self.iceberg_v3_sink_manager.receive_compaction_report(
-            sink_id,
-            output_files,
-            input_file_paths,
-            read_snapshot_id,
-        );
+        // Derive the PK column names from the sink's `downstream_pk` (indices into the sink's visible
+        // columns), preserving that index order — it is the writer's index-key column order, which the
+        // resolver must match when it packs PKs. The V3 sink never writes Iceberg identifier-field-ids,
+        // so the schema cannot supply the PK; these named columns do.
+        let sink_param = match self.get_sink_param(sink_id).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e.as_report(),
+                    "Failed to load sink param for V3 compaction PK derivation; skipping V3 routing"
+                );
+                return false;
+            }
+        };
+        let Some(downstream_pk) = sink_param
+            .downstream_pk
+            .as_ref()
+            .filter(|pk| !pk.is_empty())
+        else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "V3 sink has no downstream PK; cannot resolve compaction"
+            );
+            return false;
+        };
+        let Some(pk_column_names) = downstream_pk
+            .iter()
+            .map(|&i| sink_param.columns.get(i).map(|c| c.name.clone()))
+            .collect::<Option<Vec<_>>>()
+        else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "V3 sink downstream PK index out of range of sink columns; cannot resolve compaction"
+            );
+            return false;
+        };
+
+        match self
+            .iceberg_v3_sink_manager
+            .commit_compaction(
+                sink_id,
+                output_files,
+                input_file_paths,
+                read_snapshot_id,
+                pk_column_names,
+            )
+            .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e.as_report(),
+                    "V3 compaction commit failed; compaction task will be retried"
+                );
+                false
+            }
+        }
     }
 
-    pub fn handle_report_task(&self, report: IcebergReportTask) {
+    pub async fn handle_report_task(&self, report: IcebergReportTask) {
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let now = Instant::now();
 
-        // Route any V3 coordinated compaction payload to the V3 sink manager. Best-effort:
-        // failures here must NOT disrupt the compaction state-machine update below.
-        self.route_v3_compaction_report(&report, sink_id, task_id);
+        // For SUCCESS reports with a V3 payload, attempt the iceberg overwrite commit BEFORE
+        // touching the state machine. The commit outcome controls whether the track finishes
+        // successfully (commit ok) or as failed (commit error, so the scheduler retries). For
+        // non-SUCCESS reports no commit is attempted and `commit_ok` stays `false`.
+        let commit_ok = if status == IcebergReportTaskStatus::Success {
+            self.route_v3_compaction_report(&report, sink_id, task_id)
+                .await
+        } else {
+            false
+        };
 
         let waiter = {
             let mut guard = self.inner.write();
@@ -1161,7 +1231,20 @@ impl IcebergCompactionManager {
             match guard.sink_schedules.get_mut(&sink_id) {
                 Some(track) if track.is_processing_task(task_id) => {
                     let finish_action = match status {
-                        IcebergReportTaskStatus::Success => track.finish_success(now),
+                        IcebergReportTaskStatus::Success => {
+                            // A V3 report whose commit failed should be retried; treat it as a
+                            // failure so the scheduler re-dispatches on the next interval.
+                            if report.v3_output_files.is_some() && !commit_ok {
+                                tracing::warn!(
+                                    sink_id = %sink_id,
+                                    task_id,
+                                    "V3 compaction commit did not succeed; marking task failed for retry"
+                                );
+                                track.finish_failed(now)
+                            } else {
+                                track.finish_success(now)
+                            }
+                        }
                         IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
                                 sink_id = %sink_id,
