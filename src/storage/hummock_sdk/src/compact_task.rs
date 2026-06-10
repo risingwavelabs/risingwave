@@ -21,8 +21,7 @@ use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus,
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
     CompactTaskAssignment as PbCompactTaskAssignment, LevelType, PbCompactTask, PbKeyRange,
-    PbSstableFilterLayout, PbSstableFilterType, PbTableOption, PbTableSchema, PbTableStats,
-    PbValidationTask,
+    PbTableOption, PbTableSchema, PbTableStats, PbValidationTask,
 };
 
 use crate::compaction_group::StateTableId;

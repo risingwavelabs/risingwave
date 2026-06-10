@@ -45,6 +45,7 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             table_watermarks,
             state_table_info: _,
             member_table_ids,
+            in_progress_compactions,
             ..
         } = context;
         let dynamic_level_core =
@@ -55,6 +56,11 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             safe_epoch_read_table_watermarks(table_watermarks, member_table_ids);
         let compaction_input =
             picker.pick_compaction(levels, level_handlers, &pk_table_watermarks)?;
+        if !compaction_input.skip_target_range_conflict_check
+            && in_progress_compactions.has_conflict_with_input(&compaction_input)
+        {
+            return None;
+        }
         compaction_input.add_pending_task(task_id, level_handlers);
         Some(create_compaction_task(
             dynamic_level_core.get_config(),
