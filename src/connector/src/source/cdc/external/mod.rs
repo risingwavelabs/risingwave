@@ -364,6 +364,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
+    /// For each given primary key column (by name), returns whether the upstream column is an
+    /// unsigned integer. Only MySQL has unsigned integer types (whose overflowing `BIGINT
+    /// UNSIGNED` values are stored as negative `i64`), so other connectors are always false.
+    pub fn pk_column_unsigned_flags(&self, pk_names: &[String]) -> Vec<bool> {
+        match self {
+            ExternalTableReaderImpl::MySql(mysql) => mysql.pk_column_unsigned_flags(pk_names),
+            _ => vec![false; pk_names.len()],
+        }
+    }
+
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
             ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),

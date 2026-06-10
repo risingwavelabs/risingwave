@@ -304,6 +304,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
+        // Whether each pk column is an unsigned integer upstream. Used to compare buffered
+        // binlog rows against `current_pos` with unsigned semantics, so overflowing values
+        // stored as negative integers are ordered consistently with the upstream snapshot.
+        let pk_is_unsigned = {
+            let schema = self.external_table.schema();
+            let pk_names: Vec<String> = pk_indices
+                .iter()
+                .map(|&i| schema.fields[i].name.clone())
+                .collect();
+            upstream_table_reader
+                .reader
+                .pk_column_unsigned_flags(&pk_names)
+        };
+
         tracing::info!(
             %table_id,
             upstream_table_name,
@@ -704,6 +718,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 current_pos,
                                 &pk_indices,
                                 &pk_order,
+                                &pk_is_unsigned,
                                 last_binlog_offset.clone(),
                             )?,
                             &self.output_indices,
