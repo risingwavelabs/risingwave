@@ -16,7 +16,7 @@ use std::cmp::{self, Ordering, max};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Add;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use itertools::Itertools;
 use risingwave_common::RW_VERSION;
@@ -54,6 +54,42 @@ use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
+
+const CLUSTER_CONTROLLER_OP_STUCK_WARN_AFTER: Duration = Duration::from_secs(5);
+const CLUSTER_CONTROLLER_OP_SLOW_LOG_AFTER: Duration = Duration::from_millis(500);
+
+fn spawn_cluster_controller_watchdog(
+    op: &'static str,
+    context: String,
+    started_at: Instant,
+    done_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    tokio::spawn(async move {
+        if tokio::time::timeout(CLUSTER_CONTROLLER_OP_STUCK_WARN_AFTER, done_rx)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                op,
+                context = %context,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "cluster controller operation is still running"
+            );
+        }
+    });
+}
+
+fn log_slow_cluster_controller_op(op: &'static str, context: &str, started_at: Instant) {
+    let elapsed = started_at.elapsed();
+    if elapsed >= CLUSTER_CONTROLLER_OP_SLOW_LOG_AFTER {
+        tracing::warn!(
+            op,
+            context,
+            elapsed_ms = elapsed.as_millis(),
+            "cluster controller operation finished slowly"
+        );
+    }
+}
 
 pub struct ClusterController {
     env: MetaSrvEnv,
@@ -220,10 +256,20 @@ impl ClusterController {
         resource: Option<PbResource>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        self.inner
-            .write()
-            .await
-            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
+        let lock_started_at = Instant::now();
+        let (lock_done_tx, lock_done_rx) = tokio::sync::oneshot::channel();
+        let context = format!("worker_id={worker_id}");
+        spawn_cluster_controller_watchdog(
+            "heartbeat.write_lock",
+            context.clone(),
+            lock_started_at,
+            lock_done_rx,
+        );
+        let mut inner = self.inner.write().await;
+        let _ = lock_done_tx.send(());
+        log_slow_cluster_controller_op("heartbeat.write_lock", &context, lock_started_at);
+
+        inner.heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -245,7 +291,21 @@ impl ClusterController {
                     }
                 }
 
+                let lock_started_at = Instant::now();
+                let (lock_done_tx, lock_done_rx) = tokio::sync::oneshot::channel();
+                spawn_cluster_controller_watchdog(
+                    "heartbeat_checker.write_lock",
+                    "heartbeat checker tick".to_owned(),
+                    lock_started_at,
+                    lock_done_rx,
+                );
                 let mut inner = cluster_controller.inner.write().await;
+                let _ = lock_done_tx.send(());
+                log_slow_cluster_controller_op(
+                    "heartbeat_checker.write_lock",
+                    "heartbeat checker tick",
+                    lock_started_at,
+                );
                 // 1. Initialize new workers' TTL.
                 for worker in inner
                     .worker_extra_info
@@ -265,6 +325,24 @@ impl ClusterController {
                     .collect_vec();
 
                 // 3. Delete expired workers.
+                let db_started_at = Instant::now();
+                let context = format!(
+                    "expired_worker_count={}, expired_worker_ids={:?}",
+                    worker_to_delete.len(),
+                    worker_to_delete
+                );
+                let (db_done_tx, db_done_rx) = tokio::sync::oneshot::channel();
+                tracing::info!(
+                    op = "heartbeat_checker.load_expired_workers",
+                    context = %context,
+                    "starting cluster controller DB operation"
+                );
+                spawn_cluster_controller_watchdog(
+                    "heartbeat_checker.load_expired_workers",
+                    context.clone(),
+                    db_started_at,
+                    db_done_rx,
+                );
                 let worker_infos = match Worker::find()
                     .select_only()
                     .column(worker::Column::WorkerId)
@@ -276,8 +354,17 @@ impl ClusterController {
                     .all(&inner.db)
                     .await
                 {
-                    Ok(keys) => keys,
+                    Ok(keys) => {
+                        let _ = db_done_tx.send(());
+                        log_slow_cluster_controller_op(
+                            "heartbeat_checker.load_expired_workers",
+                            &context,
+                            db_started_at,
+                        );
+                        keys
+                    }
                     Err(err) => {
+                        let _ = db_done_tx.send(());
                         tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
                         continue;
                     }
@@ -844,22 +931,58 @@ impl ClusterControllerInner {
     }
 
     pub async fn delete_worker(&mut self, host_addr: HostAddress) -> MetaResult<PbWorkerNode> {
+        let find_started_at = Instant::now();
+        let find_context = format!("host={}:{}", host_addr.host, host_addr.port);
+        let (find_done_tx, find_done_rx) = tokio::sync::oneshot::channel();
+        tracing::info!(
+            op = "delete_worker.find_worker",
+            context = %find_context,
+            "starting cluster controller DB operation"
+        );
+        spawn_cluster_controller_watchdog(
+            "delete_worker.find_worker",
+            find_context.clone(),
+            find_started_at,
+            find_done_rx,
+        );
         let worker = Worker::find()
             .filter(
                 worker::Column::Host
-                    .eq(host_addr.host)
+                    .eq(host_addr.host.clone())
                     .and(worker::Column::Port.eq(host_addr.port)),
             )
             .find_also_related(WorkerProperty)
             .one(&self.db)
-            .await?;
+            .await;
+        let _ = find_done_tx.send(());
+        log_slow_cluster_controller_op("delete_worker.find_worker", &find_context, find_started_at);
+        let worker = worker?;
         let Some((worker, property)) = worker else {
             return Err(MetaError::invalid_parameter("worker not found!"));
         };
 
-        let res = Worker::delete_by_id(worker.worker_id)
-            .exec(&self.db)
-            .await?;
+        let delete_started_at = Instant::now();
+        let delete_context = format!("worker_id={}", worker.worker_id);
+        let (delete_done_tx, delete_done_rx) = tokio::sync::oneshot::channel();
+        tracing::info!(
+            op = "delete_worker.delete_worker",
+            context = %delete_context,
+            "starting cluster controller DB operation"
+        );
+        spawn_cluster_controller_watchdog(
+            "delete_worker.delete_worker",
+            delete_context.clone(),
+            delete_started_at,
+            delete_done_rx,
+        );
+        let res = Worker::delete_by_id(worker.worker_id).exec(&self.db).await;
+        let _ = delete_done_tx.send(());
+        log_slow_cluster_controller_op(
+            "delete_worker.delete_worker",
+            &delete_context,
+            delete_started_at,
+        );
+        let res = res?;
         if res.rows_affected == 0 {
             return Err(MetaError::invalid_parameter("worker not found!"));
         }

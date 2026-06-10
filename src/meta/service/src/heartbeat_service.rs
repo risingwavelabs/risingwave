@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::{Duration, Instant};
+
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot;
 use tonic::{Request, Response, Status};
+
+const HEARTBEAT_RPC_STUCK_WARN_AFTER: Duration = Duration::from_secs(5);
+const HEARTBEAT_RPC_SLOW_LOG_AFTER: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
@@ -36,11 +42,41 @@ impl HeartbeatService for HeartbeatServiceImpl {
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
+        let node_id = req.node_id;
+        let resource = req.resource.clone();
+        let started_at = Instant::now();
+        let (done_tx, done_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            if tokio::time::timeout(HEARTBEAT_RPC_STUCK_WARN_AFTER, done_rx)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    %node_id,
+                    resource = ?resource,
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    "heartbeat RPC is still running in meta service"
+                );
+            }
+        });
+
         let result = self
             .metadata_manager
             .cluster_controller
-            .heartbeat(req.node_id, req.resource)
+            .heartbeat(node_id, req.resource)
             .await;
+        let elapsed = started_at.elapsed();
+        let _ = done_tx.send(());
+
+        if elapsed >= HEARTBEAT_RPC_SLOW_LOG_AFTER {
+            tracing::warn!(
+                %node_id,
+                elapsed_ms = elapsed.as_millis(),
+                is_ok = result.is_ok(),
+                "heartbeat RPC finished slowly in meta service"
+            );
+        }
 
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
