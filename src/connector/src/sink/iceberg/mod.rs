@@ -3872,10 +3872,12 @@ mod test {
         use std::collections::HashMap;
 
         use iceberg::spec::{
-            FormatVersion as IcebergFormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema,
-            Snapshot, SnapshotReference, SnapshotRetention, SortOrder, Summary,
-            TableMetadataBuilder, Type, UnboundPartitionSpec,
+            FormatVersion as IcebergFormatVersion, MAIN_BRANCH, NestedField, Operation,
+            PrimitiveType, Schema, Snapshot, SnapshotReference, SnapshotRetention, SortOrder,
+            Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
         };
+
+        use crate::sink::iceberg::{ICEBERG_COW_BRANCH, IcebergSinkCommitter};
 
         let mut builder = TableMetadataBuilder::new(
             Schema::builder()
