@@ -185,6 +185,12 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '0' SECOND, LOCF(val));
   expected_outputs:
     - binder_error
+- name: negative interval
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '-1' SECOND, LOCF(val));
+  expected_outputs:
+    - binder_error
 - name: test gap fill with project
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
@@ -227,6 +233,21 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), KEEPNULL(status), PARTITION_BY(device_id));
   expected_outputs:
     - stream_plan
+
+- name: partition by time column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(ts));
+  expected_outputs:
+    - binder_error
+
+- name: eowc partition by unsupported
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_error
 
 - name: partition by in materialized view
   sql: |

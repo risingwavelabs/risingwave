@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::gap_fill::FillStrategy;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Interval};
 use risingwave_sqlparser::ast::{Expr as AstExpr, FunctionArg, FunctionArgExpr, TableAlias};
 
 use super::{Binder, Relation};
@@ -82,16 +82,14 @@ impl Binder {
             .into());
         }
 
-        // Validate that the interval is not zero (only works for constant intervals)
+        // Validate that the interval is positive (only works for constant intervals).
         if let ExprImpl::Literal(literal) = &interval
             && let Some(risingwave_common::types::ScalarImpl::Interval(interval_value)) =
                 literal.get_data()
-            && interval_value.months() == 0
-            && interval_value.days() == 0
-            && interval_value.usecs() == 0
+            && *interval_value <= Interval::from_month_day_usec(0, 0, 0)
         {
             return Err(
-                ErrorCode::BindError("The gap fill interval cannot be zero".to_owned()).into(),
+                ErrorCode::BindError("The gap fill interval must be positive".to_owned()).into(),
             );
         }
 
@@ -119,6 +117,12 @@ impl Binder {
                             )
                         })?;
                         if let ExprImpl::InputRef(input_ref) = arg_expr {
+                            if input_ref.index() == time_col.index() {
+                                return Err(ErrorCode::BindError(
+                                    "PARTITION_BY cannot include the time column".to_owned(),
+                                )
+                                .into());
+                            }
                             // Canonicalize duplicate partition columns eagerly so downstream
                             // planning always sees a unique partition key list.
                             if !seen_partition_by_cols.insert(input_ref.index()) {

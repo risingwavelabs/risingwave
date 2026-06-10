@@ -22,15 +22,13 @@ use risingwave_common::gap_fill::{
 };
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{CheckedAdd, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{CheckedAdd, Datum, Interval, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use tracing::warn;
 
-use crate::cache::ManagedLruCache;
-use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::prelude::*;
 
@@ -45,19 +43,14 @@ pub struct GapFillExecutorArgs<S: StateStore> {
     pub state_table: StateTable<S>,
     pub partition_by_indices: Vec<usize>,
     pub pointer_key_indices: Vec<usize>,
-    pub watermark_epoch: AtomicU64Ref,
 }
 
-/// State row layout:
-///   `[output_cols..., prev_sk_0..N, next_sk_0..N]`
-///   where `prev_sk`/`next_sk` store the neighbor pointer key inside the partition:
-///   (time column, upstream stream key columns excluding partition/time).
-///
 /// Only original (anchor) rows are persisted. Filled rows are computed on the fly.
+///
+/// State rows have the same layout as output rows. Neighbor lookups use the state table PK prefix:
+/// `(partition_cols..., time_col, upstream stream key columns excluding partition/time)`.
 pub struct ManagedGapFillState<S: StateStore> {
     state_table: StateTable<S>,
-    /// Number of columns from the upstream output schema.
-    output_col_count: usize,
     partition_by_indices: Vec<usize>,
     pointer_key_indices: Vec<usize>,
 }
@@ -65,7 +58,7 @@ pub struct ManagedGapFillState<S: StateStore> {
 impl<S: StateStore> ManagedGapFillState<S> {
     pub fn new(
         state_table: StateTable<S>,
-        schema: &Schema,
+        _schema: &Schema,
         partition_by_indices: Vec<usize>,
         pointer_key_indices: Vec<usize>,
     ) -> Self {
@@ -74,11 +67,8 @@ impl<S: StateStore> ManagedGapFillState<S> {
             "gap fill pointer key should not be empty",
         );
 
-        let output_col_count = schema.len();
-
         Self {
             state_table,
-            output_col_count,
             partition_by_indices,
             pointer_key_indices,
         }
@@ -103,75 +93,8 @@ impl<S: StateStore> ManagedGapFillState<S> {
         self.state_table.commit(epoch).await
     }
 
-    /// Index of prev pointer start in a state row.
-    fn prev_pointer_idx(&self) -> usize {
-        self.output_col_count
-    }
-
-    /// Index of next pointer start in a state row.
-    fn next_pointer_idx(&self) -> usize {
-        self.output_col_count + self.pointer_key_indices.len()
-    }
-
-    /// Build the state row from an upstream row with prev/next pointer datums.
-    /// State row = `[output_cols..., prev_sk_0..N, next_sk_0..N]`
-    fn build_state_row(
-        &self,
-        row: impl Row,
-        prev_pointer: impl Row,
-        next_pointer: impl Row,
-    ) -> OwnedRow {
-        row.chain(prev_pointer).chain(next_pointer).into_owned_row()
-    }
-
-    /// Extract only the output columns from a state row.
     fn state_row_to_output_row(&self, state_row: impl Row) -> OwnedRow {
-        state_row.slice(..self.output_col_count).into_owned_row()
-    }
-
-    /// Build a null pointer (all None datums) for prev or next.
-    fn null_pointer(&self) -> OwnedRow {
-        OwnedRow::new(vec![None; self.pointer_key_indices.len()])
-    }
-
-    /// Build the explicit pointer key from an upstream row using the pointer key columns.
-    fn row_to_pointer(&self, row: &OwnedRow) -> OwnedRow {
-        OwnedRow::new(
-            self.pointer_key_indices
-                .iter()
-                .map(|&sk| row.datum_at(sk).to_owned_datum())
-                .collect(),
-        )
-    }
-
-    /// Check if a pointer is null (first datum is None = no neighbor).
-    fn is_null_pointer(pointer: impl Row) -> bool {
-        pointer.len() == 0 || pointer.datum_at(0).is_none()
-    }
-
-    /// Reconstruct a PK row from a partition key prefix and pointer datums.
-    /// The pointer contains the explicit neighbor lookup key inside the partition.
-    /// Returns None if the pointer is null.
-    fn build_pk_row(&self, partition_key: impl Row, pointer: impl Row) -> Option<OwnedRow> {
-        if Self::is_null_pointer(&pointer) {
-            return None;
-        }
-        Some(partition_key.chain(pointer).into_owned_row())
-    }
-
-    /// Build the full PK row for an output row.
-    fn output_row_to_pk_row(&self, row: &impl Row) -> OwnedRow {
-        self.build_pk_row(
-            row.project(&self.partition_by_indices),
-            row.project(&self.pointer_key_indices),
-        )
-        .expect("gap fill output row should always produce a non-null PK")
-    }
-
-    /// Point-get a row from state table by its full PK prefix (partition + time + sk).
-    async fn get_row(&self, pk_row: &OwnedRow) -> StreamExecutorResult<Option<OwnedRow>> {
-        let result = self.state_table.get_row(pk_row).await?;
-        Ok(result)
+        state_row.into_owned_row()
     }
 
     /// Find the previous neighbor within the same partition by scanning backward.
@@ -224,71 +147,6 @@ impl<S: StateStore> ManagedGapFillState<S> {
             Ok(None)
         }
     }
-
-    /// Update a row's prev pointer in the state table.
-    /// Deletes the old state row and inserts the updated one.
-    fn update_prev_pointer(
-        &mut self,
-        old_state_row: &OwnedRow,
-        new_prev_pointer: &OwnedRow,
-    ) -> OwnedRow {
-        self.state_table.delete(old_state_row);
-        let mut new_data = old_state_row.as_inner().to_vec();
-        let start = self.prev_pointer_idx();
-        let count = self.pointer_key_indices.len();
-        new_data[start..start + count].clone_from_slice(new_prev_pointer.as_inner());
-        let new_state_row = OwnedRow::new(new_data);
-        self.state_table.insert(&new_state_row);
-        new_state_row
-    }
-
-    /// Update a row's next pointer in the state table.
-    fn update_next_pointer(
-        &mut self,
-        old_state_row: &OwnedRow,
-        new_next_pointer: &OwnedRow,
-    ) -> OwnedRow {
-        self.state_table.delete(old_state_row);
-        let mut new_data = old_state_row.as_inner().to_vec();
-        let start = self.next_pointer_idx();
-        let count = self.pointer_key_indices.len();
-        new_data[start..start + count].clone_from_slice(new_next_pointer.as_inner());
-        let new_state_row = OwnedRow::new(new_data);
-        self.state_table.insert(&new_state_row);
-        new_state_row
-    }
-}
-
-struct GapFillStateCache {
-    rows: ManagedLruCache<OwnedRow, OwnedRow>,
-}
-
-impl GapFillStateCache {
-    fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        Self {
-            rows: ManagedLruCache::unbounded(watermark_epoch, metrics_info),
-        }
-    }
-
-    fn get(&mut self, pk_row: &OwnedRow) -> Option<OwnedRow> {
-        self.rows.get(pk_row).cloned()
-    }
-
-    fn insert(&mut self, pk_row: OwnedRow, state_row: OwnedRow) {
-        self.rows.put(pk_row, state_row);
-    }
-
-    fn remove(&mut self, pk_row: &OwnedRow) {
-        self.rows.remove(pk_row);
-    }
-
-    fn evict(&mut self) {
-        self.rows.evict();
-    }
-
-    fn clear(&mut self) {
-        self.rows.clear();
-    }
 }
 
 pub struct GapFillExecutor<S: StateStore> {
@@ -302,7 +160,6 @@ pub struct GapFillExecutor<S: StateStore> {
 
     // State management
     managed_state: ManagedGapFillState<S>,
-    state_cache: GapFillStateCache,
 
     // Metrics
     metrics: GapFillMetrics,
@@ -335,37 +192,13 @@ impl<S: StateStore> GapFillExecutor<S> {
             .map(|sr| managed_state.state_row_to_output_row(sr)))
     }
 
-    async fn get_state_row_by_pk(
-        managed_state: &ManagedGapFillState<S>,
-        state_cache: &mut GapFillStateCache,
-        pk_row: &OwnedRow,
-    ) -> StreamExecutorResult<Option<OwnedRow>> {
-        if let Some(state_row) = state_cache.get(pk_row) {
-            return Ok(Some(state_row));
-        }
-
-        let state_row = managed_state.get_row(pk_row).await?;
-        if let Some(state_row) = &state_row {
-            state_cache.insert(pk_row.clone(), state_row.clone());
-        }
-        Ok(state_row)
-    }
-
     pub fn new(args: GapFillExecutorArgs<S>) -> Self {
-        let state_table_id = args.state_table.table_id();
-        let cache_metrics_info = MetricsInfo::new(
-            args.ctx.streaming_metrics.clone(),
-            state_table_id,
-            args.ctx.id,
-            "GapFill",
-        );
         let managed_state = ManagedGapFillState::new(
             args.state_table,
             &args.schema,
             args.partition_by_indices,
             args.pointer_key_indices,
         );
-        let state_cache = GapFillStateCache::new(args.watermark_epoch, cache_metrics_info);
 
         let metrics = args.ctx.streaming_metrics.clone();
         let actor_id = args.ctx.id.to_string();
@@ -385,7 +218,6 @@ impl<S: StateStore> GapFillExecutor<S> {
             fill_columns: args.fill_columns,
             gap_interval: args.gap_interval,
             managed_state,
-            state_cache,
             metrics: gap_fill_metrics,
         }
     }
@@ -556,13 +388,25 @@ impl<S: StateStore> GapFillExecutor<S> {
                         }
                     }
                 } else {
-                    // No strategy specified, default to NULL
+                    // No strategy specified, default to NULL. This can include upstream stream-key
+                    // columns (for example hidden `_row_id` on no-PK inputs). The generated row is
+                    // still distinct from both anchor rows because the time column is always part
+                    // of the gap-fill output key and `fill_time` is strictly between them.
                     None
                 };
                 new_row_data.push(datum);
             }
 
-            filled_rows.push(OwnedRow::new(new_row_data));
+            let filled_row = OwnedRow::new(new_row_data);
+            debug_assert_ne!(
+                filled_row.datum_at(time_column_index),
+                prev_row.datum_at(time_column_index)
+            );
+            debug_assert_ne!(
+                filled_row.datum_at(time_column_index),
+                curr_row.datum_at(time_column_index)
+            );
+            filled_rows.push(filled_row);
 
             fill_time = match fill_time.checked_add(*interval) {
                 Some(t) => t,
@@ -597,7 +441,6 @@ impl<S: StateStore> GapFillExecutor<S> {
     async fn execute_inner(self: Box<Self>) {
         let Self {
             mut managed_state,
-            mut state_cache,
             schema,
             chunk_size,
             time_column_index,
@@ -622,8 +465,8 @@ impl<S: StateStore> GapFillExecutor<S> {
             .ok_or_else(|| anyhow::anyhow!("Gap interval expression returned null"))?
             .into_interval();
 
-        if interval.months() == 0 && interval.days() == 0 && interval.usecs() == 0 {
-            Err(anyhow::anyhow!("Gap interval cannot be zero"))?;
+        if interval <= Interval::from_month_day_usec(0, 0, 0) {
+            Err(anyhow::anyhow!("Gap interval must be positive"))?;
         }
 
         let partition_by_indices = managed_state.partition_by_indices.clone();
@@ -639,6 +482,12 @@ impl<S: StateStore> GapFillExecutor<S> {
 
                     for (op, row_ref) in chunk.rows() {
                         let row = row_ref.to_owned_row();
+                        if row.datum_at(time_column_index).is_none() {
+                            if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                                yield Message::Chunk(chunk);
+                            }
+                            continue;
+                        }
                         let partition_key = (&row).project(&partition_by_indices);
                         let pointer_key = (&row).project(&pointer_key_indices);
 
@@ -682,67 +531,14 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     }
                                 }
 
-                                // 3. Build pointer datums for the new row.
-                                let new_row_pointer = managed_state.row_to_pointer(&row);
-                                let prev_pointer = prev_output
-                                    .as_ref()
-                                    .map(|r| managed_state.row_to_pointer(r));
-                                let next_pointer = next_output
-                                    .as_ref()
-                                    .map(|r| managed_state.row_to_pointer(r));
-
-                                // 4. Update prev's next pointer to point to new row.
-                                //    We need to get the state row from the state table for pointer update.
-                                if let Some(prev_ptr) = &prev_pointer {
-                                    let pk = managed_state.build_pk_row(partition_key, prev_ptr);
-                                    if let Some(pk) = pk
-                                        && let Some(prev_sr) = Self::get_state_row_by_pk(
-                                            &managed_state,
-                                            &mut state_cache,
-                                            &pk,
-                                        )
-                                        .await?
-                                    {
-                                        let new_prev_sr = managed_state
-                                            .update_next_pointer(&prev_sr, &new_row_pointer);
-                                        state_cache.insert(pk, new_prev_sr);
-                                    }
-                                }
-
-                                // 5. Update next's prev pointer to point to new row.
-                                if let Some(next_ptr) = &next_pointer {
-                                    let pk = managed_state.build_pk_row(partition_key, next_ptr);
-                                    if let Some(pk) = pk
-                                        && let Some(next_sr) = Self::get_state_row_by_pk(
-                                            &managed_state,
-                                            &mut state_cache,
-                                            &pk,
-                                        )
-                                        .await?
-                                    {
-                                        let new_next_sr = managed_state
-                                            .update_prev_pointer(&next_sr, &new_row_pointer);
-                                        state_cache.insert(pk, new_next_sr);
-                                    }
-                                }
-
-                                // 6. Insert the new row into state with prev/next pointers.
-                                let null_ptr = managed_state.null_pointer();
-                                let state_row = managed_state.build_state_row(
-                                    &row,
-                                    prev_pointer.as_ref().unwrap_or(&null_ptr),
-                                    next_pointer.as_ref().unwrap_or(&null_ptr),
-                                );
-                                managed_state.insert(&state_row);
-                                let new_pk_row = managed_state.output_row_to_pk_row(&row);
-                                state_cache.insert(new_pk_row, state_row.clone());
-
-                                // 7. Emit the inserted row.
+                                // 3. Insert the new anchor row into state.
+                                managed_state.insert(&row);
+                                // 4. Emit the inserted row.
                                 if let Some(chunk) = chunk_builder.append_row(op, &row) {
                                     yield Message::Chunk(chunk);
                                 }
 
-                                // 8. Emit new filled rows between prev and new row.
+                                // 5. Emit new filled rows between prev and new row.
                                 if let Some(prev_out) = &prev_output {
                                     let filled_rows = Self::generate_filled_rows_between_static(
                                         prev_out,
@@ -762,7 +558,7 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     }
                                 }
 
-                                // 9. Emit new filled rows between new row and next.
+                                // 6. Emit new filled rows between new row and next.
                                 if let Some(next_out) = &next_output {
                                     let filled_rows = Self::generate_filled_rows_between_static(
                                         &row,
@@ -837,78 +633,15 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     }
                                 }
 
-                                // 3. Find the actual state row to delete.
-                                //    Build the full PK and point-get from state table.
-                                let row_pointer = managed_state.row_to_pointer(&row);
-                                let pk_row =
-                                    managed_state.build_pk_row(partition_key, &row_pointer);
-                                let cur_state_row = if let Some(ref pk) = pk_row {
-                                    Self::get_state_row_by_pk(&managed_state, &mut state_cache, pk)
-                                        .await?
-                                } else {
-                                    None
-                                };
+                                // 3. Delete the anchor row from state.
+                                managed_state.delete(&row);
 
-                                if let Some(cur_sr) = &cur_state_row {
-                                    // 4. Delete the row from state.
-                                    managed_state.delete(cur_sr);
-                                }
-                                if let Some(pk_row) = &pk_row {
-                                    state_cache.remove(pk_row);
-                                }
-
-                                // 5. Emit the delete for the original row.
+                                // 4. Emit the delete for the original row.
                                 if let Some(chunk) = chunk_builder.append_row(op, &row) {
                                     yield Message::Chunk(chunk);
                                 }
 
-                                // 6. Update prev's next pointer to point to next.
-                                let null_ptr = managed_state.null_pointer();
-                                let prev_pointer = prev_output
-                                    .as_ref()
-                                    .map(|r| managed_state.row_to_pointer(r));
-                                let next_pointer = next_output
-                                    .as_ref()
-                                    .map(|r| managed_state.row_to_pointer(r));
-
-                                if let Some(prev_ptr) = &prev_pointer {
-                                    let pk = managed_state.build_pk_row(partition_key, prev_ptr);
-                                    if let Some(pk) = pk
-                                        && let Some(prev_sr) = Self::get_state_row_by_pk(
-                                            &managed_state,
-                                            &mut state_cache,
-                                            &pk,
-                                        )
-                                        .await?
-                                    {
-                                        let new_prev_sr = managed_state.update_next_pointer(
-                                            &prev_sr,
-                                            next_pointer.as_ref().unwrap_or(&null_ptr),
-                                        );
-                                        state_cache.insert(pk, new_prev_sr);
-                                    }
-                                }
-
-                                // 7. Update next's prev pointer to point to prev.
-                                if let Some(next_ptr) = &next_pointer {
-                                    let pk = managed_state.build_pk_row(partition_key, next_ptr);
-                                    if let Some(pk) = pk
-                                        && let Some(next_sr) = Self::get_state_row_by_pk(
-                                            &managed_state,
-                                            &mut state_cache,
-                                            &pk,
-                                        )
-                                        .await?
-                                    {
-                                        let new_next_sr = managed_state.update_prev_pointer(
-                                            &next_sr,
-                                            prev_pointer.as_ref().unwrap_or(&null_ptr),
-                                        );
-                                        state_cache.insert(pk, new_next_sr);
-                                    }
-                                }
-
-                                // 8. If both neighbors exist, emit new fills between them.
+                                // 5. If both neighbors exist, emit new fills between them.
                                 if let (Some(prev_out), Some(next_out)) =
                                     (&prev_output, &next_output)
                                 {
@@ -942,15 +675,9 @@ impl<S: StateStore> GapFillExecutor<S> {
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = managed_state.flush(barrier.epoch).await?;
-                    state_cache.evict();
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale
-                    {
-                        state_cache.clear();
-                    }
+                    let _ = post_commit.post_yield_barrier(update_vnode_bitmap).await?;
                 }
             }
         }
@@ -959,9 +686,6 @@ impl<S: StateStore> GapFillExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicU64;
-
     use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -988,26 +712,16 @@ mod tests {
 
         let time_column_index = 0;
         let partition_by_indices: Vec<usize> = vec![];
-        // Stream key = [0] (time column). Since time is the only sk col,
-        // prev/next pointers each have 1 datum (the time value).
+        // Stream key = [0] (time column), so the lookup key within the singleton partition is the
+        // time value.
         let pointer_key_indices = vec![0];
 
-        let mut table_columns: Vec<ColumnDesc> = schema
+        let table_columns: Vec<ColumnDesc> = schema
             .fields
             .iter()
             .enumerate()
             .map(|(i, f)| ColumnDesc::unnamed(ColumnId::new(i as i32), f.data_type.clone()))
             .collect();
-
-        // Add prev/next pointer columns — each stores the full stream key.
-        // For this test: sk=[0], so each pointer has 1 datum (time value).
-        let time_dt = schema[time_column_index].data_type();
-        let mut col_id = table_columns.len() as i32;
-        // prev pointer (sk[0])
-        table_columns.push(ColumnDesc::unnamed(ColumnId::new(col_id), time_dt.clone()));
-        col_id += 1;
-        // next pointer (sk[0])
-        table_columns.push(ColumnDesc::unnamed(ColumnId::new(col_id), time_dt));
 
         // PK: (partition_cols, time_col, stream_key) with dedup = [0]
         // (no partition, time=0, sk=[0] already covered)
@@ -1039,7 +753,6 @@ mod tests {
             state_table: table,
             partition_by_indices,
             pointer_key_indices,
-            watermark_epoch: Arc::new(AtomicU64::new(0)),
         });
 
         (tx, executor.boxed().execute())

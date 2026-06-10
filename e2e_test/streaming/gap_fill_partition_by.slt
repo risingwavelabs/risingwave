@@ -233,3 +233,46 @@ DROP MATERIALIZED VIEW gf_update;
 
 statement ok
 DROP TABLE update_test;
+
+# ============================================
+# Test 5: no-PK input and NULL time pass-through
+# ============================================
+
+statement ok
+CREATE TABLE no_pk_null_time (
+    device_id INT,
+    ts TIMESTAMP,
+    value INT
+);
+
+statement ok
+INSERT INTO no_pk_null_time VALUES
+    (1, '2024-05-21 10:00:00', 10),
+    (1, NULL, 999),
+    (1, '2024-05-21 10:02:00', 20),
+    (2, '2024-05-21 10:00:00', 30),
+    (2, '2024-05-21 10:02:00', 40);
+
+statement ok
+CREATE MATERIALIZED VIEW gf_no_pk_null_time AS
+SELECT device_id, ts, value
+FROM GAP_FILL(no_pk_null_time, ts, INTERVAL '1' MINUTE, LOCF(value), PARTITION_BY(device_id));
+
+# NULL time rows pass through unchanged and are not inserted into gap-fill state.
+# The no-PK input also verifies filled rows with NULL hidden stream-key columns are valid.
+query ITR
+SELECT device_id, ts, value FROM gf_no_pk_null_time ORDER BY device_id, ts NULLS FIRST, value;
+----
+1 NULL 999
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 20
+2 2024-05-21 10:00:00 30
+2 2024-05-21 10:01:00 30
+2 2024-05-21 10:02:00 40
+
+statement ok
+DROP MATERIALIZED VIEW gf_no_pk_null_time;
+
+statement ok
+DROP TABLE no_pk_null_time;

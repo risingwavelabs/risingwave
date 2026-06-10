@@ -20,7 +20,7 @@ use risingwave_common::gap_fill::{
 };
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{CheckedAdd, ToOwnedDatum};
+use risingwave_common::types::{CheckedAdd, Interval, ToOwnedDatum};
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
 use tracing::warn;
@@ -299,9 +299,9 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
             .ok_or_else(|| anyhow::anyhow!("Gap interval expression returned null"))?
             .into_interval();
 
-        // Validate that gap interval is not zero
-        if interval.months() == 0 && interval.days() == 0 && interval.usecs() == 0 {
-            Err(anyhow::anyhow!("Gap interval cannot be zero"))?;
+        // Validate that gap interval is positive.
+        if interval <= Interval::from_month_day_usec(0, 0, 0) {
+            Err(anyhow::anyhow!("Gap interval must be positive"))?;
         }
 
         let mut vars = ExecutionVars {

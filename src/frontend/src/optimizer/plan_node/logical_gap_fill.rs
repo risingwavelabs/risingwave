@@ -223,6 +223,16 @@ impl ToStream for LogicalGapFill {
                 .into());
             }
 
+            if !partition_cols.is_empty() {
+                return Err(ErrorCode::NotSupported(
+                    "GAP_FILL with PARTITION_BY and EMIT ON WINDOW CLOSE is not supported yet."
+                        .to_owned(),
+                    "Remove PARTITION_BY or use normal streaming GAP_FILL until partitioned EOWC gap fill is implemented."
+                        .to_owned(),
+                )
+                .into());
+            }
+
             Ok(StreamEowcGapFill::new(core).into())
         } else {
             Ok(StreamGapFill::new(core).into())

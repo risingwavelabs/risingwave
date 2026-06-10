@@ -459,7 +459,12 @@
   sql: |
     CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '0' SECOND, LOCF(val));
-  binder_error: 'Bind error: The gap fill interval cannot be zero'
+  binder_error: 'Bind error: The gap fill interval must be positive'
+- name: negative interval
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '-1' SECOND, LOCF(val));
+  binder_error: 'Bind error: The gap fill interval must be positive'
 - name: test gap fill with project
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
@@ -503,12 +508,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0
-    ├── columns: [ t_device_id, t_ts, t_val, prev_sk_0, next_sk_0, _rw_timestamp ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 0
+    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp ]
@@ -559,7 +559,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, prev_sk_0, next_sk_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, region, device_id, ts, _rw_timestamp ]
@@ -580,6 +580,23 @@
     └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Interpolate, target_col: $2 }, BoundFillStrategy { strategy: Null, target_col: $3 }], partition_by: [$0] }
       └─StreamExchange { dist: HashShard(t.device_id) }
         └─StreamTableScan { table: t, columns: [t.device_id, t.ts, t.temp, t.status], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
+- name: partition by time column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(ts));
+  binder_error: 'Bind error: PARTITION_BY cannot include the time column'
+- name: eowc partition by unsupported
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  stream_plan: |-
+    StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─StreamExchange { dist: HashShard(t.device_id) }
+        └─StreamTableScan { table: t, columns: [t.device_id, t.ts, t.val], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
+  eowc_stream_error: |-
+    Not supported: GAP_FILL with PARTITION_BY and EMIT ON WINDOW CLOSE is not supported yet.
+    HINT: Remove PARTITION_BY or use normal streaming GAP_FILL until partitioned EOWC gap fill is implemented.
 - name: partition by in materialized view
   sql: |
     CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));

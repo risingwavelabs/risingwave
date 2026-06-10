@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -120,28 +119,10 @@ impl StreamGapFill {
             tbl_builder.add_column(field);
         }
 
-        let input_schema = &out_schema;
-        let pointer_key_indices = self.pointer_key_indices();
         let state_key_indices = self
             .core
             .stream_key_indices()
             .expect("stream gap fill input should have stream key");
-
-        // Add prev/next pointer columns for linked-list traversal.
-        // Each pointer stores the explicit pointer key inside the partition:
-        // (time column, upstream stream key columns excluding partition/time).
-        for (i, &sk_idx) in pointer_key_indices.iter().enumerate() {
-            tbl_builder.add_column(&Field::with_name(
-                input_schema[sk_idx].data_type(),
-                format!("prev_sk_{}", i),
-            ));
-        }
-        for (i, &sk_idx) in pointer_key_indices.iter().enumerate() {
-            tbl_builder.add_column(&Field::with_name(
-                input_schema[sk_idx].data_type(),
-                format!("next_sk_{}", i),
-            ));
-        }
 
         // PK: deduplicated (partition_cols..., time_col, upstream stream key...).
         for key_idx in state_key_indices {
