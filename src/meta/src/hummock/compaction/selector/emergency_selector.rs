@@ -26,7 +26,7 @@ pub struct EmergencySelector {}
 impl CompactionSelector for EmergencySelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -50,8 +50,6 @@ impl CompactionSelector for EmergencySelector {
 
         let mut stats = LocalPickerStatistic::default();
         if let Some(compaction_input) = picker.pick_compaction(levels, level_handlers, &mut stats) {
-            compaction_input.add_pending_task(task_id, level_handlers);
-
             return Some(create_compaction_task(
                 group.compaction_config.as_ref(),
                 compaction_input,

@@ -44,6 +44,7 @@ pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
 pub use vnode_watermark_picker::VnodeWatermarkCompactionPicker;
 
+use crate::hummock::in_progress_compaction::TargetWriteScope;
 use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default, Debug)]
@@ -66,6 +67,14 @@ pub struct CompactionInput {
 }
 
 impl CompactionInput {
+    pub fn target_write_scope(&self) -> Option<TargetWriteScope> {
+        TargetWriteScope::from_input_levels(
+            self.target_level as u32,
+            self.target_sub_level_id,
+            &self.input_levels,
+        )
+    }
+
     pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
         let mut has_l0 = false;
         for level in &self.input_levels {

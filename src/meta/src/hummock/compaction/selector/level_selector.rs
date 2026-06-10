@@ -425,7 +425,7 @@ impl DynamicLevelSelectorCore {
 impl CompactionSelector for DynamicLevelSelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -459,7 +459,6 @@ impl CompactionSelector for DynamicLevelSelector {
 
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
-                ret.add_pending_task(task_id, level_handlers);
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
                     ret,

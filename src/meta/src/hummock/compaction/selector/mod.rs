@@ -47,7 +47,7 @@ use super::{
     CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::CompactionTask;
-use crate::hummock::compaction::in_progress_compaction::InProgressCompactInfo;
+use crate::hummock::in_progress_compaction::InProgressCompactInfo;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;

@@ -35,7 +35,7 @@ pub struct SpaceReclaimCompactionSelector {
 impl CompactionSelector for SpaceReclaimCompactionSelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -56,7 +56,6 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
         let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
-        compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(
             dynamic_level_core.get_config(),

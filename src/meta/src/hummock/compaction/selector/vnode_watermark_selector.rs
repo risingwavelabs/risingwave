@@ -34,7 +34,7 @@ pub struct VnodeWatermarkCompactionSelector {}
 impl CompactionSelector for VnodeWatermarkCompactionSelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -55,7 +55,6 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
             safe_epoch_read_table_watermarks(table_watermarks, member_table_ids);
         let compaction_input =
             picker.pick_compaction(levels, level_handlers, &pk_table_watermarks)?;
-        compaction_input.add_pending_task(task_id, level_handlers);
         Some(create_compaction_task(
             dynamic_level_core.get_config(),
             compaction_input,

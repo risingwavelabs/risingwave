@@ -58,9 +58,6 @@ use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::in_progress_compaction::{
-    InProgressCompactInfo, in_progress_compact_infos_for_group,
-};
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
@@ -72,6 +69,9 @@ use crate::hummock::compaction::{
     CompactionTask as PickedCompactionTask,
 };
 use crate::hummock::error::{Error, Result};
+use crate::hummock::in_progress_compaction::{
+    InProgressCompactInfo, in_progress_compact_infos_for_group,
+};
 use crate::hummock::manager::CompactionTaskReportResult;
 use crate::hummock::manager::compaction::compact_task_builder::{
     CompactTaskBuildContext, attach_compact_task_table_metadata, build_base_compact_task,
@@ -498,7 +498,6 @@ impl HummockManager {
                             compact_task.input_ssts,
                             start_time.elapsed()
                         );
-                        compact_status.report_compact_task(&compact_task);
                         update_table_stats_for_vnode_watermark_trivial_reclaim(
                             &mut version_stats.table_stats,
                             &compact_task,
@@ -521,6 +520,7 @@ impl HummockManager {
                         }
                     }
                     BuiltCompactTask::PendingAssignment(compact_task) => {
+                        compact_status.add_pending_task(&compact_task);
                         // Keep the projection view complete if this loop later allows multiple
                         // pending assignments from the same compaction group.
                         in_progress_compactions

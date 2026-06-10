@@ -92,7 +92,7 @@ impl ManualCompactionSelector {
 impl CompactionSelector for ManualCompactionSelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -187,7 +187,6 @@ impl CompactionSelector for ManualCompactionSelector {
         }
 
         let compaction_input = compaction_input?;
-        compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(
             group.compaction_config.as_ref(),

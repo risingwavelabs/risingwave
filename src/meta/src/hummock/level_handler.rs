@@ -14,31 +14,25 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 
+use crate::hummock::in_progress_compaction::PendingInputSstIndex;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-    /// Input SSTs that are already selected by running compaction tasks.
-    ///
-    /// This is an input-side pending index for picker checks. Full running task
-    /// metadata is stored in `Compaction::compact_task_assignment`.
-    compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
-    /// A lightweight summary used to persist and restore `compacting_files`, and
-    /// to report pending input task metrics.
-    pending_tasks: Vec<RunningCompactTask>,
+    /// Per-level input-side pending view used by picker checks and metrics.
+    pending_inputs: PendingInputSstIndex,
 }
 
 impl LevelHandler {
     pub fn new(level: u32) -> Self {
         Self {
             level,
-            compacting_files: HashMap::default(),
-            pending_tasks: vec![],
+            pending_inputs: PendingInputSstIndex::default(),
         }
     }
 
@@ -47,44 +41,26 @@ impl LevelHandler {
     }
 
     pub fn remove_task(&mut self, target_task_id: u64) {
-        for task in &self.pending_tasks {
-            if task.task_id == target_task_id {
-                for sst in &task.ssts {
-                    self.compacting_files.remove(sst);
-                }
-            }
-        }
-        self.pending_tasks
-            .retain(|task| task.task_id != target_task_id);
+        self.pending_inputs.remove_task(target_task_id);
     }
 
     pub fn is_pending_compact(&self, sst_id: &HummockSstableId) -> bool {
-        self.compacting_files.contains_key(sst_id)
+        self.pending_inputs.contains_sst(sst_id)
     }
 
     pub fn pending_task_id_by_sst(
         &self,
         sst_id: &HummockSstableId,
     ) -> Option<HummockCompactionTaskId> {
-        self.compacting_files.get(sst_id).cloned()
+        self.pending_inputs.task_id_by_sst(sst_id)
     }
 
     pub fn is_level_pending_compact(&self, level: &Level) -> bool {
-        level
-            .table_infos
-            .iter()
-            .any(|table| self.compacting_files.contains_key(&table.sst_id))
+        self.pending_inputs.contains_any_sst_in_level(level)
     }
 
     pub fn is_level_all_pending_compact(&self, level: &Level) -> bool {
-        if level.table_infos.is_empty() {
-            return false;
-        }
-
-        level
-            .table_infos
-            .iter()
-            .all(|table| self.compacting_files.contains_key(&table.sst_id))
+        self.pending_inputs.contains_all_ssts_in_level(level)
     }
 
     pub fn add_pending_task<'a>(
@@ -93,60 +69,37 @@ impl LevelHandler {
         target_level: usize,
         ssts: impl IntoIterator<Item = &'a SstableInfo>,
     ) {
-        let target_level = target_level as u32;
-        let mut table_ids = vec![];
-        let mut total_file_size = 0;
-        for sst in ssts {
-            self.compacting_files.insert(sst.sst_id, task_id);
-            total_file_size += sst.sst_size;
-            table_ids.push(sst.sst_id);
-        }
-
-        self.pending_tasks.push(RunningCompactTask {
-            task_id,
-            target_level,
-            total_file_size,
-            ssts: table_ids,
-        });
+        self.pending_inputs
+            .add_pending_task(task_id, target_level as u32, ssts);
     }
 
     pub fn pending_file_count(&self) -> usize {
-        self.compacting_files.len()
+        self.pending_inputs.pending_file_count()
     }
 
     pub fn pending_file_size(&self) -> u64 {
-        self.pending_tasks
-            .iter()
-            .map(|task| task.total_file_size)
-            .sum::<u64>()
+        self.pending_inputs.pending_file_size()
     }
 
     pub fn pending_output_file_size(&self, target_level: u32) -> u64 {
-        self.pending_tasks
-            .iter()
-            .filter(|task| task.target_level == target_level)
-            .map(|task| task.total_file_size)
-            .sum::<u64>()
+        self.pending_inputs.pending_output_file_size(target_level)
     }
 
     pub fn pending_tasks_ids(&self) -> Vec<u64> {
-        self.pending_tasks
-            .iter()
-            .map(|task| task.task_id)
-            .collect_vec()
+        self.pending_inputs.task_ids()
     }
 
     pub fn pending_tasks(&self) -> &[RunningCompactTask] {
-        &self.pending_tasks
+        self.pending_inputs.tasks()
     }
 
     pub fn compacting_files(&self) -> &HashMap<HummockSstableId, HummockCompactionTaskId> {
-        &self.compacting_files
+        self.pending_inputs.sst_to_task()
     }
 
     #[cfg(test)]
     pub(crate) fn test_add_pending_sst(&mut self, sst_id: HummockSstableId, task_id: u64) {
-        self.compacting_files.insert(sst_id, task_id);
+        self.pending_inputs.test_add_pending_sst(sst_id, task_id);
     }
 }
 
@@ -154,24 +107,15 @@ impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
     fn from(lh: &LevelHandler) -> Self {
         risingwave_pb::hummock::LevelHandler {
             level: lh.level,
-            tasks: lh.pending_tasks.clone(),
+            tasks: lh.pending_tasks().to_vec(),
         }
     }
 }
 
 impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
     fn from(lh: &risingwave_pb::hummock::LevelHandler) -> Self {
-        let mut pending_tasks = vec![];
-        let mut compacting_files = HashMap::new();
-        for task in &lh.tasks {
-            pending_tasks.push(task.clone());
-            for s in &task.ssts {
-                compacting_files.insert(*s, task.task_id);
-            }
-        }
         Self {
-            pending_tasks,
-            compacting_files,
+            pending_inputs: PendingInputSstIndex::from_tasks(lh.tasks.clone()),
             level: lh.level,
         }
     }

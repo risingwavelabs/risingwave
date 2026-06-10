@@ -20,6 +20,7 @@ pub(crate) use manager::checkpoint::{compress_payload, xxhash64_checksum};
 pub use manager::*;
 use thiserror_ext::AsReport;
 
+pub(crate) mod in_progress_compaction;
 mod level_handler;
 mod metrics_utils;
 #[cfg(any(test, feature = "test"))]

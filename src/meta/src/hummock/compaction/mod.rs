@@ -15,7 +15,6 @@
 #![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
 
 pub mod compaction_config;
-pub(crate) mod in_progress_compaction;
 mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
@@ -39,12 +38,12 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
-use self::in_progress_compaction::InProgressCompactInfo;
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
 use super::GroupStateValidator;
 use crate::MetaOpts;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
+use crate::hummock::in_progress_compaction::InProgressCompactInfo;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
@@ -163,6 +162,33 @@ impl CompactStatus {
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
+        }
+    }
+
+    pub fn add_pending_task(&mut self, compact_task: &CompactTask) {
+        let mut has_l0 = false;
+        for level in &compact_task.input_ssts {
+            if level.level_idx != 0 {
+                self.level_handlers[level.level_idx as usize].add_pending_task(
+                    compact_task.task_id,
+                    compact_task.target_level as usize,
+                    &level.table_infos,
+                );
+            } else {
+                has_l0 = true;
+            }
+        }
+        if has_l0 {
+            let table_infos = compact_task
+                .input_ssts
+                .iter()
+                .filter(|level| level.level_idx == 0)
+                .flat_map(|level| level.table_infos.iter());
+            self.level_handlers[0].add_pending_task(
+                compact_task.task_id,
+                compact_task.target_level as usize,
+                table_infos,
+            );
         }
     }
 

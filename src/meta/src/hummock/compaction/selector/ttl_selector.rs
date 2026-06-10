@@ -35,7 +35,7 @@ pub struct TtlCompactionSelector {
 impl CompactionSelector for TtlCompactionSelector {
     fn pick_compaction(
         &mut self,
-        task_id: HummockCompactionTaskId,
+        _task_id: HummockCompactionTaskId,
         context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
         let CompactionSelectorContext {
@@ -52,7 +52,6 @@ impl CompactionSelector for TtlCompactionSelector {
         let picker = TtlReclaimCompactionPicker::new(table_id_to_options);
         let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
-        compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(
             group.compaction_config.as_ref(),
