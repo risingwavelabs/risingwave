@@ -28,7 +28,7 @@ use iceberg::arrow::{
 };
 use iceberg::spec::{
     DataFile, FormatVersion, MAIN_BRANCH, Operation, PartitionSpecRef,
-    SchemaRef as IcebergSchemaRef, SerializedDataFile, TableProperties, Transform,
+    SchemaRef as IcebergSchemaRef, SerializedDataFile, TableMetadata, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
@@ -195,6 +195,7 @@ pub const COMPACTION_TYPE: &str = "compaction.type";
 pub const COMPACTION_WRITE_PARQUET_COMPRESSION: &str = "compaction.write_parquet_compression";
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
     "compaction.write_parquet_max_row_group_rows";
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 
 const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
@@ -461,6 +462,7 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
+    /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -587,6 +589,16 @@ impl IcebergConfig {
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
                 "`commit-checkpoint-interval` must be greater than 0"
+            )));
+        }
+
+        if config.enable_compaction && !values.contains_key(COMPACTION_MAX_SNAPSHOTS_NUM) {
+            config.max_snapshots_num_before_compaction = Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM);
+        }
+
+        if config.max_snapshots_num_before_compaction == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.max_snapshots_num` must be greater than 0"
             )));
         }
 
@@ -2720,39 +2732,43 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
-    /// Returns the number of snapshots since the last rewrite/overwrite
-    fn count_snapshots_since_rewrite(&self) -> usize {
-        let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
-        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
-
-        // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
+    /// Check the number of snapshots on the given branch lineage since the last rewrite operation.
+    /// Returns the number of snapshots since the last rewrite.
+    fn count_snapshots_since_rewrite_in_metadata(metadata: &TableMetadata, branch: &str) -> usize {
+        // Start from the latest snapshot of the commit branch.
+        let mut snapshot_id = metadata
+            .snapshot_for_ref(branch)
+            .map(|snapshot| snapshot.snapshot_id());
         let mut count = 0;
-        for snapshot in snapshots {
-            // Check if this snapshot represents a rewrite or overwrite operation
-            let summary = snapshot.summary();
-            match &summary.operation {
-                Operation::Replace => {
-                    // Found a rewrite/overwrite operation, stop counting
-                    break;
-                }
 
-                _ => {
-                    // Increment count for each snapshot that is not a rewrite/overwrite
-                    count += 1;
-                }
+        // Iterate through snapshots by parent lineage to find the last rewrite.
+        while let Some(current_snapshot_id) = snapshot_id {
+            let Some(snapshot) = metadata.snapshot_by_id(current_snapshot_id) else {
+                break;
+            };
+
+            // Check if this snapshot represents a rewrite operation.
+            if snapshot.summary().operation == Operation::Replace {
+                // Found a rewrite operation, stop counting.
+                break;
             }
+
+            // Increment count for each snapshot that is not a rewrite.
+            count += 1;
+            snapshot_id = snapshot.parent_snapshot_id();
         }
 
         count
     }
 
+    /// Returns the number of snapshots in the current commit branch since the last rewrite.
+    fn count_snapshots_since_rewrite(&self) -> usize {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        Self::count_snapshots_since_rewrite_in_metadata(self.table.metadata(), branch.as_str())
+    }
+
     /// Wait until snapshot count since last rewrite is below the limit
     async fn wait_for_snapshot_limit(&mut self) -> Result<()> {
-        if !self.config.enable_compaction {
-            return Ok(());
-        }
-
         if let Some(max_snapshots) = self.config.max_snapshots_num_before_compaction {
             loop {
                 let current_count = self.count_snapshots_since_rewrite();
@@ -2993,10 +3009,11 @@ mod test {
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
-        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, CompactionType, ENABLE_COMPACTION,
-        ENABLE_SNAPSHOT_EXPIRATION, FormatVersion, IcebergConfig, IcebergWriteMode,
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, CompactionType,
+        DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+        FormatVersion, IcebergConfig, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+        SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -3262,7 +3279,7 @@ mod test {
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
-            max_snapshots_num_before_compaction: None,
+            max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
             trigger_snapshot_count: None,
@@ -3641,9 +3658,54 @@ mod test {
         .collect();
 
         let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert!(!config.enable_compaction);
         assert_eq!(config.target_file_size_mb(), 1024); // Default
         assert_eq!(config.write_parquet_compression(), "zstd"); // Default
         assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
+        assert_eq!(config.max_snapshots_num_before_compaction, None);
+
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("compaction.max_snapshots_num", "1000"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let config = IcebergConfig::from_btreemap(values).unwrap();
+        assert!(!config.enable_compaction);
+        assert_eq!(config.max_snapshots_num_before_compaction, Some(1000));
+    }
+
+    #[test]
+    fn test_reject_zero_max_snapshots_num() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("compaction.max_snapshots_num", "0"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("`compaction.max_snapshots_num` must be greater than 0")
+        );
     }
 
     /// Test parquet compression parsing.
@@ -3803,5 +3865,82 @@ mod test {
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
+    }
+
+    #[test]
+    fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {
+        use std::collections::HashMap;
+
+        use iceberg::spec::{
+            FormatVersion as IcebergFormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema,
+            Snapshot, SnapshotReference, SnapshotRetention, SortOrder, Summary,
+            TableMetadataBuilder, Type, UnboundPartitionSpec,
+        };
+
+        let mut builder = TableMetadataBuilder::new(
+            Schema::builder()
+                .with_fields(vec![
+                    NestedField::new(1, "id", Type::Primitive(PrimitiveType::Long), false).into(),
+                ])
+                .build()
+                .unwrap(),
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "s3://warehouse/db/table".to_owned(),
+            IcebergFormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap();
+
+        let make_snapshot = |snapshot_id: i64,
+                             parent_snapshot_id: Option<i64>,
+                             operation: Operation| {
+            Snapshot::builder()
+                .with_snapshot_id(snapshot_id)
+                .with_parent_snapshot_id(parent_snapshot_id)
+                .with_sequence_number(snapshot_id)
+                .with_timestamp_ms(snapshot_id)
+                .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
+                .with_summary(Summary {
+                    operation,
+                    additional_properties: HashMap::new(),
+                })
+                .with_schema_id(0)
+                .build()
+        };
+
+        for (snapshot_id, parent_snapshot_id, operation) in [
+            (1, None, Operation::Append),
+            (2, Some(1), Operation::Append),
+            (3, Some(2), Operation::Replace),
+            (4, Some(3), Operation::Append),
+            // Simulate the COW publish snapshot on main. It should not affect
+            // the ingestion branch backlog count.
+            (5, None, Operation::Overwrite),
+        ] {
+            builder = builder
+                .add_snapshot(make_snapshot(snapshot_id, parent_snapshot_id, operation))
+                .unwrap();
+        }
+
+        let make_snapshot_ref = |snapshot_id: i64| {
+            SnapshotReference::new(snapshot_id, SnapshotRetention::branch(None, None, None))
+        };
+
+        let metadata = builder
+            .set_ref(ICEBERG_COW_BRANCH, make_snapshot_ref(4))
+            .unwrap()
+            .set_ref(MAIN_BRANCH, make_snapshot_ref(5))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+
+        let count = IcebergSinkCommitter::count_snapshots_since_rewrite_in_metadata(
+            &metadata,
+            ICEBERG_COW_BRANCH,
+        );
+
+        assert_eq!(count, 1);
     }
 }
