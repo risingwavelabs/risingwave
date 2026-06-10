@@ -276,3 +276,61 @@ DROP MATERIALIZED VIEW gf_no_pk_null_time;
 
 statement ok
 DROP TABLE no_pk_null_time;
+
+# ============================================
+# Test 6: update a MIDDLE anchor (regression for dangling UpdateDelete)
+# ============================================
+# Updating an anchor that has both a prev and a next neighbor previously emitted a
+# dangling UpdateDelete (its U- separated from the paired U+ by interleaved fill rows),
+# violating the U-/U+ adjacency invariant and panicking update_check / downstream.
+
+statement ok
+CREATE TABLE mid_update (
+    device_id INT,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (device_id, ts)
+);
+
+statement ok
+INSERT INTO mid_update VALUES
+    (1, '2024-05-21 10:00:00', 10.0),
+    (1, '2024-05-21 10:03:00', 40.0),
+    (1, '2024-05-21 10:06:00', 70.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gf_mid AS
+SELECT device_id, ts, value
+FROM GAP_FILL(mid_update, ts, INTERVAL '1' MINUTE, LOCF(value), PARTITION_BY(device_id));
+
+query ITR
+SELECT device_id, ts, value FROM gf_mid ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 40
+1 2024-05-21 10:04:00 40
+1 2024-05-21 10:05:00 40
+1 2024-05-21 10:06:00 70
+
+# Update the middle anchor (10:03): must not panic; LOCF fills after it follow the new value.
+statement ok
+UPDATE mid_update SET "value" = 50.0 WHERE device_id = 1 AND ts = '2024-05-21 10:03:00';
+
+query ITR
+SELECT device_id, ts, value FROM gf_mid ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 50
+1 2024-05-21 10:04:00 50
+1 2024-05-21 10:05:00 50
+1 2024-05-21 10:06:00 70
+
+statement ok
+DROP MATERIALIZED VIEW gf_mid;
+
+statement ok
+DROP TABLE mid_update;

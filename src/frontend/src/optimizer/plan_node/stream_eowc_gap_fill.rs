@@ -216,7 +216,6 @@ impl TryToStreamPb for StreamEowcGapFill {
                 .iter()
                 .map(|c| c.index() as u32)
                 .collect(),
-            upstream_stream_key: vec![],
         })))
     }
 }

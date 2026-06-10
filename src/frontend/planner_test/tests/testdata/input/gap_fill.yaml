@@ -191,6 +191,24 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '-1' SECOND, LOCF(val));
   expected_outputs:
     - binder_error
+- name: negative interval expression
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '2' MINUTE - INTERVAL '3' MINUTE, LOCF(val));
+  expected_outputs:
+    - binder_error
+- name: fill strategy on time column
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(ts));
+  expected_outputs:
+    - binder_error
+- name: fill strategy on partition column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(device_id), PARTITION_BY(device_id));
+  expected_outputs:
+    - binder_error
 - name: test gap fill with project
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));

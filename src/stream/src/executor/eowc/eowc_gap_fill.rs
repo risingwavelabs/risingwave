@@ -45,7 +45,6 @@ pub struct EowcGapFillExecutorArgs<S: StateStore> {
     pub time_column_index: usize,
     pub fill_columns: HashMap<usize, FillStrategy>,
     pub gap_interval: NonStrictExpression,
-    pub partition_by_indices: Vec<usize>,
 }
 
 pub struct GapFillMetrics {
@@ -62,7 +61,6 @@ struct ExecutorInner<S: StateStore> {
     time_column_index: usize,
     fill_columns: HashMap<usize, FillStrategy>,
     gap_interval: NonStrictExpression,
-    _partition_by_indices: Vec<usize>,
 
     // Metrics
     metrics: GapFillMetrics,
@@ -271,7 +269,6 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                 time_column_index: args.time_column_index,
                 fill_columns: args.fill_columns,
                 gap_interval: args.gap_interval,
-                _partition_by_indices: args.partition_by_indices,
                 metrics: gap_fill_metrics,
             },
         }
@@ -480,7 +477,6 @@ mod tests {
             time_column_index,
             fill_columns,
             gap_interval,
-            partition_by_indices: vec![],
         });
 
         (tx, gap_fill_executor.boxed().execute())

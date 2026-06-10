@@ -25,7 +25,7 @@ use crate::binder::BoundFillStrategy;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -65,13 +65,15 @@ impl StreamGapFill {
             Distribution::HashShard(partition_indices)
         };
 
+        // Gap fill back-fills below the current watermark and emits non-monotonic fill values,
+        // so it preserves neither watermark nor monotonicity on its output.
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.stream_kind(),
             false, // does NOT provide EOWC semantics
-            input.watermark_columns().clone(),
-            input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Self { base, core }
     }
@@ -172,12 +174,6 @@ impl TryToStreamPb for StreamGapFill {
             .to_internal_table_prost();
 
         Ok(NodeBody::GapFill(Box::new(GapFillNode {
-            upstream_stream_key: self
-                .input()
-                .expect_stream_key()
-                .iter()
-                .map(|&idx| idx as u32)
-                .collect(),
             pointer_key_indices: self
                 .pointer_key_indices()
                 .into_iter()

@@ -82,11 +82,12 @@ impl Binder {
             .into());
         }
 
-        // Validate that the interval is positive (only works for constant intervals).
-        if let ExprImpl::Literal(literal) = &interval
-            && let Some(risingwave_common::types::ScalarImpl::Interval(interval_value)) =
-                literal.get_data()
-            && *interval_value <= Interval::from_month_day_usec(0, 0, 0)
+        // Reject non-positive intervals. Fold constant expressions
+        // (e.g. `INTERVAL '2' MINUTE - INTERVAL '3' MINUTE`) so the check is not limited to bare
+        // literals.
+        if let Some(folded) = interval.try_fold_const()
+            && let Some(risingwave_common::types::ScalarImpl::Interval(interval_value)) = folded?
+            && interval_value <= Interval::from_month_day_usec(0, 0, 0)
         {
             return Err(
                 ErrorCode::BindError("The gap fill interval must be positive".to_owned()).into(),
@@ -168,6 +169,12 @@ impl Binder {
                 })?;
 
                 if let ExprImpl::InputRef(input_ref) = arg_expr {
+                    if input_ref.index() == time_col.index() {
+                        return Err(ErrorCode::BindError(
+                            "Cannot apply a fill strategy to the time column".to_owned(),
+                        )
+                        .into());
+                    }
                     // Check datatype for interpolate
                     if matches!(strategy, FillStrategy::Interpolate) {
                         let data_type = &input_ref.data_type;
@@ -193,6 +200,20 @@ impl Binder {
                 return Err(ErrorCode::BindError(
                     "Fill strategy must be a function call like LOCF(col) or PARTITION_BY(col)"
                         .to_owned(),
+                )
+                .into());
+            }
+        }
+
+        // A PARTITION_BY column defines the time-series identity and is always carried into
+        // generated rows, so a fill strategy on it would be silently ignored. Reject it.
+        for strategy in &fill_strategies {
+            if partition_by_cols
+                .iter()
+                .any(|c| c.index() == strategy.target_col.index())
+            {
+                return Err(ErrorCode::BindError(
+                    "Cannot apply a fill strategy to a PARTITION_BY column".to_owned(),
                 )
                 .into());
             }

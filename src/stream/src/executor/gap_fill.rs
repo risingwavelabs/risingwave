@@ -480,10 +480,14 @@ impl<S: StateStore> GapFillExecutor<S> {
                     let mut chunk_builder =
                         StreamChunkBuilder::new(chunk_size, schema.data_types());
 
+                    // Fill rows interleave between an update's U-/U+, so the pair can't stay
+                    // adjacent; normalize anchor ops to Insert/Delete to avoid a dangling Update.
                     for (op, row_ref) in chunk.rows() {
                         let row = row_ref.to_owned_row();
                         if row.datum_at(time_column_index).is_none() {
-                            if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                            if let Some(chunk) =
+                                chunk_builder.append_row(op.normalize_update(), &row)
+                            {
                                 yield Message::Chunk(chunk);
                             }
                             continue;
@@ -534,7 +538,9 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 // 3. Insert the new anchor row into state.
                                 managed_state.insert(&row);
                                 // 4. Emit the inserted row.
-                                if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                                if let Some(chunk) =
+                                    chunk_builder.append_row(op.normalize_update(), &row)
+                                {
                                     yield Message::Chunk(chunk);
                                 }
 
@@ -637,7 +643,9 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 managed_state.delete(&row);
 
                                 // 4. Emit the delete for the original row.
-                                if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                                if let Some(chunk) =
+                                    chunk_builder.append_row(op.normalize_update(), &row)
+                                {
                                     yield Message::Chunk(chunk);
                                 }
 
@@ -670,8 +678,12 @@ impl<S: StateStore> GapFillExecutor<S> {
                         yield Message::Chunk(chunk);
                     }
                 }
-                Message::Watermark(watermark) => {
-                    yield Message::Watermark(watermark);
+                Message::Watermark(_) => {
+                    // Gap fill back-fills and retracts rows below the latest time, so its output is
+                    // not watermark-aligned on any column (see the empty `WatermarkColumns` in
+                    // `StreamGapFill`). Drop input watermarks rather than forwarding a promise the
+                    // output cannot keep.
+                    continue;
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = managed_state.flush(barrier.epoch).await?;
@@ -958,10 +970,10 @@ mod tests {
                 " TS                  i   F
                 - 2022-01-01T00:01:00 1   1.0
                 - 2022-01-01T00:02:00 1   1.0
-                U- 2022-01-01T00:03:00 4   4.0
+                - 2022-01-01T00:03:00 4   4.0
                 + 2022-01-01T00:01:00 1   1.0
                 + 2022-01-01T00:02:00 1   1.0
-                U+ 2022-01-01T00:03:00 5   5.0"
+                + 2022-01-01T00:03:00 5   5.0"
             )
             .sort_rows()
         );
@@ -1079,10 +1091,10 @@ mod tests {
                 " TS                  i   F
                 - 2022-01-01T00:01:00 .   .
                 - 2022-01-01T00:02:00 .   .
-                U- 2022-01-01T00:03:00 4   4.0
+                - 2022-01-01T00:03:00 4   4.0
                 + 2022-01-01T00:01:00 .   .
                 + 2022-01-01T00:02:00 .   .
-                U+ 2022-01-01T00:03:00 5   5.0"
+                + 2022-01-01T00:03:00 5   5.0"
             )
             .sort_rows()
         );
@@ -1205,10 +1217,10 @@ mod tests {
                 " TS                  i   F
                 - 2022-01-01T00:01:00 2   2.0
                 - 2022-01-01T00:02:00 3   3.0
-                U- 2022-01-01T00:03:00 4   4.0
+                - 2022-01-01T00:03:00 4   4.0
                 + 2022-01-01T00:01:00 4   4.0
                 + 2022-01-01T00:02:00 7   7.0
-                U+ 2022-01-01T00:03:00 10  10.0"
+                + 2022-01-01T00:03:00 10  10.0"
             )
             .sort_rows()
         );
@@ -1512,11 +1524,11 @@ mod tests {
                 - 2023-04-02T10:00:00 20 100 .    125.0
                 - 2023-04-03T10:00:00 30 100 .    150.0
                 - 2023-04-04T10:00:00 40 100 .    175.0
-                U- 2023-04-05T10:00:00 50 200 5.0 200.0
+                - 2023-04-05T10:00:00 50 200 5.0 200.0
                 + 2023-04-02T10:00:00 20 100 .    150.0
                 + 2023-04-03T10:00:00 30 100 .    200.0
                 + 2023-04-04T10:00:00 40 100 .    250.0
-                U+ 2023-04-05T10:00:00 50 200 5.0 300.0"
+                + 2023-04-05T10:00:00 50 200 5.0 300.0"
             )
             .sort_rows()
         );
