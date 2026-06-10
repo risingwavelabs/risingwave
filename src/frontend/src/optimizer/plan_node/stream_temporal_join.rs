@@ -15,8 +15,6 @@
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
-use risingwave_common::catalog::Field;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::TemporalJoinNode;
@@ -302,7 +300,6 @@ impl StreamTemporalJoin {
         for field in right_scan.schema().fields() {
             right_key_table_builder.add_column(field);
         }
-        right_key_table_builder.add_column(&Field::with_name(DataType::Boolean, "_rw_tombstone"));
         for idx in &right_eq_indexes {
             right_key_table_builder.add_order_column(*idx, OrderType::ascending());
         }

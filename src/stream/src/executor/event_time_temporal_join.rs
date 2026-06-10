@@ -163,12 +163,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         Ok(())
     }
 
-    fn right_key_row(&self, right_row: impl Row, tombstone: bool) -> OwnedRow {
-        right_row
-            .chain(row::once(Some(ScalarImpl::Bool(tombstone))))
-            .into_owned_row()
-    }
-
     fn right_time_row(&self, right_row: impl Row) -> OwnedRow {
         let mut datums = vec![
             right_row
@@ -207,11 +201,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         let Some(version_time) = self.right_version_time(row) else {
             return;
         };
-        let right_key_row = self.right_key_row(row, false);
         if let Some(mut versions) = self.right_version_cache.get_mut(&join_key)
-            && versions
-                .insert(version_time.clone(), right_key_row)
-                .is_some()
+            && versions.insert(version_time.clone(), row.clone()).is_some()
         {
             consistency_panic!(
                 ?join_key,
@@ -285,33 +276,18 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             let right_time_row = self.right_time_row(&row);
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let right_key_row = self.right_key_row(&row, false);
-                    self.right_versions_by_key.insert(right_key_row);
+                    self.right_versions_by_key.insert(row.clone());
                     self.right_versions_by_time.insert(right_time_row);
                     self.insert_right_version_cache(&row);
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    let right_key_row = self.right_key_row(&row, false);
-                    self.right_versions_by_key.delete(right_key_row);
+                    self.right_versions_by_key.delete(row.clone());
                     self.right_versions_by_time.delete(right_time_row);
                     self.delete_right_version_cache(&row);
                 }
             }
         }
         Ok(())
-    }
-
-    fn active_right_row(row: OwnedRow) -> Option<OwnedRow> {
-        let tombstone = row
-            .datum_at(row.len() - 1)
-            .map(|scalar| scalar.into_bool())
-            .unwrap_or(false);
-        let row_len = row.len();
-        if tombstone {
-            None
-        } else {
-            Some(row.slice(0..row_len - 1).into_owned_row())
-        }
     }
 
     async fn lookup_right_version(
@@ -352,7 +328,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             .next_back()
             .map(|(_, row)| row.clone());
 
-        Ok(row.and_then(Self::active_right_row))
+        Ok(row)
     }
 
     async fn condition_matches(
