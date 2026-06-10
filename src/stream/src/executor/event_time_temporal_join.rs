@@ -208,17 +208,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
             return;
         };
         let right_key_row = self.right_key_row(row, false);
-        if let Some(mut versions) = self.right_version_cache.get_mut(&join_key) {
-            if versions
+        if let Some(mut versions) = self.right_version_cache.get_mut(&join_key)
+            && versions
                 .insert(version_time.clone(), right_key_row)
                 .is_some()
-            {
-                consistency_panic!(
-                    ?join_key,
-                    ?version_time,
-                    "double inserting an event-time temporal join right version cache entry"
-                );
-            }
+        {
+            consistency_panic!(
+                ?join_key,
+                ?version_time,
+                "double inserting an event-time temporal join right version cache entry"
+            );
         }
     }
 
@@ -227,14 +226,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> EventTimeTemporalJoinExecutor<S,
         let Some(version_time) = self.right_version_time(row) else {
             return;
         };
-        if let Some(mut versions) = self.right_version_cache.get_mut(&join_key) {
-            if versions.remove(&version_time).is_none() {
-                consistency_panic!(
-                    ?join_key,
-                    ?version_time,
-                    "removing an event-time temporal join right version cache entry but it is not in the cache"
-                );
-            }
+        if let Some(mut versions) = self.right_version_cache.get_mut(&join_key)
+            && versions.remove(&version_time).is_none()
+        {
+            consistency_panic!(
+                ?join_key,
+                ?version_time,
+                "removing an event-time temporal join right version cache entry but it is not in the cache"
+            );
         }
     }
 
