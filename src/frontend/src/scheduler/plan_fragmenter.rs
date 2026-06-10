@@ -380,53 +380,38 @@ impl SourceScanInfo {
 
 impl UnpartitionedData {
     fn complete(self, batch_parallelism: usize) -> SchedulerResult<SourceScanInfo> {
-        macro_rules! split_iceberg_tasks {
+        macro_rules! iceberg_tasks {
             ($tasks:expr, $variant:ident, $limit:expr) => {
-                IcebergSplitEnumerator::split_n_vecs($tasks, batch_parallelism)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(id, tasks)| {
-                        SplitImpl::Iceberg(IcebergSplit {
-                            split_id: id.try_into().unwrap(),
-                            task: IcebergFileScanTask::$variant(tasks),
-                            limit: $limit,
+                if let Some(limit) = $limit {
+                    vec![SplitImpl::Iceberg(IcebergSplit {
+                        split_id: 0,
+                        task: IcebergFileScanTask::$variant($tasks),
+                        limit: Some(limit),
+                    })]
+                } else {
+                    IcebergSplitEnumerator::split_n_vecs($tasks, batch_parallelism)
+                        .into_iter()
+                        .enumerate()
+                        .map(|(id, tasks)| {
+                            SplitImpl::Iceberg(IcebergSplit {
+                                split_id: id.try_into().unwrap(),
+                                task: IcebergFileScanTask::$variant(tasks),
+                                limit: None,
+                            })
                         })
-                    })
-                    .collect()
-            };
-        }
-        macro_rules! limited_iceberg_tasks {
-            ($tasks:expr, $variant:ident, $limit:expr) => {
-                vec![SplitImpl::Iceberg(IcebergSplit {
-                    split_id: 0,
-                    task: IcebergFileScanTask::$variant($tasks),
-                    limit: $limit,
-                })]
+                        .collect()
+                }
             };
         }
 
         let splits = match self {
             UnpartitionedData::Iceberg { task, limit } => match task {
-                IcebergFileScanTask::Data(tasks) => {
-                    if limit.is_some() {
-                        limited_iceberg_tasks!(tasks, Data, limit)
-                    } else {
-                        split_iceberg_tasks!(tasks, Data, limit)
-                    }
-                }
+                IcebergFileScanTask::Data(tasks) => iceberg_tasks!(tasks, Data, limit),
                 IcebergFileScanTask::EqualityDelete(tasks) => {
-                    if limit.is_some() {
-                        limited_iceberg_tasks!(tasks, EqualityDelete, limit)
-                    } else {
-                        split_iceberg_tasks!(tasks, EqualityDelete, limit)
-                    }
+                    iceberg_tasks!(tasks, EqualityDelete, None)
                 }
                 IcebergFileScanTask::PositionDelete(tasks) => {
-                    if limit.is_some() {
-                        limited_iceberg_tasks!(tasks, PositionDelete, limit)
-                    } else {
-                        split_iceberg_tasks!(tasks, PositionDelete, limit)
-                    }
+                    iceberg_tasks!(tasks, PositionDelete, None)
                 }
             },
         };

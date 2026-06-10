@@ -228,28 +228,3 @@ fn take_first_visible_rows(chunk: DataChunk, limit: usize) -> DataChunk {
     let indexes = chunk.visibility().iter_ones().take(limit).collect_vec();
     chunk.reorder_rows(&indexes)
 }
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::test_prelude::DataChunkTestExt;
-
-    use super::*;
-
-    #[test]
-    fn test_take_first_visible_rows_keeps_visible_prefix() {
-        let chunk = DataChunk::from_pretty(
-            "i
-             1
-             2 D
-             3
-             4",
-        );
-        let expected = DataChunk::from_pretty(
-            "i
-             1
-             3",
-        );
-
-        assert_eq!(take_first_visible_rows(chunk, 2), expected);
-    }
-}

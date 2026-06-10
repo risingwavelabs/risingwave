@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::prelude::*;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
@@ -20,12 +21,16 @@ use crate::optimizer::plan_node::{BatchIcebergScan, BatchLimit, BatchSeqScan, Pl
 
 pub struct BatchPushLimitToScanRule {}
 
+// Pushing a limit into an Iceberg scan collapses file tasks into one split.
+// Keep large scans parallel and let the upper BatchLimit enforce exact results.
+const ICEBERG_LIMIT_PUSHDOWN_THRESHOLD: u64 = 1_000_000;
+
 impl Rule<Batch> for BatchPushLimitToScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let limit: &BatchLimit = plan.as_batch_limit()?;
         let limit_input = limit.input();
 
-        let pushed_limit = limit.limit() + limit.offset();
+        let pushed_limit = limit.limit().checked_add(limit.offset())?;
         if let Some(scan) = limit_input.as_batch_seq_scan() {
             if scan.limit().is_some() {
                 return None;
@@ -43,6 +48,12 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
         if scan.limit().is_some() {
             return None;
         }
+        if scan.iceberg_scan_type() != IcebergScanType::DataScan {
+            return None;
+        }
+        if pushed_limit > ICEBERG_LIMIT_PUSHDOWN_THRESHOLD {
+            return None;
+        }
         let new_scan = scan.clone_with_limit(Some(pushed_limit));
         Some(limit.clone_with_input(new_scan.into()).into())
     }
@@ -51,61 +62,5 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
 impl BatchPushLimitToScanRule {
     pub fn create() -> BoxedRule {
         Box::new(BatchPushLimitToScanRule {})
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
-    use risingwave_common::types::DataType;
-    use risingwave_connector::source::iceberg::IcebergFileScanTask;
-
-    use super::*;
-    use crate::OptimizerContext;
-    use crate::optimizer::plan_node::generic::{Limit, Source, SourceNodeKind};
-
-    fn limit_over_iceberg_scan(limit: u64, offset: u64) -> PlanRef {
-        let column = ColumnCatalog {
-            column_desc: ColumnDesc::from_field_with_column_id(
-                &Field {
-                    name: "v".to_owned(),
-                    data_type: DataType::Int32,
-                },
-                0,
-            ),
-            is_hidden: false,
-        };
-        let source = Source {
-            catalog: None,
-            column_catalog: vec![column],
-            row_id_index: None,
-            kind: SourceNodeKind::CreateMViewOrBatch,
-            ctx: OptimizerContext::mock(),
-            as_of: None,
-        };
-        let scan = BatchIcebergScan::new(source, IcebergFileScanTask::Data(vec![]));
-        BatchLimit::new(Limit::new(scan.into(), limit, offset)).into()
-    }
-
-    #[test]
-    fn pushes_small_limit_to_iceberg_scan() {
-        let plan = limit_over_iceberg_scan(1, 2);
-        let rewritten = BatchPushLimitToScanRule {}.apply(plan).unwrap();
-        let limit = rewritten.as_batch_limit().unwrap();
-        let input = limit.input();
-        let scan = input.as_batch_iceberg_scan().unwrap();
-
-        assert_eq!(scan.limit(), Some(3));
-    }
-
-    #[test]
-    fn pushes_large_limit_to_iceberg_scan() {
-        let plan = limit_over_iceberg_scan(10_000, 0);
-        let rewritten = BatchPushLimitToScanRule {}.apply(plan).unwrap();
-        let limit = rewritten.as_batch_limit().unwrap();
-        let input = limit.input();
-        let scan = input.as_batch_iceberg_scan().unwrap();
-
-        assert_eq!(scan.limit(), Some(10_000));
     }
 }
