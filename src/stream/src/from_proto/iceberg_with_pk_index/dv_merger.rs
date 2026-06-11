@@ -25,6 +25,8 @@ use crate::task::ExecutorParams;
 
 pub struct IcebergWithPkIndexDvMergerExecutorBuilder;
 
+impl_stream_node_body!(IcebergWithPkIndexDvMerger(IcebergWithPkIndexDvMergerNode) => IcebergWithPkIndexDvMergerExecutorBuilder);
+
 impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
     type Node = IcebergWithPkIndexDvMergerNode;
 

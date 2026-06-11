@@ -62,3 +62,36 @@ drop table stream;
 
 statement ok
 drop table version;
+
+# Test non-trivial output indices conversion in hash temporal join. The right
+# stream key `id2` appears after `b2` in the projected right-side output.
+
+statement ok
+create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+
+statement ok
+create table version(id2 int, a2 int, b2 int, primary key (id2));
+
+statement ok
+create materialized view v as select id1, b2, id2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+
+statement ok
+insert into version values(3, 30, 300);
+
+statement ok
+insert into stream values(3, 33, 333), (4, 44, 444);
+
+query III rowsort
+select * from v;
+----
+3 300 3
+4 NULL NULL
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table stream;
+
+statement ok
+drop table version;

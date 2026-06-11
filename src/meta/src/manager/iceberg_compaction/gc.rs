@@ -22,6 +22,14 @@ use tokio::task::JoinHandle;
 
 use super::*;
 
+const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
+
+fn snapshot_expiration_cutoff_ms(iceberg_config: &IcebergConfig, now: i64) -> i64 {
+    iceberg_config
+        .snapshot_expiration_timestamp_ms(now)
+        .unwrap_or(now - MAX_SNAPSHOT_AGE_MS_DEFAULT)
+}
+
 impl IcebergCompactionManager {
     pub fn gc_loop(manager: Arc<Self>, interval_sec: u64) -> (JoinHandle<()>, Sender<()>) {
         assert!(
@@ -77,7 +85,6 @@ impl IcebergCompactionManager {
     }
 
     pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
-        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
         let now = chrono::Utc::now().timestamp_millis();
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
@@ -85,6 +92,49 @@ impl IcebergCompactionManager {
             let mut guard = self.inner.write();
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
             return Ok(());
+        }
+
+        let processing_gc_watermark_snapshot = {
+            let guard = self.inner.read();
+            guard
+                .sink_schedules
+                .get(&sink_id)
+                .and_then(|track| track.processing_gc_watermark_snapshot())
+                .map(|snapshot| snapshot.cloned())
+        };
+
+        let mut snapshot_expiration_timestamp_ms =
+            snapshot_expiration_cutoff_ms(&iceberg_config, now);
+
+        // Outer `None` means no active compaction task. Inner `None` means an
+        // active task exists without a safe snapshot watermark, so GC skips.
+        match processing_gc_watermark_snapshot {
+            None => {}
+            Some(None) => {
+                tracing::info!(
+                    catalog_name = iceberg_config.catalog_name(),
+                    table_name = iceberg_config.full_table_name()?.to_string(),
+                    %sink_id,
+                    "Skip snapshots expiration because an iceberg compaction task has no observed GC watermark",
+                );
+                return Ok(());
+            }
+            Some(Some(snapshot)) => {
+                // A running compaction task may still need snapshots up to its
+                // captured watermark, so GC must not expire newer snapshots.
+                snapshot_expiration_timestamp_ms =
+                    snapshot_expiration_timestamp_ms.min(snapshot.timestamp_ms);
+                tracing::info!(
+                    catalog_name = iceberg_config.catalog_name(),
+                    table_name = iceberg_config.full_table_name()?.to_string(),
+                    %sink_id,
+                    gc_watermark_branch = %snapshot.branch,
+                    gc_watermark_snapshot_id = snapshot.snapshot_id,
+                    gc_watermark_timestamp_ms = snapshot.timestamp_ms,
+                    protected_snapshot_expiration_timestamp_ms = snapshot_expiration_timestamp_ms,
+                    "Protect snapshots expiration with iceberg compaction GC watermark",
+                );
+            }
         }
 
         let catalog = iceberg_config.create_catalog().await?;
@@ -96,14 +146,6 @@ impl IcebergCompactionManager {
         let metadata = table.metadata();
         let mut snapshots = metadata.snapshots().collect_vec();
         snapshots.sort_by_key(|s| s.timestamp_ms());
-
-        let default_snapshot_expiration_timestamp_ms = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
-
-        let snapshot_expiration_timestamp_ms =
-            match iceberg_config.snapshot_expiration_timestamp_ms(now) {
-                Some(timestamp) => timestamp,
-                None => default_snapshot_expiration_timestamp_ms,
-            };
 
         if snapshots.is_empty()
             || snapshots.first().unwrap().timestamp_ms() > snapshot_expiration_timestamp_ms

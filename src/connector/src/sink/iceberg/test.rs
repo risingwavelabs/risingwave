@@ -29,9 +29,10 @@ use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig,
-    IcebergOrderKeyField, IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType,
+    DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
+    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
@@ -385,7 +386,7 @@ fn test_parse_iceberg_config() {
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
-            max_snapshots_num_before_compaction: None,
+            max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
             trigger_snapshot_count: None,
@@ -773,9 +774,11 @@ fn test_parse_compaction_config() {
     .collect();
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(!config.enable_compaction);
     assert!(config.enable_snapshot_expiration);
     assert_eq!(config.snapshot_expiration_max_age_millis, None);
     assert_eq!(config.snapshot_expiration_retain_last, None);
+    assert_eq!(config.max_snapshots_num_before_compaction, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
     assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default
@@ -783,6 +786,25 @@ fn test_parse_compaction_config() {
         config.write_parquet_max_row_group_bytes(),
         Some(ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
     );
+
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.max_snapshots_num", "1000"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(!config.enable_compaction);
+    assert_eq!(config.max_snapshots_num_before_compaction, Some(1000));
 }
 
 #[test]
@@ -806,6 +828,30 @@ fn test_reject_zero_trigger_snapshot_count() {
     assert!(
         err.to_string()
             .contains("`compaction.trigger_snapshot_count` must be greater than 0")
+    );
+}
+
+#[test]
+fn test_reject_zero_max_snapshots_num() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.max_snapshots_num", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`compaction.max_snapshots_num` must be greater than 0")
     );
 }
 

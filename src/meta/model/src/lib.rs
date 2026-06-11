@@ -73,6 +73,61 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
+#[macro_export]
+macro_rules! for_all_meta_model_entities {
+    ($macro:ident) => {
+        $macro! {
+            catalog_version,
+            cdc_table_snapshot_split,
+            cluster,
+            compaction_config,
+            compaction_status,
+            compaction_task,
+            connection,
+            database,
+            exactly_once_iceberg_sink,
+            fragment,
+            fragment_relation,
+            fragment_splits,
+            function,
+            hummock_epoch_to_version,
+            hummock_gc_history,
+            hummock_pinned_snapshot,
+            hummock_pinned_version,
+            hummock_sequence,
+            hummock_sstable_info,
+            hummock_table_change_log,
+            hummock_time_travel_delta,
+            hummock_time_travel_version,
+            hummock_version_delta,
+            hummock_version_stats,
+            iceberg_namespace_properties,
+            iceberg_tables,
+            index,
+            object,
+            object_dependency,
+            pending_sink_state,
+            refresh_job,
+            schema,
+            secret,
+            serde_seaql_migration,
+            session_parameter,
+            sink,
+            source,
+            streaming_job,
+            subscription,
+            system_parameter,
+            table,
+            user,
+            user_default_privilege,
+            user_privilege,
+            view,
+            worker,
+            worker_property
+        }
+    };
+}
+
 pub type TransactionId = i32;
 
 pub type PrivilegeId = i32;
