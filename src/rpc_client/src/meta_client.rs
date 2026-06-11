@@ -474,6 +474,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
     ) -> Result<WaitVersion> {
@@ -483,6 +484,9 @@ impl MetaClient {
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
             since_timestamp_epoch,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -792,6 +796,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
@@ -799,6 +804,9 @@ impl MetaClient {
             index_table: Some(table),
             fragment_graph: Some(graph),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here

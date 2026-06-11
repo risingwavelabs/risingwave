@@ -128,6 +128,7 @@ pub trait CatalogWriter: Send + Sync {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -143,6 +144,7 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
     ) -> Result<()>;
@@ -369,11 +371,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_index(index, table, graph, if_not_exists)
+            .create_index(index, table, graph, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -446,6 +449,7 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
@@ -455,6 +459,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 sink,
                 graph,
                 dependencies,
+                resource_type,
                 if_not_exists,
                 since_timestamp_epoch,
             )

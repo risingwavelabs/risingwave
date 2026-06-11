@@ -445,6 +445,10 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
         let since_timestamp_epoch = req.since_timestamp_epoch;
 
         let stream_job = StreamingJob::Sink(sink);
@@ -453,7 +457,7 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             dependencies,
-            resource_type: Self::default_streaming_job_resource_type(),
+            resource_type,
             if_not_exists: req.if_not_exists,
             since_timestamp_epoch,
         };
@@ -595,6 +599,10 @@ impl DdlService for DdlServiceImpl {
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
 
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
@@ -603,7 +611,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                resource_type: Self::default_streaming_job_resource_type(),
+                resource_type,
                 if_not_exists: req.if_not_exists,
                 since_timestamp_epoch: None,
             })
