@@ -381,10 +381,6 @@ pub mod default {
             30000
         }
 
-        pub fn streaming_join_hash_map_evict_interval_rows() -> u32 {
-            16
-        }
-
         pub fn streaming_now_progress_ratio() -> Option<f32> {
             None
         }
