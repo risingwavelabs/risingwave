@@ -102,15 +102,15 @@ pub mod test_prelude {
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
 
+pub use risingwave_common_log as log;
+pub use risingwave_common_metrics as metrics;
 pub use risingwave_common_metrics::{
     monitor, register_guarded_gauge_vec_with_registry,
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
-pub use {
-    risingwave_common_log as log, risingwave_common_metrics as metrics,
-    risingwave_common_secret as secret, risingwave_license as license,
-};
+pub use risingwave_common_secret as secret;
+pub use risingwave_license as license;
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 
