@@ -603,8 +603,8 @@ message CompactTask {
   optional uint64 max_kv_count_for_xor16 = 28;
   // Max bytes for vnode-level key range hints to embed into output SSTs.
   optional uint64 max_vnode_key_range_bytes = 29;
-  // The xor filter family that output SSTs in this task should use.
-  SstableFilterType sstable_filter_kind = 30;
+  // The xor filter type that output SSTs in this task should use.
+  SstableFilterType sstable_filter_type = 30;
   // The xor filter layout to use for output SSTs in this task.
   SstableFilterLayout sstable_filter_layout = 31;
 }
@@ -875,14 +875,14 @@ message RiseCtlUpdateCompactionConfigRequest {
     string compression_algorithm = 2;
   }
 
-  message SstableFilterKind {
+  message SstableFilterType {
     // LSM level index to update, e.g. 0 for L0 and 6 for L6.
     uint32 level = 1;
-    string filter_kind = 2;
+    string filter_type = 2;
   }
 
   message SstableFilterLayout {
-    // LSM level index to update. See `SstableFilterKind.level`.
+    // LSM level index to update. See `SstableFilterType.level`.
     uint32 level = 1;
     string layout = 2;
   }
@@ -931,7 +931,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_vnode_key_range_bytes = 33;
       // Reset compression algorithm for all levels to defaults according to group max_level.
       bool reset_compression_algorithm = 34;
-      SstableFilterKind sstable_filter_kind = 35;
+      SstableFilterType sstable_filter_type = 35;
       SstableFilterLayout sstable_filter_layout = 36;
     }
   }
@@ -1177,14 +1177,14 @@ message CompactionConfig {
   // Max bytes for vnode key-range hints recorded into each SST.
   optional uint64 max_vnode_key_range_bytes = 33;
 
-  // The xor filter family to use for each output level (for compaction tasks).
+  // The xor filter type to use for each output level (for compaction tasks).
   //
   // Index by LSM level.
   //
-  // `sstable_filter_kind[0]` is reserved for L0 and currently ignored by shared-buffer flush, which
-  // always uses xor16. `sstable_filter_kind[1]` applies to L1 output, `sstable_filter_kind[6]`
+  // `sstable_filter_type[0]` is reserved for L0 and currently ignored by shared-buffer flush, which
+  // always uses xor16. `sstable_filter_type[1]` applies to L1 output, `sstable_filter_type[6]`
   // applies to L6 output, etc.
-  repeated string sstable_filter_kind = 34;
+  repeated string sstable_filter_type = 34;
 
   // The xor filter layout to use for each output level (for compaction tasks).
   //

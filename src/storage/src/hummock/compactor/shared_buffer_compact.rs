@@ -439,8 +439,8 @@ impl SharedBufferCompactRunner {
                 retain_multiple_version: true,
                 table_vnode_partition,
                 use_block_based_filter,
-                // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
-                sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+                // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
+                sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },

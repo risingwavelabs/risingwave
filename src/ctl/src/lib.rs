@@ -23,7 +23,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
-    CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+    CompressionAlgorithm, SstableFilterLayout, SstableFilterType,
 };
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
 use thiserror_ext::AsReport;
@@ -202,11 +202,11 @@ enum HummockCommands {
         #[clap(long)]
         compression_algorithm: Option<String>,
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.
-        #[clap(long, requires = "sstable_filter_kind")]
-        sstable_filter_kind_level: Option<u32>,
-        /// Xor filter family to use for this level. Supported values: "xor16", "xor8".
-        #[clap(long, requires = "sstable_filter_kind_level")]
-        sstable_filter_kind: Option<String>,
+        #[clap(long, requires = "sstable_filter_type")]
+        sstable_filter_type_level: Option<u32>,
+        /// Xor filter type to use for this level. Supported values: "xor16", "xor8".
+        #[clap(long, requires = "sstable_filter_type_level")]
+        sstable_filter_type: Option<String>,
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.
         #[clap(long, requires = "sstable_filter_layout")]
         sstable_filter_layout_level: Option<u32>,
@@ -727,8 +727,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             tombstone_reclaim_ratio,
             compression_level,
             compression_algorithm,
-            sstable_filter_kind_level,
-            sstable_filter_kind,
+            sstable_filter_type_level,
+            sstable_filter_type,
             sstable_filter_layout_level,
             sstable_filter_layout,
             max_l0_compact_level,
@@ -772,10 +772,13 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     } else {
                         None
                     },
-                    if let (Some(level), Some(filter_kind)) =
-                        (sstable_filter_kind_level, sstable_filter_kind)
+                    if let (Some(level), Some(filter_type)) =
+                        (sstable_filter_type_level, sstable_filter_type)
                     {
-                        Some(SstableFilterKind { level, filter_kind })
+                        Some(SstableFilterType {
+                            level,
+                            filter_type: filter_type,
+                        })
                     } else {
                         None
                     },

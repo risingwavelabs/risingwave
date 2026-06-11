@@ -388,7 +388,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let get_id_time = Arc::new(AtomicU64::new(0));
 
         assert_eq!(
-            task.sstable_filter_kind,
+            task.sstable_filter_type,
             PbSstableFilterType::SstableFilterXor16,
             "fast compaction only supports blocked xor16 filter today"
         );
@@ -407,7 +407,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
-            sstable_filter_kind: task.sstable_filter_kind,
+            sstable_filter_type: task.sstable_filter_type,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
@@ -1008,7 +1008,7 @@ mod tests {
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
             blocked_xor_filter_kv_count_threshold: Some(0),
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
 

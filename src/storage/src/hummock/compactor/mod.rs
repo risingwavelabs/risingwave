@@ -215,7 +215,7 @@ impl Compactor {
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             match (
-                self.task_config.sstable_filter_kind,
+                self.task_config.sstable_filter_type,
                 self.task_config.use_block_based_filter,
             ) {
                 (PbSstableFilterType::SstableFilterXor8, true) => {
@@ -266,9 +266,9 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (kind, _) => {
+                (filter_type, _) => {
                     return Err(HummockError::other(format!(
-                        "unsupported sstable filter kind in compactor: {kind:?}"
+                        "unsupported sstable filter type in compactor: {filter_type:?}"
                     )));
                 }
             }

@@ -121,7 +121,7 @@ pub struct TaskConfig {
     pub(crate) gc_delete_keys: bool,
     pub(crate) retain_multiple_version: bool,
     pub(crate) use_block_based_filter: bool,
-    pub(crate) sstable_filter_kind: PbSstableFilterType,
+    pub(crate) sstable_filter_type: PbSstableFilterType,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
     /// `TableId` -> `TableSchema`
@@ -147,7 +147,7 @@ impl TaskConfig {
             gc_delete_keys,
             retain_multiple_version: false,
             use_block_based_filter,
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
             table_vnode_partition: BTreeMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
@@ -571,8 +571,8 @@ fn optimize_by_copy_block_with_input(
     let all_ssts_are_blocked_filter = input_ssts
         .iter()
         .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
-    let current_filter_type = compact_task.sstable_filter_kind;
-    let all_ssts_match_filter_family = input_ssts
+    let current_filter_type = compact_task.sstable_filter_type;
+    let all_ssts_match_filter_type = input_ssts
         .iter()
         .all(|table_info| table_info.filter_type_compatible_with(current_filter_type));
     // Fast compaction path can only preserve blocked filters by copying block payloads (and their
@@ -598,7 +598,7 @@ fn optimize_by_copy_block_with_input(
     context.storage_opts.enable_fast_compaction
         && current_filter_type == PbSstableFilterType::SstableFilterXor16
         && all_ssts_are_blocked_filter
-        && all_ssts_match_filter_family
+        && all_ssts_match_filter_type
         && output_wants_blocked_filter
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
@@ -797,7 +797,7 @@ mod tests {
             target_level: 2,
             target_file_size: 1024,
             task_type: PbTaskType::Dynamic,
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
             sstable_filter_layout: layout,
             blocked_xor_filter_kv_count_threshold,
             ..Default::default()

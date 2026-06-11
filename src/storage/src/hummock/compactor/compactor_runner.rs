@@ -113,7 +113,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
                 use_block_based_filter,
-                sstable_filter_kind: task.sstable_filter_kind,
+                sstable_filter_type: task.sstable_filter_type,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task
                     .table_schemas
