@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use sea_orm::{
@@ -21,83 +21,12 @@ use sea_orm::{
     TransactionTrait, Value,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
-use tokio::sync::{oneshot, watch};
 use tokio::time;
 
 use crate::rpc::election::META_ELECTION_KEY;
 use crate::{ElectionClient, ElectionMember, MetaResult};
-
-const SQLITE_ELECTION_OP_STUCK_WARN_AFTER: Duration = Duration::from_secs(5);
-const SQLITE_ELECTION_OP_SLOW_LOG_AFTER: Duration = Duration::from_millis(500);
-
-struct SqliteElectionOpWatchdog {
-    op: &'static str,
-    service_name: String,
-    id: Option<String>,
-    started_at: Instant,
-    done_tx: Option<oneshot::Sender<()>>,
-}
-
-impl SqliteElectionOpWatchdog {
-    fn new(op: &'static str, service_name: impl Into<String>, id: Option<&str>) -> Self {
-        let service_name = service_name.into();
-        let id = id.map(str::to_owned);
-        let started_at = Instant::now();
-        let (done_tx, done_rx) = oneshot::channel();
-        tracing::info!(
-            op,
-            service_name = %service_name,
-            id = id.as_deref().unwrap_or(""),
-            "starting SQLite election operation"
-        );
-
-        tokio::spawn({
-            let service_name = service_name.clone();
-            let id = id.clone();
-            async move {
-                if time::timeout(SQLITE_ELECTION_OP_STUCK_WARN_AFTER, done_rx)
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!(
-                        op,
-                        service_name = %service_name,
-                        id = id.as_deref().unwrap_or(""),
-                        elapsed_ms = started_at.elapsed().as_millis(),
-                        "SQLite election operation is still running"
-                    );
-                }
-            }
-        });
-
-        Self {
-            op,
-            service_name,
-            id,
-            started_at,
-            done_tx: Some(done_tx),
-        }
-    }
-}
-
-impl Drop for SqliteElectionOpWatchdog {
-    fn drop(&mut self) {
-        let elapsed = self.started_at.elapsed();
-        if elapsed >= SQLITE_ELECTION_OP_SLOW_LOG_AFTER {
-            tracing::warn!(
-                op = self.op,
-                service_name = %self.service_name,
-                id = self.id.as_deref().unwrap_or(""),
-                elapsed_ms = elapsed.as_millis(),
-                "SQLite election operation finished slowly"
-            );
-        }
-        if let Some(done_tx) = self.done_tx.take() {
-            let _ = done_tx.send(());
-        }
-    }
-}
 
 pub struct SqlBackendElectionClient<T: SqlDriver> {
     id: String,
@@ -190,7 +119,6 @@ impl SqliteDriver {
 #[async_trait::async_trait]
 impl SqlDriver for SqliteDriver {
     async fn init_database(&self) -> MetaResult<()> {
-        let _watchdog = SqliteElectionOpWatchdog::new("init_database", "", None);
         self.conn.execute(
             Statement::from_string(DatabaseBackend::Sqlite, format!(
                 r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id));"#,
@@ -207,7 +135,6 @@ impl SqlDriver for SqliteDriver {
     }
 
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let _watchdog = SqliteElectionOpWatchdog::new("update_heartbeat", service_name, Some(id));
         self.conn
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
@@ -232,9 +159,7 @@ DO
         id: &str,
         ttl: i64,
     ) -> MetaResult<ElectionRow> {
-        let _watchdog = SqliteElectionOpWatchdog::new("try_campaign", service_name, Some(id));
-        let query_result = self
-            .conn
+        let query_result = self.conn
             .query_one(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
                 format!(
@@ -269,7 +194,6 @@ DO
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let _watchdog = SqliteElectionOpWatchdog::new("leader", service_name, None);
         let query_result = self
             .conn
             .query_one(Statement::from_sql_and_values(
@@ -290,7 +214,6 @@ DO
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let _watchdog = SqliteElectionOpWatchdog::new("candidates", service_name, None);
         let all = self
             .conn
             .query_all(Statement::from_sql_and_values(
@@ -312,7 +235,6 @@ DO
     }
 
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let _watchdog = SqliteElectionOpWatchdog::new("resign", service_name, Some(id));
         let txn = self.conn.begin().await?;
 
         txn.execute(Statement::from_sql_and_values(
@@ -345,7 +267,6 @@ DO
     }
 
     async fn trim_candidates(&self, service_name: &str, timeout: i64) -> MetaResult<()> {
-        let _watchdog = SqliteElectionOpWatchdog::new("trim_candidates", service_name, None);
         self.conn
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,

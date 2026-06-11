@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use risingwave_common::bail;
@@ -83,11 +83,6 @@ impl SqlMetaStore {
                     //       same underlying setting in `sqlx` under current implementation.
                     .acquire_timeout(MAX_DURATION)
                     .connect_timeout(MAX_DURATION)
-                    .sqlx_logging(true)
-                    .sqlx_slow_statements_logging_settings(
-                        tracing::log::LevelFilter::Warn,
-                        Duration::from_millis(500),
-                    )
             }
         }
 
@@ -106,18 +101,7 @@ impl SqlMetaStore {
                     .idle_timeout(MAX_DURATION)
                     .max_lifetime(MAX_DURATION);
 
-                tracing::info!(
-                    endpoint = IN_MEMORY_STORE,
-                    sqlite_single_connection = true,
-                    "connecting SQL meta store"
-                );
-                let started_at = Instant::now();
                 let conn = sea_orm::Database::connect(options).await?;
-                tracing::info!(
-                    endpoint = IN_MEMORY_STORE,
-                    elapsed_ms = started_at.elapsed().as_millis(),
-                    "connected SQL meta store"
-                );
                 Self {
                     conn,
                     endpoint: IN_MEMORY_STORE.to_owned(),
@@ -132,8 +116,7 @@ impl SqlMetaStore {
                     .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
-                let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-                if is_sqlite {
+                if DbBackend::Sqlite.is_prefix_of(&endpoint) {
                     if endpoint.contains(":memory:") || endpoint.contains("mode=memory") {
                         bail!(
                             "use the `mem` backend instead of specifying a URL of in-memory SQLite"
@@ -142,30 +125,7 @@ impl SqlMetaStore {
                     options.sqlite_common();
                 }
 
-                if is_sqlite {
-                    tracing::info!(
-                        endpoint = %endpoint,
-                        sqlite_single_connection = true,
-                        slow_statement_threshold_ms = 500,
-                        "connecting SQLite meta store"
-                    );
-                } else {
-                    tracing::info!(
-                        min_connections = config.min_connections,
-                        max_connections = config.max_connections,
-                        connect_timeout_sec = config.connection_timeout_sec,
-                        acquire_timeout_sec = config.acquire_timeout_sec,
-                        idle_timeout_sec = config.idle_timeout_sec,
-                        "connecting SQL meta store"
-                    );
-                }
-                let started_at = Instant::now();
                 let conn = sea_orm::Database::connect(options).await?;
-                tracing::info!(
-                    is_sqlite,
-                    elapsed_ms = started_at.elapsed().as_millis(),
-                    "connected SQL meta store"
-                );
                 Self { conn, endpoint }
             }
         })
