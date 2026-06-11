@@ -24,7 +24,7 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(exact_size_is_empty)]
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(impl_trait_in_assoc_type)]

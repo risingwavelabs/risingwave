@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(custom_test_frameworks)]
 #![feature(type_alias_impl_trait)]
 
 #[cfg(test)]
