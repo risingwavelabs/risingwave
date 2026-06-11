@@ -130,7 +130,7 @@ impl StreamFragmentGraph {
                     "edge between {} and {} already exists: {}",
                     upstream_id,
                     downstream_id,
-                    e.to_report_string()
+                    format!("{e:?}")
                 )
             })
     }

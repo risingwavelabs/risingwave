@@ -30,7 +30,6 @@
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
-#![feature(assert_matches)]
 #![feature(never_type)]
 #![feature(map_try_insert)]
 #![register_tool(rw)]

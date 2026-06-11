@@ -32,7 +32,6 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(test)]
 #![feature(btree_cursors)]
-#![feature(assert_matches)]
 #![feature(try_blocks)]
 
 use std::sync::Arc;

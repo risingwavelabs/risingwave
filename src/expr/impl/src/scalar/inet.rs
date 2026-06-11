@@ -88,7 +88,7 @@ pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     use super::*;
 

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(assert_matches)]
 #![feature(coverage_attribute)]
 
 use std::env;
@@ -254,7 +253,7 @@ fn playground() -> ! {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     use clap::error::ErrorKind;
 
