@@ -1542,19 +1542,40 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterResourceGroupResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_job_id();
         let deferred = req.get_deferred();
         let resource_group = req.resource_group;
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.as_job_id(),
+                job_id,
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        request: Request<AlterDatabaseResourceGroupRequest>,
+    ) -> Result<Response<AlterDatabaseResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseResourceGroup(
+                req.database_id,
+                req.resource_group,
+                req.deferred,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterDatabaseResourceGroupResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_database_param(
