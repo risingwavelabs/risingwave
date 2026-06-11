@@ -523,7 +523,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp ]
@@ -574,7 +574,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_region, t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 1
     ├── columns: [ vnode, epoch, row_count, is_epoch_finished, region, device_id, ts, _rw_timestamp ]

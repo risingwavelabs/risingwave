@@ -131,8 +131,9 @@ impl StreamGapFill {
             tbl_builder.add_order_column(key_idx, OrderType::ascending());
         }
 
-        let dist_key_indices = self.core.partition_key_indices();
-        tbl_builder.build(dist_key_indices, 0)
+        let partition_key_indices = self.core.partition_key_indices();
+        let read_prefix_len_hint = partition_key_indices.len();
+        tbl_builder.build(partition_key_indices, read_prefix_len_hint)
     }
 }
 
