@@ -368,6 +368,10 @@ pub mod default {
             2048
         }
 
+        pub fn stream_high_gap_fill_amplification_threshold() -> usize {
+            2048
+        }
+
         /// Default to 1 to be compatible with the behavior before this config is introduced.
         pub fn stream_exchange_connection_pool_size() -> Option<u16> {
             Some(1)

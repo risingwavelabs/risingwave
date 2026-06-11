@@ -110,6 +110,10 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             state_table,
             partition_by_indices,
             pointer_key_indices,
+            high_gap_fill_amplification_threshold: params
+                .config
+                .developer
+                .high_gap_fill_amplification_threshold,
         });
 
         Ok((params.info, exec).into())

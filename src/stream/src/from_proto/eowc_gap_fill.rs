@@ -102,6 +102,10 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval,
+            high_gap_fill_amplification_threshold: params
+                .config
+                .developer
+                .high_gap_fill_amplification_threshold,
         });
 
         Ok((params.info, exec).into())
