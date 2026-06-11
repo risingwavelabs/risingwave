@@ -1029,7 +1029,6 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         )
     }
 
-    let mut count = 0;
     let mut epoch_row_count = 0;
     let mut backfill_paused = initial_backfill_paused;
     loop {
@@ -1053,7 +1052,6 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                     backfill_paused = false;
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
-                    count += chunk.cardinality();
                     epoch_row_count += chunk.cardinality();
                     yield Message::Chunk(chunk);
                 }
@@ -1071,6 +1069,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                         }
                     })
                     .await?;
+                let count = backfill_state.total_row_count();
                 let post_commit = backfill_state.commit(barrier.epoch).await?;
                 trace!(?barrier_epoch, count, epoch_row_count, "update progress");
                 progress.update(barrier_epoch, barrier_epoch.prev, count as _);
@@ -1101,7 +1100,6 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                         anyhow!("snapshot backfill paused, but received snapshot chunk").into(),
                     );
                 }
-                count += chunk.cardinality();
                 epoch_row_count += chunk.cardinality();
                 yield Message::Chunk(chunk);
             }
@@ -1115,13 +1113,14 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let barrier_to_report_finish = receive_next_barrier(barrier_rx).await?;
     assert_eq!(barrier_to_report_finish.epoch.prev, barrier_epoch.curr);
     barrier_epoch = barrier_to_report_finish.epoch;
-    trace!(?barrier_epoch, count, "report finish");
     snapshot_stream
         .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
             assert_eq!(pk_progress, None);
             backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
         })
         .await?;
+    let count = backfill_state.total_row_count();
+    trace!(?barrier_epoch, count, "report finish");
     let post_commit = backfill_state.commit(barrier_epoch).await?;
     progress.finish(barrier_epoch, count as _);
     yield Message::Barrier(barrier_to_report_finish);
