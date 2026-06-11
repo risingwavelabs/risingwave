@@ -103,6 +103,7 @@ message CreateSinkRequest {
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
+  StreamingJobResourceType resource_type = 6;
 }
 
 message CreateSinkResponse {
@@ -453,6 +454,7 @@ message CreateIndexRequest {
   catalog.Table index_table = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   bool if_not_exists = 4;
+  StreamingJobResourceType resource_type = 5;
 }
 
 message CreateIndexResponse {
