@@ -36,7 +36,9 @@ use crate::types::{
     ToDatumRef, ToText, hash_datum,
 };
 use crate::util::memcmp_encoding;
-use crate::util::value_encoding::estimate_serialize_datum_size;
+use crate::util::value_encoding::{
+    estimate_serialize_datum_size, try_get_exact_serialize_datum_size,
+};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct ListArrayBuilder {
@@ -575,7 +577,19 @@ impl<'a> ListRef<'a> {
 
     /// estimate the serialized size with value encoding
     pub fn estimate_serialize_size_inner(self) -> usize {
-        self.iter().map(estimate_serialize_datum_size).sum()
+        if let Some(element_size) = try_get_exact_serialize_datum_size(self.array) {
+            return self.len() * element_size;
+        }
+
+        let len = self.len();
+        if len <= 3 {
+            self.iter().map(estimate_serialize_datum_size).sum()
+        } else {
+            let sample_sum = estimate_serialize_datum_size(self.get(0).unwrap())
+                + estimate_serialize_datum_size(self.get(len / 2).unwrap())
+                + estimate_serialize_datum_size(self.get(len - 1).unwrap());
+            sample_sum * len / 3
+        }
     }
 
     pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {

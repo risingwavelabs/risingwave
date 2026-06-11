@@ -130,6 +130,7 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Int16(_) => Some(2),
         ArrayImpl::Int32(_) => Some(4),
         ArrayImpl::Int64(_) => Some(8),
+        ArrayImpl::Int256(_) => Some(32),
         ArrayImpl::Serial(_) => Some(8),
         ArrayImpl::Float32(_) => Some(4),
         ArrayImpl::Float64(_) => Some(8),
@@ -138,7 +139,12 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
         ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
         ArrayImpl::Timestamp(_) => Some(estimate_serialize_timestamp_size()),
+        ArrayImpl::Timestamptz(_) => Some(8),
         ArrayImpl::Time(_) => Some(estimate_serialize_time_size()),
+        ArrayImpl::Struct(struct_arr) => struct_arr
+            .fields()
+            .map(|field| try_get_exact_serialize_datum_size(field))
+            .sum(),
         _ => None,
     }
     .map(|x| x + 1)
@@ -164,6 +170,30 @@ pub fn serialize_datum_into(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
 pub fn estimate_serialize_datum_size(datum_ref: impl ToDatumRef) -> usize {
     if let Some(d) = datum_ref.to_datum_ref() {
         1 + estimate_serialize_scalar_size(d)
+    } else {
+        1
+    }
+}
+
+pub fn estimate_struct_field_size(datum_ref: DatumRef<'_>) -> usize {
+    if let Some(d) = datum_ref {
+        1 + match d {
+            ScalarRefImpl::Int16(_) => 2,
+            ScalarRefImpl::Int32(_) => 4,
+            ScalarRefImpl::Int64(_) => 8,
+            ScalarRefImpl::Int256(_) => 32,
+            ScalarRefImpl::Serial(_) => 8,
+            ScalarRefImpl::Float32(_) => 4,
+            ScalarRefImpl::Float64(_) => 8,
+            ScalarRefImpl::Bool(_) => 1,
+            ScalarRefImpl::Decimal(_) => estimate_serialize_decimal_size(),
+            ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
+            ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
+            ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+            ScalarRefImpl::Timestamptz(_) => 8,
+            ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
+            _ => 0,
+        }
     } else {
         1
     }
@@ -471,10 +501,13 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{ArrayImpl, ListValue, StructValue};
+    use crate::array::{
+        Array, ArrayImpl, I32Array, I64Array, ListValue, StructArray, StructValue, Utf8Array,
+    };
+    use crate::bitmap::Bitmap;
     use crate::test_utils::rand_chunk;
     use crate::types::{
-        DataType, Date, Datum, Decimal, Interval, ScalarImpl, Serial, Time, Timestamp,
+        DataType, Date, Datum, Decimal, Interval, ScalarImpl, Serial, StructType, Time, Timestamp,
     };
     use crate::util::value_encoding::{
         estimate_serialize_datum_size, serialize_datum, try_get_exact_serialize_datum_size,
@@ -554,5 +587,35 @@ mod tests {
         for column in chunk.columns() {
             test_try_get_exact_serialize_datum_size(column);
         }
+    }
+
+    #[test]
+    fn test_try_estimate_struct_size() {
+        let fixed_size_struct = ArrayImpl::Struct(StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int64]),
+            vec![
+                I32Array::from_iter([Some(1)]).into_ref(),
+                I64Array::from_iter([Some(2)]).into_ref(),
+            ],
+            Bitmap::ones(1),
+        ));
+        assert_eq!(
+            try_get_exact_serialize_datum_size(&fixed_size_struct),
+            Some(1 + (1 + 4) + (1 + 8))
+        );
+        test_try_get_exact_serialize_datum_size(&fixed_size_struct);
+
+        let variable_size_struct = ArrayImpl::Struct(StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Varchar]),
+            vec![
+                I32Array::from_iter([Some(1)]).into_ref(),
+                Utf8Array::from_iter([Some("hello")]).into_ref(),
+            ],
+            Bitmap::ones(1),
+        ));
+        assert_eq!(
+            try_get_exact_serialize_datum_size(&variable_size_struct),
+            None
+        );
     }
 }
