@@ -30,6 +30,8 @@ pub struct CdcFilterExecutorBuilder;
 /// Keep this value in sync with CDC source schema definition.
 const RW_TABLE_NAME_COLUMN_IDX: u32 = 2;
 
+impl_stream_node_body!(CdcFilter(CdcFilterNode) => CdcFilterExecutorBuilder);
+
 /// `CdcFilter` is an extension to the Filter executor
 impl ExecutorBuilder for CdcFilterExecutorBuilder {
     type Node = CdcFilterNode;

@@ -31,6 +31,8 @@ use crate::executor::{
 
 pub struct StreamScanExecutorBuilder;
 
+impl_stream_node_body!(StreamScan(StreamScanNode) => StreamScanExecutorBuilder);
+
 impl ExecutorBuilder for StreamScanExecutorBuilder {
     type Node = StreamScanNode;
 

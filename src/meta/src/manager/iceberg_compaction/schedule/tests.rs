@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use prometheus::Registry;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 
 use super::*;
 use crate::controller::catalog::CatalogController;
@@ -64,9 +65,18 @@ fn new_track(
     }
 }
 
-fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+fn start_in_flight_on(
+    track: &mut CompactionTrack,
+    task_id: u64,
+    compactor_context_id: HummockContextId,
+    now: Instant,
+) {
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, compactor_context_id, now);
+}
+
+fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+    start_in_flight_on(track, task_id, 1.into(), now);
 }
 
 fn record_commits(track: &mut CompactionTrack, n: usize) {
@@ -235,7 +245,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
         .sink_schedules
         .get_mut(&sink_id)
         .unwrap()
-        .mark_dispatched(1, now);
+        .mark_dispatched(1, 1.into(), now);
     let applied = manager.apply_sink_update(
         &mut guard,
         PreparedSinkUpdate {
@@ -444,7 +454,7 @@ fn test_mark_dispatched_records_task_id_for_stale_report_filtering() {
     let mut track = new_track(now, 120, 10, 5);
     track.start_processing();
     assert!(track.is_pending_dispatch());
-    track.mark_dispatched(42, now);
+    track.mark_dispatched(42, 1.into(), now);
 
     assert!(track.is_processing_task(42));
     assert!(!track.is_processing_task(43));
@@ -817,7 +827,7 @@ async fn test_apply_sink_update_keeps_processing_track_when_compaction_is_disabl
     config.enable_compaction = false;
     let mut track = new_track(now, 300, 3, 0);
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, 1.into(), now);
     let mut guard = empty_inner();
     guard.sink_schedules.insert(sink_id, track);
 
@@ -999,6 +1009,41 @@ async fn test_get_top_n_creates_pending_dispatch_handle_and_drop_restores_idle()
 }
 
 #[tokio::test]
+async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(467);
+    let task_id = 88;
+    let compactor_context_id = 1000.into();
+    let mut receiver = manager
+        .iceberg_compactor_manager
+        .add_compactor(compactor_context_id);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight_on(&mut track, task_id, compactor_context_id, now);
+    {
+        let mut guard = manager.inner.write();
+        guard.sink_schedules.insert(sink_id, track);
+        guard.snapshot_expiration_sink_ids.insert(sink_id);
+    }
+
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+
+    {
+        let guard = manager.inner.read();
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+        assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
+    }
+
+    let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+    match event {
+        IcebergResponseEvent::CancelCompactTask(cancel_task) => {
+            assert_eq!(cancel_task.task_id, task_id);
+        }
+        other => panic!("unexpected iceberg compactor event: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_pre_dispatch_failure_notifies_manual_waiter_and_removes_temporary_track() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(461);
@@ -1058,7 +1103,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1089,7 +1134,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1122,7 +1167,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
     let mut track = new_track(now, 120, 10, 0);
     track.finish_action = CompactionTrackFinishAction::RemoveTrack;
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1152,7 +1197,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
     let mut track = new_track(now, 120, 10, 0);
     track.finish_action = CompactionTrackFinishAction::RemoveTrack;
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1262,7 +1307,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         let mut guard = manager.inner.write();
         let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
         track.start_processing();
-        track.mark_dispatched(task_id, now);
+        track.mark_dispatched(task_id, 1.into(), now);
     }
     manager.handle_report_task(IcebergReportTask {
         task_id,

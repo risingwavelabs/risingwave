@@ -22,6 +22,8 @@ use crate::executor::eowc::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
 
+impl_stream_node_body!(Sort(SortNode) => SortExecutorBuilder);
+
 impl ExecutorBuilder for SortExecutorBuilder {
     type Node = SortNode;
 

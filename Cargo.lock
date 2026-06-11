@@ -926,9 +926,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.40.2"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01fa0605961e005565ddbeff2d8f9148b8893128381ee3bec3a5df4e6a8d0f74"
+checksum = "3ec57a13b36ba76764870363a9182d8bc9fb49538dc5a948dd2e5224fe65ce40"
 dependencies = [
  "async-openai-macros",
  "base64 0.22.1",
@@ -12651,6 +12651,8 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "syn 2.0.117",
+ "thiserror-ext",
 ]
 
 [[package]]
