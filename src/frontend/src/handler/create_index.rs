@@ -41,6 +41,8 @@ use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, is_impure_func_call};
 use crate::handler::HandlerArgs;
+use crate::handler::create_mv::resolve_streaming_job_resource_type;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{
@@ -637,7 +639,7 @@ fn assemble_materialize(
 }
 
 pub async fn handle_create_index(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     if_not_exists: bool,
     index_name: ObjectName,
     table_name: ObjectName,
@@ -647,6 +649,9 @@ pub async fn handle_create_index(
     distributed_by: Vec<ast::Expr>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    let resource_type =
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handler_args.with_options)
+            .await?;
 
     let (graph, index_table, index) = {
         let (schema_name, table, index_table_name) =
@@ -698,9 +703,19 @@ pub async fn handle_create_index(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_index(index, index_table.to_prost(), graph, if_not_exists)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_index(
+            index,
+            index_table.to_prost(),
+            graph,
+            resource_type,
+            if_not_exists,
+        ),
+        &session,
+        "CREATE INDEX",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))
 }
