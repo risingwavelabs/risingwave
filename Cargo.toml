@@ -156,7 +156,10 @@ hashbrown = { version = "0.17", features = [
     "inline-more",
 ] }
 hashbrown0_14 = { package = "hashbrown", version = "0.14" }
-hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
+# 0.16.1 removed the `RawTableClone for RawTable<T: Copy>` specialization that
+# rustc rejects under `min_specialization` ("cannot specialize on trait Copy"),
+# so the `nightly` feature compiles again on recent nightlies. (Was 0.15.)
+hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
     "nightly",
 ] }
 hytra = "0.1"
