@@ -93,6 +93,10 @@ impl<S: StateStore> ManagedGapFillState<S> {
         self.state_table.commit(epoch).await
     }
 
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state_table.try_flush().await
+    }
+
     fn state_row_to_output_row(&self, state_row: impl Row) -> OwnedRow {
         state_row.into_owned_row()
     }
@@ -677,6 +681,8 @@ impl<S: StateStore> GapFillExecutor<S> {
                     if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
+
+                    managed_state.try_flush().await?;
                 }
                 Message::Watermark(_) => {
                     // Gap fill back-fills and retracts rows below the latest time, so its output is
