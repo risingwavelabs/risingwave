@@ -371,6 +371,9 @@ impl GlobalBarrierWorkerContextImpl {
             .get_fragment_downstream_relations_in_txn(&txn, fragment_ids)
             .await?;
 
+        txn.commit().await?;
+        drop(inner);
+
         // Resolve upstream log epochs from the hummock changelog.
         let (upstream_table_log_epochs, target_upstream_epoch) = self
             .hummock_manager
