@@ -191,7 +191,7 @@ mod tests {
         frontend.run_sql("CREATE DATABASE test_db").await.unwrap();
 
         frontend
-            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = DEFAULT")
+            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = DEFAULT DEFERRED")
             .await
             .unwrap();
         {
@@ -201,7 +201,7 @@ mod tests {
         }
 
         frontend
-            .run_sql("ALTER DATABASE test_db RESET RESOURCE_GROUP")
+            .run_sql("ALTER DATABASE test_db RESET RESOURCE_GROUP DEFERRED")
             .await
             .unwrap();
         {
@@ -211,7 +211,7 @@ mod tests {
         }
 
         let err = frontend
-            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = 1")
+            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = 1 DEFERRED")
             .await
             .unwrap_err();
         assert!(

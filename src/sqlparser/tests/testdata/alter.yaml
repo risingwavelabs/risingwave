@@ -18,13 +18,22 @@
 - input: ALTER SYSTEM SET a = DEFAULT
   formatted_sql: ALTER SYSTEM SET a = DEFAULT
 - input: ALTER DATABASE dev SET RESOURCE_GROUP TO 'rg'
-  formatted_sql: ALTER DATABASE dev SET RESOURCE_GROUP TO 'rg'
+  error_msg: |-
+    sql parser error: expected DEFERRED after ALTER DATABASE SET RESOURCE_GROUP, found: EOF
+    LINE 1: ALTER DATABASE dev SET RESOURCE_GROUP TO 'rg'
+                                                         ^
 - input: ALTER DATABASE dev SET RESOURCE_GROUP = default
-  formatted_sql: ALTER DATABASE dev SET RESOURCE_GROUP TO DEFAULT
+  error_msg: |-
+    sql parser error: expected DEFERRED after ALTER DATABASE SET RESOURCE_GROUP, found: EOF
+    LINE 1: ALTER DATABASE dev SET RESOURCE_GROUP = default
+                                                           ^
 - input: ALTER DATABASE dev SET RESOURCE_GROUP TO 'rg' DEFERRED
   formatted_sql: ALTER DATABASE dev SET RESOURCE_GROUP TO 'rg' DEFERRED
 - input: ALTER DATABASE dev RESET RESOURCE_GROUP
-  formatted_sql: ALTER DATABASE dev RESET RESOURCE_GROUP
+  error_msg: |-
+    sql parser error: expected DEFERRED after ALTER DATABASE RESET RESOURCE_GROUP, found: EOF
+    LINE 1: ALTER DATABASE dev RESET RESOURCE_GROUP
+                                                   ^
 - input: ALTER DATABASE dev RESET RESOURCE_GROUP DEFERRED
   formatted_sql: ALTER DATABASE dev RESET RESOURCE_GROUP DEFERRED
 - input: ALTER INDEX idx SET RESOURCE_GROUP TO 'rg'

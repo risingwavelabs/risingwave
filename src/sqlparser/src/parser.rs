@@ -3223,11 +3223,13 @@ impl Parser<'_> {
                     return self.expected("TO or = after ALTER DATABASE SET RESOURCE_GROUP");
                 }
                 let value = self.parse_set_variable()?;
-                let deferred = self.parse_keyword(Keyword::DEFERRED);
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE SET RESOURCE_GROUP");
+                }
 
                 AlterDatabaseOperation::SetResourceGroup {
                     resource_group: Some(value),
-                    deferred,
+                    deferred: true,
                 }
             } else {
                 // check will be delayed to frontend
@@ -3235,11 +3237,13 @@ impl Parser<'_> {
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) {
-                let deferred = self.parse_keyword(Keyword::DEFERRED);
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE RESET RESOURCE_GROUP");
+                }
 
                 AlterDatabaseOperation::SetResourceGroup {
                     resource_group: None,
-                    deferred,
+                    deferred: true,
                 }
             } else {
                 return self.expected("RESOURCE_GROUP after RESET");
