@@ -13,15 +13,15 @@ crate-type = ["cdylib"]
 # See `README.md` before bumping the version.
 # Remember to update the version in `ci/Dockerfile` as well.
 [dependencies]
-clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "21e84b5da85f" }
-dylint_linting = "=4.1.0"
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "9cadea6247dd" }
+dylint_linting = "=6.0.1"
 itertools = "0.14"
 
 [dev-dependencies]
 
 # UI test dependencies
 anyhow = "1"
-dylint_testing = "=4.1.0"
+dylint_testing = "=6.0.1"
 thiserror = "2"
 thiserror-ext = "0.2"
 tracing = "0.1"

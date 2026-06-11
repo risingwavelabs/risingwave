@@ -20,6 +20,7 @@ use clippy_utils::macros::{
 };
 use clippy_utils::paths::{PathLookup, PathNS};
 use clippy_utils::ty::implements_trait;
+use clippy_utils::sym::{Error, ToString};
 use clippy_utils::{is_in_cfg_test, is_in_test_function};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
@@ -158,7 +159,7 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
                 .type_dependent_def_id(expr.hir_id)
                 .is_some_and(|did| {
                     let Some(trait_id) = cx.tcx.trait_of_assoc(did) else { return false };
-                    cx.tcx.is_diagnostic_item(sym::ToString, trait_id)
+                    cx.tcx.is_diagnostic_item(ToString, trait_id)
                 })
         {
             check_to_string_call(cx, receiver, to_string_span);
@@ -225,7 +226,7 @@ fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_spa
 }
 
 fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help + 'static) {
-    let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
+    let Some(error_trait_id) = cx.tcx.get_diagnostic_item(Error) else {
         return;
     };
 
