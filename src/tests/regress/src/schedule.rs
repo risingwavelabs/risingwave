@@ -92,7 +92,7 @@ impl Schedule {
                 schedules.push(
                     line[5..]
                         .split_whitespace()
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                         .collect(),
                 );
                 debug!("Add one parallel schedule: {:?}", schedules.last().unwrap());
