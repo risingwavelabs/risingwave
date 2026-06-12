@@ -156,7 +156,6 @@ pub enum BackfillType {
     /// Frontend-only variant for snapshot-free sinks. It is serialized as
     /// `StreamScanType::UpstreamOnly`, but derives an upsert stream kind.
     UpstreamOnlySink,
-    Backfill,
     ArrangementBackfill,
     SnapshotBackfill,
 }
@@ -171,7 +170,6 @@ impl BackfillType {
             BackfillType::Replicated | BackfillType::UpstreamOnlySink => {
                 StreamScanType::UpstreamOnly
             }
-            BackfillType::Backfill => StreamScanType::Backfill,
             BackfillType::ArrangementBackfill => StreamScanType::ArrangementBackfill,
             BackfillType::SnapshotBackfill => StreamScanType::SnapshotBackfill,
         }
@@ -186,10 +184,6 @@ pub struct ToStreamContext {
 }
 
 impl ToStreamContext {
-    pub fn new(emit_on_window_close: bool) -> Self {
-        Self::new_with_backfill_type(emit_on_window_close, BackfillType::Backfill)
-    }
-
     pub fn new_with_backfill_type(emit_on_window_close: bool, backfill_type: BackfillType) -> Self {
         Self {
             share_to_stream_map: HashMap::new(),

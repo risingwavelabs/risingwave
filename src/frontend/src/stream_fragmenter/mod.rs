@@ -433,6 +433,7 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
+                #[expect(deprecated)]
                 match node.stream_scan_type() {
                     StreamScanType::SnapshotBackfill => {
                         current_fragment

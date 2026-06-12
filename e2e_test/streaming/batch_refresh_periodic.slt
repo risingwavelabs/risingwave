@@ -4,6 +4,9 @@
 # consume upstream changes and surface them in the batch-refresh MV.
 
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 DROP MATERIALIZED VIEW IF EXISTS mv_batch;
 
 statement ok
@@ -21,12 +24,18 @@ INSERT INTO t_batch VALUES (1), (2);
 statement ok
 CREATE MATERIALIZED VIEW mv_up AS SELECT * FROM t_batch;
 
+query I rowsort retry 15 backoff 1s
+SELECT * FROM mv_up;
+----
+1
+2
+
 statement ok
 CREATE MATERIALIZED VIEW mv_batch WITH (refresh.interval.sec = 3) AS
 SELECT * FROM mv_up;
 
 # Initial snapshot.
-query I rowsort
+query I rowsort retry 15 backoff 1s
 SELECT * FROM mv_batch;
 ----
 1
