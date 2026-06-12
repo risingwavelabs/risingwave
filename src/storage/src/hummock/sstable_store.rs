@@ -1099,12 +1099,61 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Vec<BlockMeta>> {
         let index = &sstable.index;
+        let Some(first_shard) = index.shards.first() else {
+            return Ok(vec![]);
+        };
+        let last_shard = index
+            .shards
+            .last()
+            .expect("non-empty index shards should have last shard");
+        let range_start = first_shard.offset as usize;
+        let range_end = last_shard.offset as usize + last_shard.len as usize;
+        let now = Instant::now();
+        let buf = self
+            .store
+            .read(&self.get_sst_data_path(sstable.id), range_start..range_end)
+            .instrument_await("get_partitioned_block_metas_response".verbose())
+            .await?;
+        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+        stats
+            .remote_io_time
+            .fetch_add(add as u64, Ordering::Relaxed);
+        stats.sst_store_meta_shard_read_count += 1;
+        stats.sst_store_meta_shard_read_bytes += buf.len() as u64;
+        stats.partitioned_meta_shard_read_bytes += buf.len() as u64;
+
         let mut block_metas = Vec::with_capacity(index.block_count as usize);
         for desc in &index.shards {
-            let shard = self
-                .get_meta_shard_holder(sstable.id, index.filter_type, desc, stats)
-                .await?;
-            block_metas.extend_from_slice(&shard.block_metas);
+            let shard_start = desc.offset as usize;
+            let shard_len = desc.len as usize;
+            let relative_start = shard_start.checked_sub(range_start).ok_or_else(|| {
+                HummockError::decode_error(format!(
+                    "partitioned meta shard {} offset {} precedes read range {}",
+                    desc.shard_idx, shard_start, range_start
+                ))
+            })?;
+            let relative_end = relative_start.checked_add(shard_len).ok_or_else(|| {
+                HummockError::decode_error(format!(
+                    "partitioned meta shard {} range overflow",
+                    desc.shard_idx
+                ))
+            })?;
+            let shard_body = buf.get(relative_start..relative_end).ok_or_else(|| {
+                HummockError::decode_error(format!(
+                    "partitioned meta shard {} range {}..{} exceeds full meta read {}",
+                    desc.shard_idx,
+                    relative_start,
+                    relative_end,
+                    buf.len()
+                ))
+            })?;
+            super::xxhash64_verify(shard_body, desc.checksum)?;
+            block_metas.extend(MetaShard::decode_block_metas_body(
+                desc.shard_idx,
+                desc.block_count,
+                &desc.smallest_key,
+                shard_body,
+            )?);
         }
         Ok(block_metas)
     }
@@ -1523,7 +1572,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_data, put_sst,
+        default_builder_opt_for_test, gen_test_sstable, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
     use crate::hummock::{
@@ -1633,6 +1682,35 @@ mod tests {
         };
         assert!(shard.filter.is_empty());
         assert!(filter_reader.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_partitioned_block_metas_reads_all_shards_once() {
+        let sstable_store = mock_sstable_store().await;
+        let mut opts = default_builder_opt_for_test();
+        opts.block_capacity = 256;
+        opts.partitioned_meta_block_count = 1;
+        let (holder, _) = gen_test_sstable(
+            opts,
+            SST_ID,
+            (0..100).map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+            sstable_store.clone(),
+        )
+        .await;
+        assert!(holder.index.shard_count > 1);
+
+        let mut stats = StoreLocalStatistic::default();
+        let block_metas = sstable_store
+            .get_partitioned_block_metas(&holder, &mut stats)
+            .await
+            .unwrap();
+
+        assert_eq!(block_metas.len(), holder.index.block_count as usize);
+        assert_eq!(stats.sst_store_meta_shard_read_count, 1);
+        assert_eq!(
+            stats.partitioned_meta_shard_read_bytes,
+            stats.sst_store_meta_shard_read_bytes
+        );
     }
 
     async fn validate_sst(

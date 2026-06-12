@@ -90,11 +90,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             max_sst_size: options.compactor_max_sst_size,
             shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
             max_vnode_key_range_bytes: None,
-            partitioned_meta_block_count: std::env::var("RW_SSTABLE_META_SHARD_BLOCK_COUNT")
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .filter(|value| *value > 0)
-                .unwrap_or(8),
+            partitioned_meta_block_count: options.partitioned_meta_block_count,
             estimated_output_key_count: None,
             filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
         }
@@ -2012,5 +2008,15 @@ pub(super) mod tests {
             let key_ref = k.as_ref();
             assert!(may_match_partitioned_filter(&sstable_store, &table, key_ref, hash).await);
         }
+    }
+
+    #[test]
+    fn test_sstable_builder_options_uses_configured_partitioned_meta_block_count() {
+        let storage_opts = StorageOpts {
+            partitioned_meta_block_count: 16,
+            ..Default::default()
+        };
+        let builder_opts = SstableBuilderOptions::from(&storage_opts);
+        assert_eq!(builder_opts.partitioned_meta_block_count, 16);
     }
 }

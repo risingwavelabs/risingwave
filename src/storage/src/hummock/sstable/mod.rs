@@ -767,6 +767,66 @@ impl MetaShard {
         })
     }
 
+    pub fn decode_block_metas_body(
+        shard_idx: u32,
+        expected_block_count: u32,
+        expected_smallest_key: &[u8],
+        mut buf: &[u8],
+    ) -> HummockResult<Vec<BlockMeta>> {
+        let block_meta_count = buf.get_u32_le() as usize;
+        if block_meta_count != expected_block_count as usize {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} block count mismatch: desc {} body {}",
+                shard_idx, expected_block_count, block_meta_count
+            )));
+        }
+        let mut block_metas = Vec::with_capacity(block_meta_count);
+        for _ in 0..block_meta_count {
+            block_metas.push(BlockMeta::decode(&mut buf));
+        }
+        let filter_len = buf.get_u32_le() as usize;
+        if buf.len() < filter_len {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} filter length {} exceeds remaining bytes {}",
+                shard_idx,
+                filter_len,
+                buf.len()
+            )));
+        }
+        buf.advance(filter_len);
+        if !buf.is_empty() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} has {} trailing bytes",
+                shard_idx,
+                buf.len()
+            )));
+        }
+        if block_metas.is_empty() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} has no block meta",
+                shard_idx
+            )));
+        }
+        if block_metas[0].smallest_key != expected_smallest_key {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} smallest key mismatch",
+                shard_idx
+            )));
+        }
+        for (idx, (left, right)) in block_metas.iter().tuple_windows().enumerate() {
+            if KeyComparator::compare_encoded_full_key(&left.smallest_key, &right.smallest_key)
+                != std::cmp::Ordering::Less
+            {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} block meta {} smallest key is not strictly increasing",
+                    shard_idx,
+                    idx + 1
+                )));
+            }
+        }
+        Ok(block_metas)
+    }
+
     pub fn encoded_body_size(&self) -> usize {
         4 // block meta count
             + self

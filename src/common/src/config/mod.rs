@@ -879,6 +879,26 @@ pub mod tests {
     }
 
     #[test]
+    fn test_storage_partitioned_meta_block_count_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            partitioned_meta_block_count = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 44
+              |
+            3 |             partitioned_meta_block_count = 0
+              |                                            ^
+            storage.partitioned_meta_block_count must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
+    #[test]
     fn test_iceberg_compaction_enable_prefetch_default_is_false() {
         let config = StorageConfig::default();
         assert!(

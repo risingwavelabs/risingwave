@@ -26,6 +26,8 @@ pub struct StorageOpts {
     pub sstable_size_mb: u32,
     /// Minimal target size of the Sstable to store data of different state-table in independent files as soon as possible.
     pub min_sstable_size_mb: u32,
+    /// Number of data blocks per v3 metadata shard.
+    pub partitioned_meta_block_count: usize,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
     /// Deprecated and ignored by SST filter builders; kept for backward compatibility.
@@ -221,6 +223,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
             min_sstable_size_mb: c.storage.min_sstable_size_mb,
+            partitioned_meta_block_count: c.storage.partitioned_meta_block_count,
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,

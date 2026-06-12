@@ -25,13 +25,14 @@ The benchmark should answer whether co-located `MetaShard` can reduce metadata b
 
 ## Prototype Switch
 
-The first prototype can be enabled in a local benchmark or data-correctness run by setting:
+The first prototype shard size can be configured in `risingwave.toml`:
 
-```text
-RW_SSTABLE_META_SHARD_BLOCK_COUNT=8
+```toml
+[storage]
+partitioned_meta_block_count = 8
 ```
 
-Use `16` for the second shard-size run. Leaving the variable unset uses the prototype default shard size `8`; this benchmark branch writes v3 SSTs only.
+Use `16` for the second shard-size run. Leaving the field unset uses the prototype default shard size `8`; this benchmark branch writes v3 SSTs only.
 
 For unit tests or dedicated harnesses, the same setting can be applied directly through:
 
@@ -123,7 +124,7 @@ Run this checklist after each prototype code change. The goal is to keep correct
 | Cache refill optimization | Data-cache refill must not panic or read wrong ranges for v3 SSTs. It can be conservatively disabled until a shard-aware refill path is implemented. | Code review of `event_handler::refiller` and full storage unit tests. |
 | Fast compaction | v3 fast compaction must raw-copy only whole shard-sized runs and reuse the shard filter payload only for that whole-shard copy. Partial shards fall back to decoded/rewrite output and rebuilt filters. | Focused UT proves raw-copy block count and shard count for v3 whole-shard input; no partial-shard filter reuse. |
 | Storage unit gate | Storage crate compiles and full lib tests pass after each meaningful change. | `cargo check -p risingwave_storage --lib`; `cargo test -p risingwave_storage --lib -- --test-threads=1`. |
-| E2E data gate | At least one clean v3 data-correctness run covers flush/backfill/compaction; avoid treating invalid all-glob SLT runs as evidence. | `RW_SSTABLE_META_SHARD_BLOCK_COUNT=8 ./risedev d`; selected SLT runs such as `backfill_order_control.slt` and broad streaming subsets. |
+| E2E data gate | At least one clean v3 data-correctness run covers flush/backfill/compaction; avoid treating invalid all-glob SLT runs as evidence. | Set `storage.partitioned_meta_block_count = 8` and run `./risedev d`; selected SLT runs such as `backfill_order_control.slt` and broad streaming subsets. |
 
 ## Benchmark Metrics
 
