@@ -22,7 +22,7 @@
 
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![feature(iter_array_chunks)]
 #![feature(used_with_arg)]
 #![cfg_attr(coverage, feature(coverage_attribute))]

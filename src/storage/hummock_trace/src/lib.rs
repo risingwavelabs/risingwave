@@ -14,6 +14,7 @@
 
 #![feature(trait_alias)]
 #![feature(coroutines)]
+#![cfg_attr(test, feature(cursor_split))]
 
 mod collector;
 mod error;
