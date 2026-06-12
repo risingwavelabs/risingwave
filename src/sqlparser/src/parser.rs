@@ -1860,7 +1860,7 @@ impl Parser<'_> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected(format!("{:?}", &expected).as_str())
+            self.expected(format!("{:?}", expected).as_str())
         }
     }
 
