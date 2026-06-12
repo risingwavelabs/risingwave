@@ -406,6 +406,10 @@ impl CheckpointControl {
                 }
             };
 
+            database_checkpoint_control
+                .creating_streaming_job_controls
+                .retain(|_, job| !job.dropped_after_worker_err(worker_id));
+
             if !database_checkpoint_control.is_valid_after_worker_err(worker_id as _)
                 || database_checkpoint_control
                     .database_info
