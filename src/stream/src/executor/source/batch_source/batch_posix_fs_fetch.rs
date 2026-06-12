@@ -336,6 +336,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         associated_source_id,
                                     } => {
                                         // Check if this ListFinish is for our source
+                                        #[allow(clippy::collapsible_match)]
                                         if associated_source_id.as_raw_id()
                                             == core.source_id.as_raw_id()
                                         {

@@ -403,6 +403,7 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
 
+            #[allow(clippy::explicit_counter_loop)]
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.sst_id);
@@ -460,6 +461,7 @@ mod test {
             // test select index, picker will select file from state
             assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
 
+            #[allow(clippy::explicit_counter_loop)]
             let mut start_id = 3;
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.sst_id);

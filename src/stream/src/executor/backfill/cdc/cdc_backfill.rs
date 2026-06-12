@@ -480,6 +480,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 dropped_actors,
                                                 ..
                                             }) => {
+                                                #[allow(clippy::collapsible_match)]
                                                 if dropped_actors.contains(&self.actor_ctx.id) {
                                                     // the actor has been dropped, exit the backfill loop
                                                     tracing::info!(

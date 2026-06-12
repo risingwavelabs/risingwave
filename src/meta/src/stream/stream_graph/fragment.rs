@@ -1083,7 +1083,7 @@ impl StreamFragmentGraph {
                 old_internal_tables.len()
             );
         }
-        old_internal_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        old_internal_tables.sort_by_key(|t| t.id);
         new_internal_table_ids.sort();
 
         let internal_table_id_map = new_internal_table_ids

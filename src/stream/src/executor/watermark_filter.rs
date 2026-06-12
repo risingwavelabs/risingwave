@@ -382,7 +382,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
         // Return the minimal value if the remote max watermark is Null.
         let watermark = global_watermarks
             .into_iter()
-            .chain(local_watermarks.into_iter())
+            .chain(local_watermarks)
             .flatten()
             .max_by(DefaultOrd::default_cmp);
 

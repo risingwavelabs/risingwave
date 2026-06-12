@@ -502,6 +502,7 @@ mod toast {
                 // For list type, check if it contains exactly one element with the unavailable value
                 // This is because when any element in an array triggers TOAST, Debezium treats the entire
                 // array as unchanged and sends a placeholder array with only one element
+                #[allow(clippy::collapsible_match)]
                 if list_ref.len() == 1 {
                     if let Some(Some(element)) = list_ref.get(0) {
                         // Recursively check the array element
