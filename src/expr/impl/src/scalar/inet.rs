@@ -40,11 +40,11 @@ pub fn inet_aton(str: &str) -> Result<i64> {
     for _ in 0..4 {
         let part = parts.next().ok_or(ExprError::InvalidParam {
             name: "str",
-            reason: format!("Invalid IP address: {}", &str).into(),
+            reason: format!("Invalid IP address: {}", str).into(),
         })?;
         let part = part.parse::<u8>().map_err(|_| ExprError::InvalidParam {
             name: "str",
-            reason: format!("Invalid IP address: {}", &str).into(),
+            reason: format!("Invalid IP address: {}", str).into(),
         })?;
         result = (result << 8) | part as i64;
     }
