@@ -233,10 +233,11 @@ fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType)
 
     match (current, expected) {
         // Iceberg auto schema change only supports add/drop columns, not type
-        // changes. Keep the existing decimal compatibility behavior so Arrow
-        // precision/scale normalization does not make the schema state
-        // ambiguous.
-        (Decimal128(_, _), Decimal128(_, _)) => true,
+        // changes. Keep decimal precision compatibility tolerant so Arrow
+        // precision normalization does not make the schema state ambiguous.
+        (Decimal128(_, current_scale), Decimal128(_, expected_scale)) => {
+            current_scale == expected_scale
+        }
         (Binary, LargeBinary) | (LargeBinary, Binary) => true,
         (List(current_field), List(expected_field)) => {
             arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
@@ -261,11 +262,16 @@ fn schema_contains_same_fields(current: &ArrowFields, expected: &[ArrowField]) -
         return false;
     }
 
+    let mut unmatched_current = current.iter().collect_vec();
     expected.iter().all(|expected_field| {
-        current.iter().any(|current_field| {
+        let Some(pos) = unmatched_current.iter().position(|current_field| {
             current_field.name() == expected_field.name()
                 && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
-        })
+        }) else {
+            return false;
+        };
+        unmatched_current.swap_remove(pos);
+        true
     })
 }
 
@@ -1088,7 +1094,7 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_contains_same_fields_allows_decimal_precision_scale_delta() {
+    fn test_schema_contains_same_fields_allows_decimal_precision_delta() {
         let current_schema = ArrowSchema::new(vec![ArrowField::new(
             "d",
             ArrowDataType::Decimal128(28, 10),
@@ -1101,6 +1107,25 @@ mod tests {
         )];
 
         assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_decimal_scale_mismatch() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 2),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(!schema_contains_same_fields(
             current_schema.fields(),
             &expected_fields
         ));
@@ -1126,6 +1151,23 @@ mod tests {
         let current_schema =
             ArrowSchema::new(vec![ArrowField::new("v", ArrowDataType::Utf8, true)]);
         let expected_fields = vec![ArrowField::new("v", ArrowDataType::Int32, true)];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_reused_duplicate_match() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Utf8, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Int32, true),
+        ];
 
         assert!(!schema_contains_same_fields(
             current_schema.fields(),
