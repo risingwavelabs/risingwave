@@ -232,12 +232,12 @@ fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType)
     use ArrowDataType::*;
 
     match (current, expected) {
-        // Iceberg auto schema change only supports add/drop columns, not type
-        // changes. Keep decimal precision compatibility tolerant so Arrow
-        // precision normalization does not make the schema state ambiguous.
-        (Decimal128(_, current_scale), Decimal128(_, expected_scale)) => {
-            current_scale == expected_scale
-        }
+        // RW Decimal has no precision/scale. Sink creation already accepts any
+        // table Decimal128 precision/scale, while expected schemas here are
+        // generated from RW columns using the same canonical mapping. Ignoring
+        // both values prevents false schema-state ambiguity and cannot mask an
+        // auto schema change, which only supports add/drop columns.
+        (Decimal128(_, _), Decimal128(_, _)) => true,
         (Binary, LargeBinary) | (LargeBinary, Binary) => true,
         (List(current_field), List(expected_field)) => {
             arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
@@ -1113,7 +1113,7 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_contains_same_fields_rejects_decimal_scale_mismatch() {
+    fn test_schema_contains_same_fields_allows_decimal_precision_and_scale_delta() {
         let current_schema = ArrowSchema::new(vec![ArrowField::new(
             "d",
             ArrowDataType::Decimal128(38, 2),
@@ -1125,7 +1125,7 @@ mod tests {
             true,
         )];
 
-        assert!(!schema_contains_same_fields(
+        assert!(schema_contains_same_fields(
             current_schema.fields(),
             &expected_fields
         ));
