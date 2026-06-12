@@ -1,0 +1,26 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.case_sensitive_column_upsert_table PURGE',
+    '''
+    CREATE TABLE demo_db.case_sensitive_column_upsert_table (
+    `Key` int,
+    `Value` int
+    ) USING iceberg
+    TBLPROPERTIES ('format-version'='2');
+    '''
+]
+
+slt = 'test_case/iceberg_sink_case_sensitive_column_upsert_table.slt'
+
+verify_schema = ['int','int']
+
+verify_sql = 'SELECT `Key`, `Value` FROM demo_db.case_sensitive_column_upsert_table ORDER BY `Key` ASC'
+
+verify_data = """
+1,600
+"""
+
+drop_sqls = [
+ 'DROP TABLE IF EXISTS demo_db.case_sensitive_column_upsert_table PURGE',
+ 'DROP SCHEMA IF EXISTS demo_db'
+]

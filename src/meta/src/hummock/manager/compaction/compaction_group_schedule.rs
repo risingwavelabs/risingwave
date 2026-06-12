@@ -469,16 +469,15 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    assert_eq!(task.compaction_group_id, right_group_id);
-                    canceled_tasks.push(ReportTask {
-                        task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled,
-                        table_stats_change: HashMap::default(),
-                        sorted_output_ssts: vec![],
-                        object_timestamps: HashMap::default(),
-                    });
-                }
+                let task = &task_assignment.compact_task;
+                assert_eq!(task.compaction_group_id, right_group_id);
+                canceled_tasks.push(ReportTask {
+                    task_id: task.task_id,
+                    task_status: TaskStatus::ManualCanceled,
+                    table_stats_change: HashMap::default(),
+                    sorted_output_ssts: vec![],
+                    object_timestamps: HashMap::default(),
+                });
             });
 
         if !canceled_tasks.is_empty() {
@@ -794,20 +793,19 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let is_expired = is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    );
-                    if is_expired {
-                        canceled_tasks.push(ReportTask {
-                            task_id: task.task_id,
-                            task_status: TaskStatus::ManualCanceled,
-                            table_stats_change: HashMap::default(),
-                            sorted_output_ssts: vec![],
-                            object_timestamps: HashMap::default(),
-                        });
-                    }
+                let task = &task_assignment.compact_task;
+                let is_expired = is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                );
+                if is_expired {
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
+                    });
                 }
             });
 
@@ -1097,12 +1095,11 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref()
-                    && is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    )
-                {
+                let task = &task_assignment.compact_task;
+                if is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                ) {
                     canceled_tasks.push(ReportTask {
                         task_id: task.task_id,
                         task_status: TaskStatus::ManualCanceled,

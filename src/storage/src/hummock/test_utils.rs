@@ -49,8 +49,9 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, FilterBuilder, LruCache, PartitionedSstableMetaHolder, Sstable, SstableBuilder,
-    SstableBuilderOptions, SstableStoreRef, Xor16FilterBuilder,
+    BlockedXor16FilterBuilder, CachePolicy, DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+    FilterBuilder, FilterBuilderOptions, LruCache, PartitionedSstableMetaHolder, Sstable,
+    SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -190,11 +191,39 @@ pub async fn gen_test_sstable_data(
 pub async fn put_sst(
     sst_object_id: u64,
     data: Bytes,
-    meta: SstableMeta,
+    mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
-    _options: SstableWriterOptions,
+    mut options: SstableWriterOptions,
     table_ids: Vec<u32>,
 ) -> HummockResult<SstableInfo> {
+    options.policy = CachePolicy::NotFill;
+    let mut writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_object_id, options);
+    for block_meta in &meta.block_metas {
+        let offset = block_meta.offset as usize;
+        let end_offset = offset + block_meta.len as usize;
+        writer
+            .write_block(&data[offset..end_offset], block_meta)
+            .await?;
+    }
+
+    // dummy
+    let bloom_filter = {
+        let mut filter_builder = BlockedXor16FilterBuilder::create(FilterBuilderOptions {
+            estimated_key_count: 0,
+            estimated_block_count: meta.block_metas.len(),
+            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        });
+        for _ in &meta.block_metas {
+            filter_builder.switch_block(None);
+        }
+
+        filter_builder.finish(None)
+    };
+
+    meta.meta_offset = writer.data_len() as u64;
+    meta.bloom_filter = bloom_filter;
     let sst = SstableInfoInner {
         object_id: sst_object_id.into(),
         sst_id: sst_object_id.into(),
@@ -212,9 +241,8 @@ pub async fn put_sst(
         ..Default::default()
     }
     .into();
-    sstable_store
-        .put_sst_data(sst_object_id.into(), data)
-        .await?;
+    let writer_output = writer.finish(meta).await?;
+    writer_output.await.unwrap()?;
     Ok(sst)
 }
 
@@ -253,7 +281,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let mut b = SstableBuilder::<_, F>::new(
         object_id,
         writer,
-        F::create(opts.capacity / 16),
+        F::create(opts.filter_builder_options()),
         opts,
         compaction_catalog_agent_ref,
         None,

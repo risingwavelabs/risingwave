@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_object_store::object::ObjectError;
+use risingwave_pb::id::TableId;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::error::RecvError;
@@ -47,6 +48,18 @@ pub enum HummockErrorInner {
     WaitEpoch(String),
     #[error("Next epoch error: {0}")]
     NextEpoch(String),
+    #[error("Change log retention miss: table {table_id}, epoch {epoch}")]
+    ChangeLogRetentionMiss { table_id: TableId, epoch: u64 },
+    #[error("Time-travel version expired: table {table_id}, epoch {epoch}")]
+    TimeTravelVersionExpired { table_id: TableId, epoch: u64 },
+    #[error(
+        "Committed epoch mismatch: table {table_id}, committed_epoch {committed_epoch}, read_epoch {read_epoch}"
+    )]
+    CommittedEpochMismatch {
+        table_id: TableId,
+        committed_epoch: u64,
+        read_epoch: u64,
+    },
     #[error("Barrier read is unavailable for now. Likely the cluster is recovering")]
     ReadCurrentEpoch,
     #[error("CompactionExecutor error: {0}")]
@@ -106,6 +119,27 @@ impl HummockError {
 
     pub fn next_epoch(error: impl ToString) -> HummockError {
         HummockErrorInner::NextEpoch(error.to_string()).into()
+    }
+
+    pub fn change_log_retention_miss(table_id: TableId, epoch: u64) -> HummockError {
+        HummockErrorInner::ChangeLogRetentionMiss { table_id, epoch }.into()
+    }
+
+    pub fn time_travel_version_expired(table_id: TableId, epoch: u64) -> HummockError {
+        HummockErrorInner::TimeTravelVersionExpired { table_id, epoch }.into()
+    }
+
+    pub fn committed_epoch_mismatch(
+        table_id: TableId,
+        committed_epoch: u64,
+        read_epoch: u64,
+    ) -> HummockError {
+        HummockErrorInner::CommittedEpochMismatch {
+            table_id,
+            committed_epoch,
+            read_epoch,
+        }
+        .into()
     }
 
     pub fn read_current_epoch() -> HummockError {

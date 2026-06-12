@@ -926,9 +926,9 @@ dependencies = [
 
 [[package]]
 name = "async-openai"
-version = "0.40.2"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01fa0605961e005565ddbeff2d8f9148b8893128381ee3bec3a5df4e6a8d0f74"
+checksum = "3ec57a13b36ba76764870363a9182d8bc9fb49538dc5a948dd2e5224fe65ce40"
 dependencies = [
  "async-openai-macros",
  "base64 0.22.1",
@@ -6835,7 +6835,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d6bd578d64c396040e707ce2d85c83e64b47d7d6#d6bd578d64c396040e707ce2d85c83e64b47d7d6"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c034b19105fa0f540256fbe4859be8121c5c0551#c034b19105fa0f540256fbe4859be8121c5c0551"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6894,7 +6894,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d6bd578d64c396040e707ce2d85c83e64b47d7d6#d6bd578d64c396040e707ce2d85c83e64b47d7d6"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c034b19105fa0f540256fbe4859be8121c5c0551#c034b19105fa0f540256fbe4859be8121c5c0551"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6909,7 +6909,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d6bd578d64c396040e707ce2d85c83e64b47d7d6#d6bd578d64c396040e707ce2d85c83e64b47d7d6"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c034b19105fa0f540256fbe4859be8121c5c0551#c034b19105fa0f540256fbe4859be8121c5c0551"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6931,7 +6931,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=e94541e3a1a5f8b2846d26e7ea76262e0d58f02d#e94541e3a1a5f8b2846d26e7ea76262e0d58f02d"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=4c2bf2ecdf53cbe53aa4c82746682f5bf21bdcf8#4c2bf2ecdf53cbe53aa4c82746682f5bf21bdcf8"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6960,7 +6960,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d6bd578d64c396040e707ce2d85c83e64b47d7d6#d6bd578d64c396040e707ce2d85c83e64b47d7d6"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c034b19105fa0f540256fbe4859be8121c5c0551#c034b19105fa0f540256fbe4859be8121c5c0551"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12651,6 +12651,8 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "syn 2.0.117",
+ "thiserror-ext",
 ]
 
 [[package]]
@@ -13099,6 +13101,7 @@ dependencies = [
  "await-tree",
  "bytes",
  "cfg-if",
+ "chrono-tz",
  "criterion",
  "delta_btree_map",
  "dhat",

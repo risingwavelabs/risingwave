@@ -38,7 +38,9 @@ use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
     FullKeyFilterKeyExtractor,
 };
-use crate::hummock::sstable::{FilterBuilder, utils};
+use crate::hummock::sstable::{
+    DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, utils,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     HummockResult, MemoryLimiter, Xor16FilterBuilder, try_shorten_block_smallest_key,
@@ -69,6 +71,10 @@ pub struct SstableBuilderOptions {
     pub max_vnode_key_range_bytes: Option<usize>,
     /// Number of data blocks per v3 metadata shard.
     pub partitioned_meta_block_count: usize,
+    /// Estimated key count for one output SST. Used only as a filter-builder capacity hint.
+    pub estimated_output_key_count: Option<usize>,
+    /// Upper bound for the initial key-hash buffer allocation in plain filter builders.
+    pub filter_hash_prealloc_key_count_cap: usize,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -88,6 +94,8 @@ impl From<&StorageOpts> for SstableBuilderOptions {
                 .and_then(|value| value.parse::<usize>().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(8),
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
         }
     }
 }
@@ -104,6 +112,23 @@ impl Default for SstableBuilderOptions {
             shorten_block_meta_key_threshold: None,
             max_vnode_key_range_bytes: None,
             partitioned_meta_block_count: 8,
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        }
+    }
+}
+
+impl SstableBuilderOptions {
+    pub fn estimated_output_key_count(&self) -> usize {
+        self.estimated_output_key_count
+            .unwrap_or(self.capacity / DEFAULT_ENTRY_SIZE + 1)
+    }
+
+    pub fn filter_builder_options(&self) -> FilterBuilderOptions {
+        FilterBuilderOptions {
+            estimated_key_count: self.estimated_output_key_count(),
+            estimated_block_count: self.capacity / self.block_capacity + 1,
+            hash_prealloc_key_count_cap: self.filter_hash_prealloc_key_count_cap,
         }
     }
 }
@@ -244,7 +269,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         Self::new(
             sstable_id,
             writer,
-            Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            Xor16FilterBuilder::create(options.filter_builder_options()),
             options,
             compaction_catalog_agent_ref,
             None,
@@ -851,8 +876,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.block_size_vec.push(block.len());
-        self.filter_builder
-            .switch_block(self.memory_limiter.clone());
         let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
             panic!(
                 "WARN overflow can't convert writer_data_len {} into u32 table {:?}",
@@ -866,6 +889,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 data_len, block_meta.offset
             )
         });
+
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
 
         if data_len as usize > self.options.capacity * 2 {
             tracing::warn!(
@@ -2001,7 +2027,7 @@ pub(super) mod tests {
         let mut builder = SstableBuilder::new(
             object_id,
             writer,
-            BlockedXor16FilterBuilder::new(1024),
+            BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
             opts,
             compaction_catalog_agent_ref,
             None,

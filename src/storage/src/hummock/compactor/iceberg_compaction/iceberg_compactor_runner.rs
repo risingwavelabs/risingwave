@@ -24,14 +24,15 @@ use iceberg_compaction_core::compaction::{
     CompactionPlanner, CompactionResult,
 };
 use iceberg_compaction_core::config::{
-    CompactionExecutionConfigBuilder, CompactionPlanningConfig, FilesWithDeletesConfigBuilder,
-    FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
+    CompactionExecutionConfigBuilder, CompactionPlanningConfig, FileGroupScope,
+    FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder, GroupFilters,
+    SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_heuristic_output_parallelism,
+    iceberg_compaction_enable_heuristic_output_parallelism, iceberg_compaction_enable_prefetch,
     iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -75,6 +76,10 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
     pub max_concurrent_closes: usize,
+    /// Whether to prefetch entire data files before compaction.
+    /// See `StorageConfig::iceberg_compaction_enable_prefetch` for full documentation.
+    #[builder(default = "iceberg_compaction_enable_prefetch()")]
+    pub enable_prefetch: bool,
     #[builder]
     pub target_binpack_group_size_mb: Option<u64>,
     #[builder]
@@ -261,6 +266,7 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
+            .enable_prefetch(config.enable_prefetch)
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
@@ -479,6 +485,8 @@ pub async fn create_task_execution(
 
     let parsed_task_type = TaskType::try_from(task_type)
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let should_use_cow =
+        should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
     let planning_config = match parsed_task_type {
         TaskType::SmallFiles => {
@@ -504,6 +512,11 @@ pub async fn create_task_execution(
             CompactionPlanningConfig::SmallFiles(config)
         }
         TaskType::Full => {
+            let file_group_scope = if should_use_cow {
+                FileGroupScope::Table
+            } else {
+                FileGroupScope::Partition
+            };
             let config = FullCompactionConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
@@ -512,6 +525,7 @@ pub async fn create_task_execution(
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
+                .file_group_scope(file_group_scope)
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -596,4 +610,23 @@ pub async fn create_task_execution(
         sink_id,
         plan_runners: runners,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runner_config_enable_prefetch_default_is_false() {
+        let config = IcebergCompactorRunnerConfigBuilder::default()
+            .target_binpack_group_size_mb(None)
+            .min_group_size_mb(None)
+            .min_group_file_count(None)
+            .build()
+            .expect("failed to build IcebergCompactorRunnerConfig with defaults");
+        assert!(
+            !config.enable_prefetch,
+            "enable_prefetch must default to false to match StorageConfig default"
+        );
+    }
 }

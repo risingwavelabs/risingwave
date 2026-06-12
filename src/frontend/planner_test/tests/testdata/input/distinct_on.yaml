@@ -49,6 +49,13 @@
     select k, v, ts, id from mv_order_full;
   expected_outputs:
     - stream_plan
+- name: distinct on order by stops MV pk after stream key
+  sql: |
+    create table t (a int, b int, c int);
+    select distinct on (a) a, b, c from t order by a, b, c;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;
@@ -115,3 +122,9 @@
   expected_outputs:
     - batch_plan
     - logical_plan
+# Regression test: DISTINCT ON with an aggregate but no GROUP BY must error, not panic
+- sql: |
+    create table t (x int);
+    select distinct on(x) count(*) from t;
+  expected_outputs:
+    - planner_error

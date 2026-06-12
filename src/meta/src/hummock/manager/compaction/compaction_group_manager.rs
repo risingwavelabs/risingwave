@@ -658,8 +658,10 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::SstableFilterKind(c) => {
                 if target.sstable_filter_kind.is_empty() {
-                    target.sstable_filter_kind =
-                        vec!["xor16".to_owned(); target.max_level as usize + 1];
+                    target.sstable_filter_kind = default_compaction_config::sstable_filter_kind();
+                    target
+                        .sstable_filter_kind
+                        .resize(target.max_level as usize + 1, "xor16".to_owned());
                 }
                 let idx = c.get_level() as usize;
                 let level_entry = target.sstable_filter_kind.get_mut(idx).ok_or_else(|| {
@@ -673,7 +675,10 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::SstableFilterLayout(c) => {
                 if target.sstable_filter_layout.is_empty() {
                     target.sstable_filter_layout =
-                        vec!["auto".to_owned(); target.max_level as usize + 1];
+                        default_compaction_config::sstable_filter_layout();
+                    target
+                        .sstable_filter_layout
+                        .resize(target.max_level as usize + 1, "blocked".to_owned());
                 }
                 let idx = c.get_level() as usize;
                 let level_entry = target.sstable_filter_layout.get_mut(idx).ok_or_else(|| {
@@ -829,6 +834,7 @@ mod tests {
             config.max_level as usize + 1
         );
         assert_eq!(config.sstable_filter_kind[0], "xor8");
+        assert_eq!(config.sstable_filter_kind[5], "xor8");
 
         super::update_compaction_config(
             &mut config,
@@ -843,6 +849,7 @@ mod tests {
             config.max_level as usize + 1
         );
         assert_eq!(config.sstable_filter_layout[1], "plain");
+        assert_eq!(config.sstable_filter_layout[2], "blocked");
     }
 
     #[test]

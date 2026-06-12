@@ -126,6 +126,7 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const ORDER_KEY: &str = "order_key";
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
@@ -398,6 +399,7 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
+    /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -528,6 +530,10 @@ impl IcebergConfig {
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
+        if config.enable_compaction && !values.contains_key(COMPACTION_MAX_SNAPSHOTS_NUM) {
+            config.max_snapshots_num_before_compaction = Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM);
+        }
+
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",
@@ -579,6 +585,12 @@ impl IcebergConfig {
         if config.trigger_snapshot_count == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.trigger_snapshot_count` must be greater than 0"
+            )));
+        }
+
+        if config.max_snapshots_num_before_compaction == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.max_snapshots_num` must be greater than 0"
             )));
         }
 

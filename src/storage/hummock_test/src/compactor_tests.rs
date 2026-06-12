@@ -1405,7 +1405,7 @@ pub(crate) mod tests {
             sstable_store
                 .clone()
                 .create_sst_writer(object_id, SstableWriterOptions::default()),
-            BlockedXor16FilterBuilder::create(opts.capacity / 16),
+            BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
             opts,
             compaction_catalog_agent_ref,
             None,
@@ -1672,7 +1672,7 @@ pub(crate) mod tests {
                 sstable_store
                     .clone()
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
-                BlockedXor16FilterBuilder::create(opts.capacity / 16),
+                BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
                 None,
@@ -1800,7 +1800,7 @@ pub(crate) mod tests {
                 sstable_store
                     .clone()
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
-                BlockedXor16FilterBuilder::create(opts.capacity / 16),
+                BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
                 None,

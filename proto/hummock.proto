@@ -32,6 +32,8 @@ enum SstableFilterLayout {
   SSTABLE_FILTER_LAYOUT_AUTO = 1;
   // Always use a single non-blocked filter. Ignore kv-count threshold.
   SSTABLE_FILTER_LAYOUT_PLAIN = 2;
+  // Always use per-block filters. Ignore kv-count threshold.
+  SSTABLE_FILTER_LAYOUT_BLOCKED = 3;
 }
 
 // Key range for a single vnode within an SST.
@@ -589,11 +591,13 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
-  // KV-count threshold for using blocked xor filter in this task when `sstable_filter_layout` is
-  // AUTO.
+  // KV-count threshold for using blocked xor filter when `sstable_filter_layout` is AUTO.
   //
-  // If the total kv-count of input SSTs exceeds this threshold, compaction will build blocked xor
-  // filters. Otherwise it will build a single non-blocked xor filter.
+  // If the estimated key count of one output SST exceeds this threshold, compaction will build
+  // blocked xor filters. Otherwise it will build a single non-blocked xor filter.
+  //
+  // This is an output-SST-level heuristic. Older versions compared the threshold with the total
+  // key count of the whole compaction task, which could classify many small output SSTs as blocked.
   //
   // Keep the historical protobuf field name for wire and JSON compatibility.
   optional uint64 max_kv_count_for_xor16 = 28;
@@ -1159,8 +1163,11 @@ message CompactionConfig {
 
   // KV-count threshold for using blocked xor filter when `sstable_filter_layout[level]` is AUTO.
   //
-  // When the number of keys in a compaction task exceeds this threshold, compaction will build
+  // When the estimated key count of one output SST exceeds this threshold, compaction will build
   // blocked xor filters. Otherwise it will build a single non-blocked xor filter.
+  //
+  // This is an output-SST-level heuristic. Older versions compared the threshold with the total
+  // key count of the whole compaction task, which could classify many small output SSTs as blocked.
   //
   // Typical value: 256 * 1024 (256K keys).
   //
@@ -1184,6 +1191,7 @@ message CompactionConfig {
   // Supported values:
   // - "auto": decide by heuristics (currently by kv-count threshold)
   // - "plain" or "normal": always use a single non-blocked filter, ignoring kv-count threshold
+  // - "blocked": always use block-based filters, ignoring kv-count threshold
   //
   // Note: `sstable_filter_layout[0]` is reserved for L0 and currently ignored by shared-buffer
   // flush, which always uses "auto".

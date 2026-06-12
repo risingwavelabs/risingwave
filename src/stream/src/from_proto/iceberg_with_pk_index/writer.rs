@@ -33,6 +33,8 @@ use crate::task::ExecutorParams;
 
 pub struct IcebergWithPkIndexWriterExecutorBuilder;
 
+impl_stream_node_body!(IcebergWithPkIndexWriter(IcebergWithPkIndexWriterNode) => IcebergWithPkIndexWriterExecutorBuilder);
+
 impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
     type Node = IcebergWithPkIndexWriterNode;
 
@@ -95,6 +97,7 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             sink_name,
             connector: ICEBERG_SINK.to_owned(),
             streaming_config: params.config.as_ref().clone(),
+            time_zone: params.actor_context.time_zone,
         };
         let writer = IcebergWriterImpl::build(&config, table, &writer_param)?;
         let pk_matched = params

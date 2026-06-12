@@ -2,6 +2,28 @@ statement ok
 set sink_decouple = false;
 
 statement ok
+CREATE TABLE no_permission_table (v1 int primary key);
+
+statement error write permission on the target table
+CREATE SINK sink_no_permission_table
+FROM no_permission_table
+WITH (
+    connector = 'starrocks',
+    type = 'upsert',
+    starrocks.host = 'starrocks-fe-server',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users_no_bhv_table_priv',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'demo_bhv_table',
+    primary_key = 'v1'
+);
+
+statement ok
+DROP TABLE no_permission_table;
+
+statement ok
 CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamp, v9 boolean, v10 jsonb, v11 decimal);
 
 statement ok
@@ -114,3 +136,49 @@ DROP SINK sink_reserved_words;
 
 statement ok
 DROP TABLE reserved_words;
+
+statement ok
+CREATE TABLE timestamptz_table (
+    id int primary key,
+    ts_datetime timestamptz,
+    ts_varchar timestamptz,
+    ts_char timestamptz,
+    ts_string timestamptz
+);
+
+statement ok
+SET TIME ZONE 'Asia/Shanghai';
+
+statement ok
+CREATE SINK sink_timestamptz_table
+FROM timestamptz_table
+WITH (
+    connector = 'starrocks',
+    type = 'upsert',
+    starrocks.host = 'starrocks-fe-server',
+    starrocks.mysqlport = '9030',
+    starrocks.httpport = '8030',
+    starrocks.user = 'users',
+    starrocks.password = '123456',
+    starrocks.database = 'demo',
+    starrocks.table = 'demo_timestamptz_table',
+    primary_key = 'id'
+);
+
+statement ok
+INSERT INTO timestamptz_table VALUES (
+    1,
+    '2018-01-26T18:30:09Z',
+    '2018-01-26T18:30:09Z',
+    '2018-01-26T18:30:09Z',
+    '2018-01-26T18:30:09Z'
+);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK sink_timestamptz_table;
+
+statement ok
+DROP TABLE timestamptz_table;

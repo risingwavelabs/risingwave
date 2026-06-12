@@ -28,6 +28,8 @@ use crate::task::ExecutorParams;
 
 pub struct GapFillExecutorBuilder;
 
+impl_stream_node_body!(GapFill(GapFillNode) => GapFillExecutorBuilder);
+
 impl ExecutorBuilder for GapFillExecutorBuilder {
     type Node = GapFillNode;
 

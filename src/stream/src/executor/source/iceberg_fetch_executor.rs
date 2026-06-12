@@ -117,6 +117,10 @@ mod state {
         /// The data file path corresponding to the task.
         pub data_file_path: String,
 
+        /// The data file referenced by a deletion vector.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub referenced_data_file: Option<String>,
+
         /// The content type of the file to scan.
         pub data_file_content: DataContentType,
 
@@ -166,6 +170,7 @@ mod state {
                 length,
                 record_count,
                 data_file_path,
+                referenced_data_file,
                 data_file_content,
                 data_file_format,
                 schema,
@@ -183,6 +188,7 @@ mod state {
                 length,
                 record_count,
                 data_file_path,
+                referenced_data_file,
                 data_file_content,
                 data_file_format,
                 schema,
@@ -209,6 +215,7 @@ mod state {
                 length,
                 record_count,
                 data_file_path,
+                referenced_data_file,
                 data_file_content,
                 data_file_format,
                 schema,
@@ -227,6 +234,7 @@ mod state {
                 length,
                 record_count,
                 data_file_path,
+                referenced_data_file,
                 data_file_content,
                 data_file_format,
                 schema,
@@ -249,6 +257,7 @@ mod state {
                 length: task.length,
                 record_count: task.record_count,
                 data_file_path: task.data_file_path.clone(),
+                referenced_data_file: task.referenced_data_file.clone(),
                 data_file_content: task.data_file_content,
                 data_file_format: task.data_file_format,
                 schema: task.schema.clone(),

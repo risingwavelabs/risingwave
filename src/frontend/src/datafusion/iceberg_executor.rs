@@ -64,6 +64,7 @@ struct IcebergScanInner {
     need_file_path_and_pos: bool,
     plan_properties: Arc<PlanProperties>,
     projection: Option<Vec<usize>>,
+    limit: Option<usize>,
 }
 
 impl DisplayAs for IcebergScan {
@@ -94,6 +95,9 @@ impl DisplayAs for IcebergScan {
             )?;
             if let Some(projection) = &self.inner.projection {
                 write!(f, ", projection={:?}", projection)?;
+            }
+            if let Some(limit) = self.inner.limit {
+                write!(f, ", limit={}", limit)?;
             }
         }
         Ok(())
@@ -157,9 +161,9 @@ impl IcebergScan {
     pub async fn new(
         provider: &IcebergTableProvider,
         projection: Option<&Vec<usize>>,
-        // TODO: support filter pushdown and limit pushdown
+        // TODO: support filter pushdown
         _filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
         batch_parallelism: usize,
     ) -> DFResult<Self> {
         let mut arrow_schema = provider.schema();
@@ -198,7 +202,11 @@ impl IcebergScan {
         });
 
         let scan_tasks = provider.task.tasks();
-        let tasks = if scan_tasks.len() <= batch_parallelism {
+        let tasks = if limit.is_some() {
+            // A scan-local limit must be enforced globally. Keep the tasks in a single partition
+            // so execution can stop after enough rows without scanning all files.
+            vec![scan_tasks.to_vec()]
+        } else if scan_tasks.len() <= batch_parallelism {
             scan_tasks.iter().map(|task| vec![task.clone()]).collect()
         } else {
             IcebergSplitEnumerator::split_n_vecs(scan_tasks.to_vec(), batch_parallelism)
@@ -227,6 +235,7 @@ impl IcebergScan {
                 need_file_path_and_pos,
                 plan_properties,
                 projection: projection.cloned(),
+                limit,
             }),
         })
     }
@@ -241,8 +250,13 @@ impl IcebergScanInner {
             .with_batch_size(chunk_size)
             .with_row_group_filtering_enabled(true)
             .build();
+        let mut remaining_limit = self.limit;
 
         for task in &self.tasks[partition] {
+            if matches!(remaining_limit, Some(0)) {
+                return Ok(());
+            }
+
             let stream = reader
                 .clone()
                 .read(tokio_stream::once(Ok(task.clone())).boxed())
@@ -265,8 +279,24 @@ impl IcebergScanInner {
                     batch = batch.project(projection).map_err(to_datafusion_error)?;
                 }
                 batch = cast_batch(self.arrow_schema.clone(), batch)?;
-                pos_start += i64::try_from(batch.num_rows()).unwrap();
-                yield batch;
+
+                if let Some(remaining) = &mut remaining_limit {
+                    if batch.num_rows() > *remaining {
+                        yield batch.slice(0, *remaining);
+                        return Ok(());
+                    }
+
+                    *remaining -= batch.num_rows();
+                    pos_start += i64::try_from(batch.num_rows()).unwrap();
+                    yield batch;
+
+                    if *remaining == 0 {
+                        return Ok(());
+                    }
+                } else {
+                    pos_start += i64::try_from(batch.num_rows()).unwrap();
+                    yield batch;
+                }
             }
         }
     }

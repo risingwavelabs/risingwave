@@ -34,6 +34,9 @@ use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::compaction_utils::{
+    blocked_xor_filter_key_count_threshold, estimate_output_key_count_for_task,
+};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
@@ -523,6 +526,11 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
         options.compression_algorithm = compression_algorithm;
         options.capacity = task.target_file_size as usize;
+        let estimated_output_key_count =
+            estimate_output_key_count_for_task(&task, options.capacity);
+        options.estimated_output_key_count = Some(estimated_output_key_count);
+        options.filter_hash_prealloc_key_count_cap =
+            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
         // Disable vnode key-range hints for fast compaction path by default.
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
@@ -530,6 +538,10 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             task.sstable_filter_kind,
             PbSstableFilterType::SstableFilterXor16,
             "fast compaction only supports blocked xor16 filter today"
+        );
+        debug_assert!(
+            task.should_use_block_based_filter_for_output(estimated_output_key_count as u64),
+            "fast compaction can only preserve blocked filters; expected blocked output"
         );
 
         let key_range = KeyRange::inf();
@@ -1317,6 +1329,7 @@ mod tests {
             existing_table_ids: vec![TableId::new(1)],
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
             sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
@@ -1437,6 +1450,7 @@ mod tests {
             existing_table_ids: vec![TableId::new(1)],
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
             sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
@@ -1541,6 +1555,7 @@ mod tests {
             existing_table_ids: vec![TableId::new(1)],
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
             sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
