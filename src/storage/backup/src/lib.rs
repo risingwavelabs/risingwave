@@ -13,9 +13,6 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(map_try_insert)]
 #![feature(error_generic_member_access)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 

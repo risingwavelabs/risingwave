@@ -651,7 +651,7 @@ impl BigQuerySinkWriter {
             .ok_or_else(|| {
                 SinkError::BigQuery(anyhow::anyhow!(
                     "Can't find message proto {}",
-                    &config.common.table
+                    config.common.table
                 ))
             })?;
         let proto_field = if !is_append_only {
