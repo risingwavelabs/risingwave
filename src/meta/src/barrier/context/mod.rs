@@ -30,6 +30,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
@@ -131,6 +132,15 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         refresh_finished_table_job_ids: Vec<JobId>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    /// Load the trigger context for a batch refresh job: fragment metadata, job model,
+    /// upstream log epochs, and target upstream epoch — all bundled in one struct.
+    fn load_batch_refresh_trigger_context(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> impl Future<Output = MetaResult<BatchRefreshJobTriggerContext>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
