@@ -42,7 +42,6 @@ FROM
     starrocks.password = '123456',
     starrocks.database = 'demo',
     starrocks.table = 'demo_bhv_table',
-    starrocks.max_batch_size_mb = '1',
     primary_key = 'v1'
 );
 
