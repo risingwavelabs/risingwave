@@ -231,3 +231,86 @@ DROP SOURCE iceberg_t1_source CASCADE;
 
 statement ok
 DROP TABLE s1 cascade;
+# Test that an Iceberg streaming source keeps consuming snapshots after the
+# upstream Iceberg auto-schema sink drops a column.
+statement ok
+CREATE TABLE s_schema_drop (
+    id int primary key,
+    keep_v varchar,
+    drop_v varchar
+);
+
+statement ok
+CREATE SINK sink_schema_drop FROM s_schema_drop WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    database.name = 'demo_db',
+    table.name = 'test_streaming_schema_drop',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1,
+    auto.schema.change = 'true'
+);
+
+statement ok
+INSERT INTO s_schema_drop VALUES (1, 'before', 'dropped');
+
+statement ok
+FLUSH;
+
+statement ok retry 6 backoff 1s
+CREATE SOURCE iceberg_schema_drop_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_streaming_schema_drop',
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_schema_drop AS
+SELECT id, keep_v FROM iceberg_schema_drop_source;
+
+query IT retry 6 backoff 1s
+SELECT id, keep_v FROM mv_schema_drop ORDER BY id;
+----
+1 before
+
+statement ok
+ALTER TABLE s_schema_drop DROP COLUMN drop_v;
+
+statement ok
+INSERT INTO s_schema_drop(id, keep_v) VALUES (2, 'after');
+
+statement ok
+FLUSH;
+
+query IT retry 6 backoff 5s
+SELECT id, keep_v FROM mv_schema_drop ORDER BY id;
+----
+1 before
+2 after
+
+statement ok
+DROP MATERIALIZED VIEW mv_schema_drop;
+
+statement ok
+DROP SOURCE iceberg_schema_drop_source;
+
+statement ok
+DROP SINK sink_schema_drop;
+
+statement ok
+DROP TABLE s_schema_drop cascade;
