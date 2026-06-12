@@ -109,6 +109,7 @@ impl ColumnSelfEqualRewriter {
                 }
             }
             ExprImpl::InputRef(_) => {
+                #[allow(clippy::collapsible_match)]
                 if !columns.contains(&expr) {
                     // only add the column if not exists
                     columns.push(expr);

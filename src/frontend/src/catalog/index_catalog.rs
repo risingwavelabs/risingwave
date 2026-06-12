@@ -297,6 +297,7 @@ impl IndexCatalog {
     }
 
     pub fn get_column_def(&self, column_idx: usize) -> Option<String> {
+        #[allow(clippy::question_mark)]
         if let Some(col) = self.index_table().columns.get(column_idx) {
             if col.is_hidden {
                 return None;

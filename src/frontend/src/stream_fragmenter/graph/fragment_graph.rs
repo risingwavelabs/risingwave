@@ -125,12 +125,7 @@ impl StreamFragmentGraph {
             .try_insert((upstream_id, downstream_id), edge)
             .map(|_| ())
             .map_err(|e| {
-                format!(
-                    "edge between {} and {} already exists: {}",
-                    upstream_id,
-                    downstream_id,
-                    format!("{e:?}")
-                )
+                format!("edge between {upstream_id} and {downstream_id} already exists: {e:?}")
             })
     }
 }

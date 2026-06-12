@@ -303,8 +303,8 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
 
-            #[allow(clippy::explicit_counter_loop)]
             let mut start_id = 2;
+            #[allow(clippy::explicit_counter_loop)]
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.sst_id);
                 start_id += 1;
@@ -354,8 +354,8 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
-            #[allow(clippy::explicit_counter_loop)]
             let mut start_id = 8;
+            #[allow(clippy::explicit_counter_loop)]
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.sst_id);
                 start_id += 1;

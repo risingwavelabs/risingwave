@@ -54,6 +54,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for LocalityProvider<PlanRef> {
 
     fn stream_key(&self) -> Option<Vec<usize>> {
         let mut stream_key = self.locality_columns.clone();
+        #[allow(clippy::question_mark)]
         if let Some(input_stream_key) = self.input.stream_key() {
             for col in input_stream_key {
                 if !stream_key.contains(col) {
