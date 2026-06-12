@@ -131,6 +131,12 @@ pub enum HummockMetaCacheKey {
     MetaShard(MetaShardCacheKey),
 }
 
+impl HummockMetaCacheKey {
+    pub fn estimate_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 enum SerdeHummockMetaCacheEntry {
     MetaIndex(Box<PartitionedSstableMeta>),
@@ -180,8 +186,8 @@ impl<'de> Deserialize<'de> for HummockMetaCacheEntry {
             match SerdeHummockMetaCacheEntry::deserialize(deserializer)? {
                 SerdeHummockMetaCacheEntry::MetaIndex(meta_index) => Self::MetaIndex(meta_index),
                 SerdeHummockMetaCacheEntry::MetaShard(mut shard) => {
-                    let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
-                    shard.filter.clear();
+                    let filter = std::mem::take(&mut shard.filter);
+                    let filter_reader = XorFilterReader::new(&filter, &shard.block_metas);
                     Self::MetaShard {
                         filter_reader: Box::new(filter_reader),
                         shard,
@@ -203,11 +209,18 @@ impl HummockMetaCacheEntry {
                 ..
             } => {
                 std::mem::size_of::<MetaShard>()
-                    + shard.encoded_body_size()
+                    + shard.estimated_heap_size()
                     + filter_reader.estimated_heap_size()
             }
         }
     }
+}
+
+pub fn estimate_meta_cache_entry_size(
+    key: &HummockMetaCacheKey,
+    value: &HummockMetaCacheEntry,
+) -> usize {
+    key.estimate_size() + value.estimate_size()
 }
 
 #[derive(Clone)]
@@ -527,9 +540,7 @@ impl SstableStore {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
-            .with_weighter(|_: &HummockMetaCacheKey, value: &HummockMetaCacheEntry| {
-                u64::BITS as usize / 8 + value.estimate_size()
-            })
+            .with_weighter(estimate_meta_cache_entry_size)
             .storage()
             .build()
             .await
@@ -1051,8 +1062,8 @@ impl SstableStore {
                     &buf[..],
                 )?;
                 let mut shard = shard;
-                let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
-                shard.filter.clear();
+                let filter = std::mem::take(&mut shard.filter);
+                let filter_reader = XorFilterReader::new(&filter, &shard.block_metas);
                 Ok::<_, anyhow::Error>((
                     HummockMetaCacheEntry::MetaShard {
                         filter_reader: Box::new(filter_reader),
@@ -1386,8 +1397,8 @@ impl SstableStore {
                 &shard_body,
             )?;
             let mut shard = shard;
-            let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
-            shard.filter.clear();
+            let filter = std::mem::take(&mut shard.filter);
+            let filter_reader = XorFilterReader::new(&filter, &shard.block_metas);
             self.meta_cache.insert_with_properties(
                 HummockMetaCacheKey::MetaShard(MetaShardCacheKey {
                     sst_id: object_id,
@@ -1531,10 +1542,13 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 
-    use super::{HummockMetaCacheEntry, SstableStoreRef, SstableWriterOptions};
+    use super::{
+        HummockMetaCacheEntry, HummockMetaCacheKey, MetaShardCacheKey, SstableStoreRef,
+        SstableWriterOptions, estimate_meta_cache_entry_size,
+    };
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -1567,13 +1581,42 @@ mod tests {
             filter_type: 1,
             filter,
         };
-        let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
-        shard.filter.clear();
+        let filter = std::mem::take(&mut shard.filter);
+        let filter_reader = XorFilterReader::new(&filter, &shard.block_metas);
         HummockMetaCacheEntry::MetaShard {
             shard: Box::new(shard),
             filter_reader: Box::new(filter_reader),
             skip_filter_in_serde,
         }
+    }
+
+    #[test]
+    fn test_meta_cache_entry_size_accounts_for_typed_key() {
+        let entry = test_meta_shard_cache_entry(false);
+        let index_key = HummockMetaCacheKey::MetaIndex(HummockSstableObjectId::new(SST_ID));
+        let shard_key = HummockMetaCacheKey::MetaShard(MetaShardCacheKey {
+            sst_id: HummockSstableObjectId::new(SST_ID),
+            shard_idx: 1,
+            first_block_idx: 2,
+            offset: 3,
+            len: 4,
+            checksum: 5,
+            filter_type: 6,
+        });
+
+        assert_eq!(
+            index_key.estimate_size(),
+            std::mem::size_of::<HummockMetaCacheKey>()
+        );
+        assert_eq!(
+            shard_key.estimate_size(),
+            std::mem::size_of::<HummockMetaCacheKey>()
+        );
+        assert!(shard_key.estimate_size() > std::mem::size_of::<HummockSstableObjectId>());
+        assert_eq!(
+            estimate_meta_cache_entry_size(&shard_key, &entry),
+            shard_key.estimate_size() + entry.estimate_size()
+        );
     }
 
     #[test]

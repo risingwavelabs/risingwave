@@ -24,6 +24,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -248,7 +249,7 @@ impl BlockStreamIterator {
         self.next_block_index += blocks.len();
         Ok(blocks
             .into_iter()
-            .zip(block_metas.iter().cloned())
+            .zip_eq_fast(block_metas.iter().cloned())
             .collect())
     }
 
@@ -686,13 +687,12 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             return Ok(None);
         }
 
-        if let Some(right_key) = right_key {
-            if FullKey::decode(&candidate.largest_key)
+        if let Some(right_key) = right_key
+            && FullKey::decode(&candidate.largest_key)
                 .user_key
                 .ge(&right_key.user_key.as_ref())
-            {
-                return Ok(None);
-            }
+        {
+            return Ok(None);
         }
 
         if !executor.shall_copy_raw_meta_shard(&candidate) {

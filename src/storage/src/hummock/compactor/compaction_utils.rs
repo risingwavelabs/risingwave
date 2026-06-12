@@ -132,7 +132,6 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
-    #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         key_range: KeyRange,
         cache_policy: CachePolicy,
@@ -153,7 +152,6 @@ impl TaskConfig {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub fn with_disable_drop_column_optimization(mut self, disable: bool) -> Self {
         self.disable_drop_column_optimization = disable;
         self

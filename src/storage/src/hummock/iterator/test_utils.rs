@@ -37,9 +37,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    HummockMetaCacheEntry, HummockMetaCacheKey, HummockValue, PartitionedSstableMetaHolder,
-    SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
-    SstableStoreRef,
+    HummockValue, PartitionedSstableMetaHolder, SstableBuilderOptions, SstableIterator,
+    SstableIteratorType, SstableStoreConfig, SstableStoreRef, estimate_meta_cache_entry_size,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -72,9 +71,7 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .with_weighter(|_: &HummockMetaCacheKey, value: &HummockMetaCacheEntry| {
-            u64::BITS as usize / 8 + value.estimate_size()
-        })
+        .with_weighter(estimate_meta_cache_entry_size)
         .storage()
         .build()
         .await

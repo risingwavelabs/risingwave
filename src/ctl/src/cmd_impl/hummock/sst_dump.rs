@@ -36,7 +36,8 @@ use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    Block, BlockHolder, BlockIterator, BlockMeta, CompressionAlgorithm, SstableStore,
+    Block, BlockHolder, BlockIterator, BlockMeta, CompressionAlgorithm, PARTITIONED_META_VERSION,
+    SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -241,16 +242,23 @@ pub async fn sst_dump_via_sstable_store(
     .into();
     let mut stats = StoreLocalStatistic::default();
     let sstable = sstable_store.meta_index(&sstable_info, &mut stats).await?;
-    let sstable_meta = &sstable.meta;
-    let block_metas = sstable_store
-        .get_partitioned_block_metas(&sstable, &mut stats)
+    let meta_shards = sstable_store
+        .get_partitioned_meta_shards(&sstable, &mut stats)
         .await?;
-    let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
-    let largest_key = FullKey::decode(&sstable_meta.largest_key);
+    let bloom_filter_size = meta_shards
+        .iter()
+        .map(|shard| shard.filter.len())
+        .sum::<usize>();
+    let block_metas = meta_shards
+        .iter()
+        .flat_map(|shard| shard.block_metas.iter().cloned())
+        .collect_vec();
+    let smallest_key = FullKey::decode(sstable.smallest_key());
+    let largest_key = FullKey::decode(sstable.largest_key());
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable_meta.estimated_size);
+    println!("File Size: {}", sstable.estimated_size());
 
     println!("Key Range:");
     println!(
@@ -258,10 +266,10 @@ pub async fn sst_dump_via_sstable_store(
         smallest_key, largest_key,
     );
 
-    println!("Estimated Table Size: {}", sstable_meta.estimated_size);
-    println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
-    println!("Key Count: {}", sstable_meta.key_count);
-    println!("Version: {}", sstable_meta.version);
+    println!("Estimated Table Size: {}", sstable.estimated_size());
+    println!("Bloom Filter Size: {}", bloom_filter_size);
+    println!("Key Count: {}", sstable.index.key_count);
+    println!("Version: {}", PARTITIONED_META_VERSION);
 
     println!("Block Count: {}", block_metas.len());
     for (i, block_meta) in block_metas.iter().enumerate() {

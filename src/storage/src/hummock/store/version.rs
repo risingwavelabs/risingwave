@@ -1054,8 +1054,8 @@ impl HummockVersionReader {
                 .meta_index(sstable_info, local_stats)
                 .await?;
 
-            if let Some(prefix_hash) = filter_prefix_hash.as_ref() {
-                if !hit_sstable_filter_with_partitioned_meta(
+            if let Some(prefix_hash) = filter_prefix_hash.as_ref()
+                && !hit_sstable_filter_with_partitioned_meta(
                     &self.sstable_store,
                     &table_holder,
                     &user_key_range_ref,
@@ -1063,9 +1063,8 @@ impl HummockVersionReader {
                     local_stats,
                 )
                 .await?
-                {
-                    continue;
-                }
+            {
+                continue;
             }
 
             staging_sst_iter_count += 1;
@@ -1108,8 +1107,8 @@ impl HummockVersionReader {
                         .meta_index(sstable_info, local_stats)
                         .await?;
 
-                    if let Some(dist_hash) = filter_prefix_hash.as_ref() {
-                        if !hit_sstable_filter_with_partitioned_meta(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter_with_partitioned_meta(
                             &self.sstable_store,
                             &sstable,
                             &user_key_range_ref,
@@ -1117,9 +1116,8 @@ impl HummockVersionReader {
                             local_stats,
                         )
                         .await?
-                        {
-                            continue;
-                        }
+                    {
+                        continue;
                     }
                     // Since there is only one sst to be included for the current non-overlapping
                     // level, there is no need to create a ConcatIterator on it.
@@ -1148,8 +1146,8 @@ impl HummockVersionReader {
                         .meta_index(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
-                    if let Some(dist_hash) = filter_prefix_hash.as_ref() {
-                        if !hit_sstable_filter_with_partitioned_meta(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter_with_partitioned_meta(
                             &self.sstable_store,
                             &sstable,
                             &user_key_range_ref,
@@ -1157,9 +1155,8 @@ impl HummockVersionReader {
                             local_stats,
                         )
                         .await?
-                        {
-                            continue;
-                        }
+                    {
+                        continue;
                     }
                     factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
                         sstable,

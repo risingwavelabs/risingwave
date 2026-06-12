@@ -20,6 +20,7 @@ use std::time::SystemTime;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, TABLE_PREFIX_LEN, UserKey, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -133,30 +134,41 @@ impl SstableBuilderOptions {
     }
 }
 
-struct PartitionedMetaBuilder {
+struct PartitionedMetaBuilder<F: FilterBuilder> {
     shard_block_count: usize,
-    filter_capacity: usize,
+    filter_builder_options: FilterBuilderOptions,
     current_first_block_idx: usize,
-    current_filter_builder: Xor16FilterBuilder,
+    current_filter_builder: F,
     shard_filters: Vec<Vec<u8>>,
     shard_block_counts: Vec<usize>,
 }
 
-impl PartitionedMetaBuilder {
-    fn new(shard_block_count: usize, capacity: usize) -> Self {
-        let filter_capacity = capacity / DEFAULT_ENTRY_SIZE / shard_block_count.max(1) + 1;
+impl<F: FilterBuilder> PartitionedMetaBuilder<F> {
+    fn new(
+        shard_block_count: usize,
+        filter_builder_options: FilterBuilderOptions,
+        current_filter_builder: F,
+    ) -> Self {
         Self {
             shard_block_count,
-            filter_capacity,
+            filter_builder_options,
             current_first_block_idx: 0,
-            current_filter_builder: Xor16FilterBuilder::new(filter_capacity),
+            current_filter_builder,
             shard_filters: Vec::new(),
             shard_block_counts: Vec::new(),
         }
     }
 
+    fn filter_type(&self) -> PbSstableFilterType {
+        self.current_filter_builder.filter_type()
+    }
+
     fn add_key(&mut self, dist_key: &[u8], table_id: u32) {
         self.current_filter_builder.add_key(dist_key, table_id);
+    }
+
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) {
+        self.current_filter_builder.switch_block(memory_limiter);
     }
 
     fn maybe_finish_shard(
@@ -175,7 +187,7 @@ impl PartitionedMetaBuilder {
                 .push(self.current_filter_builder.finish(memory_limiter));
             self.shard_block_counts.push(block_count);
             self.current_first_block_idx = total_block_count;
-            self.current_filter_builder = Xor16FilterBuilder::new(self.filter_capacity);
+            self.current_filter_builder = F::create(self.filter_builder_options);
         }
     }
 
@@ -195,7 +207,7 @@ impl PartitionedMetaBuilder {
         self.shard_filters.push(filter);
         self.shard_block_counts.push(block_count);
         self.current_first_block_idx = total_block_count;
-        self.current_filter_builder = Xor16FilterBuilder::new(self.filter_capacity);
+        self.current_filter_builder = F::create(self.filter_builder_options);
     }
 }
 
@@ -232,8 +244,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
 
-    filter_builder: F,
-    partitioned_meta_builder: PartitionedMetaBuilder,
+    partitioned_meta_builder: PartitionedMetaBuilder<F>,
 
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
@@ -298,7 +309,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 restart_interval: options.restart_interval,
                 compression_algorithm: options.compression_algorithm,
             }),
-            filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             last_table_id: None,
@@ -311,7 +321,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             last_table_stats: Default::default(),
             partitioned_meta_builder: PartitionedMetaBuilder::new(
                 options.partitioned_meta_block_count,
-                options.capacity,
+                options.filter_builder_options(),
+                filter_builder,
             ),
             epoch_set: BTreeSet::default(),
             memory_limiter,
@@ -583,6 +594,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             true,
             self.memory_limiter.clone(),
         );
+        let filter_type = self.partitioned_meta_builder.filter_type();
         let right_exclusive = false;
         let data_end_offset = self.writer.data_len() as u64;
 
@@ -630,7 +642,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             for (shard_idx, (filter, block_count)) in partitioned_meta_builder
                 .shard_filters
                 .into_iter()
-                .zip(partitioned_meta_builder.shard_block_counts.into_iter())
+                .zip_eq_fast(partitioned_meta_builder.shard_block_counts.into_iter())
                 .enumerate()
             {
                 let end_block_idx = first_block_idx + block_count;
@@ -638,7 +650,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     shard_idx: shard_idx as u32,
                     first_block_idx: first_block_idx as u32,
                     block_metas: self.block_metas[first_block_idx..end_block_idx].to_vec(),
-                    filter_type: PbSstableFilterType::SstableFilterXor16 as u32,
+                    filter_type: filter_type as u32,
                     filter,
                 };
                 total_filter_size += shard.filter.len();
@@ -676,8 +688,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 largest_key: largest_key.clone(),
                 block_count: self.block_metas.len() as u32,
                 shard_count: shards.len() as u32,
-                filter_type: PbSstableFilterType::SstableFilterXor16 as u32,
-                shard_policy: META_SHARD_POLICY_FIXED_BLOCK_COUNT as u32,
+                filter_type: filter_type as u32,
+                shard_policy: META_SHARD_POLICY_FIXED_BLOCK_COUNT,
                 shards,
             };
             let index_encoded_size = index.encoded_size();
@@ -783,7 +795,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
-            filter_type: PbSstableFilterType::SstableFilterXor16,
+            filter_type,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();
@@ -853,7 +865,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     pub fn approximate_len(&self) -> usize {
         self.writer.data_len()
             + self.block_builder.approximate_len()
-            + self.filter_builder.approximate_len()
             + self.partitioned_meta_builder.approximate_len()
     }
 
@@ -890,7 +901,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             )
         });
 
-        self.filter_builder
+        self.partitioned_meta_builder
             .switch_block(self.memory_limiter.clone());
 
         if data_len as usize > self.options.capacity * 2 {
@@ -1742,14 +1753,14 @@ pub(super) mod tests {
         );
         let mut prefix_hint = vec![];
         OrderedRowSerde::new(vec![DataType::Int64], vec![OrderType::ascending()]).serialize(
-            &OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
             &mut prefix_hint,
         );
 
         let make_key = |prefix: i64, suffix: i64| {
             let mut pk = vec![];
             pk_serde.serialize(
-                &OwnedRow::new(vec![
+                OwnedRow::new(vec![
                     Some(ScalarImpl::Int64(prefix)),
                     Some(ScalarImpl::Int64(suffix)),
                 ]),
@@ -1975,7 +1986,7 @@ pub(super) mod tests {
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
             0.01,
-            PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterType::SstableFilterXor8,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(

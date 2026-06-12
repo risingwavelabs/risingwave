@@ -247,7 +247,7 @@ impl PartitionedSstableMeta {
 
     #[inline(always)]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.index.encoded_size()
+        std::mem::size_of::<Self>() + self.index.estimated_heap_size()
     }
 
     #[inline(always)]
@@ -327,6 +327,10 @@ impl MetaShardDesc {
             + 8 // offset
             + 4 // len
             + 8 // checksum
+    }
+
+    fn estimated_heap_size(&self) -> usize {
+        self.smallest_key.capacity()
     }
 }
 
@@ -564,6 +568,17 @@ impl MetaPartitionIndex {
             + 4 // magic
     }
 
+    fn estimated_heap_size(&self) -> usize {
+        self.smallest_key.capacity()
+            + self.largest_key.capacity()
+            + self.shards.capacity() * std::mem::size_of::<MetaShardDesc>()
+            + self
+                .shards
+                .iter()
+                .map(MetaShardDesc::estimated_heap_size)
+                .sum::<usize>()
+    }
+
     pub fn locate_shard_by_key(&self, key: FullKey<&[u8]>) -> Option<&MetaShardDesc> {
         if self.shards.is_empty() {
             return None;
@@ -761,6 +776,16 @@ impl MetaShard {
                 .sum::<usize>()
             + 4 // filter len
             + self.filter.len()
+    }
+
+    pub fn estimated_heap_size(&self) -> usize {
+        self.block_metas.capacity() * std::mem::size_of::<BlockMeta>()
+            + self
+                .block_metas
+                .iter()
+                .map(BlockMeta::estimated_heap_size)
+                .sum::<usize>()
+            + self.filter.capacity()
     }
 }
 
@@ -1178,7 +1203,7 @@ mod tests {
         let index = MetaPartitionIndex::decode(&data[meta.meta_offset as usize..]).unwrap();
 
         // Legacy SST serde.
-        let sstable = Sstable::new(42.into(), meta.clone(), true);
+        let sstable = Sstable::new(42.into(), meta, true);
 
         let buffer = bincode::serialize(&sstable).unwrap();
 
