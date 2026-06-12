@@ -109,6 +109,8 @@ fn empty_inner() -> IcebergCompactionManagerInner {
     IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
         snapshot_expiration_sink_ids: HashSet::new(),
+        manifest_rewrite_sink_ids: HashSet::new(),
+        orphan_file_cleanup_sink_ids: HashSet::new(),
         manual_compaction_waiters: HashMap::new(),
     }
 }

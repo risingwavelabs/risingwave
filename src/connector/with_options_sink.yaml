@@ -726,6 +726,30 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
+  - name: enable_manifest_rewrite
+    field_type: bool
+    comments: Whether to periodically rewrite Iceberg manifests.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: enable_orphan_file_cleanup
+    field_type: bool
+    comments: Whether to periodically delete old orphan files under the Iceberg table location.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: orphan_file_cleanup_max_age_millis
+    field_type: i64
+    comments: The maximum age (in milliseconds) for orphan files before they are deleted.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: orphan_file_cleanup_dry_run
+    field_type: bool
+    comments: Whether to only report orphan file candidates without deleting them.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
   - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-

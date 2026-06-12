@@ -705,6 +705,13 @@ fn test_config_constants_consistency() {
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         "snapshot_expiration_clear_expired_meta_data"
     );
+    assert_eq!(ENABLE_MANIFEST_REWRITE, "enable_manifest_rewrite");
+    assert_eq!(ENABLE_ORPHAN_FILE_CLEANUP, "enable_orphan_file_cleanup");
+    assert_eq!(
+        ORPHAN_FILE_CLEANUP_MAX_AGE_MILLIS,
+        "orphan_file_cleanup_max_age_millis"
+    );
+    assert_eq!(ORPHAN_FILE_CLEANUP_DRY_RUN, "orphan_file_cleanup_dry_run");
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
     assert_eq!(
         COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
@@ -740,6 +747,10 @@ fn test_parse_compaction_config() {
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
         ("compaction.write_parquet_max_row_group_bytes", "67108864"),
+        ("enable_manifest_rewrite", "true"),
+        ("enable_orphan_file_cleanup", "true"),
+        ("orphan_file_cleanup_max_age_millis", "604800000"),
+        ("orphan_file_cleanup_dry_run", "true"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -757,6 +768,14 @@ fn test_parse_compaction_config() {
     assert_eq!(config.write_parquet_compression(), "zstd");
     assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
     assert_eq!(config.write_parquet_max_row_group_bytes(), Some(67_108_864));
+    assert!(config.enable_manifest_rewrite);
+    assert!(config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_max_age_millis, Some(604_800_000));
+    assert_eq!(
+        config.orphan_file_cleanup_timestamp_ms(1_000_000_000),
+        Some(395_200_000)
+    );
+    assert!(config.orphan_file_cleanup_dry_run);
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -779,6 +798,11 @@ fn test_parse_compaction_config() {
     assert_eq!(config.snapshot_expiration_max_age_millis, None);
     assert_eq!(config.snapshot_expiration_retain_last, None);
     assert_eq!(config.max_snapshots_num_before_compaction, None);
+    assert!(!config.enable_manifest_rewrite);
+    assert!(!config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_max_age_millis, None);
+    assert_eq!(config.orphan_file_cleanup_timestamp_ms(1_000), None);
+    assert!(!config.orphan_file_cleanup_dry_run);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
     assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default
@@ -852,6 +876,30 @@ fn test_reject_zero_max_snapshots_num() {
     assert!(
         err.to_string()
             .contains("`compaction.max_snapshots_num` must be greater than 0")
+    );
+}
+
+#[test]
+fn test_reject_zero_orphan_file_cleanup_max_age() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("orphan_file_cleanup_max_age_millis", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`orphan_file_cleanup_max_age_millis` must be greater than 0")
     );
 }
 
