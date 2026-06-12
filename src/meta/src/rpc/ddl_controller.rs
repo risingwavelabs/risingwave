@@ -384,6 +384,23 @@ impl DdlController {
         Ok(())
     }
 
+    fn validate_serverless_backfill_enabled(
+        &self,
+        resource_type: &streaming_job_resource_type::ResourceType,
+    ) -> MetaResult<()> {
+        if matches!(
+            resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
+        ) && self.env.opts.serverless_backfill_controller_addr.is_empty()
+        {
+            bail_invalid_parameter!(
+                "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature"
+            );
+        }
+
+        Ok(())
+    }
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -1084,6 +1101,8 @@ impl DdlController {
         {
             self.validate_table_for_sink(target_table).await?;
         }
+        self.validate_serverless_backfill_enabled(&resource_type)?;
+
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let adaptive_parallelism_strategy =
             (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
@@ -1097,6 +1116,7 @@ impl DdlController {
             parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
                 .expect("backfill adaptive parallelism strategy should be validated in frontend")
         });
+
         let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
@@ -1165,7 +1185,7 @@ impl DdlController {
                 ctx,
                 streaming_job,
                 fragment_graph,
-                resource_type,
+                resource_type.clone(),
                 streaming_job_model,
                 since_timestamp_epoch,
             )
@@ -1891,16 +1911,13 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group = if let Some(group) = resource_type.resource_group() {
-            group
-        } else {
-            self.metadata_manager
-                .get_database_resource_group(stream_job.database_id())
-                .await?
-        };
+        let database_resource_group = self
+            .metadata_manager
+            .get_database_resource_group(stream_job.database_id())
+            .await?;
         let is_serverless_backfill = matches!(
             &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
         );
 
         // 3. Build the actor graph.
@@ -1978,7 +1995,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            database_resource_group: resource_group,
+            database_resource_group,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
@@ -1991,6 +2008,7 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            resource_type,
             streaming_job_model: streaming_job_model.clone(),
             refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
             since_timestamp_epoch,

@@ -100,6 +100,26 @@ use crate::model::{
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
+fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
+    format!("SERVERLESS_BACKFILL_RESOURCE_GROUP_TBD_FOR_{job_id}")
+}
+
+fn job_initial_catalog_resource_group(
+    resource_type: &streaming_job_resource_type::ResourceType,
+    job_id: JobId,
+) -> Option<String> {
+    match resource_type {
+        streaming_job_resource_type::ResourceType::Regular(_)
+        | streaming_job_resource_type::ResourceType::ServerlessBackfill(false) => None,
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
+            Some(group.clone())
+        }
+        streaming_job_resource_type::ResourceType::ServerlessBackfill(true) => {
+            Some(serverless_backfill_resource_group_placeholder(job_id))
+        }
+    }
+}
+
 /// A planned fragment update for dependent sources when a connection's properties change.
 ///
 /// We keep it as a named struct (instead of a tuple) for readability and to avoid clippy
@@ -186,10 +206,9 @@ impl CatalogController {
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
-        let specific_resource_group = resource_type.resource_group();
         let is_serverless_backfill = matches!(
             &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
         );
         let model = streaming_job::Model {
             job_id,
@@ -207,7 +226,7 @@ impl CatalogController {
                 .map(ToString::to_string),
             backfill_orders: None,
             max_parallelism: max_parallelism as _,
-            specific_resource_group,
+            specific_resource_group: job_initial_catalog_resource_group(&resource_type, job_id),
             is_serverless_backfill,
             refresh_interval_sec: refresh_interval_sec.map(|s| s as i64),
         };
@@ -327,7 +346,7 @@ impl CatalogController {
                     adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
-                    resource_type,
+                    resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     refresh_interval_sec,
@@ -361,7 +380,7 @@ impl CatalogController {
                     adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
-                    resource_type,
+                    resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -384,7 +403,7 @@ impl CatalogController {
                     adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
-                    resource_type,
+                    resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -449,7 +468,7 @@ impl CatalogController {
                     adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
-                    resource_type,
+                    resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -487,7 +506,7 @@ impl CatalogController {
                     adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
-                    resource_type,
+                    resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -579,6 +598,28 @@ impl CatalogController {
         txn.commit().await?;
 
         Ok(table_id_map)
+    }
+
+    pub async fn update_streaming_job_resource_group(
+        &self,
+        job_id: JobId,
+        resource_group: String,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        ensure_job_not_canceled(job_id, &txn).await?;
+
+        let job = streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            specific_resource_group: Set(Some(resource_group)),
+            ..Default::default()
+        };
+        StreamingJobModel::update(job).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        Ok(())
     }
 
     pub async fn prepare_stream_job_fragments(
