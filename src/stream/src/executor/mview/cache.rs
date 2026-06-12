@@ -449,7 +449,6 @@ fn versions_are_newer_or_equal(
 
 /// TOAST column handling for CDC tables with TOAST columns.
 mod toast {
-    use risingwave_common::row::Row as _;
     use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;

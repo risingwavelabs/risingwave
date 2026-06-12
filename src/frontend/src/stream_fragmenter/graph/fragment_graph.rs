@@ -21,7 +21,6 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{DispatchStrategy, StreamNode};
-use thiserror_ext::AsReport;
 
 pub type LocalFragmentId = FragmentId;
 

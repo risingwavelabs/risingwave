@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(allocator_api)]
-#![feature(bound_as_ref)]
 #![feature(custom_test_frameworks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(test)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(type_changing_struct_update)]
@@ -28,10 +25,7 @@
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
-#![feature(get_mut_unchecked)]
-#![feature(portable_simd)]
 #![feature(map_try_insert)]
 #![feature(never_type)]
 #![feature(backtrace_frames)]

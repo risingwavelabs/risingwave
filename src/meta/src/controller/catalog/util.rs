@@ -394,8 +394,8 @@ impl CatalogController {
 
         let mut job_mapping: HashMap<JobKey, ObjectId> = creating_tables
             .into_iter()
-            .chain(creating_sinks.into_iter())
-            .chain(creating_subscriptions.into_iter())
+            .chain(creating_sinks)
+            .chain(creating_subscriptions)
             .map(|(id, name, database_id, schema_id)| ((database_id, schema_id, name), id))
             .collect();
 

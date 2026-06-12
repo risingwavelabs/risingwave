@@ -1127,7 +1127,7 @@ where
             .all(db)
             .await?;
 
-        index_table_ids.extend(internal_table_ids.into_iter());
+        index_table_ids.extend(internal_table_ids);
     }
 
     Ok(index_table_ids)

@@ -577,26 +577,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 .map(|s| s.total_key_count as usize)
                 .sum();
 
-            if total_key_count == 0 {
-                (0, 0)
-            } else {
-                let total_key_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_key_size as usize)
-                    .sum();
+            let total_key_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_key_size as usize)
+                .sum();
 
-                let total_value_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_value_size as usize)
-                    .sum();
+            let total_value_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_value_size as usize)
+                .sum();
 
-                (
-                    total_key_size / total_key_count,
-                    total_value_size / total_key_count,
-                )
-            }
+            (
+                total_key_size.checked_div(total_key_count).unwrap_or(0),
+                total_value_size.checked_div(total_key_count).unwrap_or(0),
+            )
         };
 
         let (min_epoch, max_epoch) = {

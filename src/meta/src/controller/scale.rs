@@ -105,8 +105,8 @@ where
 
     let definitions: HashMap<JobId, String> = common_job_definitions
         .into_iter()
-        .chain(sink_definitions.into_iter())
-        .chain(source_definitions.into_iter())
+        .chain(sink_definitions)
+        .chain(source_definitions)
         .collect();
 
     Ok(definitions)
