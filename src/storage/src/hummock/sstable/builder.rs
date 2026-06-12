@@ -195,20 +195,6 @@ impl<F: FilterBuilder> PartitionedMetaBuilder<F> {
         self.current_filter_builder.approximate_len()
             + self.shard_filters.iter().map(Vec::len).sum::<usize>()
     }
-
-    fn can_add_raw_shard(&self, total_block_count: usize, block_count: usize) -> bool {
-        self.current_first_block_idx == total_block_count
-            && block_count == self.shard_block_count
-            && block_count > 0
-    }
-
-    fn add_raw_shard(&mut self, total_block_count: usize, block_count: usize, filter: Vec<u8>) {
-        assert!(self.can_add_raw_shard(total_block_count - block_count, block_count));
-        self.shard_filters.push(filter);
-        self.shard_block_counts.push(block_count);
-        self.current_first_block_idx = total_block_count;
-        self.current_filter_builder = F::create(self.filter_builder_options);
-    }
 }
 
 pub struct SstableBuilderOutput<WO> {
@@ -343,70 +329,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_builder.approximate_len()
     }
 
-    pub fn can_add_raw_meta_shard(&self, block_count: usize) -> bool {
-        self.block_builder.is_empty()
-            && self
-                .partitioned_meta_builder
-                .can_add_raw_shard(self.block_metas.len(), block_count)
-    }
-
-    fn record_raw_block_stats(&mut self, block_meta: &BlockMeta, block_len: usize) {
-        self.last_table_stats.total_key_count += block_meta.total_key_count as i64;
-        self.epoch_set.insert(
-            FullKey::decode(&block_meta.smallest_key)
-                .epoch_with_gap
-                .pure_epoch(),
-        );
-        self.block_size_vec.push(block_len);
-    }
-
-    pub async fn add_raw_meta_shard(
+    /// Compatibility hook for the disabled fast-compaction runner.
+    /// Returning false keeps callers on the decoded fallback path.
+    pub async fn add_raw_block(
         &mut self,
-        blocks: Vec<(Bytes, BlockMeta)>,
-        filter_data: Vec<u8>,
-        largest_key: Vec<u8>,
+        _buf: Bytes,
+        _filter_data: Vec<u8>,
+        _smallest_key: FullKey<Vec<u8>>,
+        _largest_key: Vec<u8>,
+        _meta: BlockMeta,
     ) -> HummockResult<bool> {
-        let block_count = blocks.len();
-        if !self.can_add_raw_meta_shard(block_count) {
-            return Ok(false);
-        }
-
-        let table_id = blocks
-            .first()
-            .expect("raw meta shard should not be empty")
-            .1
-            .table_id();
-        if blocks.iter().any(|(_, meta)| meta.table_id() != table_id) {
-            return Ok(false);
-        }
-
-        if self.last_table_id != Some(table_id) {
-            self.table_ids.insert(table_id);
-            self.finalize_last_table_stats();
-            self.last_table_id = Some(table_id);
-        }
-
-        self.last_full_key = largest_key;
-        for (block, mut meta) in blocks {
-            self.record_raw_block_stats(&meta, block.len());
-            meta.offset = self.writer.data_len() as u32;
-            meta.len = block.len() as u32;
-            self.block_metas.push(meta);
-            let block_meta = self.block_metas.last_mut().unwrap();
-            self.writer.write_block_bytes(block, block_meta).await?;
-        }
-        self.epoch_set.insert(
-            FullKey::decode(&self.last_full_key)
-                .epoch_with_gap
-                .pure_epoch(),
-        );
-        self.partitioned_meta_builder.add_raw_shard(
-            self.block_metas.len(),
-            block_count,
-            filter_data,
-        );
-
-        Ok(true)
+        std::future::ready(()).await;
+        Ok(false)
     }
 
     /// Add kv pair to sstable.

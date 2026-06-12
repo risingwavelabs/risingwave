@@ -705,6 +705,18 @@ impl XorFilterReader {
         }
     }
 
+    pub fn get_block_raw_filter(&self, block_index: usize) -> Vec<u8> {
+        match &self.filter {
+            XorFilter::BlockXor8(reader) => {
+                Xor8FilterBuilder::build_from_xor8(&reader.filters[block_index])
+            }
+            XorFilter::BlockXor16(reader) => {
+                Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index])
+            }
+            _ => unreachable!("get_block_raw_filter requires a blocked xor filter"),
+        }
+    }
+
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         match &self.filter {
             XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),

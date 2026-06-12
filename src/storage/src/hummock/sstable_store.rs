@@ -47,7 +47,7 @@ use tokio::time::Instant;
 use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, MetaPartitionIndex, MetaShard,
     MetaShardDesc, PARTITIONED_META_VERSION, PartitionedSstableMeta, RecentFilter, Sstable,
-    SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
+    SstableMeta, SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -113,6 +113,8 @@ impl<T> Deref for VectorMetaFileHolder<T> {
         unsafe { &*self.ptr }
     }
 }
+
+pub type TableHolder = Box<Sstable>;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MetaShardCacheKey {
@@ -1327,6 +1329,36 @@ impl SstableStore {
         entry
     }
 
+    /// Legacy full-meta loader kept only to compile the disabled fast-compaction runner.
+    pub async fn sstable(
+        &self,
+        sstable_info_ref: &SstableInfo,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        let object_id = sstable_info_ref.object_id;
+        let store = self.store.clone();
+        let meta_path = self.get_sst_data_path(object_id);
+        let stats_ptr = stats.remote_io_time.clone();
+        let range = sstable_info_ref.meta_offset as usize..;
+        let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
+
+        let now = Instant::now();
+        let buf = store
+            .read(&meta_path, range)
+            .instrument_await("get_meta_response".verbose())
+            .await?;
+        let meta = SstableMeta::decode(&buf[..])?;
+        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+        stats.cache_meta_block_total += 1;
+
+        Ok(Box::new(Sstable::new(
+            object_id,
+            meta,
+            skip_bloom_filter_in_serde,
+        )))
+    }
+
     pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
@@ -1465,55 +1497,6 @@ impl SstableStore {
             }
         };
         Ok(BlockDataStream::new(reader, metas.to_vec()))
-    }
-
-    pub async fn read_raw_blocks_by_block_metas(
-        &self,
-        object_id: HummockSstableObjectId,
-        metas: &[BlockMeta],
-    ) -> HummockResult<Vec<Bytes>> {
-        if metas.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let start_pos = metas[0].offset as usize;
-        let mut expected_offset = start_pos;
-        for meta in metas {
-            if meta.offset as usize != expected_offset {
-                return Err(ObjectError::internal(format!(
-                    "non-contiguous raw block range in sst {}: expected offset {}, actual {}",
-                    object_id, expected_offset, meta.offset
-                ))
-                .into());
-            }
-            expected_offset += meta.len as usize;
-        }
-        let data_path = self.get_sst_data_path(object_id);
-        let store = self.store();
-        let range = start_pos..expected_offset;
-        let ret = tokio::spawn(async move { store.read(&data_path, range).await }).await;
-        let buf = match ret {
-            Ok(Ok(buf)) => buf,
-            Ok(Err(e)) => return Err(HummockError::from(e)),
-            Err(e) => {
-                return Err(HummockError::other(format!(
-                    "failed to get result, this read request may be canceled: {}",
-                    e.as_report()
-                )));
-            }
-        };
-
-        let mut offset = 0;
-        let mut blocks = Vec::with_capacity(metas.len());
-        for meta in metas {
-            let end = offset + meta.len as usize;
-            if end > buf.len() {
-                return Err(ObjectError::internal("read unexpected EOF").into());
-            }
-            blocks.push(buf.slice(offset..end));
-            offset = end;
-        }
-        Ok(blocks)
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry> {
