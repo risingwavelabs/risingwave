@@ -73,14 +73,16 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 } else {
                     input_sst_table_ids.extend(table.table_ids.iter().copied());
                 }
-                if table.total_key_count != 0 {
+                if let Some(stale_ratio) =
+                    (table.stale_key_count * 100).checked_div(table.total_key_count)
+                {
                     format!(
                         "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
-                        (table.stale_key_count * 100 / table.total_key_count),
+                        stale_ratio,
                     )
                 } else {
                     format!(
