@@ -23,7 +23,9 @@ use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use iceberg::{Catalog, TableIdent};
 use itertools::Itertools;
-use risingwave_common::array::arrow::arrow_schema_iceberg::Field as ArrowField;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{
+    DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields,
+};
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::Field;
@@ -225,6 +227,54 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
         Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
     }
 }
+
+fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType) -> bool {
+    use ArrowDataType::*;
+
+    match (current, expected) {
+        // RW Decimal has no precision/scale. Sink creation already accepts any
+        // table Decimal128 precision/scale, while expected schemas here are
+        // generated from RW columns using the same canonical mapping. Ignoring
+        // both values prevents false schema-state ambiguity and cannot mask an
+        // auto schema change, which only supports add/drop columns.
+        (Decimal128(_, _), Decimal128(_, _)) => true,
+        (Binary, LargeBinary) | (LargeBinary, Binary) => true,
+        (List(current_field), List(expected_field)) => {
+            arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }
+        (Map(current_field, current_sorted), Map(expected_field, expected_sorted)) => {
+            current_sorted == expected_sorted
+                && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }
+        (Struct(current_fields), Struct(expected_fields)) => {
+            let expected_fields = expected_fields
+                .iter()
+                .map(|field| field.as_ref().clone())
+                .collect_vec();
+            schema_contains_same_fields(current_fields, &expected_fields)
+        }
+        _ => current == expected,
+    }
+}
+
+fn schema_contains_same_fields(current: &ArrowFields, expected: &[ArrowField]) -> bool {
+    if current.len() != expected.len() {
+        return false;
+    }
+
+    let mut unmatched_current = current.iter().collect_vec();
+    expected.iter().all(|expected_field| {
+        let Some(pos) = unmatched_current.iter().position(|current_field| {
+            current_field.name() == expected_field.name()
+                && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }) else {
+            return false;
+        };
+        unmatched_current.swap_remove(pos);
+        true
+    })
+}
+
 pub struct IcebergSinkCommitter {
     pub(super) catalog: Arc<dyn Catalog>,
     pub(super) table: Table,
@@ -695,16 +745,7 @@ impl IcebergSinkCommitter {
         let iceberg_arrow_convert = IcebergArrowConvert;
 
         let schema_matches = |expected: &[ArrowField]| {
-            if current_arrow_schema.fields().len() != expected.len() {
-                return false;
-            }
-
-            expected.iter().all(|expected_field| {
-                current_arrow_schema.fields().iter().any(|current_field| {
-                    current_field.name() == expected_field.name()
-                        && current_field.data_type() == expected_field.data_type()
-                })
-            })
+            schema_contains_same_fields(current_arrow_schema.fields(), expected)
         };
 
         let original_arrow_fields: Vec<ArrowField> = schema_change
@@ -965,8 +1006,201 @@ mod tests {
         SnapshotReference, SnapshotRetention, SortOrder, Summary, TableMetadataBuilder, Type,
         UnboundPartitionSpec,
     };
+    use risingwave_common::array::arrow::arrow_schema_iceberg::{
+        DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
+        Fields as ArrowFields, Schema as ArrowSchema,
+    };
 
     use super::*;
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_binary_large_binary() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::LargeBinary, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Binary, true),
+        ];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_nested_binary_large_binary() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new(
+                "s",
+                ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                    "payload",
+                    ArrowDataType::LargeBinary,
+                    true,
+                )])),
+                true,
+            ),
+            ArrowField::new(
+                "l",
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::LargeBinary,
+                    true,
+                ))),
+                true,
+            ),
+            ArrowField::new_map(
+                "m",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new("value", ArrowDataType::LargeBinary, true)),
+                false,
+                true,
+            ),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new(
+                "s",
+                ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                    "payload",
+                    ArrowDataType::Binary,
+                    true,
+                )])),
+                true,
+            ),
+            ArrowField::new(
+                "l",
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::Binary,
+                    true,
+                ))),
+                true,
+            ),
+            ArrowField::new_map(
+                "m",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new("value", ArrowDataType::Binary, true)),
+                false,
+                true,
+            ),
+        ];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_decimal_precision_delta() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(28, 10),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_decimal_precision_and_scale_delta() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 2),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_length_mismatch() {
+        let current_schema =
+            ArrowSchema::new(vec![ArrowField::new("k", ArrowDataType::Int32, true)]);
+        let expected_fields = vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Utf8, true),
+        ];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_type_mismatch() {
+        let current_schema =
+            ArrowSchema::new(vec![ArrowField::new("v", ArrowDataType::Utf8, true)]);
+        let expected_fields = vec![ArrowField::new("v", ArrowDataType::Int32, true)];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_reused_duplicate_match() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Utf8, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Int32, true),
+        ];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_nested_type_mismatch() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "s",
+            ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                "payload",
+                ArrowDataType::Utf8,
+                true,
+            )])),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "s",
+            ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                "payload",
+                ArrowDataType::Int32,
+                true,
+            )])),
+            true,
+        )];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
 
     #[test]
     fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {
