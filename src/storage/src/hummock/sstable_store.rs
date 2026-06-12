@@ -47,7 +47,7 @@ use tokio::time::Instant;
 use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, MetaPartitionIndex, MetaShard,
     MetaShardDesc, PARTITIONED_META_VERSION, PartitionedSstableMeta, RecentFilter, Sstable,
-    SstableMeta, SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
+    SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -203,18 +203,20 @@ impl<'de> Deserialize<'de> for HummockMetaCacheEntry {
 
 impl HummockMetaCacheEntry {
     pub fn estimate_size(&self) -> usize {
-        match self {
-            Self::MetaIndex(meta_index) => meta_index.estimate_size(),
-            Self::MetaShard {
-                shard,
-                filter_reader,
-                ..
-            } => {
-                std::mem::size_of::<MetaShard>()
-                    + shard.estimated_heap_size()
-                    + filter_reader.estimated_heap_size()
+        std::mem::size_of::<Self>()
+            + match self {
+                Self::MetaIndex(meta_index) => meta_index.estimate_size(),
+                Self::MetaShard {
+                    shard,
+                    filter_reader,
+                    ..
+                } => {
+                    std::mem::size_of::<MetaShard>()
+                        + shard.estimated_heap_size()
+                        + std::mem::size_of::<XorFilterReader>()
+                        + filter_reader.estimated_heap_size()
+                }
             }
-        }
     }
 }
 
@@ -1329,34 +1331,16 @@ impl SstableStore {
         entry
     }
 
-    /// Legacy full-meta loader kept only to compile the disabled fast-compaction runner.
+    /// Disabled fast-compaction full-meta entrypoint.
     pub async fn sstable(
         &self,
-        sstable_info_ref: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
+        _sstable_info_ref: &SstableInfo,
+        _stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        let object_id = sstable_info_ref.object_id;
-        let store = self.store.clone();
-        let meta_path = self.get_sst_data_path(object_id);
-        let stats_ptr = stats.remote_io_time.clone();
-        let range = sstable_info_ref.meta_offset as usize..;
-        let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
-
-        let now = Instant::now();
-        let buf = store
-            .read(&meta_path, range)
-            .instrument_await("get_meta_response".verbose())
-            .await?;
-        let meta = SstableMeta::decode(&buf[..])?;
-        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-        stats.cache_meta_block_total += 1;
-
-        Ok(Box::new(Sstable::new(
-            object_id,
-            meta,
-            skip_bloom_filter_in_serde,
-        )))
+        std::future::ready(()).await;
+        Err(HummockError::other(
+            "fast compaction is disabled for v3 meta benchmark",
+        ))
     }
 
     pub async fn list_sst_object_metadata_from_object_store(

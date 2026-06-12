@@ -647,7 +647,7 @@ impl XorFilterReader {
 
     /// Estimates heap memory held by decoded filter data.
     ///
-    /// Inline fields of `XorFilterReader` are counted by `Sstable::estimated_meta_cache_memory_weight`.
+    /// Callers should count inline fields of `XorFilterReader` separately.
     pub fn estimated_heap_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_heap_size(filter),

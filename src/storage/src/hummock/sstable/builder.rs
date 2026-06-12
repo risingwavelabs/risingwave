@@ -44,7 +44,7 @@ use crate::hummock::sstable::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    HummockResult, MemoryLimiter, Xor16FilterBuilder, try_shorten_block_smallest_key,
+    HummockError, HummockResult, MemoryLimiter, Xor16FilterBuilder, try_shorten_block_smallest_key,
 };
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
@@ -329,8 +329,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_builder.approximate_len()
     }
 
-    /// Compatibility hook for the disabled fast-compaction runner.
-    /// Returning false keeps callers on the decoded fallback path.
+    /// Disabled fast-compaction raw-block entrypoint.
     pub async fn add_raw_block(
         &mut self,
         _buf: Bytes,
@@ -340,7 +339,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         _meta: BlockMeta,
     ) -> HummockResult<bool> {
         std::future::ready(()).await;
-        Ok(false)
+        Err(HummockError::other(
+            "fast compaction is disabled for v3 meta benchmark",
+        ))
     }
 
     /// Add kv pair to sstable.

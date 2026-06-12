@@ -437,13 +437,22 @@ impl SstableIterator {
         let Some(desc) = self.sst.index.locate_shard_by_key(key).cloned() else {
             return Ok(self.block_start_idx_inclusive);
         };
+        let desc_start_idx = desc.first_block_idx as usize;
+        let desc_end_idx = desc_start_idx + desc.block_count as usize - 1;
+        if desc_end_idx < self.block_start_idx_inclusive {
+            return Ok(self.block_start_idx_inclusive);
+        }
+        if desc_start_idx > self.block_end_idx_inclusive {
+            return Ok(self.block_end_idx_inclusive);
+        }
         self.ensure_partitioned_shard_loaded(&desc).await?;
         let shard = self
             .partitioned_shard
             .as_ref()
             .expect("partitioned shard should be loaded");
         let local_idx = shard.locate_block_by_key(key);
-        Ok(shard.first_block_idx as usize + local_idx)
+        Ok((shard.first_block_idx as usize + local_idx)
+            .clamp(self.block_start_idx_inclusive, self.block_end_idx_inclusive))
     }
 }
 

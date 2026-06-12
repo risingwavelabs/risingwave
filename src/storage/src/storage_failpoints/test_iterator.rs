@@ -14,9 +14,8 @@
 
 use std::ops::Bound::Unbounded;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::hummock::compactor::fast_compactor_runner::BlockStreamIterator;
 use crate::hummock::compactor::{SstableStreamIterator, TaskProgress};
 use crate::hummock::iterator::test_utils::{
     TEST_KEYS_COUNT, gen_iterator_test_sstable_base, gen_iterator_test_sstable_info,
@@ -435,7 +434,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
 #[tokio::test]
 #[cfg(feature = "failpoints")]
-async fn test_failpoints_fast_compactor_iterator_recreate() {
+async fn test_failpoints_sstable_stream_iterator_recreate() {
     let get_stream_err = "get_stream_err";
     let stream_read_err = "stream_read_err";
     let create_stream_err = "create_stream_err";
@@ -476,38 +475,32 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
 
     let mut stats = StoreLocalStatistic::default();
 
-    let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
-    let mut sstable_iter = BlockStreamIterator::new(
-        table,
+    let table = sstable_store.meta_index(&info, &mut stats).await.unwrap();
+    let block_metas = sstable_store
+        .get_partitioned_block_metas(&table, &mut stats)
+        .await
+        .unwrap();
+    let mut sstable_iter = SstableStreamIterator::new(
+        block_metas.clone(),
+        0..block_metas.len(),
+        info.clone(),
+        &stats,
         Arc::new(TaskProgress::default()),
         sstable_store.clone(),
-        info.clone(),
         10,
-        Arc::new(AtomicU64::new(0)),
     );
+    sstable_iter.seek(None).await.unwrap();
 
     let mut cnt = 0;
     while sstable_iter.is_valid() {
-        let (buf, _, meta) = match sstable_iter.download_next_block().await.unwrap() {
-            Some(x) => x,
-            None => break,
-        };
-        sstable_iter
-            .init_block_iter(buf, meta.uncompressed_size as usize)
-            .unwrap();
-
-        let block_iter = sstable_iter.iter_mut();
-
-        while block_iter.is_valid() {
-            let key = block_iter.key();
-            let value = HummockValue::from_slice(block_iter.value()).unwrap();
-            assert_eq!(test_key_of(cnt).to_ref(), key);
-            let expected = test_value_of(cnt);
-            let expected_slice = expected.as_slice();
-            assert_eq!(value.into_user_value().unwrap(), expected_slice);
-            cnt += 1;
-            block_iter.next();
-        }
+        let key = sstable_iter.key();
+        let value = sstable_iter.value();
+        assert_eq!(test_key_of(cnt).to_ref(), key);
+        let expected = test_value_of(cnt);
+        let expected_slice = expected.as_slice();
+        assert_eq!(value.into_user_value().unwrap(), expected_slice);
+        cnt += 1;
+        sstable_iter.next().await.unwrap();
     }
     assert_eq!(cnt, TEST_KEYS_COUNT);
     assert!(meet_err.load(Ordering::Acquire));
