@@ -1098,12 +1098,15 @@ impl SstableStore {
         sstable: &PartitionedSstableMeta,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Vec<BlockMeta>> {
-        Ok(self
-            .get_partitioned_meta_shards(sstable, stats)
-            .await?
-            .into_iter()
-            .flat_map(|shard| shard.block_metas)
-            .collect())
+        let index = &sstable.index;
+        let mut block_metas = Vec::with_capacity(index.block_count as usize);
+        for desc in &index.shards {
+            let shard = self
+                .get_meta_shard_holder(sstable.id, index.filter_type, desc, stats)
+                .await?;
+            block_metas.extend_from_slice(&shard.block_metas);
+        }
+        Ok(block_metas)
     }
 
     pub async fn get_partitioned_meta_shards(
