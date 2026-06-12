@@ -12,8 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(type_alias_impl_trait)]
-
 #[cfg(test)]
 mod test_mem_table;

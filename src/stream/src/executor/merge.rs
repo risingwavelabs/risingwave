@@ -560,7 +560,7 @@ mod tests {
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
-        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
 
@@ -579,7 +579,7 @@ mod tests {
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 20);
         });
-        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(2));
         });
     }
@@ -680,7 +680,7 @@ mod tests {
                 }
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
+            assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,..}) => {
                 assert_eq!(barrier_epoch.curr, epoch);
             });
         }
@@ -947,7 +947,7 @@ mod tests {
             assert!(columns.is_empty());
             assert!(visibility.is_empty());
         });
-        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
         assert!(rpc_called.load(Ordering::SeqCst));
