@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -22,7 +23,9 @@ use risingwave_common::gap_fill::{
 };
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{CheckedAdd, Datum, Interval, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{
+    CheckedAdd, Datum, DefaultOrd, Interval, ScalarImpl, Timestamp, ToOwnedDatum,
+};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
@@ -181,6 +184,15 @@ struct GapFillGenerationContext<'a> {
     actor_ctx: &'a ActorContextRef,
 }
 
+/// Extract the `Timestamp` the fill grid walks in from a time-column scalar; `None` if not a timestamp.
+fn time_scalar_to_timestamp(scalar: ScalarRefImpl<'_>) -> Option<Timestamp> {
+    match scalar {
+        ScalarRefImpl::Timestamp(ts) => Some(ts),
+        ScalarRefImpl::Timestamptz(ts) => Timestamp::with_micros(ts.timestamp_micros()).ok(),
+        _ => None,
+    }
+}
+
 impl<S: StateStore> GapFillExecutor<S> {
     async fn find_prev_output(
         managed_state: &ManagedGapFillState<S>,
@@ -252,6 +264,7 @@ impl<S: StateStore> GapFillExecutor<S> {
     /// - `FillStrategy::Null`: Leaves the column null.
     ///
     /// Returns a vector of `OwnedRow` representing the filled rows between `prev_row` and `curr_row`.
+    #[expect(clippy::too_many_arguments)]
     fn generate_filled_rows_between_static(
         prev_row: &OwnedRow,
         curr_row: &OwnedRow,
@@ -260,7 +273,19 @@ impl<S: StateStore> GapFillExecutor<S> {
         partition_by_indices: &[usize],
         fill_columns: &HashMap<usize, FillStrategy>,
         generation_context: &GapFillGenerationContext<'_>,
+        // Skip building fill rows below this time. Only set for LOCF/NULL (whose values don't
+        // depend on the skipped grid positions); `None` builds the whole gap.
+        build_from: Option<Timestamp>,
     ) -> StreamExecutorResult<Vec<OwnedRow>> {
+        // Skipping rows below `build_from` would desync the cumulative interpolation state, so
+        // callers must never set it when a column interpolates.
+        debug_assert!(
+            build_from.is_none()
+                || !fill_columns
+                    .values()
+                    .any(|s| matches!(s, FillStrategy::Interpolate)),
+            "build_from must not be set when any column interpolates"
+        );
         let mut filled_rows = Vec::new();
 
         let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
@@ -270,38 +295,19 @@ impl<S: StateStore> GapFillExecutor<S> {
             return Ok(filled_rows);
         };
 
-        let prev_time = match prev_time_scalar {
-            ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => {
-                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
-                    Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
-                    }
-                }
-            }
-            _ => {
-                warn!("Time column is not timestamp type: {:?}", prev_time_scalar);
-                return Ok(filled_rows);
-            }
+        let Some(prev_time) = time_scalar_to_timestamp(prev_time_scalar) else {
+            warn!(
+                "Time column is not a timestamp value: {:?}",
+                prev_time_scalar
+            );
+            return Ok(filled_rows);
         };
-
-        let curr_time = match curr_time_scalar {
-            ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => {
-                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
-                    Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
-                    }
-                }
-            }
-            _ => {
-                warn!("Time column is not timestamp type: {:?}", curr_time_scalar);
-                return Ok(filled_rows);
-            }
+        let Some(curr_time) = time_scalar_to_timestamp(curr_time_scalar) else {
+            warn!(
+                "Time column is not a timestamp value: {:?}",
+                curr_time_scalar
+            );
+            return Ok(filled_rows);
         };
 
         if prev_time >= curr_time {
@@ -365,6 +371,13 @@ impl<S: StateStore> GapFillExecutor<S> {
 
         // Generate filled rows, applying the appropriate strategy for each column
         while fill_time < curr_time {
+            if build_from.is_some_and(|from| fill_time < from) {
+                fill_time = match fill_time.checked_add(*interval) {
+                    Some(t) => t,
+                    None => break,
+                };
+                continue;
+            }
             let mut new_row_data = Vec::with_capacity(prev_row.len());
 
             for col_idx in 0..prev_row.len() {
@@ -456,6 +469,60 @@ impl<S: StateStore> GapFillExecutor<S> {
 
         Ok(filled_rows)
     }
+
+    /// Emit the minimal changelog turning `old_fills` into `new_fills` (both sorted by time).
+    ///
+    /// With `reuse_unchanged` false (e.g. interpolation changes every fill) all `old_fills` are
+    /// replaced by `new_fills`; otherwise the lists are merged and only differing rows are emitted,
+    /// leaving an unchanged LOCF prefix or NULL fill in place.
+    fn diff_fills(
+        old_fills: Vec<OwnedRow>,
+        new_fills: Vec<OwnedRow>,
+        time_column_index: usize,
+        reuse_unchanged: bool,
+    ) -> Vec<(Op, OwnedRow)> {
+        if !reuse_unchanged {
+            return old_fills
+                .into_iter()
+                .map(|row| (Op::Delete, row))
+                .chain(new_fills.into_iter().map(|row| (Op::Insert, row)))
+                .collect();
+        }
+
+        let mut ops = Vec::new();
+        let (mut i, mut j) = (0, 0);
+        while i < old_fills.len() && j < new_fills.len() {
+            match old_fills[i]
+                .datum_at(time_column_index)
+                .default_cmp(&new_fills[j].datum_at(time_column_index))
+            {
+                Ordering::Less => {
+                    ops.push((Op::Delete, old_fills[i].clone()));
+                    i += 1;
+                }
+                Ordering::Greater => {
+                    ops.push((Op::Insert, new_fills[j].clone()));
+                    j += 1;
+                }
+                Ordering::Equal => {
+                    // Same timestamp: rewrite only if the value changed; keep identical fills.
+                    if old_fills[i] != new_fills[j] {
+                        ops.push((Op::Delete, old_fills[i].clone()));
+                        ops.push((Op::Insert, new_fills[j].clone()));
+                    }
+                    i += 1;
+                    j += 1;
+                }
+            }
+        }
+        for old_row in &old_fills[i..] {
+            ops.push((Op::Delete, old_row.clone()));
+        }
+        for new_row in &new_fills[j..] {
+            ops.push((Op::Insert, new_row.clone()));
+        }
+        ops
+    }
 }
 
 impl<S: StateStore> Execute for GapFillExecutor<S> {
@@ -505,6 +572,11 @@ impl<S: StateStore> GapFillExecutor<S> {
 
         let partition_by_indices = managed_state.partition_by_indices.clone();
         let pointer_key_indices = managed_state.pointer_key_indices.clone();
+        // Interpolation re-slopes every fill, so a changed anchor changes all of them; only
+        // LOCF/NULL fills can be reused by the diff.
+        let has_interpolate = fill_columns
+            .values()
+            .any(|strategy| matches!(strategy, FillStrategy::Interpolate));
 
         #[for_await]
         for msg in input {
@@ -531,8 +603,6 @@ impl<S: StateStore> GapFillExecutor<S> {
 
                         match op {
                             Op::Insert | Op::UpdateInsert => {
-                                // 1. Find prev and next neighbors in the same partition from the
-                                //    authoritative state table.
                                 let prev_output = Self::find_prev_output(
                                     &managed_state,
                                     &partition_key,
@@ -547,40 +617,39 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 )
                                 .await?;
 
-                                // 2. If both neighbors existed, delete old filled rows between them.
-                                if let (Some(prev_out_ref), Some(next_out_ref)) =
+                                // Splitting the gap leaves the `prev -> row` prefix unchanged for
+                                // LOCF/NULL, so `split_time` makes both sides skip it; `None`
+                                // (interpolation, or no gap to split) rebuilds the whole gap.
+                                let split_time = (!has_interpolate
+                                    && prev_output.is_some()
+                                    && next_output.is_some())
+                                .then(|| {
+                                    row.datum_at(time_column_index)
+                                        .and_then(time_scalar_to_timestamp)
+                                })
+                                .flatten();
+
+                                let old_fills = if let (Some(prev_out), Some(next_out)) =
                                     (&prev_output, &next_output)
                                 {
-                                    let old_fills = Self::generate_filled_rows_between_static(
-                                        prev_out_ref,
-                                        next_out_ref,
+                                    Self::generate_filled_rows_between_static(
+                                        prev_out,
+                                        next_out,
                                         &interval,
                                         time_column_index,
                                         &managed_state.partition_by_indices,
                                         &fill_columns,
                                         &generation_context,
-                                    )?;
-                                    for filled_row in &old_fills {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Delete, filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
-                                    }
-                                }
-
-                                // 3. Insert the new anchor row into state.
-                                managed_state.insert(&row);
-                                // 4. Emit the inserted row.
-                                if let Some(chunk) =
-                                    chunk_builder.append_row(op.normalize_update(), &row)
+                                        split_time,
+                                    )?
+                                } else {
+                                    vec![]
+                                };
+                                let mut new_fills = vec![];
+                                if split_time.is_none()
+                                    && let Some(prev_out) = &prev_output
                                 {
-                                    yield Message::Chunk(chunk);
-                                }
-
-                                // 5. Emit new filled rows between prev and new row.
-                                if let Some(prev_out) = &prev_output {
-                                    let filled_rows = Self::generate_filled_rows_between_static(
+                                    new_fills.extend(Self::generate_filled_rows_between_static(
                                         prev_out,
                                         &row,
                                         &interval,
@@ -588,19 +657,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         &managed_state.partition_by_indices,
                                         &fill_columns,
                                         &generation_context,
-                                    )?;
-                                    for filled_row in filled_rows {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
-                                    }
+                                        None,
+                                    )?);
                                 }
-
-                                // 6. Emit new filled rows between new row and next.
                                 if let Some(next_out) = &next_output {
-                                    let filled_rows = Self::generate_filled_rows_between_static(
+                                    new_fills.extend(Self::generate_filled_rows_between_static(
                                         &row,
                                         next_out,
                                         &interval,
@@ -608,18 +669,33 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         &managed_state.partition_by_indices,
                                         &fill_columns,
                                         &generation_context,
-                                    )?;
-                                    for filled_row in filled_rows {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
+                                        None,
+                                    )?);
+                                }
+
+                                // A late anchor on a filled slot shares that fill's downstream key,
+                                // so retract the changed fills before inserting the anchor.
+                                for (fill_op, filled_row) in Self::diff_fills(
+                                    old_fills,
+                                    new_fills,
+                                    time_column_index,
+                                    !has_interpolate,
+                                ) {
+                                    if let Some(chunk) =
+                                        chunk_builder.append_row(fill_op, &filled_row)
+                                    {
+                                        yield Message::Chunk(chunk);
                                     }
+                                }
+
+                                managed_state.insert(&row);
+                                if let Some(chunk) =
+                                    chunk_builder.append_row(op.normalize_update(), &row)
+                                {
+                                    yield Message::Chunk(chunk);
                                 }
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                // 1. Find prev/next neighbors from the authoritative state table.
                                 let prev_output = Self::find_prev_output(
                                     &managed_state,
                                     &partition_key,
@@ -634,9 +710,23 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 )
                                 .await?;
 
-                                // 2. Delete old filled rows on both sides.
-                                if let Some(prev_out) = &prev_output {
-                                    let old_fills = Self::generate_filled_rows_between_static(
+                                // Merging the gap leaves the `prev -> row` prefix unchanged for
+                                // LOCF/NULL, so `split_time` makes both sides skip it; `None`
+                                // (interpolation, or no merged gap) rebuilds the whole gap.
+                                let split_time = (!has_interpolate
+                                    && prev_output.is_some()
+                                    && next_output.is_some())
+                                .then(|| {
+                                    row.datum_at(time_column_index)
+                                        .and_then(time_scalar_to_timestamp)
+                                })
+                                .flatten();
+
+                                let mut old_fills = vec![];
+                                if split_time.is_none()
+                                    && let Some(prev_out) = &prev_output
+                                {
+                                    old_fills.extend(Self::generate_filled_rows_between_static(
                                         prev_out,
                                         &row,
                                         &interval,
@@ -644,18 +734,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         &managed_state.partition_by_indices,
                                         &fill_columns,
                                         &generation_context,
-                                    )?;
-                                    for filled_row in &old_fills {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Delete, filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
-                                    }
+                                        None,
+                                    )?);
                                 }
-
                                 if let Some(next_out) = &next_output {
-                                    let old_fills = Self::generate_filled_rows_between_static(
+                                    old_fills.extend(Self::generate_filled_rows_between_static(
                                         &row,
                                         next_out,
                                         &interval,
@@ -663,45 +746,43 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         &managed_state.partition_by_indices,
                                         &fill_columns,
                                         &generation_context,
-                                    )?;
-                                    for filled_row in &old_fills {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Delete, filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
-                                    }
+                                        None,
+                                    )?);
                                 }
+                                let new_fills = if let (Some(prev_out), Some(next_out)) =
+                                    (&prev_output, &next_output)
+                                {
+                                    Self::generate_filled_rows_between_static(
+                                        prev_out,
+                                        next_out,
+                                        &interval,
+                                        time_column_index,
+                                        &managed_state.partition_by_indices,
+                                        &fill_columns,
+                                        &generation_context,
+                                        split_time,
+                                    )?
+                                } else {
+                                    vec![]
+                                };
 
-                                // 3. Delete the anchor row from state.
                                 managed_state.delete(&row);
-
-                                // 4. Emit the delete for the original row.
                                 if let Some(chunk) =
                                     chunk_builder.append_row(op.normalize_update(), &row)
                                 {
                                     yield Message::Chunk(chunk);
                                 }
 
-                                // 5. If both neighbors exist, emit new fills between them.
-                                if let (Some(prev_out), Some(next_out)) =
-                                    (&prev_output, &next_output)
-                                {
-                                    let filled_rows = Self::generate_filled_rows_between_static(
-                                        prev_out,
-                                        next_out,
-                                        &interval,
-                                        time_column_index,
-                                        &managed_state.partition_by_indices,
-                                        &fill_columns,
-                                        &generation_context,
-                                    )?;
-                                    for filled_row in filled_rows {
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
+                                for (fill_op, filled_row) in Self::diff_fills(
+                                    old_fills,
+                                    new_fills,
+                                    time_column_index,
+                                    !has_interpolate,
+                                ) {
+                                    if let Some(chunk) =
+                                        chunk_builder.append_row(fill_op, &filled_row)
+                                    {
+                                        yield Message::Chunk(chunk);
                                     }
                                 }
                             }
@@ -821,23 +902,18 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_filled_rows_preserve_partition_columns() {
-        let prev_row = OwnedRow::new(vec![
-            Some(ScalarImpl::Int32(7)),
-            Some(ScalarImpl::Timestamp(
-                "2023-04-01T10:00:00".parse::<Timestamp>().unwrap(),
-            )),
-            Some(ScalarImpl::Int32(10)),
-            Some(ScalarImpl::Int32(99)),
-        ]);
-        let curr_row = OwnedRow::new(vec![
-            Some(ScalarImpl::Int32(7)),
-            Some(ScalarImpl::Timestamp(
-                "2023-04-01T10:03:00".parse::<Timestamp>().unwrap(),
-            )),
-            Some(ScalarImpl::Int32(40)),
-            Some(ScalarImpl::Int32(88)),
-        ]);
+    fn test_generate_filled_rows_between_static() {
+        // Row layout `[partition, time, locf, no-strategy]`, gap 10:00 -> 10:05 on a 1-minute grid.
+        let anchor = |minute: &str, locf: i32| {
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(7)),
+                Some(ScalarImpl::Timestamp(minute.parse().unwrap())),
+                Some(ScalarImpl::Int32(locf)),
+                Some(ScalarImpl::Int32(99)),
+            ])
+        };
+        let prev_row = anchor("2023-04-01T10:00:00", 10);
+        let curr_row = anchor("2023-04-01T10:05:00", 40);
 
         let ctx = ActorContext::for_test(123);
         let metrics = test_gap_fill_metrics();
@@ -846,37 +922,42 @@ mod tests {
             high_amplification_threshold: 2048,
             actor_ctx: &ctx,
         };
-        let filled_rows = GapFillExecutor::<MemoryStateStore>::generate_filled_rows_between_static(
-            &prev_row,
-            &curr_row,
-            &Interval::from_minutes(1),
-            1,
-            &[0],
-            &HashMap::from([(2, FillStrategy::Locf)]),
-            &generation_context,
-        )
-        .unwrap();
+        let generate = |build_from: Option<Timestamp>| {
+            GapFillExecutor::<MemoryStateStore>::generate_filled_rows_between_static(
+                &prev_row,
+                &curr_row,
+                &Interval::from_minutes(1),
+                1,
+                &[0],
+                &HashMap::from([(2, FillStrategy::Locf)]),
+                &generation_context,
+                build_from,
+            )
+            .unwrap()
+        };
 
+        // Each fill keeps the partition column (7) and the LOCF value (10); the no-strategy column
+        // defaults to NULL.
+        let fill = |minute: &str| {
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(7)),
+                Some(ScalarImpl::Timestamp(minute.parse().unwrap())),
+                Some(ScalarImpl::Int32(10)),
+                None,
+            ])
+        };
+        let full = vec![
+            fill("2023-04-01T10:01:00"),
+            fill("2023-04-01T10:02:00"),
+            fill("2023-04-01T10:03:00"),
+            fill("2023-04-01T10:04:00"),
+        ];
+        assert_eq!(generate(None), full);
+
+        // `build_from` skips the prefix below it, returning exactly the suffix.
         assert_eq!(
-            filled_rows,
-            vec![
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(7)),
-                    Some(ScalarImpl::Timestamp(
-                        "2023-04-01T10:01:00".parse::<Timestamp>().unwrap(),
-                    )),
-                    Some(ScalarImpl::Int32(10)),
-                    None,
-                ]),
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(7)),
-                    Some(ScalarImpl::Timestamp(
-                        "2023-04-01T10:02:00".parse::<Timestamp>().unwrap(),
-                    )),
-                    Some(ScalarImpl::Int32(10)),
-                    None,
-                ]),
-            ]
+            generate(Some("2023-04-01T10:03:00".parse().unwrap())),
+            full[2..]
         );
     }
 
@@ -903,19 +984,13 @@ mod tests {
             + 2022-01-01T00:03:00 4   4.0",
         ));
 
-        let chunk = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor).await;
         let expected = StreamChunk::from_pretty(
             " TS                  i   F
             + 2022-01-01T00:00:00 1   1.0
-            + 2022-01-01T00:03:00 4   4.0
             + 2022-01-01T00:01:00 1   1.0
-            + 2022-01-01T00:02:00 1   1.0",
+            + 2022-01-01T00:02:00 1   1.0
+            + 2022-01-01T00:03:00 4   4.0",
         );
 
         // Simple comparison since the test utility assumes Int64 keys.
@@ -946,20 +1021,12 @@ mod tests {
             + 2022-01-01T00:02:00 2   2.0",
         ));
 
-        // Expect a chunk that retracts the old fills, inserts the new row, and adds the new fills.
-        let chunk2 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        // 00:01's fill is unchanged (LOCF from 00:00 either way); only the 00:02 slot is rewritten.
+        let chunk2 = next_chunk(&mut executor).await;
 
         let expected2 = StreamChunk::from_pretty(
             " TS                  i   F
-                - 2022-01-01T00:01:00 1   1.0
                 - 2022-01-01T00:02:00 1   1.0
-                + 2022-01-01T00:01:00 1   1.0
                 + 2022-01-01T00:02:00 2   2.0",
         );
 
@@ -972,20 +1039,12 @@ mod tests {
             - 2022-01-01T00:02:00 2   2.0",
         ));
 
-        let chunk3 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk3 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk3.sort_rows(),
             StreamChunk::from_pretty(
                 " TS                  i   F
-                - 2022-01-01T00:01:00 1   1.0
                 - 2022-01-01T00:02:00 2   2.0
-                + 2022-01-01T00:01:00 1   1.0
                 + 2022-01-01T00:02:00 1   1.0"
             )
             .sort_rows()
@@ -999,13 +1058,7 @@ mod tests {
             U+ 2022-01-01T00:03:00 5   5.0",
         ));
 
-        let chunk4 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk4 = next_chunk(&mut executor).await;
         // The filled rows' values don't change as they depend on the first row,
         // but they are still retracted and re-inserted due to the general path logic.
         assert_eq!(
@@ -1046,13 +1099,7 @@ mod tests {
             + 2022-01-01T00:03:00 4   4.0",
         ));
 
-        let chunk = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor).await;
         assert_eq!(
             chunk.sort_rows(),
             StreamChunk::from_pretty(
@@ -1071,20 +1118,12 @@ mod tests {
             + 2022-01-01T00:02:00 2   2.0",
         ));
 
-        let chunk2 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk2 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk2.sort_rows(),
             StreamChunk::from_pretty(
                 " TS                  i   F
-                - 2022-01-01T00:01:00 .   .
                 - 2022-01-01T00:02:00 .   .
-                + 2022-01-01T00:01:00 .   .
                 + 2022-01-01T00:02:00 2   2.0"
             )
             .sort_rows()
@@ -1096,20 +1135,12 @@ mod tests {
             - 2022-01-01T00:02:00 2   2.0",
         ));
 
-        let chunk3 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk3 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk3.sort_rows(),
             StreamChunk::from_pretty(
                 " TS                  i   F
-                - 2022-01-01T00:01:00 .   .
                 - 2022-01-01T00:02:00 2   2.0
-                + 2022-01-01T00:01:00 .   .
                 + 2022-01-01T00:02:00 .   ."
             )
             .sort_rows()
@@ -1122,13 +1153,7 @@ mod tests {
             U+ 2022-01-01T00:03:00 5   5.0",
         ));
 
-        let chunk4 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk4 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk4.sort_rows(),
             StreamChunk::from_pretty(
@@ -1170,13 +1195,7 @@ mod tests {
             + 2022-01-01T00:03:00 4   4.0",
         ));
 
-        let chunk = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor).await;
         assert_eq!(
             chunk.sort_rows(),
             StreamChunk::from_pretty(
@@ -1195,13 +1214,7 @@ mod tests {
             + 2022-01-01T00:02:00 10  10.0",
         ));
 
-        let chunk2 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk2 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk2.sort_rows(),
             StreamChunk::from_pretty(
@@ -1221,13 +1234,7 @@ mod tests {
             - 2022-01-01T00:02:00 10  10.0",
         ));
 
-        let chunk3 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk3 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk3.sort_rows(),
             StreamChunk::from_pretty(
@@ -1248,13 +1255,7 @@ mod tests {
             U+ 2022-01-01T00:03:00 10  10.0",
         ));
 
-        let chunk4 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk4 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk4.sort_rows(),
             StreamChunk::from_pretty(
@@ -1332,13 +1333,7 @@ mod tests {
             + 2022-01-01T00:01:00 11  11.0",
         ));
 
-        let chunk = executor2
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor2).await;
 
         assert_eq!(
             chunk.sort_rows(),
@@ -1382,13 +1377,7 @@ mod tests {
         ));
 
         // Consume the initial filled chunk.
-        let chunk = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor).await;
         assert_eq!(
             chunk.sort_rows(),
             StreamChunk::from_pretty(
@@ -1425,13 +1414,7 @@ mod tests {
             + 2022-01-01T00:05:00 6   10.0",
         ));
 
-        let chunk2 = executor2
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk2 = next_chunk(&mut executor2).await;
         assert_eq!(
             chunk2.sort_rows(),
             StreamChunk::from_pretty(
@@ -1475,13 +1458,7 @@ mod tests {
             + 2023-04-05T10:00:00 50 200 5.0 200.0",
         ));
 
-        let chunk = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk = next_chunk(&mut executor).await;
         assert_eq!(
             chunk.sort_rows(),
             StreamChunk::from_pretty(
@@ -1501,13 +1478,7 @@ mod tests {
             + 2023-04-03T10:00:00 25 150 3.0 160.0",
         ));
 
-        let chunk2 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk2 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk2.sort_rows(),
             StreamChunk::from_pretty(
@@ -1527,13 +1498,7 @@ mod tests {
             " TS                  i   I    f     F
             - 2023-04-03T10:00:00 25 150 3.0 160.0",
         ));
-        let chunk3 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk3 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk3.sort_rows(),
             StreamChunk::from_pretty(
@@ -1554,13 +1519,7 @@ mod tests {
             U- 2023-04-05T10:00:00 50 200 5.0 200.0
             U+ 2023-04-05T10:00:00 50 200 5.0 300.0",
         ));
-        let chunk4 = executor
-            .next()
-            .await
-            .unwrap()
-            .unwrap()
-            .into_chunk()
-            .unwrap();
+        let chunk4 = next_chunk(&mut executor).await;
         assert_eq!(
             chunk4.sort_rows(),
             StreamChunk::from_pretty(
@@ -1575,6 +1534,312 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 300.0"
             )
             .sort_rows()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_streaming_gap_fill_out_of_order_keeps_unchanged_prefix() {
+        let store = MemoryStateStore::new();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ]);
+        let fill_columns = HashMap::from([(1, FillStrategy::Locf), (2, FillStrategy::Locf)]);
+        let (mut tx, mut executor) =
+            create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap(); // Barrier
+
+        // A wide gap: 00:01..=00:05 are all LOCF-filled from 00:00.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:00:00 1   1.0
+            + 2022-01-01T00:06:00 7   7.0",
+        ));
+        let chunk = next_chunk(&mut executor).await;
+        assert_eq!(
+            chunk.sort_rows(),
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                + 2022-01-01T00:00:00 1   1.0
+                + 2022-01-01T00:01:00 1   1.0
+                + 2022-01-01T00:02:00 1   1.0
+                + 2022-01-01T00:03:00 1   1.0
+                + 2022-01-01T00:04:00 1   1.0
+                + 2022-01-01T00:05:00 1   1.0
+                + 2022-01-01T00:06:00 7   7.0"
+            )
+            .sort_rows()
+        );
+
+        // Anchor near the end: the LOCF fills before it (00:01..=00:04) are unchanged, so only the
+        // 00:05 slot is rewritten regardless of how wide the prefix is.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:05:00 5   5.0",
+        ));
+        let chunk2 = next_chunk(&mut executor).await;
+        assert_eq!(
+            chunk2.sort_rows(),
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2022-01-01T00:05:00 1   1.0
+                + 2022-01-01T00:05:00 5   5.0"
+            )
+            .sort_rows()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_streaming_gap_fill_null_out_of_order_keeps_unchanged_suffix() {
+        let store = MemoryStateStore::new();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ]);
+        let fill_columns = HashMap::from([(1, FillStrategy::Null), (2, FillStrategy::Null)]);
+        let (mut tx, mut executor) =
+            create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap(); // Barrier
+
+        // A wide gap with NULL fills at 00:01..=00:05.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:00:00 1   1.0
+            + 2022-01-01T00:06:00 7   7.0",
+        ));
+        let chunk = next_chunk(&mut executor).await;
+        assert_eq!(
+            chunk.sort_rows(),
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                + 2022-01-01T00:00:00 1   1.0
+                + 2022-01-01T00:01:00 .   .
+                + 2022-01-01T00:02:00 .   .
+                + 2022-01-01T00:03:00 .   .
+                + 2022-01-01T00:04:00 .   .
+                + 2022-01-01T00:05:00 .   .
+                + 2022-01-01T00:06:00 7   7.0"
+            )
+            .sort_rows()
+        );
+
+        // Anchor in the middle: NULL fills are anchor-independent and the grid stays aligned, so
+        // both sides (00:01,00:02 and 00:04,00:05) are unchanged — only 00:03 is rewritten.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:03:00 3   3.0",
+        ));
+        let chunk2 = next_chunk(&mut executor).await;
+        assert_eq!(
+            chunk2.sort_rows(),
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2022-01-01T00:03:00 .   .
+                + 2022-01-01T00:03:00 3   3.0"
+            )
+            .sort_rows()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_streaming_gap_fill_out_of_order_retracts_before_reinsert() {
+        let store = MemoryStateStore::new();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ]);
+        let fill_columns = HashMap::from([(1, FillStrategy::Locf), (2, FillStrategy::Locf)]);
+        let (mut tx, mut executor) =
+            create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap(); // Barrier
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:00:00 1   1.0
+            + 2022-01-01T00:04:00 4   4.0",
+        ));
+        executor.next().await.unwrap().unwrap(); // Initial fills 00:01..=00:03 (LOCF from 00:00).
+
+        // Insert collision: a late anchor on the filled 00:02 slot shares that fill's downstream
+        // key, so the fill is retracted before the anchor is inserted; 00:03 also re-bases its LOCF
+        // value from 00:00 to 00:02. Assert order, not just the set.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:02:00 2   2.0",
+        ));
+        assert_chunk_eq_ordered(
+            next_chunk(&mut executor).await,
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2022-01-01T00:02:00 1   1.0
+                - 2022-01-01T00:03:00 1   1.0
+                + 2022-01-01T00:03:00 2   2.0
+                + 2022-01-01T00:02:00 2   2.0",
+            ),
+        );
+
+        // Delete collision (symmetric): removing the 00:02 anchor turns its slot back into a fill,
+        // which must be inserted after the anchor Delete.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            - 2022-01-01T00:02:00 2   2.0",
+        ));
+        assert_chunk_eq_ordered(
+            next_chunk(&mut executor).await,
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2022-01-01T00:02:00 2   2.0
+                + 2022-01-01T00:02:00 1   1.0
+                - 2022-01-01T00:03:00 2   2.0
+                + 2022-01-01T00:03:00 1   1.0",
+            ),
+        );
+    }
+
+    /// Assert `got` equals `expected` including op order (unlike `sort_rows`, which ignores order).
+    fn assert_chunk_eq_ordered(got: StreamChunk, expected: StreamChunk) {
+        assert_eq!(got.ops(), expected.ops());
+        let got_rows: Vec<_> = got.rows().map(|(op, r)| (op, r.to_owned_row())).collect();
+        let want_rows: Vec<_> = expected
+            .rows()
+            .map(|(op, r)| (op, r.to_owned_row()))
+            .collect();
+        assert_eq!(got_rows, want_rows);
+    }
+
+    async fn next_chunk(executor: &mut BoxedMessageStream) -> StreamChunk {
+        executor
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_chunk()
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_streaming_gap_fill_off_grid_out_of_order_regrids_suffix() {
+        let store = MemoryStateStore::new();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ]);
+        let fill_columns = HashMap::from([(1, FillStrategy::Locf), (2, FillStrategy::Locf)]);
+        let (mut tx, mut executor) =
+            create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap(); // Barrier
+
+        // Gap 00:00 -> 00:04 with LOCF fills at 00:01..=00:03.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:00:00 1   1.0
+            + 2022-01-01T00:04:00 4   4.0",
+        ));
+        executor.next().await.unwrap().unwrap(); // Initial fills.
+
+        // An off-grid anchor (00:01:30) is not on the prev grid, so the suffix re-grids onto the new
+        // anchor (00:02:30, 00:03:30) — fully disjoint from the old 00:02/00:03 fills, no slot
+        // collision. The 00:01 prefix fill is untouched (not in the chunk).
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2022-01-01T00:01:30 9   9.0",
+        ));
+        let chunk = next_chunk(&mut executor).await;
+        assert_chunk_eq_ordered(
+            chunk,
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2022-01-01T00:02:00 1   1.0
+                + 2022-01-01T00:02:30 9   9.0
+                - 2022-01-01T00:03:00 1   1.0
+                + 2022-01-01T00:03:30 9   9.0
+                + 2022-01-01T00:01:30 9   9.0",
+            ),
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_streaming_gap_fill_month_interval_partial_overlap() {
+        let store = MemoryStateStore::new();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ]);
+        let fill_columns = HashMap::from([(1, FillStrategy::Null), (2, FillStrategy::Null)]);
+        let (mut tx, mut executor) = create_executor(
+            store,
+            fill_columns,
+            schema,
+            Interval::from_month_day_usec(1, 0, 0),
+        )
+        .await;
+
+        tx.push_barrier(test_epoch(1), false);
+        executor.next().await.unwrap().unwrap(); // Barrier
+
+        // Month grid from 2023-12-30 clamps day 30/31 into Feb: fills at 2024-01-30, 2024-02-29.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2023-12-30T00:00:00 1   1.0
+            + 2024-03-01T00:00:00 9   9.0",
+        ));
+        let chunk = next_chunk(&mut executor).await;
+        assert_eq!(
+            chunk.sort_rows(),
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                + 2023-12-30T00:00:00 1   1.0
+                + 2024-01-30T00:00:00 .   .
+                + 2024-02-29T00:00:00 .   .
+                + 2024-03-01T00:00:00 9   9.0"
+            )
+            .sort_rows()
+        );
+
+        // Insert 2023-12-31: the new grid (01-31, 02-29) diverges from the old (01-30, 02-29) at the
+        // head but converges at 02-29. Only 01-30 -> 01-31 changes; 02-29 must NOT be churned.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            + 2023-12-31T00:00:00 5   5.0",
+        ));
+        let chunk2 = next_chunk(&mut executor).await;
+        assert_chunk_eq_ordered(
+            chunk2,
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2024-01-30T00:00:00 .   .
+                + 2024-01-31T00:00:00 .   .
+                + 2023-12-31T00:00:00 5   5.0",
+            ),
+        );
+
+        // Deleting it merges back to the old grid: 01-31 -> 01-30, 02-29 still untouched.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   F
+            - 2023-12-31T00:00:00 5   5.0",
+        ));
+        let chunk3 = next_chunk(&mut executor).await;
+        assert_chunk_eq_ordered(
+            chunk3,
+            StreamChunk::from_pretty(
+                " TS                  i   F
+                - 2023-12-31T00:00:00 5   5.0
+                + 2024-01-30T00:00:00 .   .
+                - 2024-01-31T00:00:00 .   .",
+            ),
         );
     }
 }
