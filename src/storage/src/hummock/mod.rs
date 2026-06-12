@@ -88,11 +88,12 @@ pub async fn get_from_sstable_info(
             Bound::Included(full_key.user_key),
         );
         let mut may_match = false;
+        let mut checked_filter = false;
         for desc in index.filter_candidate_shards_by_user_key(full_key) {
             let shard = sstable_store_ref
                 .get_meta_shard_holder(sstable.id, index.filter_type, desc, local_stats)
                 .await?;
-            local_stats.bloom_filter_check_counts += 1;
+            checked_filter = true;
             if shard.may_match(&user_key_range, hash) {
                 local_stats.partitioned_meta_shard_filter_positive_counts += 1;
                 may_match = true;
@@ -102,8 +103,13 @@ pub async fn get_from_sstable_info(
             local_stats.partitioned_meta_shard_filter_negative_counts += 1;
         }
 
+        if checked_filter {
+            local_stats.bloom_filter_check_counts += 1;
+        }
         if !may_match {
-            local_stats.bloom_filter_true_negative_counts += 1;
+            if checked_filter {
+                local_stats.bloom_filter_true_negative_counts += 1;
+            }
             return Ok(None);
         }
     }
@@ -142,25 +148,29 @@ pub async fn hit_sstable_filter_with_partitioned_meta(
 ) -> HummockResult<bool> {
     let index = &sstable_ref.index;
     let mut checked_filter = false;
+    let mut may_match = false;
     for desc in index.filter_candidate_shards_by_user_key_range(user_key_range) {
         let shard = sstable_store_ref
             .get_meta_shard_holder(sstable_ref.id, index.filter_type, desc, local_stats)
             .await?;
-        local_stats.bloom_filter_check_counts += 1;
         checked_filter = true;
 
         if shard.may_match(user_key_range, prefix_hash) {
             local_stats.partitioned_meta_shard_filter_positive_counts += 1;
-            return Ok(true);
+            may_match = true;
+            break;
         }
 
         local_stats.partitioned_meta_shard_filter_negative_counts += 1;
     }
 
     if checked_filter {
-        local_stats.bloom_filter_true_negative_counts += 1;
+        local_stats.bloom_filter_check_counts += 1;
+        if !may_match {
+            local_stats.bloom_filter_true_negative_counts += 1;
+        }
     }
-    Ok(false)
+    Ok(may_match)
 }
 
 /// Get `user_value` from `ImmutableMemtable`

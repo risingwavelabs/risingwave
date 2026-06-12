@@ -1536,7 +1536,7 @@ pub(super) mod tests {
             assert_bytes_eq!(iter.value().into_user_value().unwrap(), test_value_of(42));
         }
         assert!(stats.cache_meta_block_total >= 2);
-        assert!(stats.bloom_filter_check_counts >= 1);
+        assert_eq!(stats.bloom_filter_check_counts, 1);
         assert_eq!(stats.partitioned_meta_index_cache_total, 1);
         assert_eq!(stats.partitioned_meta_index_cache_miss, 0);
         assert!(stats.partitioned_meta_shard_cache_total >= 1);
@@ -1599,6 +1599,7 @@ pub(super) mod tests {
             .await
             .unwrap()
         );
+        assert_eq!(negative_filter_stats.bloom_filter_check_counts, 1);
         assert_eq!(negative_filter_stats.bloom_filter_true_negative_counts, 1);
         assert_eq!(
             negative_filter_stats.partitioned_meta_shard_filter_positive_counts,
@@ -1618,6 +1619,8 @@ pub(super) mod tests {
             .await
             .unwrap()
         );
+        assert_eq!(positive_filter_stats.bloom_filter_check_counts, 1);
+        assert_eq!(positive_filter_stats.bloom_filter_true_negative_counts, 0);
         assert_eq!(
             positive_filter_stats.partitioned_meta_shard_filter_positive_counts,
             1
@@ -1743,6 +1746,8 @@ pub(super) mod tests {
             .unwrap(),
             "schema prefix filter missed prefix across partitioned meta shards; stats={stats:?}"
         );
+        assert_eq!(stats.bloom_filter_check_counts, 1);
+        assert!(stats.partitioned_meta_shard_filter_positive_counts >= 1);
     }
 
     #[tokio::test]
