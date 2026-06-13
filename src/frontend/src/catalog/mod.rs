@@ -23,10 +23,14 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_pb::common::PbObjectType;
+use risingwave_pb::ddl_service::CascadeObject;
 use risingwave_pb::user::grant_privilege::Object as PbGrantObject;
+use risingwave_sqlparser::ast::QuoteIdent;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
+use crate::session::current::notice_to_user;
 pub(crate) mod catalog_service;
 pub mod purify;
 
@@ -100,6 +104,39 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn notice_drop_cascade_objects(objects: &[CascadeObject]) {
+    for object in objects {
+        notice_to_user(format_drop_cascade_object(object));
+    }
+}
+
+fn format_drop_cascade_object(object: &CascadeObject) -> String {
+    let object_type = match object.object_type() {
+        PbObjectType::Database => "database",
+        PbObjectType::Schema => "schema",
+        PbObjectType::Table => "table",
+        PbObjectType::Mview => "materialized view",
+        PbObjectType::Source => "source",
+        PbObjectType::Sink => "sink",
+        PbObjectType::View => "view",
+        PbObjectType::Index => "index",
+        PbObjectType::Function => "function",
+        PbObjectType::Connection => "connection",
+        PbObjectType::Subscription => "subscription",
+        PbObjectType::Secret => "secret",
+        PbObjectType::Unspecified => "object",
+    };
+    let object_name = match &object.schema_name {
+        Some(schema_name) => format!(
+            "{}.{}",
+            QuoteIdent(schema_name),
+            QuoteIdent(&object.object_name)
+        ),
+        None => QuoteIdent(&object.object_name).to_string(),
+    };
+    format!("drop cascades to {object_type} {object_name}")
 }
 
 pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
@@ -213,4 +250,29 @@ impl OwnedByUserCatalog for SinkCatalog {
 pub struct OwnedGrantObject {
     pub owner: UserId,
     pub object: PbGrantObject,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_drop_cascade_object() {
+        assert_eq!(
+            format_drop_cascade_object(&CascadeObject {
+                object_type: PbObjectType::Mview as _,
+                schema_name: Some("public".to_owned()),
+                object_name: "mv".to_owned(),
+            }),
+            "drop cascades to materialized view public.mv"
+        );
+        assert_eq!(
+            format_drop_cascade_object(&CascadeObject {
+                object_type: PbObjectType::View as _,
+                schema_name: Some("My Schema".to_owned()),
+                object_name: "select".to_owned(),
+            }),
+            "drop cascades to view \"My Schema\".\"select\""
+        );
+    }
 }

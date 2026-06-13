@@ -17,6 +17,7 @@ mod tests {
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use risingwave_pb::common::PbObjectType;
     use tokio::sync::oneshot;
 
     use crate::controller::catalog::*;
@@ -165,6 +166,84 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_table_cascade_objects() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_table(
+            &txn,
+            table_obj.oid.as_table_id(),
+            "t",
+            TableType::Table,
+            None,
+            "CREATE TABLE t (v INT)",
+        )
+        .await?;
+
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_table(
+            &txn,
+            internal_obj.oid.as_table_id(),
+            "__internal_t",
+            TableType::Internal,
+            None,
+            "",
+        )
+        .await?;
+        ObjectDependency::insert(object_dependency::ActiveModel {
+            oid: Set(table_obj.oid),
+            used_by: Set(internal_obj.oid),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        mgr.create_view(
+            PbView {
+                schema_id: TEST_SCHEMA_ID,
+                database_id: TEST_DATABASE_ID,
+                name: "v".to_owned(),
+                owner: TEST_OWNER_ID as _,
+                sql: "CREATE VIEW v AS SELECT * FROM t".to_owned(),
+                ..Default::default()
+            },
+            HashSet::from([table_obj.oid]),
+        )
+        .await?;
+
+        let result = mgr
+            .drop_object(ObjectType::Table, table_obj.oid, DropMode::Cascade)
+            .await?;
+
+        let cascade_objects = result.cascade_objects.unwrap();
+        assert_eq!(cascade_objects.len(), 1);
+        let cascade_object = &cascade_objects[0];
+        assert_eq!(cascade_object.object_type(), PbObjectType::View);
+        assert_eq!(cascade_object.schema_name.as_deref(), Some("public"));
+        assert_eq!(cascade_object.object_name, "v");
 
         Ok(())
     }

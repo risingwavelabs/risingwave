@@ -53,8 +53,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    DdlProgress, TableJobType, WaitVersion, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, streaming_job_resource_type,
+    CascadeObject as PbCascadeObject, DdlProgress, TableJobType, WaitVersion, alter_name_request,
+    alter_set_schema_request, alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType as PbFragmentDistributionType;
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -71,7 +71,7 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
+use crate::controller::catalog::{DropObjectResult, DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
@@ -100,7 +100,7 @@ use crate::stream::{
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum DropMode {
     Restrict,
     Cascade,
@@ -277,6 +277,25 @@ impl DdlCommand {
     }
 }
 
+pub struct DdlCommandResult {
+    pub version: Option<WaitVersion>,
+    pub cascade_objects: Option<Vec<PbCascadeObject>>,
+}
+
+struct ExecutedDdlCommand {
+    version: NotificationVersion,
+    cascade_objects: Option<Vec<PbCascadeObject>>,
+}
+
+impl ExecutedDdlCommand {
+    fn without_cascade_objects(version: NotificationVersion) -> Self {
+        Self {
+            version,
+            cascade_objects: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DdlController {
     pub(crate) env: MetaSrvEnv,
@@ -438,8 +457,8 @@ impl DdlController {
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     ///
-    /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
+    /// The version is always `Some`, to simplify the handling logic.
+    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<DdlCommandResult> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
@@ -449,26 +468,38 @@ impl DdlController {
 
         let ctrl = self.clone();
         let fut = Box::pin(async move {
+            macro_rules! execute {
+                ($future:expr) => {
+                    ($future)
+                        .await
+                        .map(ExecutedDdlCommand::without_cascade_objects)
+                };
+            }
+
             match command {
-                DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
+                DdlCommand::CreateDatabase(database) => {
+                    execute!(ctrl.create_database(database))
+                }
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
-                DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
+                DdlCommand::CreateSchema(schema) => execute!(ctrl.create_schema(schema)),
                 DdlCommand::DropSchema(schema_id, drop_mode) => {
                     ctrl.drop_schema(schema_id, drop_mode).await
                 }
                 DdlCommand::CreateNonSharedSource(source) => {
-                    ctrl.create_non_shared_source(source).await
+                    execute!(ctrl.create_non_shared_source(source))
                 }
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
-                DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
-                DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
+                DdlCommand::ResetSource(source_id) => execute!(ctrl.reset_source(source_id)),
+                DdlCommand::CreateFunction(function) => {
+                    execute!(ctrl.create_function(function))
+                }
                 DdlCommand::DropFunction(function_id, drop_mode) => {
                     ctrl.drop_function(function_id, drop_mode).await
                 }
                 DdlCommand::CreateView(view, dependencies) => {
-                    ctrl.create_view(view, dependencies).await
+                    execute!(ctrl.create_view(view, dependencies))
                 }
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
@@ -483,7 +514,7 @@ impl DdlController {
                     replace_sink,
                     since_timestamp_epoch,
                 } => {
-                    ctrl.create_streaming_job(
+                    execute!(ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         dependencies,
@@ -501,31 +532,33 @@ impl DdlController {
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
-                }) => ctrl.replace_job(streaming_job, fragment_graph).await,
-                DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
+                }) => execute!(ctrl.replace_job(streaming_job, fragment_graph)),
+                DdlCommand::AlterName(relation, name) => {
+                    execute!(ctrl.alter_name(relation, &name))
+                }
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
-                    ctrl.alter_owner(object, owner_id).await
+                    execute!(ctrl.alter_owner(object, owner_id))
                 }
                 DdlCommand::AlterSetSchema(object, new_schema_id) => {
-                    ctrl.alter_set_schema(object, new_schema_id).await
+                    execute!(ctrl.alter_set_schema(object, new_schema_id))
                 }
                 DdlCommand::CreateConnection(connection) => {
-                    ctrl.create_connection(connection).await
+                    execute!(ctrl.create_connection(connection))
                 }
                 DdlCommand::DropConnection(connection_id, drop_mode) => {
                     ctrl.drop_connection(connection_id, drop_mode).await
                 }
-                DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
+                DdlCommand::CreateSecret(secret) => execute!(ctrl.create_secret(secret)),
+                DdlCommand::AlterSecret(secret) => execute!(ctrl.alter_secret(secret)),
                 DdlCommand::DropSecret(secret_id, drop_mode) => {
                     ctrl.drop_secret(secret_id, drop_mode).await
                 }
-                DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
                 DdlCommand::AlterNonSharedSource(source) => {
-                    ctrl.alter_non_shared_source(source).await
+                    execute!(ctrl.alter_non_shared_source(source))
                 }
-                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
+                DdlCommand::CommentOn(comment) => execute!(ctrl.comment_on(comment)),
                 DdlCommand::CreateSubscription(subscription) => {
-                    ctrl.create_subscription(subscription).await
+                    execute!(ctrl.create_subscription(subscription))
                 }
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
@@ -535,24 +568,31 @@ impl DdlController {
                     retention_seconds,
                     definition,
                 } => {
-                    ctrl.alter_subscription_retention(
+                    execute!(ctrl.alter_subscription_retention(
                         subscription_id,
                         retention_seconds,
                         definition,
-                    )
-                    .await
+                    ))
                 }
-                DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
+                DdlCommand::AlterSwapRename(objects) => {
+                    execute!(ctrl.alter_swap_rename(objects))
+                }
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
-                    ctrl.alter_database_param(database_id, param).await
+                    execute!(ctrl.alter_database_param(database_id, param))
                 }
                 DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
-                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
-                        .await
+                    execute!(ctrl.alter_database_resource_group(
+                        database_id,
+                        resource_group,
+                        deferred,
+                    ))
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
-                    ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
-                        .await
+                    execute!(ctrl.alter_streaming_job_config(
+                        job_id,
+                        entries_to_add,
+                        keys_to_remove,
+                    ))
                 }
             }
         })
@@ -560,11 +600,15 @@ impl DdlController {
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
             .instrument(Box::pin(fut));
-        let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
-        Ok(Some(WaitVersion {
-            catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
-        }))
+        let result = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
+
+        Ok(DdlCommandResult {
+            version: Some(WaitVersion {
+                catalog_version: result.version,
+                hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
+            }),
+            cascade_objects: result.cascade_objects,
+        })
     }
 
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
@@ -659,7 +703,7 @@ impl DdlController {
             .await
     }
 
-    async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
+    async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
             .await
     }
@@ -675,7 +719,7 @@ impl DdlController {
         &self,
         schema_id: SchemaId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Schema, schema_id, drop_mode)
             .await
     }
@@ -701,7 +745,7 @@ impl DdlController {
         &self,
         source_id: SourceId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Source, source_id, drop_mode)
             .await
     }
@@ -750,7 +794,7 @@ impl DdlController {
         &self,
         function_id: FunctionId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Function, function_id, drop_mode)
             .await
     }
@@ -770,7 +814,7 @@ impl DdlController {
         &self,
         view_id: ViewId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::View, view_id, drop_mode).await
     }
 
@@ -786,7 +830,7 @@ impl DdlController {
         &self,
         connection_id: ConnectionId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Connection, connection_id, drop_mode)
             .await
     }
@@ -864,7 +908,7 @@ impl DdlController {
         &self,
         secret_id: SecretId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         self.drop_object(ObjectType::Secret, secret_id, drop_mode)
             .await
     }
@@ -924,7 +968,7 @@ impl DdlController {
         &self,
         subscription_id: SubscriptionId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let subscription = self
@@ -934,7 +978,11 @@ impl DdlController {
             .await?;
         let table_id = subscription.dependent_table_id;
         let database_id = subscription.database_id;
-        let (_, version) = self
+        let DropObjectResult {
+            version,
+            cascade_objects,
+            ..
+        } = self
             .metadata_manager
             .catalog_controller
             .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
@@ -943,7 +991,10 @@ impl DdlController {
             .drop_subscription(database_id, subscription_id, table_id)
             .await;
         tracing::debug!("finish drop subscription");
-        Ok(version)
+        Ok(ExecutedDdlCommand {
+            version,
+            cascade_objects,
+        })
     }
 
     async fn alter_subscription_retention(
@@ -1418,19 +1469,23 @@ impl DdlController {
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
-    pub async fn drop_object(
+    async fn drop_object(
         &self,
         object_type: ObjectType,
         object_id: impl Into<ObjectId>,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         let object_id = object_id.into();
         // Fence reschedule and source tick before catalog deletion so post-collect split updates
         // cannot race with dropped fragments.
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
         let _source_tick_pause_guard = self.source_manager.pause_tick().await;
 
-        let (release_ctx, version) = self
+        let DropObjectResult {
+            release_context: release_ctx,
+            version,
+            cascade_objects,
+        } = self
             .metadata_manager
             .catalog_controller
             .drop_object(object_type, object_id, drop_mode)
@@ -1550,7 +1605,10 @@ impl DdlController {
         for secret in secret_ids {
             LocalSecretManager::global().remove_secret(secret);
         }
-        Ok(version)
+        Ok(ExecutedDdlCommand {
+            version,
+            cascade_objects,
+        })
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
@@ -1837,7 +1895,7 @@ impl DdlController {
         &self,
         job_id: StreamingJobId,
         drop_mode: DropMode,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<ExecutedDdlCommand> {
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
             StreamingJobId::Sink(id) => (id.as_object_id(), ObjectType::Sink),
@@ -1850,24 +1908,24 @@ impl DdlController {
             .catalog_controller
             .get_streaming_job_status(job_id.id())
             .await?;
-        let version = match job_status {
+        let result = match job_status {
             JobStatus::Initial => {
                 self.metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
-                IGNORED_NOTIFICATION_VERSION
+                ExecutedDdlCommand::without_cascade_objects(IGNORED_NOTIFICATION_VERSION)
             }
             JobStatus::Creating => {
                 self.stream_manager
                     .cancel_streaming_jobs(vec![job_id.id()])
                     .await?;
-                IGNORED_NOTIFICATION_VERSION
+                ExecutedDdlCommand::without_cascade_objects(IGNORED_NOTIFICATION_VERSION)
             }
             JobStatus::Created => self.drop_object(object_type, object_id, drop_mode).await?,
         };
 
-        Ok(version)
+        Ok(result)
     }
 
     /// Builds the actor graph:
