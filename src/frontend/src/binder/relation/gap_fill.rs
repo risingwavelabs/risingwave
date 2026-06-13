@@ -111,12 +111,13 @@ impl Binder {
                     }
                     for partition_arg in &func.arg_list.args {
                         let arg_exprs = self.bind_function_arg(partition_arg)?;
-                        let arg_expr = Itertools::exactly_one(arg_exprs.into_iter()).map_err(|_| {
-                            ErrorCode::BindError(
-                                "PARTITION_BY argument should be a single column reference"
-                                    .to_owned(),
-                            )
-                        })?;
+                        let arg_expr =
+                            Itertools::exactly_one(arg_exprs.into_iter()).map_err(|_| {
+                                ErrorCode::BindError(
+                                    "PARTITION_BY argument should be a single column reference"
+                                        .to_owned(),
+                                )
+                            })?;
                         if let ExprImpl::InputRef(input_ref) = arg_expr {
                             if input_ref.index() == time_col.index() {
                                 return Err(ErrorCode::BindError(
