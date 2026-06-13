@@ -207,7 +207,7 @@ impl DdlServiceImpl {
             let migrate_future = async move {
                 let mut attempt = 0;
                 loop {
-                    match migrate_inner(&env, &metadata_manager, &ddl_controller).await {
+                    match Box::pin(migrate_inner(&env, &metadata_manager, &ddl_controller)).await {
                         Ok(_) => break,
                         Err(e) => {
                             attempt += 1;
@@ -240,7 +240,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateDatabase(database))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
@@ -258,7 +259,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropDatabase(database_id))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropDatabaseResponse {
             status: None,
@@ -282,7 +284,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateSecret(pb_secret))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateSecretResponse { version }))
     }
@@ -297,7 +300,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropSecret(secret_id, drop_mode))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropSecretResponse {
             status: None,
@@ -321,7 +325,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterSecret(pb_secret))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(AlterSecretResponse { version }))
     }
@@ -335,7 +340,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateSchema(schema))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
@@ -353,7 +359,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropSchema(schema_id, drop_mode))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
@@ -372,7 +379,8 @@ impl DdlService for DdlServiceImpl {
                 let version = self
                     .ddl_controller
                     .run_command(DdlCommand::CreateNonSharedSource(source, None))
-                    .await?;
+                    .await?
+                    .version;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
                     version,
@@ -393,7 +401,8 @@ impl DdlService for DdlServiceImpl {
                         replace_sink: None,
                         since_timestamp_epoch: None,
                     })
-                    .await?;
+                    .await?
+                    .version;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
                     version,
@@ -412,7 +421,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropSource(source_id, drop_mode))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -436,7 +446,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::ResetSource(source_id))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(ResetSourceResponse {
             status: None,
@@ -474,7 +485,7 @@ impl DdlService for DdlServiceImpl {
             since_timestamp_epoch,
         };
 
-        let version = self.ddl_controller.run_command(command).await?;
+        let version = self.ddl_controller.run_command(command).await?.version;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
@@ -495,7 +506,7 @@ impl DdlService for DdlServiceImpl {
             drop_mode,
         };
 
-        let version = self.ddl_controller.run_command(command).await?;
+        let version = self.ddl_controller.run_command(command).await?.version;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -514,7 +525,7 @@ impl DdlService for DdlServiceImpl {
         let subscription = req.get_subscription()?.clone();
         let command = DdlCommand::CreateSubscription(subscription);
 
-        let version = self.ddl_controller.run_command(command).await?;
+        let version = self.ddl_controller.run_command(command).await?.version;
 
         Ok(Response::new(CreateSubscriptionResponse {
             status: None,
@@ -532,7 +543,7 @@ impl DdlService for DdlServiceImpl {
 
         let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
-        let version = self.ddl_controller.run_command(command).await?;
+        let version = self.ddl_controller.run_command(command).await?.version;
 
         Ok(Response::new(DropSubscriptionResponse {
             status: None,
@@ -565,7 +576,8 @@ impl DdlService for DdlServiceImpl {
                 replace_sink: None,
                 since_timestamp_epoch: None,
             })
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
@@ -589,7 +601,8 @@ impl DdlService for DdlServiceImpl {
                 job_id: StreamingJobId::MaterializedView(table_id),
                 drop_mode,
             })
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -625,7 +638,8 @@ impl DdlService for DdlServiceImpl {
                 refresh_interval_sec: None,
                 since_timestamp_epoch: None,
             })
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateIndexResponse {
             status: None,
@@ -648,7 +662,8 @@ impl DdlService for DdlServiceImpl {
                 job_id: StreamingJobId::Index(index_id),
                 drop_mode,
             })
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -666,7 +681,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateFunction(function))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateFunctionResponse {
             status: None,
@@ -686,7 +702,8 @@ impl DdlService for DdlServiceImpl {
                 request.function_id,
                 DropMode::from_request_setting(request.cascade),
             ))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropFunctionResponse {
             status: None,
@@ -718,7 +735,8 @@ impl DdlService for DdlServiceImpl {
                 replace_sink: None,
                 since_timestamp_epoch: None,
             })
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateTableResponse {
             status: None,
@@ -735,7 +753,7 @@ impl DdlService for DdlServiceImpl {
         let table_id = request.table_id;
 
         let drop_mode = DropMode::from_request_setting(request.cascade);
-        let version = self
+        let result = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
@@ -745,7 +763,10 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(DropTableResponse {
             status: None,
-            version,
+            version: result.version,
+            drop_result: result
+                .cascade_objects
+                .map(|cascade_objects| DropResult { cascade_objects }),
         }))
     }
 
@@ -764,7 +785,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateView(view, dependencies))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CreateViewResponse {
             status: None,
@@ -782,7 +804,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropView(view_id, drop_mode))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(DropViewResponse {
             status: None,
             version,
@@ -892,7 +915,7 @@ impl DdlService for DdlServiceImpl {
             }
         };
 
-        let version = self.ddl_controller.run_command(command).await?;
+        let version = self.ddl_controller.run_command(command).await?.version;
 
         Ok(Response::new(ReplaceJobPlanResponse {
             status: None,
@@ -922,7 +945,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterName(object.unwrap(), new_name))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(AlterNameResponse {
             status: None,
             version,
@@ -938,7 +962,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterNonSharedSource(source.unwrap()))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(AlterSourceResponse {
             status: None,
             version,
@@ -953,7 +978,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id as _))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(AlterOwnerResponse {
             status: None,
             version,
@@ -976,7 +1002,8 @@ impl DdlService for DdlServiceImpl {
                 retention_seconds,
                 definition,
             })
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(AlterSubscriptionRetentionResponse {
             status: None,
             version,
@@ -994,7 +1021,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
-            .await?;
+            .await?
+            .version;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,
             version,
@@ -1036,7 +1064,8 @@ impl DdlService for DdlServiceImpl {
                 let version = self
                     .ddl_controller
                     .run_command(DdlCommand::CreateConnection(pb_connection))
-                    .await?;
+                    .await?
+                    .version;
                 Ok(Response::new(CreateConnectionResponse { version }))
             }
         }
@@ -1067,7 +1096,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropConnection(req.connection_id, drop_mode))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(DropConnectionResponse {
             status: None,
@@ -1091,7 +1121,8 @@ impl DdlService for DdlServiceImpl {
                 column_index: comment.column_index,
                 description: comment.description,
             }))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(CommentOnResponse {
             status: None,
@@ -1636,7 +1667,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterSwapRename(req.object.unwrap()))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(AlterSwapRenameResponse {
             status: None,
@@ -1678,7 +1710,8 @@ impl DdlService for DdlServiceImpl {
                 req.resource_group,
                 req.deferred,
             ))
-            .await?;
+            .await?
+            .version;
 
         Ok(Response::new(AlterDatabaseResourceGroupResponse {
             status: None,
@@ -1704,7 +1737,8 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::AlterDatabaseParam(database_id, param))
-            .await?;
+            .await?
+            .version;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
             status: None,
@@ -2016,7 +2050,7 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(CreateIcebergTableResponse {
             status: None,
-            version: res?,
+            version: res?.version,
         }))
     }
 }
