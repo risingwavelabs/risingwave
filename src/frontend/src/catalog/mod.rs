@@ -107,8 +107,26 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
 }
 
 pub(crate) fn notice_drop_cascade_objects(objects: &[CascadeObject]) {
-    for object in objects {
-        notice_to_user(format_drop_cascade_object(object));
+    if let Some(notice) = format_drop_cascade_notice(objects) {
+        notice_to_user(notice);
+    }
+}
+
+fn format_drop_cascade_notice(objects: &[CascadeObject]) -> Option<String> {
+    match objects {
+        [] => None,
+        [object] => Some(format_drop_cascade_object(object)),
+        objects => {
+            let detail = objects
+                .iter()
+                .map(format_drop_cascade_object)
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(format!(
+                "drop cascades to {} other objects\nDETAIL:  {detail}",
+                objects.len()
+            ))
+        }
     }
 }
 
@@ -273,6 +291,30 @@ mod tests {
                 object_name: "select".to_owned(),
             }),
             "drop cascades to view \"My Schema\".\"select\""
+        );
+    }
+
+    #[test]
+    fn test_format_multiple_drop_cascade_objects() {
+        let objects = [
+            CascadeObject {
+                object_type: PbObjectType::View as _,
+                schema_name: Some("public".to_owned()),
+                object_name: "order_view".to_owned(),
+            },
+            CascadeObject {
+                object_type: PbObjectType::Mview as _,
+                schema_name: Some("public".to_owned()),
+                object_name: "order_mv".to_owned(),
+            },
+        ];
+
+        assert_eq!(
+            format_drop_cascade_notice(&objects).as_deref(),
+            Some(
+                "drop cascades to 2 other objects\nDETAIL:  drop cascades to view public.order_view\n\
+                 drop cascades to materialized view public.order_mv"
+            )
         );
     }
 }
