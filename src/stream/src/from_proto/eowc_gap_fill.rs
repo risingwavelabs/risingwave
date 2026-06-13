@@ -86,6 +86,12 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
                 .build()
                 .await;
 
+        // Partitioned EOWC gap fill is not supported yet (rejected at planning); guard here too
+        // in case a partitioned plan ever reaches the executor.
+        if !node.get_partition_by_indices().is_empty() {
+            return Err(anyhow::anyhow!("partitioned EOWC gap fill is not supported").into());
+        }
+
         let exec = EowcGapFillExecutor::new(EowcGapFillExecutorArgs {
             actor_ctx: params.actor_context,
             input,
@@ -96,6 +102,10 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval,
+            high_gap_fill_amplification_threshold: params
+                .config
+                .developer
+                .high_gap_fill_amplification_threshold,
         });
 
         Ok((params.info, exec).into())
