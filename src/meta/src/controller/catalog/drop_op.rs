@@ -70,10 +70,7 @@ impl CatalogController {
                         get_referring_objects(object_id, object_type, &txn)
                             .await?
                             .into_iter()
-                            .filter(|object| {
-                                object.obj_type == ObjectType::Index
-                                    || object.obj_type == ObjectType::Sink
-                            })
+                            .filter(|object| object.obj_type == ObjectType::Index)
                             .map(|object| object.oid),
                     );
                 }
