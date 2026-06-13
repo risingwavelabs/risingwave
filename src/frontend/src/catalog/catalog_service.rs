@@ -42,7 +42,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SecretId, SinkId, SubscriptionId, TableId};
+use super::{DatabaseId, SecretId, SinkId, SubscriptionId, TableId, notice_drop_cascade_objects};
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
@@ -595,11 +595,18 @@ impl CatalogWriter for CatalogWriterImpl {
         table_id: TableId,
         cascade: bool,
     ) -> Result<()> {
-        let version = self
+        let response = self
             .meta_client
             .drop_table(source_id, table_id, cascade)
             .await?;
-        self.wait_version(version).await
+        let version = response
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?;
+        self.wait_version(version).await?;
+        if let Some(drop_result) = response.drop_result {
+            notice_drop_cascade_objects(&drop_result.cascade_objects);
+        }
+        Ok(())
     }
 
     async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
