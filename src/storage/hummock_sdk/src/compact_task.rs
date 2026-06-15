@@ -336,14 +336,10 @@ impl From<PbCompactTask> for CompactTask {
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
             sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
                 .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
-            sstable_filter_layout: match PbSstableFilterLayout::try_from(
+            sstable_filter_layout: PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto)
-            {
-                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
-                layout => layout,
-            },
+            .unwrap_or(PbSstableFilterLayout::Auto),
         }
     }
 }
@@ -412,14 +408,10 @@ impl From<&PbCompactTask> for CompactTask {
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
             sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
                 .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
-            sstable_filter_layout: match PbSstableFilterLayout::try_from(
+            sstable_filter_layout: PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto)
-            {
-                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
-                layout => layout,
-            },
+            .unwrap_or(PbSstableFilterLayout::Auto),
         }
     }
 }
