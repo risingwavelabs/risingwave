@@ -778,6 +778,10 @@ impl BarrierKind {
     }
 }
 
+/// Build sink original schema fields from sink columns by excluding hidden columns.
+///
+/// Hidden columns (for example system-generated columns) are not part of the user-visible
+/// schema used for sink schema change checks.
 fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
     columns
         .iter()
@@ -1778,9 +1782,9 @@ impl Command {
 mod tests {
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::data::data_type::PbTypeName;
-    use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, ColumnDesc};
+    use risingwave_pb::plan_common::ColumnDesc;
 
-    use super::sink_original_schema_fields;
+    use super::{PbColumnCatalog, sink_original_schema_fields};
 
     fn column(name: &str, type_name: PbTypeName, is_hidden: bool) -> PbColumnCatalog {
         PbColumnCatalog {

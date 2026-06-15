@@ -228,6 +228,12 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
     }
 }
 
+/// Returns whether two Arrow data types should be treated as compatible when
+/// checking whether a schema change is already applied.
+///
+/// This intentionally allows Binary/LargeBinary equivalence and ignores
+/// Decimal128 precision/scale differences to match RisingWave's canonical
+/// mappings and avoid false ambiguity when handling add/drop column changes.
 fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType) -> bool {
     use ArrowDataType::*;
 
@@ -237,7 +243,7 @@ fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType)
         // generated from RW columns using the same canonical mapping. Ignoring
         // both values prevents false schema-state ambiguity and cannot mask an
         // auto schema change, which only supports add/drop columns.
-        (Decimal128(_, _), Decimal128(_, _)) => true,
+        (Decimal128(_, _), Decimal128(_, _)) => true, // Ignore both precision and scale.
         (Binary, LargeBinary) | (LargeBinary, Binary) => true,
         (List(current_field), List(expected_field)) => {
             arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
@@ -257,6 +263,11 @@ fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType)
     }
 }
 
+/// Returns whether `current` contains exactly the same fields as `expected`,
+/// using unordered matching with relaxed type compatibility.
+///
+/// Matched current fields are removed from an unmatched set so duplicated field
+/// names cannot be matched multiple times.
 fn schema_contains_same_fields(current: &ArrowFields, expected: &[ArrowField]) -> bool {
     if current.len() != expected.len() {
         return false;
@@ -891,7 +902,11 @@ impl IcebergSinkCommitter {
     }
 
     /// Check the number of snapshots on the given branch lineage since the last rewrite operation.
-    /// Returns the number of snapshots since the last rewrite.
+    ///
+    /// This follows the branch head and then parent links instead of scanning all snapshots,
+    /// so snapshot backlog accounting stays isolated to the sink commit branch.
+    /// The method is stateless and only inspects the provided metadata, which also
+    /// makes it suitable for isolated unit tests.
     fn count_snapshots_since_rewrite_in_metadata(metadata: &TableMetadata, branch: &str) -> usize {
         // Start from the latest snapshot of the commit branch.
         let mut snapshot_id = metadata
@@ -1243,6 +1258,7 @@ mod tests {
             .build()
     }
 
+    /// Build a branch snapshot reference without retention limits for tests.
     fn snapshot_ref(snapshot_id: i64) -> SnapshotReference {
         SnapshotReference::new(snapshot_id, SnapshotRetention::branch(None, None, None))
     }
