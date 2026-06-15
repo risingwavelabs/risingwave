@@ -185,6 +185,30 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '0' SECOND, LOCF(val));
   expected_outputs:
     - binder_error
+- name: negative interval
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '-1' SECOND, LOCF(val));
+  expected_outputs:
+    - binder_error
+- name: negative interval expression
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '2' MINUTE - INTERVAL '3' MINUTE, LOCF(val));
+  expected_outputs:
+    - binder_error
+- name: fill strategy on time column
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(ts));
+  expected_outputs:
+    - binder_error
+- name: fill strategy on partition column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(device_id), PARTITION_BY(device_id));
+  expected_outputs:
+    - binder_error
 - name: test gap fill with project
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
@@ -193,3 +217,74 @@
     - logical_plan
     - stream_plan
     - eowc_stream_error
+
+# PARTITION BY Tests
+- name: partition by single column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - stream_dist_plan
+
+- name: partition by duplicate columns
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id, device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+
+- name: partition by multiple columns
+  sql: |
+    CREATE TABLE t (region VARCHAR, device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(region, device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(val), PARTITION_BY(region, device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - stream_dist_plan
+
+- name: partition by with mixed strategies
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, temp DOUBLE, status VARCHAR, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), KEEPNULL(status), PARTITION_BY(device_id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by time column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(ts));
+  expected_outputs:
+    - binder_error
+
+- name: eowc partition by unsupported
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_error
+
+- name: partition by without input pk
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
+    SELECT id, ts, v FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by under aggregate
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
+    SELECT count(*) FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by with projection
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, extra INT, PRIMARY KEY(device_id, ts));
+    SELECT device_id, ts, val FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan

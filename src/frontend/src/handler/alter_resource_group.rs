@@ -13,14 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::bail;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 
+use super::alter_utils::resolve_streaming_job_id_for_alter_parallelism;
 use super::{HandlerArgs, RwPgResponse};
-use crate::Binder;
-use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 
 pub async fn handle_alter_resource_group(
@@ -31,45 +28,15 @@ pub async fn handle_alter_resource_group(
     deferred: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
-    let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(&db_name, &obj_name)?;
-    let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
-    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     risingwave_common::license::Feature::ResourceGroup.check_available()?;
 
-    let table_id = {
-        let reader = session.env().catalog_reader().read_guard();
-
-        match stmt_type {
-            StatementType::ALTER_MATERIALIZED_VIEW => {
-                let (table, schema_name) =
-                    reader.get_created_table_by_name(&db_name, schema_path, &real_table_name)?;
-
-                match (table.table_type(), stmt_type) {
-                    (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW) => {}
-                    _ => {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "cannot alter resource group of {} {} by {}",
-                            table.table_type().to_prost().as_str_name(),
-                            table.name(),
-                            stmt_type,
-                        ))
-                        .into());
-                    }
-                }
-
-                session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                table.id
-            }
-            _ => bail!(
-                "invalid statement type for alter resource group: {:?}",
-                stmt_type
-            ),
-        }
-    };
+    let job_id = resolve_streaming_job_id_for_alter_parallelism(
+        &session,
+        obj_name,
+        stmt_type,
+        "resource group",
+    )?;
 
     let resource_group = resource_group
         .map(resolve_resource_group)
@@ -80,7 +47,7 @@ pub async fn handle_alter_resource_group(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_resource_group(table_id, resource_group, deferred)
+        .alter_resource_group(job_id, resource_group, deferred)
         .await?;
 
     if deferred {

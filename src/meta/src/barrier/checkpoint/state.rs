@@ -745,6 +745,7 @@ impl DatabaseCheckpointControl {
                         partial_graph_manager,
                         &logical,
                         worker_nodes,
+                        refresh_interval_sec,
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
