@@ -634,19 +634,37 @@ mod tests {
     #[test]
     fn test_local_fs_connector_config_gate() {
         let frontend_config = FrontendConfig::default();
-        assert!(!is_local_fs_connector_enabled(
-            &frontend_config,
-            POSIX_FS_CONNECTOR
-        ));
-        assert!(!is_local_fs_connector_enabled(
-            &frontend_config,
-            BATCH_POSIX_FS_CONNECTOR
-        ));
-        assert!(!is_local_fs_connector_enabled(&frontend_config, FS_SINK));
+        let default_enabled = cfg!(debug_assertions);
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, POSIX_FS_CONNECTOR),
+            default_enabled
+        );
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, BATCH_POSIX_FS_CONNECTOR),
+            default_enabled
+        );
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, FS_SINK),
+            default_enabled
+        );
         assert!(is_local_fs_connector_enabled(
             &frontend_config,
             KAFKA_CONNECTOR
         ));
+
+        let disabled_config = FrontendConfig {
+            unsafe_enable_local_fs_connector: false,
+            ..Default::default()
+        };
+        assert!(!is_local_fs_connector_enabled(
+            &disabled_config,
+            POSIX_FS_CONNECTOR
+        ));
+        assert!(!is_local_fs_connector_enabled(
+            &disabled_config,
+            BATCH_POSIX_FS_CONNECTOR
+        ));
+        assert!(!is_local_fs_connector_enabled(&disabled_config, FS_SINK));
 
         let enabled_config = FrontendConfig {
             unsafe_enable_local_fs_connector: true,
