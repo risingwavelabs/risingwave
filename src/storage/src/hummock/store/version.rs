@@ -1384,7 +1384,7 @@ mod tests {
     use risingwave_pb::hummock::hummock_version::PbLevels;
     use risingwave_pb::hummock::{
         LevelType as PbLevelType, PbBloomFilterType, PbHummockVersion, PbLevel, PbOverlappingLevel,
-        PbStateTableInfo, StateTableInfoDelta,
+        PbSstableFilterLayout, PbSstableFilterType, PbStateTableInfo, StateTableInfoDelta,
     };
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -1524,8 +1524,9 @@ mod tests {
             max_epoch: 0,
             uncompressed_file_size: 0,
             range_tombstone_count: 0,
-            bloom_filter_kind: PbBloomFilterType::Sstable,
-            filter_type: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+            bloom_filter_kind: PbBloomFilterType::BloomFilterUnspecified,
+            filter_type: Some(PbSstableFilterType::SstableFilterXor16),
+            filter_layout: Some(PbSstableFilterLayout::Plain),
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
         }

@@ -63,6 +63,7 @@ message SstableInfo {
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
+  // Legacy SST filter physical layout. New writers should use `filter_layout`.
   BloomFilterType bloom_filter_kind = 13;
 
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
@@ -72,7 +73,8 @@ message SstableInfo {
   // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
   // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
   VnodeStatistics vnode_statistics = 15;
-  SstableFilterType filter_type = 16;
+  optional SstableFilterType filter_type = 16;
+  optional SstableFilterLayout filter_layout = 17;
 }
 
 enum LevelType {

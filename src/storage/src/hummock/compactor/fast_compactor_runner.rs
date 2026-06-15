@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -453,7 +453,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             left_ssts
                 .iter()
                 .chain(right_ssts.iter())
-                .all(|sst| sst.bloom_filter_kind == BloomFilterType::Blocked),
+                .all(|sst| sst.effective_filter_layout() == PbSstableFilterLayout::Blocked),
             "fast compaction requires blocked-filter SSTs: {}",
             compact_task_to_string(&task)
         );
@@ -910,7 +910,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{BloomFilterType, LevelType, PbSstableFilterType};
+    use risingwave_pb::hummock::{LevelType, PbSstableFilterLayout, PbSstableFilterType};
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
@@ -952,7 +952,10 @@ mod tests {
             table_id_to_watermark_serde.clone(),
         )
         .await;
-        assert_eq!(dropped_only_sst.bloom_filter_kind, BloomFilterType::Sstable);
+        assert_eq!(
+            dropped_only_sst.effective_filter_layout(),
+            PbSstableFilterLayout::Plain
+        );
         let mut inner = dropped_only_sst.get_inner();
         inner.table_ids.clear();
         dropped_only_sst.set_inner(inner);

@@ -56,6 +56,8 @@ struct RwHummockSstable {
     uncompressed_file_size: i64,
     range_tombstone_count: i64,
     bloom_filter_kind: i32,
+    filter_type: i32,
+    filter_layout: i32,
     table_ids: JsonbVal,
     sst_size: i64,
 }
@@ -134,6 +136,8 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     uncompressed_file_size: sst.uncompressed_file_size as _,
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
+                    filter_type: sst.effective_filter_type() as _,
+                    filter_layout: sst.effective_filter_layout() as _,
                     table_ids: json!(
                         sst.table_ids
                             .iter()

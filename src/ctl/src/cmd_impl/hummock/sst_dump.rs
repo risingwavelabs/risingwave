@@ -234,7 +234,8 @@ pub async fn sst_dump_via_sstable_store(
         uncompressed_file_size: 0,
         range_tombstone_count: 0,
         bloom_filter_kind: Default::default(),
-        filter_type: Default::default(),
+        filter_type: None,
+        filter_layout: None,
         sst_size: 0,
         vnode_statistics: None,
     }

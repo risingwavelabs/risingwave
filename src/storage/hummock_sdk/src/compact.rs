@@ -137,7 +137,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, filter_type {:?}, filter_layout {:?}",
         sstable_info.object_id,
         sstable_info.sst_id,
         left_str,
@@ -146,7 +146,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         sstable_info.file_size / 1024,
         sstable_info.sst_size / 1024,
         stale_ratio,
-        sstable_info.bloom_filter_kind,
+        sstable_info.effective_filter_type(),
+        sstable_info.effective_filter_layout(),
     )
     .unwrap();
 }

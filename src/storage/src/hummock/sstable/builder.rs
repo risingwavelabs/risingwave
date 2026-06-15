@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterLayout, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -495,15 +495,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let meta_offset = self.writer.data_len() as u64;
 
         let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
-        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
-            (
-                BloomFilterType::BloomFilterUnspecified,
-                PbSstableFilterType::SstableFilterNone,
-            )
+        let (filter_type, filter_layout) = if filter_data.is_empty() {
+            (PbSstableFilterType::SstableFilterNone, None)
         } else if self.filter_builder.support_blocked_raw_data() {
-            (BloomFilterType::Blocked, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                Some(PbSstableFilterLayout::Blocked),
+            )
         } else {
-            (BloomFilterType::Sstable, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                Some(PbSstableFilterLayout::Plain),
+            )
         };
 
         let total_key_count = self
@@ -613,7 +616,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind,
+            bloom_filter_kind: BloomFilterType::BloomFilterUnspecified,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -629,7 +632,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
-            filter_type,
+            filter_type: Some(filter_type),
+            filter_layout,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();
@@ -1256,6 +1260,7 @@ pub(super) mod tests {
     async fn test_with_xor_filter_builder<F: FilterBuilder>(
         bloom_false_positive: f64,
         expected_filter_type: PbSstableFilterType,
+        expected_filter_layout: PbSstableFilterLayout,
     ) {
         let key_count = 1000;
 
@@ -1281,7 +1286,12 @@ pub(super) mod tests {
             table_id_to_watermark_serde,
         )
         .await;
-        assert_eq!(sst_info.filter_type, expected_filter_type);
+        assert_eq!(
+            sst_info.bloom_filter_kind,
+            BloomFilterType::BloomFilterUnspecified
+        );
+        assert_eq!(sst_info.effective_filter_type(), expected_filter_type);
+        assert_eq!(sst_info.effective_filter_layout(), expected_filter_layout);
         let table = sstable_store
             .sstable(&sst_info, &mut StoreLocalStatistic::default())
             .await
@@ -1305,21 +1315,25 @@ pub(super) mod tests {
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.0,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor8,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Blocked,
         )
         .await;
     }

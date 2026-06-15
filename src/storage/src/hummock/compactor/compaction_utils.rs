@@ -30,7 +30,9 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
-use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbSstableFilterType, PbTableSchema};
+use risingwave_pb::hummock::{
+    PbLevelType, PbSstableFilterLayout, PbSstableFilterType, PbTableSchema,
+};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -133,7 +135,7 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
-    #[cfg(any(test, feature = "test"))]
+    /// Construct a compact task config for tests and benchmarks.
     pub fn for_test(
         key_range: KeyRange,
         cache_policy: CachePolicy,
@@ -154,7 +156,6 @@ impl TaskConfig {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub fn with_disable_drop_column_optimization(mut self, disable: bool) -> Self {
         self.disable_drop_column_optimization = disable;
         self
@@ -570,7 +571,7 @@ fn optimize_by_copy_block_with_input(
 ) -> bool {
     let all_ssts_are_blocked_filter = input_ssts
         .iter()
-        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
+        .all(|table_info| table_info.effective_filter_layout() == PbSstableFilterLayout::Blocked);
     let current_filter_type = compact_task.sstable_filter_type;
     let all_ssts_match_filter_type = input_ssts
         .iter()
@@ -757,8 +758,9 @@ mod tests {
             total_key_count,
             sst_size: 1024,
             uncompressed_file_size: 1024,
-            bloom_filter_kind: PbBloomFilterType::Blocked,
-            filter_type: PbSstableFilterType::SstableFilterXor16,
+            bloom_filter_kind: PbBloomFilterType::BloomFilterUnspecified,
+            filter_type: Some(PbSstableFilterType::SstableFilterXor16),
+            filter_layout: Some(PbSstableFilterLayout::Blocked),
             ..Default::default()
         }
         .into()
