@@ -181,7 +181,7 @@ CREATE SOURCE iceberg_auto_schema_bytea_source WITH (
 );
 
 query TT retry 6 backoff 1s
-SELECT id, email FROM iceberg_auto_schema_bytea_source ORDER BY id;
+SELECT id, v, email FROM iceberg_auto_schema_bytea_source ORDER BY id;
 ----
 1 NULL
 2 bytea@example.com
