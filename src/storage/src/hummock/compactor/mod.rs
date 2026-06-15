@@ -64,7 +64,6 @@ use iceberg_compaction::{
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
-use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::{
     HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
@@ -75,7 +74,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, PbSstableFilterType, ReportCompactionTaskRequest,
+    CompactTaskProgress, PbSstableFilterLayout, PbSstableFilterType, ReportCompactionTaskRequest,
     SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -91,8 +90,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockErrorInner, HummockResult, ObjectIdManager, SstableBuilderOptions,
-    Xor8FilterBuilder, Xor16FilterBuilder,
+    GetObjectId, HummockError, HummockErrorInner, HummockResult, ObjectIdManager,
+    SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -231,7 +230,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor8, ResolvedSstableFilterLayout::Blocked) => {
+                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Blocked) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
                         iter,
@@ -243,7 +242,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor8, ResolvedSstableFilterLayout::Plain) => {
+                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Plain) => {
                     self.compact_key_range_impl::<_, Xor8FilterBuilder>(
                         factory,
                         iter,
@@ -260,7 +259,7 @@ impl Compactor {
                 (
                     PbSstableFilterType::SstableFilterUnspecified
                     | PbSstableFilterType::SstableFilterXor16,
-                    ResolvedSstableFilterLayout::Blocked,
+                    PbSstableFilterLayout::Blocked,
                 ) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
@@ -276,7 +275,7 @@ impl Compactor {
                 (
                     PbSstableFilterType::SstableFilterUnspecified
                     | PbSstableFilterType::SstableFilterXor16,
-                    ResolvedSstableFilterLayout::Plain,
+                    PbSstableFilterLayout::Plain,
                 ) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,
@@ -288,6 +287,12 @@ impl Compactor {
                     )
                     .instrument_await("compact".verbose())
                     .await?
+                }
+                (filter_type, layout) => {
+                    return Err(HummockError::compaction_executor(format!(
+                        "unresolved SST filter layout in task config: {:?}, {:?}",
+                        filter_type, layout
+                    )));
                 }
             }
         };

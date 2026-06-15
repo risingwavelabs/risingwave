@@ -25,7 +25,6 @@ use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
-use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -397,7 +396,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
-            sstable_filter_layout: ResolvedSstableFilterLayout::Blocked,
+            sstable_filter_layout: PbSstableFilterLayout::Blocked,
             sstable_filter_type: task.sstable_filter_type,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,

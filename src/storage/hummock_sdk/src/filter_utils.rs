@@ -33,14 +33,6 @@ pub fn should_use_blocked_xor_filter_by_kv_count(
     kv_count > threshold
 }
 
-/// Physical SST filter layout after `auto` has been resolved for one output SST.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ResolvedSstableFilterLayout {
-    #[default]
-    Plain,
-    Blocked,
-}
-
 pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterType, String> {
     match filter_type {
         "none" => Ok(PbSstableFilterType::SstableFilterNone),
