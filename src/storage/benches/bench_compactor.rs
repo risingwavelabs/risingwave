@@ -26,12 +26,13 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::ValueRowSerializer;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::{PbSstableFilterLayout, PbTableSchema};
+use risingwave_pb::hummock::PbTableSchema;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
@@ -305,7 +306,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
             KeyRange::inf(),
             CachePolicy::Disable,
             false,
-            PbSstableFilterLayout::Blocked,
+            ResolvedSstableFilterLayout::Blocked,
             HashMap::new(),
         )
     });
@@ -453,7 +454,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        PbSstableFilterLayout::Blocked,
+        ResolvedSstableFilterLayout::Blocked,
         HashMap::new(),
     );
 
@@ -461,7 +462,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        PbSstableFilterLayout::Blocked,
+        ResolvedSstableFilterLayout::Blocked,
         HashMap::from([
             (
                 10.into(),
@@ -482,7 +483,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        PbSstableFilterLayout::Blocked,
+        ResolvedSstableFilterLayout::Blocked,
         HashMap::from([
             (
                 10.into(),

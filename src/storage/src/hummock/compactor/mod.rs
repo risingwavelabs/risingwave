@@ -64,6 +64,7 @@ use iceberg_compaction::{
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
+use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::{
     HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
@@ -216,7 +217,7 @@ impl Compactor {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             match (
                 self.task_config.sstable_filter_type,
-                self.task_config.use_block_based_filter(),
+                self.task_config.sstable_filter_layout,
             ) {
                 (PbSstableFilterType::SstableFilterNone, _) => {
                     self.compact_key_range_impl::<_, NoneFilterBuilder>(
@@ -230,7 +231,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor8, true) => {
+                (PbSstableFilterType::SstableFilterXor8, ResolvedSstableFilterLayout::Blocked) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
                         iter,
@@ -242,7 +243,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor8, false) => {
+                (PbSstableFilterType::SstableFilterXor8, ResolvedSstableFilterLayout::Plain) => {
                     self.compact_key_range_impl::<_, Xor8FilterBuilder>(
                         factory,
                         iter,
@@ -259,7 +260,7 @@ impl Compactor {
                 (
                     PbSstableFilterType::SstableFilterUnspecified
                     | PbSstableFilterType::SstableFilterXor16,
-                    true,
+                    ResolvedSstableFilterLayout::Blocked,
                 ) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
@@ -275,7 +276,7 @@ impl Compactor {
                 (
                     PbSstableFilterType::SstableFilterUnspecified
                     | PbSstableFilterType::SstableFilterXor16,
-                    false,
+                    ResolvedSstableFilterLayout::Plain,
                 ) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,

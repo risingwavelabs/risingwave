@@ -27,6 +27,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::id::WorkerId;
 
 use crate::compaction_group::StateTableId;
+use crate::filter_utils::ResolvedSstableFilterLayout;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
@@ -198,18 +199,18 @@ impl CompactTask {
     pub fn sstable_filter_layout_for_output(
         &self,
         estimated_output_key_count: u64,
-    ) -> PbSstableFilterLayout {
+    ) -> ResolvedSstableFilterLayout {
         match self.sstable_filter_layout {
-            PbSstableFilterLayout::Plain => PbSstableFilterLayout::Plain,
-            PbSstableFilterLayout::Blocked => PbSstableFilterLayout::Blocked,
+            PbSstableFilterLayout::Plain => ResolvedSstableFilterLayout::Plain,
+            PbSstableFilterLayout::Blocked => ResolvedSstableFilterLayout::Blocked,
             PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
                 if crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
                     estimated_output_key_count,
                     self.blocked_xor_filter_kv_count_threshold,
                 ) {
-                    PbSstableFilterLayout::Blocked
+                    ResolvedSstableFilterLayout::Blocked
                 } else {
-                    PbSstableFilterLayout::Plain
+                    ResolvedSstableFilterLayout::Plain
                 }
             }
         }
@@ -683,6 +684,7 @@ mod tests {
     use risingwave_pb::hummock::{PbCompactTask, PbLevelType, PbSstableFilterLayout};
 
     use super::CompactTask;
+    use crate::filter_utils::ResolvedSstableFilterLayout;
     use crate::level::InputLevel;
     use crate::sstable_info::{SstableInfo, SstableInfoInner};
 
@@ -730,11 +732,11 @@ mod tests {
 
         assert_eq!(
             task.sstable_filter_layout_for_output(100),
-            PbSstableFilterLayout::Plain
+            ResolvedSstableFilterLayout::Plain
         );
         assert_eq!(
             task.sstable_filter_layout_for_output(101),
-            PbSstableFilterLayout::Blocked
+            ResolvedSstableFilterLayout::Blocked
         );
 
         let task = CompactTask {
@@ -745,7 +747,7 @@ mod tests {
 
         assert_eq!(
             task.sstable_filter_layout_for_output(101),
-            PbSstableFilterLayout::Plain
+            ResolvedSstableFilterLayout::Plain
         );
 
         let task = CompactTask {
@@ -756,7 +758,7 @@ mod tests {
 
         assert_eq!(
             task.sstable_filter_layout_for_output(0),
-            PbSstableFilterLayout::Blocked
+            ResolvedSstableFilterLayout::Blocked
         );
     }
 
@@ -823,7 +825,7 @@ mod tests {
 
         assert_eq!(
             task.sstable_filter_layout_for_output(0),
-            PbSstableFilterLayout::Blocked
+            ResolvedSstableFilterLayout::Blocked
         );
     }
 

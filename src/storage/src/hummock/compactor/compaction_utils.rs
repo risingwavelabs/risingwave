@@ -24,6 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -122,7 +123,7 @@ pub struct TaskConfig {
     pub(crate) cache_policy: CachePolicy,
     pub(crate) gc_delete_keys: bool,
     pub(crate) retain_multiple_version: bool,
-    pub(crate) sstable_filter_layout: PbSstableFilterLayout,
+    pub(crate) sstable_filter_layout: ResolvedSstableFilterLayout,
     pub(crate) sstable_filter_type: PbSstableFilterType,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
@@ -140,7 +141,7 @@ impl TaskConfig {
         key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
-        sstable_filter_layout: PbSstableFilterLayout,
+        sstable_filter_layout: ResolvedSstableFilterLayout,
         table_schemas: HashMap<TableId, PbTableSchema>,
     ) -> Self {
         Self {
@@ -153,16 +154,6 @@ impl TaskConfig {
             table_vnode_partition: BTreeMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
-        }
-    }
-
-    pub(crate) fn use_block_based_filter(&self) -> bool {
-        match self.sstable_filter_layout {
-            PbSstableFilterLayout::Plain => false,
-            PbSstableFilterLayout::Blocked => true,
-            PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
-                unreachable!("task config must use a resolved physical SST filter layout")
-            }
         }
     }
 
@@ -613,7 +604,7 @@ fn optimize_by_copy_block_with_input(
         )
         && all_ssts_are_blocked_filter
         && all_ssts_match_filter_type
-        && output_filter_layout == PbSstableFilterLayout::Blocked
+        && output_filter_layout == ResolvedSstableFilterLayout::Blocked
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()

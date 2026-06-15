@@ -25,10 +25,11 @@ use futures::future::try_join;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::filter_utils::ResolvedSstableFilterLayout;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
+use risingwave_pb::hummock::PbSstableFilterType;
 use thiserror_ext::AsReport;
 use tracing::error;
 
@@ -192,9 +193,9 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             estimated_output_key_count as u64,
             None,
         ) {
-            PbSstableFilterLayout::Blocked
+            ResolvedSstableFilterLayout::Blocked
         } else {
-            PbSstableFilterLayout::Plain
+            ResolvedSstableFilterLayout::Plain
         };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
@@ -426,7 +427,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         estimated_output_key_count: usize,
         table_vnode_partition: BTreeMap<TableId, u32>,
-        sstable_filter_layout: PbSstableFilterLayout,
+        sstable_filter_layout: ResolvedSstableFilterLayout,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
