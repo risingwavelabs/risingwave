@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
@@ -35,7 +36,6 @@ use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::compaction_utils::{
     blocked_xor_filter_key_count_threshold, estimate_output_key_count_for_task,
-    new_remote_capacity_split_table_builder,
 };
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
@@ -401,14 +401,27 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
-        let sst_builder = new_remote_capacity_split_table_builder::<B>(
-            &context,
-            options,
-            &task_config,
+        let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
+
+        let builder_factory = RemoteBuilderFactory::<_, B> {
             object_id_getter,
-            get_id_time,
-            compaction_catalog_agent_ref.clone(),
+            limiter: context.memory_limiter.clone(),
+            options,
+            policy: task_config.cache_policy,
+            remote_rpc_cost: get_id_time,
+            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
+            sstable_writer_factory: factory,
+            _phantom: PhantomData,
+        };
+        let sst_builder = CapacitySplitTableBuilder::new(
+            builder_factory,
+            context.compactor_metrics.clone(),
             Some(task_progress.clone()),
+            task_config.table_vnode_partition.clone(),
+            context
+                .storage_opts
+                .compactor_concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref.clone(),
         );
         assert_eq!(
             task.input_ssts.len(),
