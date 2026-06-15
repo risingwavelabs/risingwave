@@ -64,3 +64,53 @@ pub trait FilterBuilder: Send {
 
     fn filter_type(&self) -> PbSstableFilterType;
 }
+
+pub struct NoneFilterBuilder;
+
+impl FilterBuilder for NoneFilterBuilder {
+    fn add_key(&mut self, _dist_key: &[u8], _table_id: u32) {}
+
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn approximate_len(&self) -> usize {
+        0
+    }
+
+    fn create(_options: FilterBuilderOptions) -> Self {
+        Self
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        0
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterNone
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_none_filter_builder_output() {
+        let mut builder = NoneFilterBuilder::create(FilterBuilderOptions {
+            estimated_key_count: 1,
+            estimated_block_count: 1,
+            hash_prealloc_key_count_cap: 1,
+        });
+
+        builder.add_key(b"key", 1);
+
+        assert_eq!(builder.approximate_len(), 0);
+        assert_eq!(builder.approximate_building_memory(), 0);
+        assert!(builder.finish(None).is_empty());
+        assert_eq!(
+            builder.filter_type(),
+            PbSstableFilterType::SstableFilterNone
+        );
+    }
+}

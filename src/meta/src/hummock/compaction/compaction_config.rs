@@ -274,4 +274,11 @@ mod tests {
         config.sstable_filter_type = vec!["xor16".to_owned()];
         assert!(validate_compaction_config(&config).is_err());
     }
+
+    #[test]
+    fn test_validate_compaction_config_accepts_none_filter_type() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_type = vec!["none".to_owned(); config.max_level as usize + 1];
+        assert!(validate_compaction_config(&config).is_ok());
+    }
 }

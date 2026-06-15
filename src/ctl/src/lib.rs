@@ -204,7 +204,7 @@ enum HummockCommands {
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.
         #[clap(long, requires = "sstable_filter_type")]
         sstable_filter_type_level: Option<u32>,
-        /// Xor filter type to use for this level. Supported values: "xor16", "xor8".
+        /// SST filter type to use for this level. Supported values: "none", "xor16", "xor8".
         #[clap(long, requires = "sstable_filter_type_level")]
         sstable_filter_type: Option<String>,
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.

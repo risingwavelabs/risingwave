@@ -35,6 +35,7 @@ pub fn should_use_blocked_xor_filter_by_kv_count(
 
 pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterType, String> {
     match filter_type.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(PbSstableFilterType::SstableFilterNone),
         "xor16" => Ok(PbSstableFilterType::SstableFilterXor16),
         "xor8" => Ok(PbSstableFilterType::SstableFilterXor8),
         _ => Err(format!("unsupported sstable filter type: {filter_type}")),
@@ -118,6 +119,10 @@ mod tests {
     #[test]
     fn test_parse_sstable_filter_type() {
         assert_eq!(
+            parse_sstable_filter_type("none").unwrap(),
+            PbSstableFilterType::SstableFilterNone
+        );
+        assert_eq!(
             parse_sstable_filter_type("xor16").unwrap(),
             PbSstableFilterType::SstableFilterXor16
         );
@@ -150,13 +155,14 @@ mod tests {
             parse_sstable_filter_layout("blocked").unwrap(),
             PbSstableFilterLayout::Blocked
         );
+        assert!(parse_sstable_filter_layout("none").is_err());
         assert!(parse_sstable_filter_layout("unknown").is_err());
     }
 
     #[test]
     fn test_get_sstable_filter_type_for_level() {
         let config = CompactionConfig {
-            sstable_filter_type: vec!["xor8".to_owned(), "xor16".to_owned(), "xor8".to_owned()],
+            sstable_filter_type: vec!["xor8".to_owned(), "none".to_owned(), "xor16".to_owned()],
             ..Default::default()
         };
         assert_eq!(
@@ -165,11 +171,11 @@ mod tests {
         );
         assert_eq!(
             get_sstable_filter_type(&config, 2, 1).unwrap(),
-            PbSstableFilterType::SstableFilterXor16
+            PbSstableFilterType::SstableFilterNone
         );
         assert_eq!(
             get_sstable_filter_type(&config, 2, 2).unwrap(),
-            PbSstableFilterType::SstableFilterXor8
+            PbSstableFilterType::SstableFilterXor16
         );
         assert!(get_sstable_filter_type(&config, 2, 3).is_err());
     }

@@ -101,7 +101,7 @@ use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder, NoneFilterBuilder,
     SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
     validate_ssts,
 };
@@ -218,6 +218,18 @@ impl Compactor {
                 self.task_config.sstable_filter_type,
                 self.task_config.use_block_based_filter,
             ) {
+                (PbSstableFilterType::SstableFilterNone, _) => {
+                    self.compact_key_range_impl::<_, NoneFilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
                 (PbSstableFilterType::SstableFilterXor8, true) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
@@ -242,11 +254,10 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                // Old compact tasks may not carry this field. `NONE` is not a valid configured
-                // compaction-output filter either. Keep the legacy xor16 behavior in both cases.
+                // Old compact tasks may not carry this field. Keep the legacy xor16 behavior rather
+                // than failing the task.
                 (
                     PbSstableFilterType::SstableFilterUnspecified
-                    | PbSstableFilterType::SstableFilterNone
                     | PbSstableFilterType::SstableFilterXor16,
                     true,
                 ) => {
@@ -263,7 +274,6 @@ impl Compactor {
                 }
                 (
                     PbSstableFilterType::SstableFilterUnspecified
-                    | PbSstableFilterType::SstableFilterNone
                     | PbSstableFilterType::SstableFilterXor16,
                     false,
                 ) => {
