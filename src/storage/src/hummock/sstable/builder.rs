@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterLayout, PbSstableFilterType};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -616,7 +616,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind: BloomFilterType::BloomFilterUnspecified,
+            bloom_filter_kind: None,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -1286,10 +1286,7 @@ pub(super) mod tests {
             table_id_to_watermark_serde,
         )
         .await;
-        assert_eq!(
-            sst_info.bloom_filter_kind,
-            BloomFilterType::BloomFilterUnspecified
-        );
+        assert!(sst_info.bloom_filter_kind.is_none());
         assert_eq!(sst_info.effective_filter_type(), expected_filter_type);
         assert_eq!(sst_info.effective_filter_layout(), expected_filter_layout);
         let table = sstable_store

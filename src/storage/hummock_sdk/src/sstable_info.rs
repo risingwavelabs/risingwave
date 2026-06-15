@@ -53,7 +53,7 @@ pub struct SstableInfoInner {
     pub max_epoch: u64,
     pub uncompressed_file_size: u64,
     pub range_tombstone_count: u64,
-    pub bloom_filter_kind: PbBloomFilterType,
+    pub bloom_filter_kind: Option<PbBloomFilterType>,
     pub filter_type: Option<PbSstableFilterType>,
     pub filter_layout: Option<PbSstableFilterLayout>,
     pub sst_size: u64,
@@ -74,7 +74,7 @@ impl SstableInfoInner {
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
             + size_of::<u64>(); // sst_size
-        if self.bloom_filter_kind != PbBloomFilterType::BloomFilterUnspecified {
+        if self.bloom_filter_kind.is_some() {
             basic += size_of::<u32>(); // bloom_filter_kind
         }
         if self.filter_type.is_some() {
@@ -96,6 +96,20 @@ impl SstableInfoInner {
     pub fn to_protobuf(&self) -> PbSstableInfo {
         self.into()
     }
+}
+
+fn legacy_bloom_filter_kind_from_pb(bloom_filter_kind: i32) -> Option<PbBloomFilterType> {
+    let bloom_filter_kind = PbBloomFilterType::try_from(bloom_filter_kind).unwrap();
+    match bloom_filter_kind {
+        PbBloomFilterType::BloomFilterUnspecified => None,
+        bloom_filter_kind => Some(bloom_filter_kind),
+    }
+}
+
+fn legacy_bloom_filter_kind_to_pb(bloom_filter_kind: Option<PbBloomFilterType>) -> i32 {
+    bloom_filter_kind
+        .unwrap_or(PbBloomFilterType::BloomFilterUnspecified)
+        .into()
 }
 
 impl From<&PbVnodeStatistics> for VnodeStatistics {
@@ -178,8 +192,7 @@ impl From<PbSstableInfo> for SstableInfoInner {
             max_epoch: pb_sstable_info.max_epoch,
             uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
-            bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
-                .unwrap(),
+            bloom_filter_kind: legacy_bloom_filter_kind_from_pb(pb_sstable_info.bloom_filter_kind),
             filter_type: pb_sstable_info.filter_type.map(|filter_type| {
                 PbSstableFilterType::try_from(filter_type)
                     .unwrap_or(PbSstableFilterType::SstableFilterUnspecified)
@@ -227,8 +240,7 @@ impl From<&PbSstableInfo> for SstableInfoInner {
             max_epoch: pb_sstable_info.max_epoch,
             uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
-            bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
-                .unwrap(),
+            bloom_filter_kind: legacy_bloom_filter_kind_from_pb(pb_sstable_info.bloom_filter_kind),
             filter_type: pb_sstable_info.filter_type.map(|filter_type| {
                 PbSstableFilterType::try_from(filter_type)
                     .unwrap_or(PbSstableFilterType::SstableFilterUnspecified)
@@ -282,7 +294,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
             max_epoch: sstable_info.max_epoch,
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
-            bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            bloom_filter_kind: legacy_bloom_filter_kind_to_pb(sstable_info.bloom_filter_kind),
             filter_type: sstable_info.filter_type.map(Into::into),
             filter_layout: sstable_info.filter_layout.map(Into::into),
             sst_size: sstable_info.sst_size,
@@ -323,7 +335,7 @@ impl From<&SstableInfoInner> for PbSstableInfo {
             max_epoch: sstable_info.max_epoch,
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
-            bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            bloom_filter_kind: legacy_bloom_filter_kind_to_pb(sstable_info.bloom_filter_kind),
             filter_type: sstable_info.filter_type.map(Into::into),
             filter_layout: sstable_info.filter_layout.map(Into::into),
             sst_size: sstable_info.sst_size,
@@ -366,10 +378,12 @@ impl SstableInfo {
         }
 
         match self.bloom_filter_kind {
-            PbBloomFilterType::BloomFilterUnspecified => PbSstableFilterType::SstableFilterNone,
+            None | Some(PbBloomFilterType::BloomFilterUnspecified) => {
+                PbSstableFilterType::SstableFilterNone
+            }
             // Old SST metadata did not record the xor filter algorithm. Before configurable SST
             // filters, all persisted filters were xor16.
-            PbBloomFilterType::Sstable | PbBloomFilterType::Blocked => {
+            Some(PbBloomFilterType::Sstable | PbBloomFilterType::Blocked) => {
                 PbSstableFilterType::SstableFilterXor16
             }
         }
@@ -382,9 +396,11 @@ impl SstableInfo {
         }
 
         match self.bloom_filter_kind {
-            PbBloomFilterType::BloomFilterUnspecified => PbSstableFilterLayout::Unspecified,
-            PbBloomFilterType::Sstable => PbSstableFilterLayout::Plain,
-            PbBloomFilterType::Blocked => PbSstableFilterLayout::Blocked,
+            None | Some(PbBloomFilterType::BloomFilterUnspecified) => {
+                PbSstableFilterLayout::Unspecified
+            }
+            Some(PbBloomFilterType::Sstable) => PbSstableFilterLayout::Plain,
+            Some(PbBloomFilterType::Blocked) => PbSstableFilterLayout::Blocked,
         }
     }
 
@@ -481,7 +497,7 @@ mod tests {
     #[test]
     fn test_effective_filter_metadata_uses_new_fields_first() {
         let sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: PbBloomFilterType::Blocked,
+            bloom_filter_kind: Some(PbBloomFilterType::Blocked),
             filter_type: Some(PbSstableFilterType::SstableFilterXor8),
             filter_layout: Some(PbSstableFilterLayout::Plain),
             ..Default::default()
@@ -501,7 +517,7 @@ mod tests {
     #[test]
     fn test_effective_filter_metadata_falls_back_to_legacy_bloom_kind() {
         let blocked_sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: PbBloomFilterType::Blocked,
+            bloom_filter_kind: Some(PbBloomFilterType::Blocked),
             ..Default::default()
         }
         .into();
@@ -515,7 +531,7 @@ mod tests {
         );
 
         let plain_sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: PbBloomFilterType::Sstable,
+            bloom_filter_kind: Some(PbBloomFilterType::Sstable),
             ..Default::default()
         }
         .into();
@@ -547,5 +563,28 @@ mod tests {
             PbSstableFilterLayout::Unspecified
         );
         assert!(sst_info.filter_type_compatible_with(PbSstableFilterType::SstableFilterNone));
+    }
+
+    #[test]
+    fn test_legacy_bloom_filter_kind_round_trip() {
+        let sst_info = SstableInfoInner {
+            bloom_filter_kind: None,
+            ..Default::default()
+        };
+        let pb_sst_info = PbSstableInfo::from(sst_info);
+        assert_eq!(
+            pb_sst_info.bloom_filter_kind,
+            PbBloomFilterType::BloomFilterUnspecified as i32
+        );
+        assert_eq!(SstableInfoInner::from(pb_sst_info).bloom_filter_kind, None);
+
+        let pb_sst_info = PbSstableInfo {
+            bloom_filter_kind: PbBloomFilterType::Blocked as i32,
+            ..Default::default()
+        };
+        assert_eq!(
+            SstableInfoInner::from(pb_sst_info).bloom_filter_kind,
+            Some(PbBloomFilterType::Blocked)
+        );
     }
 }

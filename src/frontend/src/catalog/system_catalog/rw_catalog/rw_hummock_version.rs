@@ -20,6 +20,7 @@ use risingwave_common::id::TableId;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_pb::hummock::PbBloomFilterType;
 use risingwave_pb::id::{
     CompactionGroupId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
@@ -135,7 +136,10 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     max_epoch: sst.max_epoch as _,
                     uncompressed_file_size: sst.uncompressed_file_size as _,
                     range_tombstone_count: sst.range_tombstone_count as _,
-                    bloom_filter_kind: sst.bloom_filter_kind as _,
+                    bloom_filter_kind: sst
+                        .bloom_filter_kind
+                        .unwrap_or(PbBloomFilterType::BloomFilterUnspecified)
+                        as _,
                     filter_type: sst.effective_filter_type() as _,
                     filter_layout: sst.effective_filter_layout() as _,
                     table_ids: json!(

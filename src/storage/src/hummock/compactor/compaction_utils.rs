@@ -735,9 +735,7 @@ mod tests {
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_pb::hummock::compact_task::PbTaskType;
-    use risingwave_pb::hummock::{
-        PbBloomFilterType, PbLevelType, PbSstableFilterLayout, PbSstableFilterType,
-    };
+    use risingwave_pb::hummock::{PbLevelType, PbSstableFilterLayout, PbSstableFilterType};
 
     use super::{
         CompactTask, CompactorContext, estimate_output_key_count_by_size, optimize_by_copy_block,
@@ -758,7 +756,7 @@ mod tests {
             total_key_count,
             sst_size: 1024,
             uncompressed_file_size: 1024,
-            bloom_filter_kind: PbBloomFilterType::BloomFilterUnspecified,
+            bloom_filter_kind: None,
             filter_type: Some(PbSstableFilterType::SstableFilterXor16),
             filter_layout: Some(PbSstableFilterLayout::Blocked),
             ..Default::default()
