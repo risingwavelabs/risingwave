@@ -775,10 +775,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     if let (Some(level), Some(filter_type)) =
                         (sstable_filter_type_level, sstable_filter_type)
                     {
-                        Some(SstableFilterType {
-                            level,
-                            filter_type: filter_type,
-                        })
+                        Some(SstableFilterType { level, filter_type })
                     } else {
                         None
                     },

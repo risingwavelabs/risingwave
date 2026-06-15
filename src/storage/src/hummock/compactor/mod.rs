@@ -214,10 +214,15 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
-            match (
-                self.task_config.sstable_filter_type,
-                self.task_config.use_block_based_filter,
-            ) {
+            let sstable_filter_type = match self.task_config.sstable_filter_type {
+                // Old compact tasks may not carry this field. Keep the legacy xor16 behavior rather
+                // than failing the task.
+                PbSstableFilterType::SstableFilterUnspecified => {
+                    PbSstableFilterType::SstableFilterXor16
+                }
+                filter_type => filter_type,
+            };
+            match (sstable_filter_type, self.task_config.use_block_based_filter) {
                 (PbSstableFilterType::SstableFilterXor8, true) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
