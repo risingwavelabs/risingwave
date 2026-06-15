@@ -495,74 +495,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effective_filter_metadata_uses_new_fields_first() {
-        let sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: Some(PbBloomFilterType::Blocked),
-            filter_type: Some(PbSstableFilterType::SstableFilterXor8),
-            filter_layout: Some(PbSstableFilterLayout::Plain),
-            ..Default::default()
+    fn test_effective_filter_metadata() {
+        let cases = [
+            (
+                "new fields override legacy bloom kind",
+                Some(PbBloomFilterType::Blocked),
+                Some(PbSstableFilterType::SstableFilterXor8),
+                Some(PbSstableFilterLayout::Plain),
+                PbSstableFilterType::SstableFilterXor8,
+                PbSstableFilterLayout::Plain,
+            ),
+            (
+                "legacy blocked bloom kind",
+                Some(PbBloomFilterType::Blocked),
+                None,
+                None,
+                PbSstableFilterType::SstableFilterXor16,
+                PbSstableFilterLayout::Blocked,
+            ),
+            (
+                "legacy plain bloom kind",
+                Some(PbBloomFilterType::Sstable),
+                None,
+                None,
+                PbSstableFilterType::SstableFilterXor16,
+                PbSstableFilterLayout::Plain,
+            ),
+            (
+                "explicit no filter",
+                None,
+                Some(PbSstableFilterType::SstableFilterNone),
+                None,
+                PbSstableFilterType::SstableFilterNone,
+                PbSstableFilterLayout::Unspecified,
+            ),
+        ];
+
+        for (
+            case_name,
+            bloom_filter_kind,
+            filter_type,
+            filter_layout,
+            expected_filter_type,
+            expected_filter_layout,
+        ) in cases
+        {
+            let sst_info: SstableInfo = SstableInfoInner {
+                bloom_filter_kind,
+                filter_type,
+                filter_layout,
+                ..Default::default()
+            }
+            .into();
+
+            assert_eq!(
+                sst_info.effective_filter_type(),
+                expected_filter_type,
+                "{case_name}"
+            );
+            assert_eq!(
+                sst_info.effective_filter_layout(),
+                expected_filter_layout,
+                "{case_name}"
+            );
         }
-        .into();
-
-        assert_eq!(
-            sst_info.effective_filter_type(),
-            PbSstableFilterType::SstableFilterXor8
-        );
-        assert_eq!(
-            sst_info.effective_filter_layout(),
-            PbSstableFilterLayout::Plain
-        );
-    }
-
-    #[test]
-    fn test_effective_filter_metadata_falls_back_to_legacy_bloom_kind() {
-        let blocked_sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: Some(PbBloomFilterType::Blocked),
-            ..Default::default()
-        }
-        .into();
-        assert_eq!(
-            blocked_sst_info.effective_filter_type(),
-            PbSstableFilterType::SstableFilterXor16
-        );
-        assert_eq!(
-            blocked_sst_info.effective_filter_layout(),
-            PbSstableFilterLayout::Blocked
-        );
-
-        let plain_sst_info: SstableInfo = SstableInfoInner {
-            bloom_filter_kind: Some(PbBloomFilterType::Sstable),
-            ..Default::default()
-        }
-        .into();
-        assert_eq!(
-            plain_sst_info.effective_filter_type(),
-            PbSstableFilterType::SstableFilterXor16
-        );
-        assert_eq!(
-            plain_sst_info.effective_filter_layout(),
-            PbSstableFilterLayout::Plain
-        );
-    }
-
-    #[test]
-    fn test_effective_filter_metadata_supports_none_filter() {
-        let sst_info: SstableInfo = SstableInfoInner {
-            filter_type: Some(PbSstableFilterType::SstableFilterNone),
-            filter_layout: None,
-            ..Default::default()
-        }
-        .into();
-
-        assert_eq!(
-            sst_info.effective_filter_type(),
-            PbSstableFilterType::SstableFilterNone
-        );
-        assert_eq!(
-            sst_info.effective_filter_layout(),
-            PbSstableFilterLayout::Unspecified
-        );
-        assert!(sst_info.filter_type_compatible_with(PbSstableFilterType::SstableFilterNone));
     }
 
     #[test]
