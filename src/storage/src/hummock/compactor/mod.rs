@@ -90,8 +90,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockError, HummockErrorInner, HummockResult, ObjectIdManager,
-    SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
+    GetObjectId, HummockErrorInner, HummockResult, ObjectIdManager, SstableBuilderOptions,
+    Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -214,15 +214,10 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
-            let sstable_filter_type = match self.task_config.sstable_filter_type {
-                // Old compact tasks may not carry this field. Keep the legacy xor16 behavior rather
-                // than failing the task.
-                PbSstableFilterType::SstableFilterUnspecified => {
-                    PbSstableFilterType::SstableFilterXor16
-                }
-                filter_type => filter_type,
-            };
-            match (sstable_filter_type, self.task_config.use_block_based_filter) {
+            match (
+                self.task_config.sstable_filter_type,
+                self.task_config.use_block_based_filter,
+            ) {
                 (PbSstableFilterType::SstableFilterXor8, true) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
@@ -247,7 +242,14 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor16, true) => {
+                // Old compact tasks may not carry this field. `NONE` is not a valid configured
+                // compaction-output filter either. Keep the legacy xor16 behavior in both cases.
+                (
+                    PbSstableFilterType::SstableFilterUnspecified
+                    | PbSstableFilterType::SstableFilterNone
+                    | PbSstableFilterType::SstableFilterXor16,
+                    true,
+                ) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
                         iter,
@@ -259,7 +261,12 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor16, false) => {
+                (
+                    PbSstableFilterType::SstableFilterUnspecified
+                    | PbSstableFilterType::SstableFilterNone
+                    | PbSstableFilterType::SstableFilterXor16,
+                    false,
+                ) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,
                         iter,
@@ -270,11 +277,6 @@ impl Compactor {
                     )
                     .instrument_await("compact".verbose())
                     .await?
-                }
-                (filter_type, _) => {
-                    return Err(HummockError::other(format!(
-                        "unsupported sstable filter type in compactor: {filter_type:?}"
-                    )));
                 }
             }
         };
