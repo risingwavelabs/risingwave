@@ -45,10 +45,10 @@ use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
     UserIterator,
 };
-use crate::hummock::multi_builder::TableBuilderFactory;
+use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions, UnifiedSstableWriterFactory,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -61,6 +61,39 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
+}
+
+pub(super) fn new_remote_capacity_split_table_builder<F: FilterBuilder>(
+    context: &CompactorContext,
+    options: SstableBuilderOptions,
+    task_config: &TaskConfig,
+    object_id_getter: Arc<dyn GetObjectId>,
+    remote_rpc_cost: Arc<AtomicU64>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    task_progress: Option<Arc<TaskProgress>>,
+) -> CapacitySplitTableBuilder<RemoteBuilderFactory<UnifiedSstableWriterFactory, F>> {
+    let writer_factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
+    let builder_factory = RemoteBuilderFactory::<_, F> {
+        object_id_getter,
+        limiter: context.memory_limiter.clone(),
+        options,
+        policy: task_config.cache_policy,
+        remote_rpc_cost,
+        compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
+        sstable_writer_factory: writer_factory,
+        _phantom: PhantomData,
+    };
+
+    CapacitySplitTableBuilder::new(
+        builder_factory,
+        context.compactor_metrics.clone(),
+        task_progress,
+        task_config.table_vnode_partition.clone(),
+        context
+            .storage_opts
+            .compactor_concurrent_uploading_sst_count,
+        compaction_catalog_agent_ref,
+    )
 }
 
 #[async_trait::async_trait]
