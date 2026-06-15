@@ -214,7 +214,8 @@ enum HummockCommands {
         ///
         /// Supported values:
         /// - "auto": decide by heuristics (currently by kv-count threshold)
-        /// - "plain" / "normal": always use a single non-blocked filter, ignoring kv-count threshold
+        /// - "plain": always use a single non-blocked filter, ignoring kv-count threshold
+        /// - "blocked": always use block-based filters, ignoring kv-count threshold
         #[clap(long, requires = "sstable_filter_layout_level")]
         sstable_filter_layout: Option<String>,
         #[clap(long)]

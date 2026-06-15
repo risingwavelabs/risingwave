@@ -34,8 +34,8 @@ use risingwave_hummock_sdk::{
     HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
     full_key_can_concat,
 };
-use risingwave_pb::hummock::LevelType;
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::{LevelType, PbSstableFilterType};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -63,8 +63,8 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    SstableStoreRef,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm,
+    GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -432,14 +432,46 @@ pub async fn compact_with_agent(
         });
 
     if optimize_by_copy_block {
-        let runner = fast_compactor_runner::CompactorRunner::new(
-            context.clone(),
-            compact_task.clone(),
-            compaction_catalog_agent_ref.clone(),
-            object_id_getter.clone(),
-            task_progress_guard.progress.clone(),
-            multi_filter,
-        );
+        let fast_compaction = {
+            let context = context.clone();
+            let task = compact_task.clone();
+            let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
+            let object_id_getter = object_id_getter.clone();
+            let task_progress = task_progress_guard.progress.clone();
+
+            async move {
+                match task.sstable_filter_type {
+                    PbSstableFilterType::SstableFilterXor8 => {
+                        fast_compactor_runner::CompactorRunner::<BlockedXor8FilterBuilder, _>::new(
+                            context,
+                            task,
+                            compaction_catalog_agent_ref,
+                            object_id_getter,
+                            task_progress,
+                            multi_filter,
+                        )
+                        .run()
+                        .await
+                    }
+                    PbSstableFilterType::SstableFilterXor16 => {
+                        fast_compactor_runner::CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                            context,
+                            task,
+                            compaction_catalog_agent_ref,
+                            object_id_getter,
+                            task_progress,
+                            multi_filter,
+                        )
+                        .run()
+                        .await
+                    }
+                    filter_type => Err(HummockError::compaction_executor(format!(
+                        "fast compaction only supports blocked xor filters, got {:?}",
+                        filter_type
+                    ))),
+                }
+            }
+        };
 
         tokio::select! {
             _ = &mut shutdown_rx => {
@@ -447,7 +479,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run() => {
+            ret = fast_compaction => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));

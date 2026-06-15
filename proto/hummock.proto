@@ -1196,7 +1196,7 @@ message CompactionConfig {
   //
   // Supported values:
   // - "auto": decide by heuristics (currently by kv-count threshold)
-  // - "plain" or "normal": always use a single non-blocked filter, ignoring kv-count threshold
+  // - "plain": always use a single non-blocked filter, ignoring kv-count threshold
   // - "blocked": always use block-based filters, ignoring kv-count threshold
   //
   // Ignored when the corresponding `sstable_filter_type` is "none".

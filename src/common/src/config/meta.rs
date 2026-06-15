@@ -674,7 +674,7 @@ pub struct CompactionConfig {
     pub sstable_filter_type: Vec<String>,
     /// Per-level xor filter layout for compaction output.
     ///
-    /// `auto` uses the kv-count heuristic; `plain`/`normal` forces non-blocked filters; `blocked`
+    /// `auto` uses the kv-count heuristic; `plain` forces non-blocked filters; `blocked`
     /// forces block-based filters. Explicit `plain` and `blocked` values ignore the kv-count
     /// threshold. This setting is ignored when the corresponding `sstable_filter_type` is "none".
     ///

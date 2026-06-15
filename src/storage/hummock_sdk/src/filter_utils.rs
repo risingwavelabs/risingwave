@@ -44,10 +44,8 @@ pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterTyp
 
 pub fn parse_sstable_filter_layout(layout: &str) -> Result<PbSstableFilterLayout, String> {
     match layout.trim().to_ascii_lowercase().as_str() {
-        "" | "auto" => Ok(PbSstableFilterLayout::Auto),
-        "plain" | "normal" | "nonblocked" | "non_blocked" | "non-blocked" => {
-            Ok(PbSstableFilterLayout::Plain)
-        }
+        "auto" => Ok(PbSstableFilterLayout::Auto),
+        "plain" => Ok(PbSstableFilterLayout::Plain),
         "blocked" => Ok(PbSstableFilterLayout::Blocked),
         _ => Err(format!("unsupported sstable filter layout: {layout}")),
     }
@@ -140,15 +138,7 @@ mod tests {
             PbSstableFilterLayout::Auto
         );
         assert_eq!(
-            parse_sstable_filter_layout("").unwrap(),
-            PbSstableFilterLayout::Auto
-        );
-        assert_eq!(
             parse_sstable_filter_layout("plain").unwrap(),
-            PbSstableFilterLayout::Plain
-        );
-        assert_eq!(
-            parse_sstable_filter_layout("NORMAL").unwrap(),
             PbSstableFilterLayout::Plain
         );
         assert_eq!(
@@ -202,7 +192,6 @@ mod tests {
             sstable_filter_layout: vec![
                 "plain".to_owned(),
                 "auto".to_owned(),
-                "normal".to_owned(),
                 "blocked".to_owned(),
             ],
             ..Default::default()
@@ -217,13 +206,9 @@ mod tests {
         );
         assert_eq!(
             get_sstable_filter_layout(&config, 2, 2).unwrap(),
-            PbSstableFilterLayout::Plain
-        );
-        assert_eq!(
-            get_sstable_filter_layout(&config, 2, 3).unwrap(),
             PbSstableFilterLayout::Blocked
         );
-        assert!(get_sstable_filter_layout(&config, 2, 4).is_err());
+        assert!(get_sstable_filter_layout(&config, 2, 3).is_err());
     }
 
     #[test]
