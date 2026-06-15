@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::spec::{DataFile, Operation, SerializedDataFile};
+use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use iceberg::{Catalog, TableIdent};
@@ -890,31 +890,40 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
-    /// Returns the number of snapshots since the last rewrite/overwrite
-    fn count_snapshots_since_rewrite(&self) -> usize {
-        let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
-        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
-
-        // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
+    /// Check the number of snapshots on the given branch lineage since the last rewrite operation.
+    /// Returns the number of snapshots since the last rewrite.
+    fn count_snapshots_since_rewrite_in_metadata(metadata: &TableMetadata, branch: &str) -> usize {
+        // Start from the latest snapshot of the commit branch.
+        let mut snapshot_id = metadata
+            .snapshot_for_ref(branch)
+            .map(|snapshot| snapshot.snapshot_id());
         let mut count = 0;
-        for snapshot in snapshots {
-            // Check if this snapshot represents a rewrite or overwrite operation
-            let summary = snapshot.summary();
-            match &summary.operation {
-                Operation::Replace => {
-                    // Found a rewrite/overwrite operation, stop counting
-                    break;
-                }
 
-                _ => {
-                    // Increment count for each snapshot that is not a rewrite/overwrite
-                    count += 1;
-                }
+        // Iterate through snapshots by parent lineage to find the last rewrite.
+        while let Some(current_snapshot_id) = snapshot_id {
+            let Some(snapshot) = metadata.snapshot_by_id(current_snapshot_id) else {
+                break;
+            };
+
+            // Check if this snapshot represents a rewrite operation.
+            if snapshot.summary().operation == Operation::Replace {
+                // Found a rewrite operation, stop counting.
+                break;
             }
+
+            // Increment count for each snapshot that is not a rewrite.
+            count += 1;
+            snapshot_id = snapshot.parent_snapshot_id();
         }
 
         count
+    }
+
+    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
+    /// Returns the number of snapshots since the last rewrite/overwrite
+    fn count_snapshots_since_rewrite(&self) -> usize {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        Self::count_snapshots_since_rewrite_in_metadata(self.table.metadata(), branch.as_str())
     }
 
     /// Wait until snapshot count since last rewrite is below the limit
