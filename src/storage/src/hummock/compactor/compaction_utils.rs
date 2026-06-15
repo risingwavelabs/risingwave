@@ -572,11 +572,11 @@ fn optimize_by_copy_block_with_input(
 ) -> bool {
     let all_ssts_are_blocked_filter = input_ssts
         .iter()
-        .all(|table_info| table_info.effective_filter_layout() == PbSstableFilterLayout::Blocked);
+        .all(|table_info| table_info.filter_layout == PbSstableFilterLayout::Blocked);
     let current_filter_type = compact_task.sstable_filter_type;
     let all_ssts_match_filter_type = input_ssts
         .iter()
-        .all(|table_info| table_info.filter_type_compatible_with(current_filter_type));
+        .all(|table_info| table_info.filter_type == current_filter_type);
     // Fast compaction path can only preserve blocked filters by copying block payloads (and their
     // per-block filter bytes). If the output-SST-level heuristic now wants a plain filter, fall back
     // to the normal compaction path to rebuild filters. This intentionally lets tasks that were
@@ -761,9 +761,8 @@ mod tests {
             total_key_count,
             sst_size: 1024,
             uncompressed_file_size: 1024,
-            bloom_filter_kind: None,
-            filter_type: Some(filter_type),
-            filter_layout: Some(PbSstableFilterLayout::Blocked),
+            filter_type,
+            filter_layout: PbSstableFilterLayout::Blocked,
             ..Default::default()
         }
         .into()

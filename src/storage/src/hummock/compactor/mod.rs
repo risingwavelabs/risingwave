@@ -254,13 +254,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                // Old compact tasks may not carry this field. Keep the legacy xor16 behavior rather
-                // than failing the task.
-                (
-                    PbSstableFilterType::SstableFilterUnspecified
-                    | PbSstableFilterType::SstableFilterXor16,
-                    PbSstableFilterLayout::Blocked,
-                ) => {
+                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Blocked) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
                         iter,
@@ -272,11 +266,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (
-                    PbSstableFilterType::SstableFilterUnspecified
-                    | PbSstableFilterType::SstableFilterXor16,
-                    PbSstableFilterLayout::Plain,
-                ) => {
+                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Plain) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,
                         iter,

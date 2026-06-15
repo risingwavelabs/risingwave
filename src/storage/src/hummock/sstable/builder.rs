@@ -496,16 +496,19 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
         let (filter_type, filter_layout) = if filter_data.is_empty() {
-            (PbSstableFilterType::SstableFilterNone, None)
+            (
+                PbSstableFilterType::SstableFilterNone,
+                PbSstableFilterLayout::Unspecified,
+            )
         } else if self.filter_builder.support_blocked_raw_data() {
             (
                 self.filter_builder.filter_type(),
-                Some(PbSstableFilterLayout::Blocked),
+                PbSstableFilterLayout::Blocked,
             )
         } else {
             (
                 self.filter_builder.filter_type(),
-                Some(PbSstableFilterLayout::Plain),
+                PbSstableFilterLayout::Plain,
             )
         };
 
@@ -616,7 +619,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind: None,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -632,7 +634,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
-            filter_type: Some(filter_type),
+            filter_type,
             filter_layout,
             vnode_statistics: vnode_user_key_ranges,
         }
@@ -1286,9 +1288,8 @@ pub(super) mod tests {
             table_id_to_watermark_serde,
         )
         .await;
-        assert!(sst_info.bloom_filter_kind.is_none());
-        assert_eq!(sst_info.effective_filter_type(), expected_filter_type);
-        assert_eq!(sst_info.effective_filter_layout(), expected_filter_layout);
+        assert_eq!(sst_info.filter_type, expected_filter_type);
+        assert_eq!(sst_info.filter_layout, expected_filter_layout);
         let table = sstable_store
             .sstable(&sst_info, &mut StoreLocalStatistic::default())
             .await

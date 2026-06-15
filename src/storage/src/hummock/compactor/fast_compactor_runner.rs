@@ -443,7 +443,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             left_ssts
                 .iter()
                 .chain(right_ssts.iter())
-                .all(|sst| sst.effective_filter_layout() == PbSstableFilterLayout::Blocked),
+                .all(|sst| sst.filter_layout == PbSstableFilterLayout::Blocked),
             "fast compaction requires blocked-filter SSTs: {}",
             compact_task_to_string(&task)
         );
@@ -942,10 +942,7 @@ mod tests {
             table_id_to_watermark_serde.clone(),
         )
         .await;
-        assert_eq!(
-            dropped_only_sst.effective_filter_layout(),
-            PbSstableFilterLayout::Plain
-        );
+        assert_eq!(dropped_only_sst.filter_layout, PbSstableFilterLayout::Plain);
         let mut inner = dropped_only_sst.get_inner();
         inner.table_ids.clear();
         dropped_only_sst.set_inner(inner);

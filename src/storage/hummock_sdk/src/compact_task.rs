@@ -334,16 +334,8 @@ impl From<PbCompactTask> for CompactTask {
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             blocked_xor_filter_kv_count_threshold: pb_compact_task.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_type: match PbSstableFilterType::try_from(
-                pb_compact_task.sstable_filter_type,
-            )
-            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
-            {
-                PbSstableFilterType::SstableFilterUnspecified => {
-                    PbSstableFilterType::SstableFilterXor16
-                }
-                filter_type => filter_type,
-            },
+            sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
             sstable_filter_layout: match PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
@@ -418,16 +410,8 @@ impl From<&PbCompactTask> for CompactTask {
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             blocked_xor_filter_kv_count_threshold: pb_compact_task.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_type: match PbSstableFilterType::try_from(
-                pb_compact_task.sstable_filter_type,
-            )
-            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
-            {
-                PbSstableFilterType::SstableFilterUnspecified => {
-                    PbSstableFilterType::SstableFilterXor16
-                }
-                filter_type => filter_type,
-            },
+            sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
             sstable_filter_layout: match PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )

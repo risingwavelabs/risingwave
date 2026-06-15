@@ -146,8 +146,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         sstable_info.file_size / 1024,
         sstable_info.sst_size / 1024,
         stale_ratio,
-        sstable_info.effective_filter_type(),
-        sstable_info.effective_filter_layout(),
+        sstable_info.filter_type,
+        sstable_info.filter_layout,
     )
     .unwrap();
 }

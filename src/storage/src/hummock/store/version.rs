@@ -1524,9 +1524,8 @@ mod tests {
             max_epoch: 0,
             uncompressed_file_size: 0,
             range_tombstone_count: 0,
-            bloom_filter_kind: None,
-            filter_type: Some(PbSstableFilterType::SstableFilterXor16),
-            filter_layout: Some(PbSstableFilterLayout::Plain),
+            filter_type: PbSstableFilterType::SstableFilterXor16,
+            filter_layout: PbSstableFilterLayout::Plain,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
         }
