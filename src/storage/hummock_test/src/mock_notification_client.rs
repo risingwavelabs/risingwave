@@ -72,8 +72,7 @@ impl NotificationClient for MockNotificationClient {
             ..Default::default()
         };
 
-        self.notification_manager
-            .notify_snapshot(tx.clone(), meta_snapshot);
+        self.notification_manager.notify_snapshot(tx, meta_snapshot);
 
         Ok(TestChannel(rx))
     }

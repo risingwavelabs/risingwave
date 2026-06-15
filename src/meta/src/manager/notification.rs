@@ -55,18 +55,15 @@ pub enum LocalNotification {
 }
 
 #[derive(Debug)]
-enum Target {
-    Subscribers {
-        subscribe_type: SubscribeType,
-        // `None` indicates sending to all subscribers of `subscribe_type`.
-        worker_key: Option<WorkerKey>,
-    },
-    Direct(UnboundedSender<Notification>),
+struct Target {
+    subscribe_type: SubscribeType,
+    // `None` indicates sending to all subscribers of `subscribe_type`.
+    worker_key: Option<WorkerKey>,
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self::Subscribers {
+        Self {
             subscribe_type: value,
             worker_key: None,
         }
@@ -167,11 +164,15 @@ impl NotificationManager {
         sender: UnboundedSender<Notification>,
         meta_snapshot: MetaSnapshot,
     ) {
-        self.notify_without_version(
-            Target::Direct(sender),
-            Operation::Snapshot,
-            Info::Snapshot(meta_snapshot),
-        )
+        let response = SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(meta_snapshot)),
+            version: Default::default(),
+        };
+        let _ = sender.send(Ok(response)).inspect_err(|err| {
+            tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
+        });
     }
 
     pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
@@ -347,41 +348,29 @@ impl NotificationManagerCore {
             };
         }
 
-        match target {
-            Target::Subscribers {
-                subscribe_type,
-                worker_key,
-            } => {
-                let senders = self.senders_of(subscribe_type);
+        let senders = self.senders_of(target.subscribe_type);
 
-                if let Some(worker_key) = worker_key {
-                    match senders.entry(worker_key.clone()) {
-                        Entry::Occupied(entry) => {
-                            let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                                warn_send_failure!(subscribe_type, &worker_key, err.as_report());
-                                entry.remove_entry();
-                            });
-                        }
-                        Entry::Vacant(_) => {
-                            tracing::warn!("Failed to find notification sender of {:?}", worker_key)
-                        }
-                    }
-                } else {
-                    senders.retain(|worker_key, sender| {
-                        sender
-                            .send(Ok(response.clone()))
-                            .inspect_err(|err| {
-                                warn_send_failure!(subscribe_type, &worker_key, err.as_report());
-                            })
-                            .is_ok()
+        if let Some(worker_key) = target.worker_key {
+            match senders.entry(worker_key.clone()) {
+                Entry::Occupied(entry) => {
+                    let _ = entry.get().send(Ok(response)).inspect_err(|err| {
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                        entry.remove_entry();
                     });
                 }
+                Entry::Vacant(_) => {
+                    tracing::warn!("Failed to find notification sender of {:?}", worker_key)
+                }
             }
-            Target::Direct(sender) => {
-                let _ = sender.send(Ok(response)).inspect_err(|err| {
-                    tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
-                });
-            }
+        } else {
+            senders.retain(|worker_key, sender| {
+                sender
+                    .send(Ok(response.clone()))
+                    .inspect_err(|err| {
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
+                    })
+                    .is_ok()
+            });
         }
     }
 
