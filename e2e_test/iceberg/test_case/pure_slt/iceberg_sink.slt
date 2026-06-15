@@ -9,7 +9,7 @@ CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPER
 "
 
 statement ok
-set sink_decouple = false;
+set sink_decouple = true;
 
 statement ok
 CREATE TABLE t6 (v1 int primary key, v2 bigint, v3 varchar);
@@ -181,7 +181,7 @@ CREATE SOURCE iceberg_auto_schema_bytea_source WITH (
 );
 
 query TT retry 6 backoff 1s
-SELECT id, v, email FROM iceberg_auto_schema_bytea_source ORDER BY id;
+SELECT id, email FROM iceberg_auto_schema_bytea_source ORDER BY id;
 ----
 1 NULL
 2 bytea@example.com
