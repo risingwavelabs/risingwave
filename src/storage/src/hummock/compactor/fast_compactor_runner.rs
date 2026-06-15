@@ -396,7 +396,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
-            use_block_based_filter: true,
+            sstable_filter_layout: PbSstableFilterLayout::Blocked,
             sstable_filter_type: task.sstable_filter_type,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,

@@ -96,8 +96,8 @@ impl CompactorRunner {
         options.filter_hash_prealloc_key_count_cap =
             blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
         options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
-        let use_block_based_filter =
-            task.should_use_block_based_filter_for_output(estimated_output_key_count as u64);
+        let sstable_filter_layout =
+            task.sstable_filter_layout_for_output(estimated_output_key_count as u64);
 
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),
@@ -112,7 +112,7 @@ impl CompactorRunner {
                 cache_policy: CachePolicy::NotFill,
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
-                use_block_based_filter,
+                sstable_filter_layout,
                 sstable_filter_type: task.sstable_filter_type,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task

@@ -122,7 +122,7 @@ pub struct TaskConfig {
     pub(crate) cache_policy: CachePolicy,
     pub(crate) gc_delete_keys: bool,
     pub(crate) retain_multiple_version: bool,
-    pub(crate) use_block_based_filter: bool,
+    pub(crate) sstable_filter_layout: PbSstableFilterLayout,
     pub(crate) sstable_filter_type: PbSstableFilterType,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
@@ -140,7 +140,7 @@ impl TaskConfig {
         key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
-        use_block_based_filter: bool,
+        sstable_filter_layout: PbSstableFilterLayout,
         table_schemas: HashMap<TableId, PbTableSchema>,
     ) -> Self {
         Self {
@@ -148,11 +148,21 @@ impl TaskConfig {
             cache_policy,
             gc_delete_keys,
             retain_multiple_version: false,
-            use_block_based_filter,
+            sstable_filter_layout,
             sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
             table_vnode_partition: BTreeMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
+        }
+    }
+
+    pub(crate) fn use_block_based_filter(&self) -> bool {
+        match self.sstable_filter_layout {
+            PbSstableFilterLayout::Plain => false,
+            PbSstableFilterLayout::Blocked => true,
+            PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
+                unreachable!("task config must use a resolved physical SST filter layout")
+            }
         }
     }
 
@@ -583,8 +593,8 @@ fn optimize_by_copy_block_with_input(
     let output_capacity = estimate_task_output_capacity(context.clone(), compact_task);
     let estimated_output_key_count =
         estimate_output_key_count_for_input_ssts(input_ssts.iter().copied(), output_capacity);
-    let output_wants_blocked_filter =
-        compact_task.should_use_block_based_filter_for_output(estimated_output_key_count as u64);
+    let output_filter_layout =
+        compact_task.sstable_filter_layout_for_output(estimated_output_key_count as u64);
 
     let delete_key_count = input_ssts
         .iter()
@@ -603,7 +613,7 @@ fn optimize_by_copy_block_with_input(
         )
         && all_ssts_are_blocked_filter
         && all_ssts_match_filter_type
-        && output_wants_blocked_filter
+        && output_filter_layout == PbSstableFilterLayout::Blocked
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()

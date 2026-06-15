@@ -190,23 +190,27 @@ impl CompactTask {
         )
     }
 
-    /// Determines whether to use block-based filter for one output SST.
+    /// Resolves the physical filter layout for one output SST.
     ///
     /// The caller should pass an output-SST-level key-count estimate. This differs from the legacy
     /// task-level check below: a large compaction task can produce many small output SSTs, and those
     /// outputs should be allowed to use plain filters when each output is below the threshold.
-    pub fn should_use_block_based_filter_for_output(
+    pub fn sstable_filter_layout_for_output(
         &self,
         estimated_output_key_count: u64,
-    ) -> bool {
+    ) -> PbSstableFilterLayout {
         match self.sstable_filter_layout {
-            PbSstableFilterLayout::Plain => false,
-            PbSstableFilterLayout::Blocked => true,
+            PbSstableFilterLayout::Plain => PbSstableFilterLayout::Plain,
+            PbSstableFilterLayout::Blocked => PbSstableFilterLayout::Blocked,
             PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
-                crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+                if crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
                     estimated_output_key_count,
                     self.blocked_xor_filter_kv_count_threshold,
-                )
+                ) {
+                    PbSstableFilterLayout::Blocked
+                } else {
+                    PbSstableFilterLayout::Plain
+                }
             }
         }
     }
@@ -717,15 +721,21 @@ mod tests {
     }
 
     #[test]
-    fn test_should_use_block_based_filter_for_output() {
+    fn test_sstable_filter_layout_for_output() {
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Auto,
             blocked_xor_filter_kv_count_threshold: Some(100),
             ..Default::default()
         };
 
-        assert!(!task.should_use_block_based_filter_for_output(100));
-        assert!(task.should_use_block_based_filter_for_output(101));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(100),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            task.sstable_filter_layout_for_output(101),
+            PbSstableFilterLayout::Blocked
+        );
 
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Plain,
@@ -733,7 +743,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!task.should_use_block_based_filter_for_output(101));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(101),
+            PbSstableFilterLayout::Plain
+        );
 
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Blocked,
@@ -741,7 +754,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(task.should_use_block_based_filter_for_output(0));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(0),
+            PbSstableFilterLayout::Blocked
+        );
     }
 
     #[test]
@@ -805,7 +821,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(task.should_use_block_based_filter_for_output(0));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(0),
+            PbSstableFilterLayout::Blocked
+        );
     }
 
     #[test]

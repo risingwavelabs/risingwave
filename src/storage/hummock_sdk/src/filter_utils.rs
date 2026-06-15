@@ -34,7 +34,7 @@ pub fn should_use_blocked_xor_filter_by_kv_count(
 }
 
 pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterType, String> {
-    match filter_type.trim().to_ascii_lowercase().as_str() {
+    match filter_type {
         "none" => Ok(PbSstableFilterType::SstableFilterNone),
         "xor16" => Ok(PbSstableFilterType::SstableFilterXor16),
         "xor8" => Ok(PbSstableFilterType::SstableFilterXor8),
@@ -43,7 +43,7 @@ pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterTyp
 }
 
 pub fn parse_sstable_filter_layout(layout: &str) -> Result<PbSstableFilterLayout, String> {
-    match layout.trim().to_ascii_lowercase().as_str() {
+    match layout {
         "auto" => Ok(PbSstableFilterLayout::Auto),
         "plain" => Ok(PbSstableFilterLayout::Plain),
         "blocked" => Ok(PbSstableFilterLayout::Blocked),
@@ -125,9 +125,10 @@ mod tests {
             PbSstableFilterType::SstableFilterXor16
         );
         assert_eq!(
-            parse_sstable_filter_type("XOR8").unwrap(),
+            parse_sstable_filter_type("xor8").unwrap(),
             PbSstableFilterType::SstableFilterXor8
         );
+        assert!(parse_sstable_filter_type("XOR8").is_err());
         assert!(parse_sstable_filter_type("bfuse8").is_err());
     }
 
@@ -145,6 +146,7 @@ mod tests {
             parse_sstable_filter_layout("blocked").unwrap(),
             PbSstableFilterLayout::Blocked
         );
+        assert!(parse_sstable_filter_layout("blocked ").is_err());
         assert!(parse_sstable_filter_layout("none").is_err());
         assert!(parse_sstable_filter_layout("unknown").is_err());
     }

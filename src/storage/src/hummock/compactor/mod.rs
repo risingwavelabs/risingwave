@@ -216,7 +216,7 @@ impl Compactor {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             match (
                 self.task_config.sstable_filter_type,
-                self.task_config.use_block_based_filter,
+                self.task_config.use_block_based_filter(),
             ) {
                 (PbSstableFilterType::SstableFilterNone, _) => {
                     self.compact_key_range_impl::<_, NoneFilterBuilder>(

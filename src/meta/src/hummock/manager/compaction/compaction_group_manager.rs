@@ -23,7 +23,9 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
-use risingwave_hummock_sdk::filter_utils::parse_sstable_filter_type;
+use risingwave_hummock_sdk::filter_utils::{
+    parse_sstable_filter_layout, parse_sstable_filter_type,
+};
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -675,6 +677,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 level_entry.clone_from(&c.filter_type);
             }
             MutableConfig::SstableFilterLayout(c) => {
+                parse_sstable_filter_layout(&c.layout).map_err(Error::CompactionGroup)?;
                 if target.sstable_filter_layout.is_empty() {
                     target.sstable_filter_layout =
                         default_compaction_config::sstable_filter_layout();
@@ -913,6 +916,22 @@ mod tests {
                 &[MutableConfig::SstableFilterType(SstableFilterType {
                     level: 0,
                     filter_type: "unknown".to_owned(),
+                })],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_update_compaction_config_rejects_invalid_filter_layout() {
+        let mut config = CompactionConfigBuilder::new().build();
+
+        assert!(
+            super::update_compaction_config(
+                &mut config,
+                &[MutableConfig::SstableFilterLayout(SstableFilterLayout {
+                    level: 0,
+                    layout: "normal".to_owned(),
                 })],
             )
             .is_err()
