@@ -387,6 +387,7 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
@@ -401,6 +402,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
@@ -724,11 +726,28 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: TableId,
+        _job_id: JobId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
+            database.to_prost()
+        };
+        pb_database.resource_group =
+            resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
     }
 
     async fn alter_database_param(

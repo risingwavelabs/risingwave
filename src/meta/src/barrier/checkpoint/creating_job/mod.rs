@@ -523,6 +523,19 @@ impl CreatingStreamingJobControl {
         self.barrier_control.is_empty()
     }
 
+    pub(crate) fn dropped_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+        if let CreatingStreamingJobStatus::Resetting(collector, notifiers) = &mut self.status {
+            collector.remaining_workers.remove(&worker_id);
+            if collector.remaining_workers.is_empty() {
+                for notifier in notifiers.drain(..) {
+                    notifier.notify_collected();
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_valid_after_worker_err(worker_id)
             && self

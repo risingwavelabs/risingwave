@@ -3176,10 +3176,40 @@ impl Parser<'_> {
                 return self.expected("TO after RENAME");
             }
         } else if self.parse_keyword(Keyword::SET) {
-            // check will be delayed to frontend
-            AlterDatabaseOperation::SetParam(self.parse_config_param()?)
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER DATABASE SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE SET RESOURCE_GROUP");
+                }
+
+                AlterDatabaseOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred: true,
+                }
+            } else {
+                // check will be delayed to frontend
+                AlterDatabaseOperation::SetParam(self.parse_config_param()?)
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE RESET RESOURCE_GROUP");
+                }
+
+                AlterDatabaseOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred: true,
+                }
+            } else {
+                return self.expected("RESOURCE_GROUP after RESET");
+            }
         } else {
-            return self.expected("RENAME, OWNER TO, OR SET after ALTER DATABASE");
+            return self.expected("RENAME, OWNER TO, SET, OR RESET after ALTER DATABASE");
         };
 
         Ok(Statement::AlterDatabase {
@@ -3449,18 +3479,38 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER INDEX SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterIndexOperation::SetConfig { entries }
             } else {
-                return self.expected("PARALLELISM or CONFIG after SET");
+                return self.expected("PARALLELISM/RESOURCE_GROUP or CONFIG after SET");
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterIndexOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else {
             return self.expected("RENAME, SET, or RESET after ALTER INDEX");
@@ -3634,6 +3684,19 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SINK SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
@@ -3643,15 +3706,22 @@ impl Parser<'_> {
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/RESOURCE_GROUP/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSinkOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;
