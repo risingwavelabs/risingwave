@@ -1248,6 +1248,7 @@ pub mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
+    use risingwave_common::config::FrontendConfig;
     use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::plan_common::EncodeType;
 
@@ -1341,7 +1342,14 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_create_posix_fs_source_requires_frontend_config() {
-        let frontend = LocalFrontend::new(Default::default()).await;
+        let frontend = LocalFrontend::with_frontend_config(
+            Default::default(),
+            FrontendConfig {
+                unsafe_enable_local_fs_connector: false,
+                ..Default::default()
+            },
+        )
+        .await;
         let err = frontend
             .run_sql(
                 r#"CREATE SOURCE local_files (

@@ -300,6 +300,10 @@ impl FrontendEnv {
         }
     }
 
+    pub(crate) fn set_frontend_config_for_test(&mut self, frontend_config: FrontendConfig) {
+        self.frontend_config = frontend_config;
+    }
+
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
         let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");

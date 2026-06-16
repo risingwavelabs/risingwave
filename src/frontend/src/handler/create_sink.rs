@@ -975,6 +975,7 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 
 #[cfg(test)]
 pub mod tests {
+    use risingwave_common::config::FrontendConfig;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1026,7 +1027,14 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_create_fs_sink_requires_frontend_config() {
-        let frontend = LocalFrontend::new(Default::default()).await;
+        let frontend = LocalFrontend::with_frontend_config(
+            Default::default(),
+            FrontendConfig {
+                unsafe_enable_local_fs_connector: false,
+                ..Default::default()
+            },
+        )
+        .await;
         frontend.run_sql("CREATE TABLE t(v int);").await.unwrap();
         frontend
             .run_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;")

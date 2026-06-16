@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -137,6 +138,13 @@ impl LocalFrontend {
     #[expect(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
+        Self { opts, env }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn with_frontend_config(opts: FrontendOpts, frontend_config: FrontendConfig) -> Self {
+        let mut env = FrontendEnv::mock();
+        env.set_frontend_config_for_test(frontend_config);
         Self { opts, env }
     }
 
