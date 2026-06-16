@@ -30,6 +30,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 /// JDBC type constants found in Debezium schema change events.
 mod debezium_sql_types {
     pub const STRUCT: i32 = 2002;
+    pub const ARRAY: i32 = 2003;
 }
 use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::parser::TransactionControl;
@@ -135,6 +136,58 @@ async fn fetch_pgvector_dimensions_for_table(
                 err.as_report()
             ),
         })
+}
+
+/// Decide whether an unknown array column type (one not resolved by
+/// `type_name_to_pg_type`) can be represented as `varchar[]` in RW. This is the
+/// single question this function answers; the criteria behind it may grow over
+/// time.
+///
+/// Right now the answer is "yes iff the array's element type is a user-defined
+/// enum". Debezium does not expose element enum metadata on the array column
+/// (the `enumValues` field is only set for scalar enum columns), so we ask the
+/// upstream catalog directly: follow the array type's `typelem` to its element
+/// type and check `typtype = 'e'`. Enum values are plain text, hence `varchar[]`.
+///
+/// TODO(composite): arrays of composite types (`typtype = 'c'`) should likewise
+/// map to `varchar[]`. That is deferred to a follow-up PR — the snapshot/streaming
+/// side for composite arrays is handled in #25818, and this predicate should be
+/// extended to `typtype IN ('e', 'c')` once that lands.
+async fn can_fallback_array_to_varchar(
+    connector_props: &ConnectorProperties,
+    array_type_name: &str,
+) -> AccessResult<bool> {
+    let ConnectorProperties::PostgresCdc(cdc_props) = connector_props else {
+        return Ok(false);
+    };
+
+    let client = create_pg_client_from_properties(&cdc_props.properties, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    let row = client
+        .query_opt(
+            "SELECT t_elem.typtype = 'e' \
+             FROM pg_type t \
+             JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+             WHERE t.typname = $1 \
+             LIMIT 1",
+            &[&array_type_name],
+        )
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres for array element type of `{array_type_name}`: {}",
+                err.as_report()
+            ),
+        })?;
+
+    Ok(row.map(|r| r.get::<_, bool>(0)).unwrap_or(false))
 }
 
 // Example of Debezium JSON value:
@@ -318,11 +371,11 @@ pub async fn parse_schema_change(
                     // Both are mapped to Varchar — enum values are plain strings, and
                     // composite values are converted to text by our CustomConverter.
                     let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
-                    let is_composite = col
+                    let jdbc_type = col
                         .access_object_field("jdbcType")
                         .and_then(|v| v.as_number().ok())
-                        .map(|n| n.0 as i32)
-                        == Some(debezium_sql_types::STRUCT);
+                        .map(|n| n.0 as i32);
+                    let is_composite = jdbc_type == Some(debezium_sql_types::STRUCT);
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
@@ -371,6 +424,12 @@ pub async fn parse_schema_change(
                                     }
                                 }
                             } else {
+                                // Resolve builtin types first, so arrays of builtin element
+                                // types keep their proper element type (e.g. `_int4` -> int[],
+                                // `_text` -> text[]). `type_name_to_pg_type` only covers PG
+                                // builtins (the `PgType` it returns carries a static OID);
+                                // user-defined and extension types are not representable here
+                                // and fall through to the catalog lookup below.
                                 let ty = type_name_to_pg_type(type_name.as_str());
                                 match ty {
                                     Some(ty) => match pg_type_to_rw_type(&ty) {
@@ -386,6 +445,23 @@ pub async fn parse_schema_change(
                                             });
                                         }
                                     },
+                                    // An unrecognized ARRAY type may be an array of a
+                                    // user-defined enum (e.g. `_mood_enum`). Debezium carries
+                                    // no enum metadata on the array column, so ask upstream
+                                    // whether the element is an enum; if so, map to
+                                    // `varchar[]` (enum values are plain text).
+                                    None if jdbc_type == Some(debezium_sql_types::ARRAY)
+                                        && can_fallback_array_to_varchar(
+                                            connector_props,
+                                            type_name.as_str(),
+                                        )
+                                        .await? =>
+                                    {
+                                        tracing::debug!(target: "auto_schema_change",
+                                            "Fall back PostgreSQL array type '{}' to VARCHAR[]",
+                                            type_name);
+                                        DataType::Varchar.list()
+                                    }
                                     None => {
                                         return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
