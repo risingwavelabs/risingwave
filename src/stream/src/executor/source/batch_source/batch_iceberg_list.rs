@@ -132,7 +132,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "encountered an error in batch iceberg list");
+                    tracing::error!(error = %e.as_report(), "encountered an error in batch iceberg list");
 
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),

@@ -130,6 +130,7 @@ pub trait CatalogWriter: Send + Sync {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -145,6 +146,7 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -261,7 +263,14 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()>;
@@ -398,11 +407,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_index(index, table, graph, if_not_exists)
+            .create_index(index, table, graph, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -475,11 +485,12 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, dependencies, if_not_exists)
+            .create_sink(sink, graph, dependencies, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -742,16 +753,30 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_resource_group(table_id, resource_group, deferred)
+            .alter_resource_group(job_id, resource_group, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_database_resource_group(database_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
     }
 
     async fn alter_database_param(

@@ -29,7 +29,7 @@ use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
+use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
 use risingwave_hummock_sdk::level::Levels;
@@ -47,7 +47,7 @@ use risingwave_meta_model::hummock_sequence::COMPACTION_TASK_ID;
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
+    CompactTaskAssignment as PbCompactTaskAssignment, CompactionConfig, PbCompactStatus,
     SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
@@ -196,7 +196,7 @@ impl HummockVersionTransaction<'_> {
 #[derive(Default)]
 pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
-    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
+    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
@@ -210,14 +210,28 @@ impl HummockManager {
 
     pub async fn list_compaction_status(
         &self,
-    ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
-        let compaction = self.compaction.read().await;
+    ) -> (Vec<PbCompactStatus>, Vec<PbCompactTaskAssignment>) {
+        let (compaction_statuses, compact_task_assignments) = {
+            let compaction = self.compaction.read().await;
+            (
+                compaction
+                    .compaction_statuses
+                    .values()
+                    .map_into()
+                    .collect_vec(),
+                compaction
+                    .compact_task_assignment
+                    .values()
+                    .cloned()
+                    .collect_vec(),
+            )
+        };
+
         (
-            compaction.compaction_statuses.values().map_into().collect(),
-            compaction
-                .compact_task_assignment
-                .values()
-                .cloned()
+            compaction_statuses,
+            compact_task_assignments
+                .into_iter()
+                .map(PbCompactTaskAssignment::from)
                 .collect(),
         )
     }
@@ -515,7 +529,7 @@ impl HummockManager {
                         compact_task_assignment.insert(
                             compact_task.task_id,
                             CompactTaskAssignment {
-                                compact_task: Some(compact_task.clone().into()),
+                                compact_task: compact_task.clone(),
                                 context_id: META_NODE_ID, // deprecated
                             },
                         );
@@ -839,7 +853,7 @@ impl HummockManager {
             let task_id = task.task_id;
             let mut task_status = task.task_status;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
-                Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
+                Some(compact_task_assignment) => compact_task_assignment.compact_task,
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task.task_id));
                     rets[idx] = false;
@@ -1350,7 +1364,7 @@ impl HummockManager {
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(task.into()),
+                    compact_task: task,
                     context_id: 0.into(),
                 },
             );
@@ -1543,15 +1557,8 @@ impl Compaction {
         self.compact_task_assignment
             .iter()
             .filter_map(|(_, assignment)| {
-                if assignment
-                    .compact_task
-                    .as_ref()
-                    .is_some_and(|task| task.compaction_group_id == compaction_group_id)
-                {
-                    Some(CompactTaskAssignment {
-                        compact_task: assignment.compact_task.clone(),
-                        context_id: assignment.context_id,
-                    })
+                if assignment.compact_task.compaction_group_id == compaction_group_id {
+                    Some(assignment.clone())
                 } else {
                     None
                 }

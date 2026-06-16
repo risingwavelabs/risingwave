@@ -22,6 +22,8 @@ use crate::executor::{BatchQueryExecutor, DummyExecutor};
 
 pub struct BatchQueryExecutorBuilder;
 
+impl_stream_node_body!(BatchPlan(BatchPlanNode) => BatchQueryExecutorBuilder);
+
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
     type Node = BatchPlanNode;
 

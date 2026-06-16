@@ -335,7 +335,7 @@ impl PartialGraphManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        context: &impl GlobalBarrierWorkerContext,
+        context: Arc<impl GlobalBarrierWorkerContext>,
     ) {
         self.control_stream_manager
             .add_worker(node, existing_graphs(&self.graphs), &self.term_id, context)

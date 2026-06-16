@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use chrono_tz::Tz;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 
@@ -112,6 +113,7 @@ pub enum TimestamptzHandlingMode {
     #[default]
     UtcString,
     UtcWithoutSuffix,
+    SpecifiedTimezoneWithoutSuffix(Tz),
     Micro,
     Milli,
 }
