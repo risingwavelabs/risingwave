@@ -962,7 +962,7 @@ impl LogicalPlanRoot {
             .chain([dml_node, upstream_sink_union.into()])
             .collect_vec();
 
-        let mut stream_plan = StreamUnion::new_with_dist(
+        let mut stream_plan: StreamPlanRef = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
@@ -978,26 +978,28 @@ impl LogicalPlanRoot {
             .map(|d| d.watermark_idx as usize)
             .collect_vec();
 
+        let add_row_id_gen = |stream_plan: StreamPlanRef, row_id_index| match kind {
+            PrimaryKeyKind::UserDefinedPrimaryKey => {
+                unreachable!()
+            }
+            PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
+                StreamRowIdGen::new_with_dist(
+                    stream_plan,
+                    row_id_index,
+                    Distribution::HashShard(vec![row_id_index]),
+                )
+                .into()
+            }
+        };
+
+        // Add RowIDGen before WatermarkFilter, so filtering always sees a valid row-id key.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = add_row_id_gen(stream_plan, row_id_index);
+        }
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
-        // Add RowIDGen node if needed.
-        if let Some(row_id_index) = row_id_index {
-            match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey => {
-                    unreachable!()
-                }
-                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
-                    stream_plan = StreamRowIdGen::new_with_dist(
-                        stream_plan,
-                        row_id_index,
-                        Distribution::HashShard(vec![row_id_index]),
-                    )
-                    .into();
-                }
-            }
         }
 
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
