@@ -975,8 +975,8 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_common::config::FrontendConfig;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::config::FrontendConfig;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};

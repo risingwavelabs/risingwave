@@ -30,9 +30,9 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
-use risingwave_common::config::FrontendConfig;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
