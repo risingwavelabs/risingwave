@@ -1,0 +1,243 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+CREATE SECRET tpuf_api_key WITH (backend = 'meta') AS 'tpuf_test';
+
+# ---- Success: write payload, headers, dynamic namespace, and mixed upsert/delete request ----
+statement ok
+CREATE TABLE tpuf_e2e_items (
+    id varchar primary key,
+    workspace_id varchar,
+    body varchar,
+    note_contents varchar[],
+    is_starred boolean,
+    published_at timestamp,
+    embedding vector(3)
+);
+
+statement ok
+INSERT INTO tpuf_e2e_items VALUES
+    ('delete-me', 'IFI-ns-1', 'to be deleted', ARRAY['old', 'row'], true, '2026-06-16 01:02:03+00:00', '[0.1,0.2,0.3]');
+
+statement ok
+CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'http://localhost:18082',
+    namespace_column = 'workspace_id',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    distance_metric = 'cosine_distance',
+    disable_backpressure = 'true',
+    full_text_search_columns = 'body,note_contents',
+    filterable_columns = '*'
+);
+
+statement ok
+FLUSH;
+
+statement ok
+UPDATE tpuf_e2e_items
+SET id = 'upsert-me',
+    body = 'inserted after delete',
+    note_contents = ARRAY['new', 'row'],
+    is_starred = false,
+    published_at = '2026-06-16 04:05:06',
+    embedding = '[0.4,0.5,0.6]'
+WHERE id = 'delete-me';
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK tpuf_e2e_sink;
+
+statement ok
+DROP TABLE tpuf_e2e_items;
+
+statement ok
+CREATE TABLE tpuf_items (
+    id varchar primary key,
+    workspace_id varchar,
+    body varchar,
+    note_contents varchar[],
+    is_starred boolean,
+    published_at timestamp,
+    vector vector(3)
+);
+
+# ---- Validation: static namespace success path ----
+statement ok
+CREATE SINK tpuf_static FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    distance_metric = 'cosine_distance',
+    disable_backpressure = 'true',
+    full_text_search_columns = 'body,note_contents',
+    filterable_columns = '*'
+);
+
+statement ok
+DROP SINK tpuf_static;
+
+# ---- Validation: dynamic namespace success path ----
+statement ok
+CREATE SINK tpuf_dynamic FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace_column = 'workspace_id',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    distance_metric = 'cosine_distance',
+    full_text_search_columns = 'body',
+    filterable_columns = '*'
+);
+
+statement ok
+DROP SINK tpuf_dynamic;
+
+# ---- Validation: append-only sinks also require a single primary_key document id ----
+statement ok
+CREATE TABLE tpuf_append_only (
+    id varchar,
+    body varchar
+) append only;
+
+statement ok
+CREATE SINK tpuf_append_only_sink FROM tpuf_append_only WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-append-only',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'append-only',
+    filterable_columns = '*'
+);
+
+statement ok
+DROP SINK tpuf_append_only_sink;
+
+statement ok
+DROP TABLE tpuf_append_only;
+
+# ---- Validation: distance_metric is optional without vector columns ----
+statement ok
+CREATE TABLE tpuf_no_vector (
+    id varchar primary key,
+    body varchar
+);
+
+statement ok
+CREATE SINK tpuf_no_vector_sink FROM tpuf_no_vector WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-no-vector',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    filterable_columns = '*'
+);
+
+statement ok
+DROP SINK tpuf_no_vector_sink;
+
+statement ok
+DROP TABLE tpuf_no_vector;
+
+# ---- Validation: primary key is required and must be single-column ----
+statement error Turbopuffer sink requires exactly one primary_key column
+CREATE SINK tpuf_missing_pk FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    type = 'upsert'
+);
+
+statement error Turbopuffer sink requires exactly one primary_key column
+CREATE SINK tpuf_composite_pk FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id,workspace_id',
+    type = 'upsert'
+);
+
+# ---- Validation: namespace must be static or dynamic, not both ----
+statement error Turbopuffer sink requires only one of namespace or namespace_column
+CREATE SINK tpuf_namespace_conflict FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    namespace_column = 'workspace_id',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+# ---- Validation: schema option columns must refer to generated attributes ----
+statement error Turbopuffer schema option references unknown attribute column
+CREATE SINK tpuf_unknown_schema_column FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    full_text_search_columns = 'missing_column'
+);
+
+statement ok
+CREATE TABLE tpuf_id_attribute (
+    doc_id varchar primary key,
+    id varchar,
+    body varchar
+);
+
+statement error Turbopuffer attribute column must not be named id
+CREATE SINK tpuf_id_attribute_sink FROM tpuf_id_attribute WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'doc_id',
+    type = 'upsert',
+    filterable_columns = '*'
+);
+
+statement ok
+DROP TABLE tpuf_id_attribute;
+
+statement error Turbopuffer sink requires distance_metric when sink schema contains vector columns
+CREATE SINK tpuf_missing_distance_metric FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement error Turbopuffer full_text_search column
+CREATE SINK tpuf_bad_fts_type FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-static',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    full_text_search_columns = 'is_starred'
+);
+
+statement ok
+DROP TABLE tpuf_items;
+
+statement ok
+DROP SECRET tpuf_api_key;
