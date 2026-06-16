@@ -228,11 +228,20 @@ impl Scheduler {
                             return;
                         }
                     }
-                    NodeBody::GapFill(node) => {
-                        // GapFill node uses buffer_table for vnode count requirement
-                        let buffer_table = node.get_state_table().unwrap();
+                    NodeBody::Sort(node) => {
+                        let state_table = node.get_state_table().unwrap();
                         // Check if vnode_count is a placeholder, skip if so as it will be filled later
-                        if let Some(vnode_count) = buffer_table.vnode_count_inner().value_opt() {
+                        if let Some(vnode_count) = state_table.vnode_count_inner().value_opt() {
+                            vnode_count
+                        } else {
+                            // Skip this node as vnode_count is still a placeholder
+                            return;
+                        }
+                    }
+                    NodeBody::GapFill(node) => {
+                        let state_table = node.get_state_table().unwrap();
+                        // Check if vnode_count is a placeholder, skip if so as it will be filled later
+                        if let Some(vnode_count) = state_table.vnode_count_inner().value_opt() {
                             vnode_count
                         } else {
                             // Skip this node as vnode_count is still a placeholder
