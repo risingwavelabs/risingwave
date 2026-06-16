@@ -228,26 +228,6 @@ impl Scheduler {
                             return;
                         }
                     }
-                    NodeBody::Sort(node) => {
-                        let state_table = node.get_state_table().unwrap();
-                        // Check if vnode_count is a placeholder, skip if so as it will be filled later
-                        if let Some(vnode_count) = state_table.vnode_count_inner().value_opt() {
-                            vnode_count
-                        } else {
-                            // Skip this node as vnode_count is still a placeholder
-                            return;
-                        }
-                    }
-                    NodeBody::GapFill(node) => {
-                        let state_table = node.get_state_table().unwrap();
-                        // Check if vnode_count is a placeholder, skip if so as it will be filled later
-                        if let Some(vnode_count) = state_table.vnode_count_inner().value_opt() {
-                            vnode_count
-                        } else {
-                            // Skip this node as vnode_count is still a placeholder
-                            return;
-                        }
-                    }
                     _ => return,
                 };
                 facts.push(Fact::Req {
