@@ -71,15 +71,6 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
 
-        let buffer_table = StateTableBuilder::new(
-            node.get_buffer_table().as_ref().unwrap(),
-            store.clone(),
-            vnodes.clone(),
-        )
-        .forbid_preload_all_rows()
-        .build()
-        .await;
-
         let prev_row_table =
             StateTableBuilder::new(node.get_prev_row_table().as_ref().unwrap(), store, vnodes)
                 .forbid_preload_all_rows()
@@ -96,7 +87,6 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             actor_ctx: params.actor_context,
             input,
             schema: params.info.schema.clone(),
-            buffer_table,
             prev_row_table,
             chunk_size: params.config.developer.chunk_size,
             time_column_index,

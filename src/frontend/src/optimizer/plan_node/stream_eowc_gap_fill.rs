@@ -26,7 +26,7 @@ use crate::binder::BoundFillStrategy;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -50,13 +50,22 @@ impl StreamEowcGapFill {
             Distribution::HashShard(partition_indices)
         };
 
+        // EOWC gap fill may synthesize rows whose time/fill values do not preserve the
+        // input monotonicity. Only `PARTITION BY` columns are copied unchanged into
+        // generated rows, so only their monotonicity can be propagated.
+        let mut columns_monotonicity = MonotonicityMap::new();
+        for partition_col in &core.partition_by_cols {
+            let idx = partition_col.index();
+            columns_monotonicity.insert(idx, input.columns_monotonicity()[idx]);
+        }
+
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.stream_kind(),
             true, // provides EOWC semantics
             input.watermark_columns().clone(),
-            input.columns_monotonicity().clone(),
+            columns_monotonicity,
         );
         Self { base, core }
     }
@@ -88,44 +97,6 @@ impl StreamEowcGapFill {
 
     pub fn fill_strategies(&self) -> &[BoundFillStrategy] {
         &self.core.fill_strategies
-    }
-
-    fn infer_buffer_table(&self) -> TableCatalog {
-        let mut tbl_builder = TableCatalogBuilder::default();
-
-        let out_schema = self.core.schema();
-        for field in out_schema.fields() {
-            tbl_builder.add_column(field);
-        }
-
-        // PK: time_col + partition_cols + stream_key for buffer ordering.
-        // `SortBuffer` requires the watermark/time column to be the first pk column, while
-        // `partition_by` still participates in the remaining ordering and distribution.
-        let mut added_to_pk = std::collections::HashSet::new();
-        let time_col_idx = self.time_col().index();
-        tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
-        added_to_pk.insert(time_col_idx);
-
-        for pc in &self.core.partition_by_cols {
-            if added_to_pk.insert(pc.index()) {
-                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
-            }
-        }
-        let input_ref = self.input();
-        let input_stream_key = input_ref.expect_stream_key();
-        for &sk_idx in input_stream_key {
-            if added_to_pk.insert(sk_idx) {
-                tbl_builder.add_order_column(sk_idx, OrderType::ascending());
-            }
-        }
-
-        let dist_key_indices: Vec<usize> = self
-            .core
-            .partition_by_cols
-            .iter()
-            .map(|c| c.index())
-            .collect();
-        tbl_builder.build(dist_key_indices, 0)
     }
 
     fn infer_prev_row_table(&self) -> TableCatalog {
@@ -189,11 +160,6 @@ impl TryToStreamPb for StreamEowcGapFill {
             })
             .collect();
 
-        let buffer_table = self
-            .infer_buffer_table()
-            .with_id(state.gen_table_id_wrapped())
-            .to_internal_table_prost();
-
         let prev_row_table = self
             .infer_prev_row_table()
             .with_id(state.gen_table_id_wrapped())
@@ -211,7 +177,7 @@ impl TryToStreamPb for StreamEowcGapFill {
                 .map(|strategy| strategy.target_col.index() as u32)
                 .collect(),
             fill_strategies,
-            buffer_table: Some(buffer_table),
+            buffer_table: None,
             prev_row_table: Some(prev_row_table),
             partition_by_indices: self
                 .core
