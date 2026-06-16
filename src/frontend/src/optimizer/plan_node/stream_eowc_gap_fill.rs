@@ -177,7 +177,6 @@ impl TryToStreamPb for StreamEowcGapFill {
                 .map(|strategy| strategy.target_col.index() as u32)
                 .collect(),
             fill_strategies,
-            buffer_table: None,
             prev_row_table: Some(prev_row_table),
             partition_by_indices: self
                 .core

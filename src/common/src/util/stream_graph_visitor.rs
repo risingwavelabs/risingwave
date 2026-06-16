@@ -280,7 +280,6 @@ pub fn visit_stream_node_tables_inner<F>(
             }
 
             NodeBody::EowcGapFill(node) => {
-                optional!(node.buffer_table, "EowcGapFillBufferTable");
                 always!(node.prev_row_table, "EowcGapFillPrevRowTable");
             }
 
