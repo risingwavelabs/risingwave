@@ -468,12 +468,6 @@ impl ToStream for LogicalSource {
                     plan = StreamProject::new(logical_project).into();
                 }
 
-                if let Some(catalog) = self.source_catalog()
-                    && !catalog.watermark_descs.is_empty()
-                {
-                    plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
-                }
-
                 if let Some(row_id_index) = self.output_row_id_index {
                     plan = StreamRowIdGen::new_with_dist(
                         plan,
@@ -481,6 +475,12 @@ impl ToStream for LogicalSource {
                         HashShard(vec![row_id_index]),
                     )
                     .into();
+                }
+
+                if let Some(catalog) = self.source_catalog()
+                    && !catalog.watermark_descs.is_empty()
+                {
+                    plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
                 }
             }
         }
