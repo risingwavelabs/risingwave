@@ -483,7 +483,13 @@ impl HummockManager {
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        self.try_update_write_limits(&[left_group_id, right_group_id])
+            .await;
 
         self.metrics
             .merge_compaction_group_count
@@ -812,7 +818,13 @@ impl HummockManager {
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        let affected_group_ids = result.iter().map(|(cg_id, _)| *cg_id).collect_vec();
+        self.try_update_write_limits(&affected_group_ids).await;
 
         self.metrics
             .split_compaction_group_count
@@ -1064,6 +1076,8 @@ impl HummockManager {
 
         self.cancel_expired_normalize_split_tasks(plan.parent_group_id)
             .await?;
+        self.try_update_write_limits(&[plan.parent_group_id, new_compaction_group_id])
+            .await;
         self.metrics
             .split_compaction_group_count
             .with_label_values(&[&plan.parent_group_id.to_string()])
