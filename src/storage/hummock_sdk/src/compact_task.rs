@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -597,17 +596,6 @@ impl From<ValidationTask> for PbValidationTask {
                 .collect_vec(),
             sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
-    }
-}
-
-impl ValidationTask {
-    pub fn estimated_encode_len(&self) -> usize {
-        self.sst_infos
-            .iter()
-            .map(|sst| sst.estimated_encode_len())
-            .sum::<usize>()
-            + self.sst_id_to_worker_id.len() * (size_of::<u64>() + size_of::<u32>())
-            + size_of::<u64>()
     }
 }
 
