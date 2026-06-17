@@ -28,10 +28,7 @@ use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::encoder::{
-    DateHandlingMode, JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode,
-    TimestampHandlingMode, TimestamptzHandlingMode,
-};
+use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -196,6 +193,9 @@ impl TryFrom<SinkParam> for TurbopufferSink {
                 "Turbopuffer sink requires distance_metric when sink schema contains vector columns"
             )));
         }
+        // This validates every document attribute type before the writer is created:
+        // `build_turbopuffer_schema` calls `turbopuffer_type` for each attribute and
+        // returns a config error for unsupported types.
         let generated_schema = build_turbopuffer_schema(
             &schema,
             &attribute_indices,
@@ -283,15 +283,7 @@ impl TurbopufferSinkWriter {
             .to_string()
             .trim_end_matches('/')
             .to_owned();
-        let row_encoder = JsonEncoder::new(
-            schema,
-            Some(attribute_indices),
-            DateHandlingMode::String,
-            TimestampHandlingMode::String,
-            TimestamptzHandlingMode::UtcString,
-            TimeHandlingMode::String,
-            JsonbHandlingMode::Dynamic,
-        );
+        let row_encoder = JsonEncoder::new_with_turbopuffer(schema, Some(attribute_indices));
         Ok(Self {
             client,
             base_url,
@@ -666,6 +658,30 @@ fn supports_full_text_search(data_type: &DataType) -> bool {
     }
 }
 
+// Mapping from RisingWave attribute types to generated turbopuffer schema types and
+// the JSON value shapes emitted by `JsonEncoder`:
+//
+// | RisingWave type                  | turbopuffer type | JSON payload                  |
+// |----------------------------------|------------------|-------------------------------|
+// | boolean                          | bool             | boolean                       |
+// | int16, int32, int64              | int              | number                        |
+// | float32, float64                 | float            | number                        |
+// | varchar                          | string           | string                        |
+// | date                             | datetime         | string: YYYY-MM-DD            |
+// | timestamp                        | datetime         | string: YYYY-MM-DD HH:MM:SS   |
+// | boolean[]                        | []bool           | array of booleans             |
+// | int16[], int32[], int64[]        | []int            | array of numbers              |
+// | float32[], float64[]             | []float          | array of numbers              |
+// | varchar[]                        | []string         | array of strings              |
+// | date[], timestamp[]              | []datetime       | array of datetime strings     |
+// | vector(N)                        | [N]f32           | array of numbers              |
+// | serial                           | int              | number                        |
+// | decimal                          | float            | number, converted through f64 |
+// | serial[]                         | []int            | array of numbers              |
+// | decimal[]                        | []float          | array of f64-converted numbers|
+//
+// The primary key column is encoded separately as the turbopuffer document id, so
+// it does not participate in this schema mapping.
 fn turbopuffer_type(data_type: &DataType) -> Result<String> {
     match data_type {
         DataType::Boolean => Ok("bool".to_owned()),
@@ -704,10 +720,11 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
 
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
+    use risingwave_common::array::{ListValue, StreamChunk, VectorVal};
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::ListType;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{ListType, ScalarImpl, Timestamp};
     use serde_json::json;
 
     use super::*;
@@ -805,6 +822,171 @@ mod tests {
         assert_eq!(body["upsert_rows"][0]["id"], json!("new-id"));
         assert_eq!(body["upsert_rows"][0]["body"], json!("new_body"));
         assert!(body.get("distance_metric").is_none());
+    }
+
+    #[test]
+    fn test_decimal_and_serial_schema_types() {
+        assert_eq!(turbopuffer_type(&DataType::Decimal).unwrap(), "float");
+        assert_eq!(turbopuffer_type(&DataType::Serial).unwrap(), "int");
+        assert_eq!(
+            turbopuffer_type(&DataType::List(ListType::new(DataType::Decimal))).unwrap(),
+            "[]float"
+        );
+        assert_eq!(
+            turbopuffer_type(&DataType::List(ListType::new(DataType::Serial))).unwrap(),
+            "[]int"
+        );
+    }
+
+    #[test]
+    fn test_manual_http_sink_schema_and_payload_shape() {
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Varchar, "id"),
+            Field::with_name(DataType::Varchar, "workspaceId"),
+            Field::with_name(DataType::Varchar, "inboxFeedItemId"),
+            Field::with_name(DataType::Varchar, "body"),
+            Field::with_name(
+                DataType::List(ListType::new(DataType::Varchar)),
+                "noteContents",
+            ),
+            Field::with_name(DataType::Varchar, "communityMemberHandle"),
+            Field::with_name(DataType::Varchar, "communityMemberIdentifier"),
+            Field::with_name(DataType::Varchar, "inboxFeedItemTitle"),
+            Field::with_name(DataType::Boolean, "isInboxFeedItemStarred"),
+            Field::with_name(DataType::Boolean, "isInboxFeedItemAnswered"),
+            Field::with_name(DataType::Timestamp, "inboxFeedItemPreviewTimestamp"),
+            Field::with_name(DataType::Timestamp, "inboxFeedItemPublishTimestamp"),
+            Field::with_name(DataType::Int64, "inboxFeedItemAuthorInstagramFollowerCount"),
+            Field::with_name(DataType::Int64, "inboxFeedItemAuthorTikTokFollowerCount"),
+            Field::with_name(
+                DataType::List(ListType::new(DataType::Varchar)),
+                "attributes",
+            ),
+            Field::with_name(DataType::Varchar, "threadId"),
+            Field::with_name(DataType::Vector(384), "vector"),
+        ]);
+        let attribute_indices = (2..schema.len()).collect_vec();
+        let full_text_search_columns = parse_column_selection(
+            Some(
+                "body,noteContents,communityMemberHandle,communityMemberIdentifier,inboxFeedItemTitle",
+            ),
+            &schema,
+            &attribute_indices,
+        )
+        .unwrap();
+        let filterable_columns =
+            parse_column_selection(Some("*"), &schema, &attribute_indices).unwrap();
+        let generated_schema = build_turbopuffer_schema(
+            &schema,
+            &attribute_indices,
+            &full_text_search_columns,
+            &filterable_columns,
+        )
+        .unwrap();
+
+        assert_eq!(
+            generated_schema,
+            json!({
+                "inboxFeedItemId": {"type": "string", "filterable": true},
+                "body": {"type": "string", "filterable": true, "full_text_search": true},
+                "noteContents": {"type": "[]string", "filterable": true, "full_text_search": true},
+                "communityMemberHandle": {"type": "string", "filterable": true, "full_text_search": true},
+                "communityMemberIdentifier": {"type": "string", "filterable": true, "full_text_search": true},
+                "inboxFeedItemTitle": {"type": "string", "filterable": true, "full_text_search": true},
+                "isInboxFeedItemStarred": {"type": "bool", "filterable": true},
+                "isInboxFeedItemAnswered": {"type": "bool", "filterable": true},
+                "inboxFeedItemPreviewTimestamp": {"type": "datetime", "filterable": true},
+                "inboxFeedItemPublishTimestamp": {"type": "datetime", "filterable": true},
+                "inboxFeedItemAuthorInstagramFollowerCount": {"type": "int", "filterable": true},
+                "inboxFeedItemAuthorTikTokFollowerCount": {"type": "int", "filterable": true},
+                "attributes": {"type": "[]string", "filterable": true},
+                "threadId": {"type": "string", "filterable": true},
+                "vector": {"type": "[384]f32", "filterable": true, "ann": true}
+            })
+        );
+
+        let config = TurbopufferConfig {
+            base_url: "http://127.0.0.1:0".to_owned(),
+            namespace: None,
+            namespace_column: Some("workspaceId".to_owned()),
+            api_key: "tpuf_test_key".to_owned(),
+            distance_metric: Some("cosine_distance".to_owned()),
+            disable_backpressure: Some(true),
+            full_text_search_columns: Some("body,noteContents,communityMemberHandle,communityMemberIdentifier,inboxFeedItemTitle".to_owned()),
+            filterable_columns: Some("*".to_owned()),
+            r#type: "upsert".to_owned(),
+        };
+        let writer = TurbopufferSinkWriter::new(
+            config,
+            schema,
+            false,
+            0,
+            TurbopufferNamespace::Dynamic { index: 1 },
+            attribute_indices,
+            generated_schema.clone(),
+        )
+        .unwrap();
+        let vector =
+            VectorVal::from_text(&format!("[{}]", vec!["0.25"; 384].join(",")), 384).unwrap();
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("doc-1".into())),
+            Some(ScalarImpl::Utf8("workspace-1".into())),
+            Some(ScalarImpl::Utf8("item-1".into())),
+            Some(ScalarImpl::Utf8("body text".into())),
+            Some(ScalarImpl::List(ListValue::from_iter(["note a", "note b"]))),
+            Some(ScalarImpl::Utf8("@member".into())),
+            Some(ScalarImpl::Utf8("member-1".into())),
+            Some(ScalarImpl::Utf8("title".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Bool(false)),
+            Some(ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(
+                1_781_582_706,
+                0,
+            ))),
+            Some(ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(
+                1_781_598_707,
+                0,
+            ))),
+            Some(ScalarImpl::Int64(12345)),
+            Some(ScalarImpl::Int64(67890)),
+            Some(ScalarImpl::List(ListValue::from_iter(["important", "vip"]))),
+            Some(ScalarImpl::Utf8("thread-1".into())),
+            Some(ScalarImpl::Vector(vector)),
+        ]);
+        let id = writer.id_for_row(&row).unwrap();
+        let upsert_row = writer.upsert_row(&row, id).unwrap();
+        let body = writer.request_body(vec![upsert_row], Vec::new());
+
+        assert_eq!(body["distance_metric"], json!("cosine_distance"));
+        assert_eq!(body["disable_backpressure"], json!(true));
+        assert_eq!(body["schema"], generated_schema);
+        assert_eq!(body["upsert_rows"][0]["id"], json!("doc-1"));
+        assert_eq!(body["upsert_rows"][0]["body"], json!("body text"));
+        assert_eq!(
+            body["upsert_rows"][0]["noteContents"],
+            json!(["note a", "note b"])
+        );
+        assert_eq!(
+            body["upsert_rows"][0]["isInboxFeedItemStarred"],
+            json!(true)
+        );
+        assert_eq!(
+            body["upsert_rows"][0]["isInboxFeedItemAnswered"],
+            json!(false)
+        );
+        assert_eq!(
+            body["upsert_rows"][0]["inboxFeedItemAuthorInstagramFollowerCount"],
+            json!(12345)
+        );
+        assert_eq!(
+            body["upsert_rows"][0]["inboxFeedItemPreviewTimestamp"],
+            json!("2026-06-16 04:05:06.000000")
+        );
+        assert_eq!(
+            body["upsert_rows"][0]["vector"].as_array().unwrap().len(),
+            384
+        );
+        assert_eq!(body["upsert_rows"][0]["vector"][0], json!(0.25));
     }
 
     fn spawn_mock_http_server() -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {

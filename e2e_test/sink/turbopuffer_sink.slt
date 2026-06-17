@@ -150,6 +150,29 @@ DROP SINK tpuf_no_vector_sink;
 statement ok
 DROP TABLE tpuf_no_vector;
 
+# ---- Validation: numeric attribute JSON payloads match generated schema types ----
+statement ok
+CREATE TABLE tpuf_decimal_attr (
+    id varchar primary key,
+    price decimal
+);
+
+statement ok
+CREATE SINK tpuf_decimal_attr_sink FROM tpuf_decimal_attr WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-decimal',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement ok
+DROP SINK tpuf_decimal_attr_sink;
+
+statement ok
+DROP TABLE tpuf_decimal_attr;
+
 # ---- Validation: primary key is required and must be single-column ----
 statement error Turbopuffer sink requires exactly one primary_key column
 CREATE SINK tpuf_missing_pk FROM tpuf_items WITH (
