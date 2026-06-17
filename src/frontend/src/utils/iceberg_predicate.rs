@@ -254,12 +254,8 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                                 return None;
                             }
                             if let ExprImpl::Literal(l) = arg {
-                                #[expect(clippy::question_mark)]
-                                if let Some(datum) = rw_literal_to_iceberg_datum(l) {
-                                    datums.push(datum);
-                                } else {
-                                    return None;
-                                }
+                                let datum = rw_literal_to_iceberg_datum(l)?;
+                                datums.push(datum);
                             } else {
                                 return None;
                             }
