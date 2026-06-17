@@ -1813,6 +1813,35 @@ StarrocksConfig:
   - name: r#type
     field_type: String
     required: true
+TurbopufferConfig:
+  fields:
+  - name: base_url
+    field_type: String
+    required: true
+  - name: namespace
+    field_type: String
+    required: false
+  - name: namespace_column
+    field_type: String
+    required: false
+  - name: api_key
+    field_type: String
+    required: true
+  - name: distance_metric
+    field_type: String
+    required: false
+  - name: disable_backpressure
+    field_type: bool
+    required: false
+  - name: full_text_search_columns
+    field_type: String
+    required: false
+  - name: filterable_columns
+    field_type: String
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 WebhdfsConfig:
   fields:
   - name: webhdfs.endpoint
