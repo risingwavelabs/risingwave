@@ -148,6 +148,8 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
+    // turbopuffer expects serial and decimal attributes to match `int` and `float` schema types.
+    Turbopuffer,
     None,
 }
 
