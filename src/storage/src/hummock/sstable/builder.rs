@@ -495,7 +495,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let meta_offset = self.writer.data_len() as u64;
 
         let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
-        let (filter_type, filter_layout) = if filter_data.is_empty() {
+        let (filter_type, filter_layout) = if filter_data.is_none() {
             (
                 PbSstableFilterType::SstableFilterNone,
                 PbSstableFilterLayout::Unspecified,
@@ -531,7 +531,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
-            bloom_filter: filter_data,
+            bloom_filter: filter_data.unwrap_or_default(),
             estimated_size: 0,
             key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
                 panic!(

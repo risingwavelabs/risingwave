@@ -231,6 +231,10 @@ impl From<VnodeStatistics> for PbVnodeStatistics {
 }
 
 impl From<PbSstableInfo> for SstableInfoInner {
+    #[expect(
+        deprecated,
+        reason = "read legacy SST filter metadata for compatibility"
+    )]
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         let (filter_type, filter_layout) = filter_metadata_from_pb(
@@ -278,6 +282,10 @@ impl From<PbSstableInfo> for SstableInfoInner {
 }
 
 impl From<&PbSstableInfo> for SstableInfoInner {
+    #[expect(
+        deprecated,
+        reason = "read legacy SST filter metadata for compatibility"
+    )]
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         let (filter_type, filter_layout) = filter_metadata_from_pb(
@@ -324,6 +332,7 @@ impl From<&PbSstableInfo> for SstableInfoInner {
 }
 
 impl From<SstableInfoInner> for PbSstableInfo {
+    #[expect(deprecated, reason = "write legacy SST filter metadata as unset")]
     fn from(sstable_info: SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         assert_resolved_filter_metadata(sstable_info.filter_type, sstable_info.filter_layout);
@@ -370,6 +379,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
 }
 
 impl From<&SstableInfoInner> for PbSstableInfo {
+    #[expect(deprecated, reason = "write legacy SST filter metadata as unset")]
     fn from(sstable_info: &SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         assert_resolved_filter_metadata(sstable_info.filter_type, sstable_info.filter_layout);
@@ -519,6 +529,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(deprecated, reason = "test legacy SST filter metadata compatibility")]
     fn test_filter_metadata_from_pb() {
         let cases = [
             (

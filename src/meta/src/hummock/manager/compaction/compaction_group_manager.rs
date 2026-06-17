@@ -928,7 +928,7 @@ mod tests {
                 &mut config,
                 &[MutableConfig::SstableFilterLayout(SstableFilterLayout {
                     level: 0,
-                    layout: "normal".to_owned(),
+                    layout: "unknown".to_owned(),
                 })],
             )
             .is_err()

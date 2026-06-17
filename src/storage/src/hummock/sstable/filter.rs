@@ -39,7 +39,7 @@ pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
     /// Builds serialized filter bytes from key hashes.
-    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8>;
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>>;
     /// Approximate serialized filter bytes counted toward SST builder capacity.
     ///
     /// `SstableBuilder::reach_capacity` uses this value to decide when to seal the current
@@ -70,8 +70,8 @@ pub struct NoneFilterBuilder;
 impl FilterBuilder for NoneFilterBuilder {
     fn add_key(&mut self, _dist_key: &[u8], _table_id: u32) {}
 
-    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
-        Vec::new()
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
+        None
     }
 
     fn approximate_len(&self) -> usize {
