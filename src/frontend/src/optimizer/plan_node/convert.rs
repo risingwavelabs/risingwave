@@ -70,11 +70,9 @@ pub fn try_enforce_locality_requirement(plan: LogicalPlanRef, columns: &[usize])
     assert!(!columns.is_empty());
     if let Some(better_plan) = plan.try_better_locality(columns) {
         better_plan
-    } else if plan.ctx().session_ctx().config().enable_locality_backfill() {
+    } else if plan.ctx().locality_backfill_enabled() {
         LogicalLocalityProvider::new(plan, columns.to_owned()).into()
     } else {
-        // TODO: remove this when locality backfill is enabled by default
-        plan.ctx().inc_missed_locality_providers();
         plan
     }
 }
