@@ -208,18 +208,25 @@ struct DynamoDbRequest {
 }
 
 impl DynamoDbRequest {
-    fn extract_pk_values(&self) -> Option<Vec<AttributeValue>> {
+    fn extract_pk(&self) -> Option<HashMap<String, AttributeValue>> {
         let key = match (&self.inner.put_request(), &self.inner.delete_request()) {
             (Some(put_req), None) => &put_req.item,
             (None, Some(del_req)) => &del_req.key,
             _ => return None,
         };
-        let vs = key
+        let pk = key
             .iter()
             .filter(|(k, _)| self.key_items.contains(k))
-            .map(|(_, v)| v.clone())
+            .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        Some(vs)
+        Some(pk)
+    }
+
+    fn has_same_pk(&self, other: &Self) -> bool {
+        match (self.extract_pk(), other.extract_pk()) {
+            (Some(pk), Some(other_pk)) => pk == other_pk,
+            _ => false,
+        }
     }
 }
 
@@ -372,40 +379,31 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
 }
 
 mod write_chunk_future {
-    use core::result;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use anyhow::anyhow;
     use aws_sdk_dynamodb as dynamodb;
     use aws_sdk_dynamodb::client::Client;
-    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-    use dynamodb::error::SdkError;
-    use dynamodb::operation::batch_write_item::{BatchWriteItemError, BatchWriteItemOutput};
     use dynamodb::types::{
         AttributeValue, DeleteRequest, PutRequest, ReturnConsumedCapacity,
         ReturnItemCollectionMetrics, WriteRequest,
     };
-    use futures::future::{Map, TryJoinAll};
+    use futures::future::TryJoinAll;
     use futures::prelude::Future;
-    use futures::prelude::future::{FutureExt, try_join_all};
+    use futures::prelude::future::try_join_all;
     use itertools::Itertools;
     use maplit::hashmap;
+    use tokio::time::sleep;
 
     use super::{DynamoDbRequest, Result, SinkError};
 
-    pub type WriteChunkFuture = TryJoinAll<
-        Map<
-            impl Future<
-                Output = result::Result<
-                    BatchWriteItemOutput,
-                    SdkError<BatchWriteItemError, HttpResponse>,
-                >,
-            >,
-            impl FnOnce(
-                result::Result<BatchWriteItemOutput, SdkError<BatchWriteItemError, HttpResponse>>,
-            ) -> Result<()>,
-        >,
-    >;
+    const MAX_BATCH_WRITE_RETRY_TIMES: usize = 3;
+    const MIN_BATCH_WRITE_RETRY_DELAY_MS: u64 = 100;
+    const MAX_BATCH_WRITE_RETRY_DELAY_MS: u64 = 500;
+
+    pub type WriteChunkFuture = TryJoinAll<impl Future<Output = Result<()>>>;
+
     pub struct DynamoDbPayloadWriter {
         pub client: Client,
         pub table: String,
@@ -447,15 +445,7 @@ mod write_chunk_future {
                 inner: req,
                 key_items: self.dynamodb_keys.clone(),
             };
-            if let Some(v) = r_req.extract_pk_values() {
-                request_items.retain(|item| {
-                    !item
-                        .extract_pk_values()
-                        .unwrap_or_default()
-                        .iter()
-                        .all(|x| v.contains(x))
-                });
-            }
+            request_items.retain(|item| !item.has_same_pk(&r_req));
             request_items.push(r_req);
         }
 
@@ -467,27 +457,94 @@ mod write_chunk_future {
                 .map(|r| r.inner)
                 .chunks(self.max_batch_item_nums);
             let futures = chunks.into_iter().map(|chunk| {
-                let req_items = chunk.collect();
-                let reqs = hashmap! {
-                    table.clone() => req_items,
-                };
-                self.client
-                    .batch_write_item()
-                    .set_request_items(Some(reqs))
-                    .return_consumed_capacity(ReturnConsumedCapacity::None)
-                    .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
-                    .send()
-                    .map(|result| {
-                        result
-                            .map_err(|e| {
-                                SinkError::DynamoDb(
-                                    anyhow!(e).context("failed to delete item from DynamoDB sink"),
-                                )
-                            })
-                            .map(|_| ())
-                    })
+                let client = self.client.clone();
+                let table = table.clone();
+                let req_items = chunk.collect::<Vec<_>>();
+                async move {
+                    let mut req_items = req_items;
+                    let mut retry_count = 0;
+
+                    loop {
+                        let reqs = hashmap! {
+                            table.clone() => req_items.clone(),
+                        };
+                        let result = client
+                            .batch_write_item()
+                            .set_request_items(Some(reqs))
+                            .return_consumed_capacity(ReturnConsumedCapacity::None)
+                            .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
+                            .send()
+                            .await;
+
+                        match result {
+                            Ok(output) => {
+                                let unprocessed_items =
+                                    output.unprocessed_items().cloned().unwrap_or_default();
+                                if unprocessed_items.is_empty() {
+                                    return Ok(());
+                                }
+
+                                req_items = unprocessed_items.into_values().flatten().collect();
+                                if retry_count >= MAX_BATCH_WRITE_RETRY_TIMES {
+                                    return Err(SinkError::DynamoDb(anyhow!(
+                                        "failed to write {} unprocessed items to DynamoDB sink after {} retries",
+                                        req_items.len(),
+                                        MAX_BATCH_WRITE_RETRY_TIMES,
+                                    )));
+                                }
+                            }
+                            Err(e) => {
+                                return Err(SinkError::DynamoDb(
+                                    anyhow!(e).context("failed to write items to DynamoDB sink"),
+                                ));
+                            }
+                        }
+
+                        retry_count += 1;
+                        let delay_ms = rand::random_range(
+                            MIN_BATCH_WRITE_RETRY_DELAY_MS..=MAX_BATCH_WRITE_RETRY_DELAY_MS,
+                        );
+                        tracing::warn!(
+                            retry_count,
+                            delay_ms,
+                            "retrying DynamoDB batch write"
+                        );
+                        sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                }
             });
             try_join_all(futures)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aws_sdk_dynamodb::types::PutRequest;
+
+    use super::*;
+
+    fn dynamodb_request(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> DynamoDbRequest {
+        let item = items
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), AttributeValue::S(v.to_owned())))
+            .collect();
+        let put_req = PutRequest::builder().set_item(Some(item)).build().unwrap();
+        DynamoDbRequest {
+            inner: WriteRequest::builder().put_request(put_req).build(),
+            key_items: vec!["pk".to_owned(), "sk".to_owned()],
+        }
+    }
+
+    #[test]
+    fn dynamodb_request_compares_pk_by_key_attribute() {
+        let req = dynamodb_request([("pk", "a"), ("sk", "b")]);
+        let swapped_values = dynamodb_request([("pk", "b"), ("sk", "a")]);
+        let same_pk = dynamodb_request([("pk", "a"), ("sk", "b")]);
+
+        assert!(!req.has_same_pk(&swapped_values));
+        assert!(req.has_same_pk(&same_pk));
     }
 }
