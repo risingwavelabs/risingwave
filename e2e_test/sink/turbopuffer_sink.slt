@@ -253,6 +253,7 @@ CREATE SINK tpuf_bad_fts_type FROM tpuf_items WITH (
     api_key = secret tpuf_api_key,
     primary_key = 'id',
     type = 'upsert',
+    distance_metric = 'cosine_distance',
     full_text_search_columns = 'is_starred'
 );
 

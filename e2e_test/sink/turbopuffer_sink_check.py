@@ -32,6 +32,16 @@ def assert_equal(actual, expected, message):
         raise AssertionError(f"{message}: expected {expected!r}, got {actual!r}")
 
 
+def assert_float_list_close(actual, expected, message, tolerance=1e-6):
+    if len(actual) != len(expected):
+        raise AssertionError(f"{message}: expected {expected!r}, got {actual!r}")
+    for index, (actual_value, expected_value) in enumerate(zip(actual, expected)):
+        if abs(actual_value - expected_value) > tolerance:
+            raise AssertionError(
+                f"{message}[{index}]: expected {expected_value!r}, got {actual_value!r}"
+            )
+
+
 def find_body(bodies, predicate, description):
     for body in bodies:
         if predicate(body):
@@ -101,7 +111,7 @@ def main():
     rows = {row["id"]: row for row in upsert_request["upsert_rows"]}
     assert_equal(rows["upsert-me"]["body"], "inserted after delete", "upsert body")
     assert_equal(rows["upsert-me"]["note_contents"], ["new", "row"], "upsert note contents")
-    assert_equal(rows["upsert-me"]["embedding"], [0.4, 0.5, 0.6], "upsert vector")
+    assert_float_list_close(rows["upsert-me"]["embedding"], [0.4, 0.5, 0.6], "upsert vector")
 
 
 if __name__ == "__main__":
