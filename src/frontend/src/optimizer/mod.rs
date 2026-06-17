@@ -260,11 +260,10 @@ fn resolve_locality_backfill(
         LocalityBackfillMode::Off => false,
         LocalityBackfillMode::On => true,
         LocalityBackfillMode::Auto => {
-            if backfill_type == BackfillType::UpstreamOnly {
-                false
-            } else if risingwave_common::license::Feature::LocalityBackfill
-                .check_available()
-                .is_err()
+            if backfill_type == BackfillType::UpstreamOnly
+                || risingwave_common::license::Feature::LocalityBackfill
+                    .check_available()
+                    .is_err()
             {
                 false
             } else {
