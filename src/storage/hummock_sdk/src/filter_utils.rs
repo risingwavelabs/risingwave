@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_sstable_filter_type_for_level() {
+    fn test_get_sstable_filter_type() {
         let config = CompactionConfig {
             sstable_filter_type: vec!["xor8".to_owned(), "none".to_owned(), "xor16".to_owned()],
             ..Default::default()
@@ -170,10 +170,7 @@ mod tests {
             PbSstableFilterType::SstableFilterXor16
         );
         assert!(get_sstable_filter_type(&config, 2, 3).is_err());
-    }
 
-    #[test]
-    fn test_get_sstable_filter_type_default_when_missing() {
         let config = CompactionConfig {
             sstable_filter_type: vec![],
             ..Default::default()
@@ -189,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_sstable_filter_layout_for_level() {
+    fn test_get_sstable_filter_layout() {
         let config = CompactionConfig {
             sstable_filter_layout: vec![
                 "plain".to_owned(),
@@ -211,10 +208,7 @@ mod tests {
             PbSstableFilterLayout::Blocked
         );
         assert!(get_sstable_filter_layout(&config, 2, 3).is_err());
-    }
 
-    #[test]
-    fn test_get_sstable_filter_layout_default_when_missing() {
         let config = CompactionConfig {
             sstable_filter_layout: vec![],
             ..Default::default()
