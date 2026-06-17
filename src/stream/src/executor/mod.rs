@@ -155,7 +155,7 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, ResolveExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
@@ -362,6 +362,14 @@ pub struct StopMutation {
     pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
+/// Lifecycle phase carried by [`Mutation::IcebergV3Resolve`]: `Start` opens a compaction-resolve
+/// window, `End` closes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvePhase {
+    Start,
+    End,
+}
+
 /// See [`PbMutation`] for the semantics of each mutation.
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 #[derive(Debug, Clone)]
@@ -384,6 +392,16 @@ pub enum Mutation {
     RefreshStart {
         table_id: TableId,
         associated_source_id: SourceId,
+    },
+    /// Signals a sink writer fragment about the lifecycle of an Iceberg V3 compaction-resolve
+    /// window. The writer filters by `sink_id`. `Start` opens the window (with the
+    /// `input_file_paths` being compacted away); `End` closes it after the transient resolve
+    /// pipeline has drained all candidates.
+    IcebergV3Resolve {
+        sink_id: u32,
+        phase: ResolvePhase,
+        /// Only meaningful for `ResolvePhase::Start`; empty for `End`.
+        input_file_paths: Vec<String>,
     },
     ListFinish {
         associated_source_id: SourceId,
@@ -572,6 +590,7 @@ impl Barrier {
             | Mutation::ConnectorPropsChange(_)
             | Mutation::StartFragmentBackfill { .. }
             | Mutation::RefreshStart { .. }
+            | Mutation::IcebergV3Resolve { .. }
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
@@ -962,6 +981,24 @@ impl Mutation {
                 table_id: *table_id,
                 associated_source_id: *associated_source_id,
             }),
+            Mutation::IcebergV3Resolve {
+                sink_id,
+                phase,
+                input_file_paths,
+            } => PbMutation::IcebergV3Resolve(
+                risingwave_pb::stream_plan::IcebergV3ResolveMutation {
+                    sink_id: *sink_id,
+                    input_file_paths: input_file_paths.clone(),
+                    phase: match phase {
+                        ResolvePhase::Start => {
+                            risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::Start
+                        }
+                        ResolvePhase::End => {
+                            risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::End
+                        }
+                    } as i32,
+                },
+            ),
             Mutation::ListFinish {
                 associated_source_id,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
@@ -1150,6 +1187,18 @@ impl Mutation {
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
                 table_id: refresh_start.table_id,
                 associated_source_id: refresh_start.associated_source_id,
+            },
+            PbMutation::IcebergV3Resolve(m) => Mutation::IcebergV3Resolve {
+                sink_id: m.sink_id,
+                phase: match m.phase() {
+                    risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::Start => {
+                        ResolvePhase::Start
+                    }
+                    risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::End => {
+                        ResolvePhase::End
+                    }
+                },
+                input_file_paths: m.input_file_paths.clone(),
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
                 associated_source_id: list_finish.associated_source_id,
@@ -1797,7 +1846,23 @@ impl DispatchBarrierBuffer {
         &mut self,
         stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
         metrics: &ActorInputMetrics,
+        upstream_is_empty: bool,
     ) -> StreamExecutorResult<DispatcherMessage> {
+        // When the merge has zero upstreams (a deferred-upstream edge awaiting attachment), no
+        // barrier will ever arrive through `stream`. Source the barrier directly from the barrier
+        // subscription instead, so the merge still advances epochs and can apply a `MergeUpdate`
+        // that attaches its first upstreams. The barrier is left in the buffer for the subsequent
+        // `pop_barrier_with_inputs` to consume, mirroring the normal upstream-driven path.
+        if upstream_is_empty {
+            while self.buffer.is_empty() {
+                self.try_fetch_barrier_rx(false).await?;
+            }
+            let (barrier, _) = self.buffer.front().unwrap();
+            return Ok(DispatcherMessage::Barrier(
+                barrier.clone().into_dispatcher(),
+            ));
+        }
+
         let mut start_time = Instant::now();
         let interval_duration = Duration::from_secs(15);
         let mut interval =
@@ -1877,17 +1942,28 @@ impl DispatchBarrierBuffer {
     }
 
     fn pre_apply_barrier(&mut self, barrier: &Barrier) -> Option<BoxedNewInputsFuture> {
-        if let Some(update) = barrier.as_update_merge(self.actor_id, self.curr_upstream_fragment_id)
-            && !update.added_upstream_actors.is_empty()
-        {
-            // When update upstream fragment, added_actors will not be empty.
-            let upstream_fragment_id =
-                if let Some(new_upstream_fragment_id) = update.new_upstream_fragment_id {
-                    self.curr_upstream_fragment_id = new_upstream_fragment_id;
-                    new_upstream_fragment_id
-                } else {
-                    self.curr_upstream_fragment_id
-                };
+        let Some(update) = barrier.as_update_merge(self.actor_id, self.curr_upstream_fragment_id)
+        else {
+            return None;
+        };
+
+        // Keep `curr_upstream_fragment_id` in sync with the merge executor's `upstream_fragment_id`
+        // for EVERY matching `MergeUpdate` that re-points the upstream fragment, even when the update
+        // adds no actors. The Iceberg-V3 compaction DETACH emits a remove-only `MergeUpdate` whose
+        // `new_upstream_fragment_id` resets the writer's remap `Merge` back to the idle fragment id 0
+        // (with `added_upstream_actors` empty). If this buffer's tracker is not reset here, it stays
+        // pinned at the detached resolve fragment id; the NEXT compaction's ATTACH then keys its
+        // `MergeUpdate` on 0 and `as_update_merge` (above) no longer matches, so the new resolve
+        // upstreams are never created and the attach barrier wedges forever.
+        let upstream_fragment_id =
+            if let Some(new_upstream_fragment_id) = update.new_upstream_fragment_id {
+                self.curr_upstream_fragment_id = new_upstream_fragment_id;
+                new_upstream_fragment_id
+            } else {
+                self.curr_upstream_fragment_id
+            };
+
+        if !update.added_upstream_actors.is_empty() {
             let ctx = self.build_input_ctx.clone();
             let added_upstream_actors = update.added_upstream_actors.clone();
             let barrier = barrier.clone();
@@ -1919,5 +1995,30 @@ impl DispatchBarrierBuffer {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+
+    /// Verify that IcebergV3Resolve survives a proto round-trip without data loss.
+    #[test]
+    fn iceberg_v3_resolve_roundtrip() {
+        let start = Mutation::IcebergV3Resolve {
+            sink_id: 7,
+            phase: ResolvePhase::Start,
+            input_file_paths: vec!["a".to_string(), "b".to_string()],
+        };
+        let restored = Mutation::from_protobuf(&start.to_protobuf()).expect("from_protobuf failed");
+        assert_eq!(start, restored);
+
+        let end = Mutation::IcebergV3Resolve {
+            sink_id: 7,
+            phase: ResolvePhase::End,
+            input_file_paths: vec![],
+        };
+        let restored = Mutation::from_protobuf(&end.to_protobuf()).expect("from_protobuf failed");
+        assert_eq!(end, restored);
     }
 }

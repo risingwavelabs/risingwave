@@ -67,9 +67,10 @@ use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
-    FragmentId, FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers,
-    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
+    ActorId, ActorUpstreams, DispatcherId, DownstreamFragmentRelation, FragmentActorDispatchers,
+    FragmentDownstreamRelation, FragmentId, FragmentReplaceUpstream, StreamActor,
+    StreamActorWithDispatchers, StreamJobActorsToCreate, StreamJobFragments,
+    StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
@@ -583,6 +584,76 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Attach a transient Iceberg-V3 compaction-resolve pipeline onto an existing pk-index sink
+    /// writer fragment.
+    ///
+    /// This materializes a `ResolveExecutor` fragment (reading the compaction output files) and
+    /// wires its Hash dispatcher into the writer fragment's idle "remap" `Merge`, producing a
+    /// single `Update` mutation (added resolve actors + dispatcher + `MergeUpdate`). It rides the
+    /// MAIN graph so the resolve actors share the writer's barriers (the writer uses
+    /// `barrier_align`).
+    IcebergV3AttachResolve(Box<IcebergV3ResolveAttachPlan>),
+
+    /// Detach a previously attached Iceberg-V3 compaction-resolve pipeline: drop the resolve
+    /// actors and remove them from the writer's remap `Merge`, leaving the writer running with an
+    /// idle remap `Merge` again. Symmetric inverse of [`Command::IcebergV3AttachResolve`].
+    IcebergV3DetachResolve(IcebergV3ResolveDetachPlan),
+
+    /// Inject a bare [`Mutation::IcebergV3Resolve`] onto a barrier to open (`Start`) or close
+    /// (`End`) a sink writer's compaction-resolve window. This rides its OWN barrier — distinct from
+    /// the attach/detach `Update` — because `Start` MUST land strictly before the attach adds the
+    /// resolve actors (the writer drops remap-edge candidates while not in resolve-mode), and `End`
+    /// MUST land before the detach drops them.
+    IcebergV3ResolvePhase {
+        sink_id: risingwave_common::catalog::SinkId,
+        phase: risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase,
+        /// Only meaningful for `Start`; the input files being compacted away. Empty for `End`.
+        input_file_paths: Vec<String>,
+    },
+}
+
+/// Parameters for [`Command::IcebergV3AttachResolve`], assembled outside the barrier worker by the
+/// iceberg compaction manager. The heavy fragment/actor construction (which needs barrier-worker
+/// context: actor-id generator, worker topology, the writer fragment's live distribution) is
+/// deferred to the barrier worker and keyed off these lightweight inputs.
+#[derive(Debug, Clone)]
+pub struct IcebergV3ResolveAttachPlan {
+    pub database_id: DatabaseId,
+    pub sink_id: risingwave_common::catalog::SinkId,
+    /// The writer (pk-index sink) fragment that owns the idle remap `Merge` we attach to. Its live
+    /// distribution (dist key + vnode count + actor placement) is mirrored onto the resolve
+    /// fragment's Hash dispatcher (distribution match) so each candidate row reaches the actor
+    /// owning its vnode.
+    pub writer_fragment_id: FragmentId,
+    /// Fragment id for the transient resolve fragment, pre-allocated by the scheduling manager so
+    /// the manager can record it and target the matching DETACH later (the barrier worker that
+    /// runs the attach does not report ids back).
+    pub resolve_fragment_id: FragmentId,
+    /// `serde_json` of `Vec<iceberg::spec::SerializedDataFile>` — the compaction OUTPUT files the
+    /// `ResolveExecutor` scans. Carried as bytes so the meta command stays connector-agnostic and
+    /// is plumbed straight into the `IcebergV3ResolveNode`.
+    pub output_files: Vec<u8>,
+    /// Iceberg data-file paths consumed by this compaction; replayed to the writer (via the
+    /// adjacent `IcebergV3Resolve` mutation) so it discards them from its read set.
+    pub input_file_paths: Vec<String>,
+    /// PK column names in index-key order; the resolver resolves them to iceberg field-ids to
+    /// project the scan, and the Hash dispatcher keys on the leading PK columns.
+    pub pk_column_names: Vec<String>,
+    /// Desired parallelism of the transient resolve fragment. `None` mirrors the writer fragment's
+    /// parallelism.
+    pub parallelism: Option<usize>,
+}
+
+/// Parameters for [`Command::IcebergV3DetachResolve`].
+#[derive(Debug, Clone)]
+pub struct IcebergV3ResolveDetachPlan {
+    pub database_id: DatabaseId,
+    pub sink_id: risingwave_common::catalog::SinkId,
+    /// The writer fragment whose remap `Merge` the resolve actors were attached to.
+    pub writer_fragment_id: FragmentId,
+    /// The transient resolve fragment created by the prior attach, to be dropped.
+    pub resolve_fragment_id: FragmentId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -680,6 +751,21 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::IcebergV3AttachResolve(plan) => write!(
+                f,
+                "IcebergV3AttachResolve: sink={} writer_fragment={}",
+                plan.sink_id, plan.writer_fragment_id
+            ),
+            Command::IcebergV3DetachResolve(plan) => write!(
+                f,
+                "IcebergV3DetachResolve: sink={} resolve_fragment={}",
+                plan.sink_id, plan.resolve_fragment_id
+            ),
+            Command::IcebergV3ResolvePhase { sink_id, phase, .. } => write!(
+                f,
+                "IcebergV3ResolvePhase: sink={} phase={:?}",
+                sink_id, phase
             ),
         }
     }
@@ -1719,6 +1805,175 @@ impl Command {
                 .collect(),
             ..Default::default()
         }))
+    }
+}
+
+impl Command {
+    /// Build the `Update` mutation that ATTACHES a transient resolve fragment onto the writer
+    /// fragment's idle remap `Merge`.
+    ///
+    /// Reuses [`FragmentEdgeBuilder`]: an edge `resolve -> writer` with a Hash dispatcher (keyed on
+    /// the writer's distribution for distribution match), then [`FragmentEdgeBuilder::replace_upstream`] to turn the
+    /// writer's idle remap `Merge` (whose `upstream_fragment_id` is the unset default `0`) into one
+    /// fed by the resolve actors. The resulting `dispatchers` + `merge_updates` are assembled into a
+    /// single `UpdateMutation` (the resolve actors themselves are created via the separate
+    /// `actors_to_create` side channel, since `UpdateMutation` carries no added-actor list).
+    ///
+    /// `resolve_actors` are the freshly rendered actors of the resolve fragment (with worker
+    /// placement in `resolve_actor_worker`); `writer_info` is the live writer fragment, whose
+    /// distribution we mirror onto the resolve dispatcher.
+    pub(super) fn iceberg_v3_attach_resolve_to_mutation(
+        resolve_fragment_id: FragmentId,
+        resolve_distribution_type: risingwave_meta_model::fragment::DistributionType,
+        resolve_actors: &[StreamActor],
+        resolve_actor_worker: &HashMap<ActorId, WorkerId>,
+        writer_fragment_id: FragmentId,
+        writer_info: &InflightFragmentInfo,
+        dist_key_indices: Vec<u32>,
+        output_indices: Vec<u32>,
+        control_stream_manager: &ControlStreamManager,
+        database_id: DatabaseId,
+    ) -> Mutation {
+        use risingwave_meta_model::DispatcherType as ModelDispatcherType;
+        use risingwave_pb::stream_plan::PbDispatchOutputMapping;
+
+        use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+
+        let partial_graph_id = to_partial_graph_id(database_id, None);
+
+        // The writer fragment's idle remap `Merge` has the default (unset) `upstream_fragment_id`
+        // of 0 — that is the id we replace, matching `MergeNode::default()` produced by the
+        // frontend (`stream_iceberg_with_pk_index_writer.rs`).
+        let unset_remap_upstream_fragment_id = FragmentId::from(0u32);
+
+        let mut builder = FragmentEdgeBuilder::new([
+            (
+                resolve_fragment_id,
+                EdgeBuilderFragmentInfo::from_rendered_actors(
+                    resolve_distribution_type,
+                    resolve_actors,
+                    resolve_actor_worker,
+                    partial_graph_id,
+                    control_stream_manager,
+                ),
+            ),
+            (
+                writer_fragment_id,
+                EdgeBuilderFragmentInfo::from_inflight(
+                    writer_info,
+                    partial_graph_id,
+                    control_stream_manager,
+                ),
+            ),
+        ]);
+
+        // The resolve fragment hash-distributes its `[pk.., output_file, output_pos]` rows onto the
+        // writer actors by the leading PK columns, exactly mirroring the writer's distribution so
+        // each candidate row reaches the writer actor that owns the matching pk-index entry.
+        let relation = DownstreamFragmentRelation {
+            downstream_fragment_id: writer_fragment_id,
+            dispatcher_type: ModelDispatcherType::Hash,
+            dist_key_indices,
+            output_mapping: PbDispatchOutputMapping::simple(output_indices),
+        };
+        builder.add_edge(resolve_fragment_id, &relation);
+        // Re-point the writer's remap `Merge` from its unset upstream (0) to the resolve fragment.
+        // This emits the `MergeUpdate { new_upstream_fragment_id: Some(resolve), added_upstream_actors }`.
+        builder.replace_upstream(
+            writer_fragment_id,
+            unset_remap_upstream_fragment_id,
+            resolve_fragment_id,
+        );
+        let edges = builder.build();
+
+        // NB: the resolve actors are NOT listed in the `UpdateMutation` (it has no `added_actors`
+        // field). They are created via the separate `actors_to_create` side channel returned
+        // alongside this mutation in the barrier worker, and the writer's remap `Merge` learns
+        // them through `MergeUpdate.added_upstream_actors` populated above.
+        Self::assemble_resolve_update_mutation(edges)
+    }
+
+    /// Build the bare `IcebergV3Resolve` mutation that opens (`Start`) or closes (`End`) a writer's
+    /// compaction-resolve window. The writer filters by `sink_id`; `Start` carries the input file
+    /// paths it must discard from its read set, `End` carries none.
+    pub(super) fn iceberg_v3_resolve_phase_to_mutation(
+        sink_id: risingwave_common::catalog::SinkId,
+        phase: risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase,
+        input_file_paths: Vec<String>,
+    ) -> Mutation {
+        Mutation::IcebergV3Resolve(risingwave_pb::stream_plan::IcebergV3ResolveMutation {
+            sink_id: sink_id.as_raw_id(),
+            input_file_paths,
+            phase: phase as i32,
+        })
+    }
+
+    /// Build the `Update` mutation that DETACHES the resolve fragment: drop its actors and remove
+    /// them from the writer's remap `Merge` (`new_upstream_fragment_id: None`,
+    /// `removed_upstream_actor_id`), leaving the writer with an idle remap `Merge` again.
+    pub(super) fn iceberg_v3_detach_resolve_to_mutation(
+        resolve_fragment_id: FragmentId,
+        resolve_actor_ids: &[ActorId],
+        writer_info: &InflightFragmentInfo,
+    ) -> Mutation {
+        // Symmetric inverse of attach: every writer actor's remap `Merge` (now keyed on the resolve
+        // fragment id) removes the resolve actors and RE-POINTS the merge back to the idle upstream
+        // fragment id 0 — the same value the frontend builds the remap `Merge` with and the value the
+        // ATTACH path assumes as its `from` when it re-points the merge to a (new) resolve fragment.
+        // Resetting to 0 is load-bearing for RE-ATTACH: a later compaction's attach keys its
+        // `MergeUpdate` on `(writer_actor, 0)` (via `as_update_merge`), so if detach left the merge at
+        // the previous resolve fragment id the next attach would silently not match and the writer would
+        // never pick up the new resolve actors (the attach barrier then hangs). `new_upstream_fragment_id
+        // = Some(0)` takes merge.rs's "replace upstream" branch: it removes ALL current upstreams (the
+        // resolve actors) and sets the merge's `upstream_fragment_id` to 0, leaving it idle/empty.
+        let merge_update = writer_info
+            .actors
+            .keys()
+            .map(|&writer_actor_id| MergeUpdate {
+                actor_id: writer_actor_id,
+                upstream_fragment_id: resolve_fragment_id,
+                new_upstream_fragment_id: Some(FragmentId::from(0u32)),
+                added_upstream_actors: vec![],
+                removed_upstream_actor_id: resolve_actor_ids.to_vec(),
+            })
+            .collect();
+
+        // Build the mutation inline rather than via `assemble_resolve_update_mutation`: detach
+        // produces remove-only `MergeUpdate`s (no new dispatchers from a `FragmentEdgeBuilder`)
+        // and must populate `dropped_actors`, which the attach-only helper hardcodes to empty.
+        Mutation::Update(UpdateMutation {
+            actor_new_dispatchers: Default::default(),
+            merge_update,
+            dropped_actors: resolve_actor_ids.to_vec(),
+            actor_splits: Default::default(),
+            actor_cdc_table_snapshot_splits: None,
+            sink_schema_change: Default::default(),
+            ..Default::default()
+        })
+    }
+
+    /// Assemble a bare `Update` mutation from an edge build result, used by the resolve attach path
+    /// (no splits, no cdc, no schema change). The attach path never drops actors; dropped actors
+    /// are passed directly in the detach path, which builds its `UpdateMutation` inline.
+    fn assemble_resolve_update_mutation(
+        edges: crate::barrier::edge_builder::FragmentEdgeBuildResult,
+    ) -> Mutation {
+        let actor_new_dispatchers = edges
+            .dispatchers
+            .into_values()
+            .flatten()
+            .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
+            .collect();
+        let merge_update = edges.merge_updates.into_values().flatten().collect();
+        Mutation::Update(UpdateMutation {
+            actor_new_dispatchers,
+            merge_update,
+            dropped_actors: vec![],
+            actor_splits: Default::default(),
+            actor_cdc_table_snapshot_splits: None,
+            sink_schema_change: Default::default(),
+            ..Default::default()
+        })
     }
 }
 

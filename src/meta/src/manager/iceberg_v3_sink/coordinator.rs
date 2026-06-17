@@ -58,7 +58,7 @@ use thiserror_ext::AsReport;
 use tokio::time::timeout;
 
 use super::backfill::backfill_dv_partitions;
-use super::compaction_resolver::resolve_compaction;
+use super::compaction_resolver::collect_compaction_delete_files;
 use crate::manager::exactly_once_util::{
     clean_aborted_records, commit_and_prune_epoch, list_sink_states_ordered_by_epoch,
     persist_pre_commit_metadata,
@@ -78,6 +78,20 @@ struct EpochCommit {
     snapshot_id: i64,
 }
 
+/// State for an in-flight compaction-resolve window, armed at ATTACH time and consumed when the
+/// bracketing checkpoint's `Resolver`-done report arrives. Threaded from the compaction manager's
+/// `route_v3_compaction_report` (which holds these from the compaction report) so the coordinator can
+/// turn the bracketing epoch's commit into an OVERWRITE without re-deriving anything from the report.
+#[derive(Clone)]
+struct PendingCompaction {
+    /// Compaction OUTPUT data files (decoded from the report's `v3_output_files`). Added by the
+    /// overwrite, alongside the bracketing epoch's DvMerger DVs.
+    output_files: Vec<SerializedDataFile>,
+    /// Input data-file paths consumed by this compaction; the overwrite's delete set
+    /// (input data files + their `N` Puffin DVs) is re-derived from these by path.
+    input_file_paths: Vec<String>,
+}
+
 /// Per-sink Iceberg V3 commit coordinator. Owns the loaded iceberg catalog/table (reused across commits)
 /// and the meta SQL connection (used for `pending_sink_state` exactly-once persistence).
 pub struct IcebergV3Coordinator {
@@ -90,6 +104,9 @@ pub struct IcebergV3Coordinator {
     /// The epoch pre-committed but not yet committed, carried from `pre_commit` to the next `commit`.
     waiting_commit: Option<EpochCommit>,
     prev_committed_epoch: Option<u64>,
+    /// Armed at compaction ATTACH; `Some` while a resolve window is open. Consumed when the
+    /// bracketing epoch's `Resolver`-done report turns that epoch's commit into an overwrite.
+    pending_compaction: Option<PendingCompaction>,
 }
 
 impl IcebergV3Coordinator {
@@ -128,6 +145,7 @@ impl IcebergV3Coordinator {
             retry_num: iceberg_config.commit_retry_num as usize,
             waiting_commit: None,
             prev_committed_epoch,
+            pending_compaction: None,
         };
 
         for commit in recovered {
@@ -146,15 +164,71 @@ impl IcebergV3Coordinator {
         prev_epoch: u64,
         reports: Vec<PbIcebergV3SinkMetadata>,
     ) -> Result<()> {
-        if reports.iter().all(|r| r.metadata.is_none()) {
+        // The transient resolve pipeline's leaf reports `Resolver` (role only, no metadata) at the
+        // bracketing checkpoint once its scan is exhausted. Its presence — together with an armed
+        // `pending_compaction` — marks THIS epoch as the one whose commit must become the coordinated
+        // overwrite (inputs out, compaction outputs in). Resolver reports carry no file metadata, and
+        // `aggregate_reports` requires every report to have metadata, so strip both the Resolver report
+        // and any other metadata-less report before aggregation.
+        let resolver_done = reports.iter().any(|r| {
+            PbIcebergV3SinkRole::try_from(r.role)
+                .is_ok_and(|role| matches!(role, PbIcebergV3SinkRole::Resolver))
+        });
+        let reports: Vec<PbIcebergV3SinkMetadata> = reports
+            .into_iter()
+            .filter(|r| {
+                r.metadata.is_some()
+                    && !PbIcebergV3SinkRole::try_from(r.role)
+                        .is_ok_and(|role| matches!(role, PbIcebergV3SinkRole::Resolver))
+            })
+            .collect();
+
+        // Whether THIS epoch is the one that folds the armed compaction overwrite into its commit.
+        let should_fold = resolver_done && self.pending_compaction.is_some();
+
+        // Nothing to commit only when there is neither fresh per-epoch metadata NOR an armed
+        // compaction to fold. The fold path must NOT be short-circuited by an empty epoch: an
+        // all-survivors resolve repairs only the (Hummock) pk-index and emits no new iceberg files,
+        // so the writer's bracketing-epoch report is empty — yet the overwrite (outputs in, inputs
+        // out) still has to commit, otherwise the resolve window never closes and the writer wedges.
+        if reports.is_empty() && !should_fold {
             return Ok(());
         }
 
-        let merged = aggregate_reports(&reports)?;
-        if merged.data_files.is_empty() && merged.delete_files.is_empty() {
+        // Build the per-epoch merged result. When the bracketing epoch carries no metadata of its own
+        // (the all-survivors case above), start from an empty result keyed to the table's current
+        // schema and the default (unpartitioned) spec — the resolver only runs on unpartitioned
+        // tables — so `fold_compaction_into_merged` can supply the overwrite.
+        let merged = if reports.is_empty() {
+            IcebergV3AggResult {
+                schema_id: self.table.metadata().current_schema_id(),
+                partition_spec_id: self.table.metadata().default_partition_spec_id(),
+                data_files: vec![],
+                delete_files: vec![],
+                overwrite_files: vec![],
+            }
+        } else {
+            let merged = aggregate_reports(&reports)?;
+            self.backfill_dv_partitions(merged)?
+        };
+
+        // At the bracketing checkpoint, fold the held compaction state into this epoch's commit so
+        // the single overwrite atomically (a) adds the compaction outputs + this epoch's fresh DVs and
+        // (b) removes the inputs being compacted away. Done in the SAME commit slot as the per-epoch
+        // append so there is no extra snapshot and exactly-once persistence covers it unchanged.
+        let merged = if should_fold {
+            self.fold_compaction_into_merged(merged).await?
+        } else {
+            merged
+        };
+
+        if merged.data_files.is_empty()
+            && merged.delete_files.is_empty()
+            && merged.overwrite_files.is_empty()
+        {
             bail!("v3 sink epoch {} has no data files to commit", prev_epoch);
         }
-        let merged = Arc::new(self.backfill_dv_partitions(merged)?);
+        let merged = Arc::new(merged);
 
         let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
         let blob = encode_pre_commit_state(&merged, snapshot_id)?;
@@ -166,6 +240,72 @@ impl IcebergV3Coordinator {
             snapshot_id,
         });
         Ok(())
+    }
+
+    /// Fold the armed [`PendingCompaction`] into an epoch's merged report so the per-epoch commit slot
+    /// performs the coordinated overwrite. `add` gains the compaction output data files; `overwrite`
+    /// (delete) gains the input data files + their `N` Puffin DVs, re-derived from the held input paths
+    /// by reading only manifest METADATA (never data bodies). The bracketing epoch's own DvMerger DVs
+    /// stay in `merged.delete_files` (added DVs) untouched. Consumes `pending_compaction` on success.
+    async fn fold_compaction_into_merged(
+        &mut self,
+        mut merged: IcebergV3AggResult,
+    ) -> Result<IcebergV3AggResult> {
+        let pending = self
+            .pending_compaction
+            .as_ref()
+            .expect("caller checks pending_compaction is_some")
+            .clone();
+
+        // Serialize the manifest-derived delete DataFiles back to `SerializedDataFile` so they ride the
+        // same pre-commit persistence path as every other file; they are re-materialized at commit time
+        // against the (idempotency-pinned) schema/partition spec in `commit_one_epoch`.
+        let delete_data_files =
+            collect_compaction_delete_files(&self.table, &pending.input_file_paths)
+                .await
+                .context("derive overwrite delete-set for v3 compaction")?;
+        let partition_type = self
+            .table
+            .metadata()
+            .partition_spec_by_id(merged.partition_spec_id)
+            .context("find partition spec for v3 compaction overwrite")?
+            .partition_type(self.table.metadata().current_schema())?;
+        let serialized_deletes = delete_data_files
+            .into_iter()
+            .map(|f| SerializedDataFile::try_from(f, &partition_type, FormatVersion::V3))
+            .try_collect::<Vec<_>>()
+            .context("serialize v3 compaction delete files")?;
+
+        merged.data_files.extend(pending.output_files);
+        merged.overwrite_files.extend(serialized_deletes);
+
+        // Resolution succeeded for this window; clear it so a later spurious Resolver report (e.g. on a
+        // recovery replay) does not re-fold an already-applied compaction.
+        self.pending_compaction = None;
+
+        tracing::info!(
+            sink_id = %self.sink_id,
+            "V3 compaction folded into epoch commit as overwrite"
+        );
+        Ok(merged)
+    }
+
+    /// Arm a compaction-resolve window at ATTACH time. The next bracketing-checkpoint `Resolver`-done
+    /// report folds the held outputs/inputs into that epoch's commit as an overwrite.
+    pub fn arm_compaction(
+        &mut self,
+        output_files: Vec<SerializedDataFile>,
+        input_file_paths: Vec<String>,
+    ) {
+        self.pending_compaction = Some(PendingCompaction {
+            output_files,
+            input_file_paths,
+        });
+    }
+
+    /// Whether a compaction-resolve window is currently armed but not yet folded into a commit.
+    pub fn has_pending_compaction(&self) -> bool {
+        self.pending_compaction.is_some()
     }
 
     pub async fn commit(&mut self) -> Result<()> {
@@ -207,88 +347,6 @@ impl IcebergV3Coordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
-        Ok(())
-    }
-
-    /// Resolve and commit a V3 compaction in the serialized commit slot. The caller already holds the
-    /// per-sink coordinator mutex, so `self.table`'s current snapshot is the commit upper bound N.
-    /// The PK index is knowingly left stale here; repair is a later milestone (M3).
-    pub async fn commit_compaction(
-        &mut self,
-        output_files: Vec<SerializedDataFile>,
-        input_file_paths: Vec<String>,
-        read_snapshot_id: i64,
-        pk_column_names: Vec<String>,
-    ) -> Result<()> {
-        let resolution = resolve_compaction(
-            &self.table,
-            self.catalog.as_ref(),
-            self.sink_id,
-            &output_files,
-            &input_file_paths,
-            read_snapshot_id,
-            &pk_column_names,
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "resolve v3 compaction for sink {} read_snapshot {}",
-                self.sink_id, read_snapshot_id
-            )
-        })?;
-
-        // Generate the target snapshot id the same way the writer path does, so the overwrite below is
-        // idempotent against an already-applied retry.
-        let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
-
-        // The resolver bails on partitioned tables, so the rewrite output and its DV files live under
-        // the default (unpartitioned) spec/type. Materialize the `add` SerializedDataFiles to DataFiles
-        // exactly like the writer path; the `delete` set is already DataFiles from the resolver.
-        let schema = self.table.metadata().current_schema();
-        let partition_spec_id = self.table.metadata().default_partition_spec_id();
-        let partition_type = self.table.metadata().default_partition_type();
-        let mut add_files: Vec<DataFile> =
-            Vec::with_capacity(output_files.len() + resolution.output_dv_files.len());
-        for serialized in output_files.iter().chain(resolution.output_dv_files.iter()) {
-            let f = serialized
-                .clone()
-                .try_into(partition_spec_id, partition_type, schema)
-                .map_err(|err| {
-                    anyhow!(err).context("materialize v3 compaction SerializedDataFile")
-                })?;
-            add_files.push(f);
-        }
-
-        let miss_count = resolution.remap_rows.len();
-        let refreshed_table = commit_overwrite(
-            &self.catalog,
-            self.table.identifier().clone(),
-            self.table.metadata().current_schema_id(),
-            partition_spec_id,
-            &self.target_branch,
-            snapshot_id,
-            add_files,
-            resolution.input_files_to_delete,
-            self.retry_num,
-        )
-        .await
-        .map_err(|err| {
-            let err_report = match err {
-                CommitError::Commit(e) | CommitError::ReloadTable(e) => e,
-            };
-            anyhow!(err_report).context(format!(
-                "iceberg v3 compaction commit failed for sink {}",
-                self.sink_id
-            ))
-        })?;
-        self.table = refreshed_table;
-
-        tracing::info!(
-            sink_id = %self.sink_id,
-            snapshot_id,
-            miss_count,
-            "V3 compaction committed; PK index repair deferred to M3"
-        );
         Ok(())
     }
 
@@ -460,10 +518,10 @@ async fn commit_one_epoch(
 }
 
 /// Run an idempotent iceberg `overwrite_files` transaction for the given pre-materialized add/delete
-/// files, keyed on `snapshot_id`, with reload+retry. Shared by the writer commit path
-/// (`commit_one_epoch`) and the compaction path (`commit_compaction`) so the idempotency check and the
-/// transaction shape live in one place. Returns the committed table, or the (unchanged) reloaded table
-/// when `snapshot_id` was already applied.
+/// files, keyed on `snapshot_id`, with reload+retry. Used by `commit_one_epoch` (the per-epoch commit
+/// path, including the fold-compaction overwrite) so the idempotency check and the transaction
+/// shape live in one place. Returns the committed table, or the (unchanged) reloaded table when
+/// `snapshot_id` was already applied.
 async fn commit_overwrite(
     catalog: &Arc<dyn Catalog>,
     table_ident: iceberg::TableIdent,

@@ -35,37 +35,55 @@ impl MergeExecutorBuilder {
         node: &MergeNode,
         chunk_size: usize,
     ) -> StreamResult<Option<MergeExecutorInput>> {
-        let Some(upstream_actors) = actor_context
-            .initial_upstream_actors
-            .get(&node.upstream_fragment_id)
-        else {
-            return Ok(None);
-        };
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = try_join_all(upstream_actors.actors.iter().map(|upstream_actor| {
-            new_input(
-                &local_barrier_manager,
-                executor_stats.clone(),
-                actor_context.id,
-                actor_context.fragment_id,
-                upstream_actor,
-                upstream_fragment_id,
-                actor_context.config.clone(),
-            )
-        }))
+        let upstream_actors = actor_context
+            .initial_upstream_actors
+            .get(&node.upstream_fragment_id);
+
+        // A merge with no initial upstream actors is normally a bug, so we return `None` and let the
+        // caller turn it into a hard error. The only exception is a "deferred upstream" edge (e.g.
+        // the Iceberg V3 sink's compaction-resolve remap edge), which is explicitly allowed to start
+        // empty and receive its upstreams later via a `MergeUpdate`. In that case we build an empty
+        // `MergeExecutor`: `DynamicReceivers` can run with zero inputs (sourcing barriers from the
+        // barrier subscription) and the runtime add-upstream path accepts inputs from an empty start.
+        if upstream_actors.is_none() && !node.allow_no_initial_upstream {
+            return Ok(None);
+        }
+
+        let inputs: Vec<_> = try_join_all(
+            upstream_actors
+                .into_iter()
+                .flat_map(|upstream_actors| upstream_actors.actors.iter())
+                .map(|upstream_actor| {
+                    new_input(
+                        &local_barrier_manager,
+                        executor_stats.clone(),
+                        actor_context.id,
+                        actor_context.fragment_id,
+                        upstream_actor,
+                        upstream_fragment_id,
+                        actor_context.config.clone(),
+                    )
+                }),
+        )
         .await?;
 
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
         // scale to multiple upstreams.
-        let always_single_input = match node.get_upstream_dispatcher_type()? {
-            DispatcherType::Unspecified => unreachable!(),
-            DispatcherType::Hash | DispatcherType::Broadcast => false,
-            // There could be arbitrary number of upstreams with simple dispatcher.
-            DispatcherType::Simple => false,
-            // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle => true,
-        };
+        //
+        // A deferred-upstream merge that started empty must use the dynamic `MergeExecutor` even if
+        // its dispatcher type would otherwise pick the singleton path: it has zero inputs now and
+        // must accept inputs later, which `ReceiverExecutor` cannot do.
+        let always_single_input = !inputs.is_empty()
+            && match node.get_upstream_dispatcher_type()? {
+                DispatcherType::Unspecified => unreachable!(),
+                DispatcherType::Hash | DispatcherType::Broadcast => false,
+                // There could be arbitrary number of upstreams with simple dispatcher.
+                DispatcherType::Simple => false,
+                // There should be always only one upstream with no-shuffle dispatcher.
+                DispatcherType::NoShuffle => true,
+            };
 
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(Itertools::exactly_one(inputs.into_iter()).unwrap())

@@ -26,10 +26,13 @@
 
 mod dv_handler_impl;
 mod dv_merger;
+mod output_scan;
+mod resolve_executor;
 mod writer;
 mod writer_impl;
 
 pub use dv_handler_impl::DvHandlerImpl;
 pub use dv_merger::DvMergerExecutor;
+pub use resolve_executor::ResolveExecutor;
 pub use writer::WriterExecutor;
 pub use writer_impl::IcebergWriterImpl;

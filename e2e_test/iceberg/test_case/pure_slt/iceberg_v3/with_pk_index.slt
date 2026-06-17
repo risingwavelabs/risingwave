@@ -85,36 +85,6 @@ select * from t_v3;
 ----
 3 charlie 300
 
-# ---- Compaction havn't been supported for v3 ----
-# # This compaction won't clean up puffin files, but only generate new data files.
-# statement ok
-# VACUUM FULL t_v3;
-
-# # Run again to clean up the puffin files.
-# statement ok
-# VACUUM FULL t_v3;
-
-# query ? retry 3 backoff 1s
-# select count(*) = 0 from rw_iceberg_files
-# where schema_name = 'public'
-#   and source_name = '__iceberg_source_t_v3'
-#   and file_format = 'puffin';
-# ----
-# t
-
-# query ?? retry 3 backoff 1s
-# select count(*) = 0 from rw_iceberg_files
-# where schema_name = 'public'
-#   and source_name = '__iceberg_source_t_v3'
-#   and content in ('EqualityDeletes', 'PositionDeletes');
-# ----
-# t
-
-# query ??? rowsort
-# select * from t_v3;
-# ----
-# 3 charlie 300
-
 statement ok
 DROP TABLE t_v3;
 

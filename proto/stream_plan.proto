@@ -151,6 +151,19 @@ message RefreshStartMutation {
   // Associated source ID for this refresh operation.
   uint32 associated_source_id = 2;
 }
+// Signals a sink writer fragment about the lifecycle of a compaction-resolve window.
+// The writer filters by sink_id. START opens the window (input_file_paths lists the files
+// being compacted away); END closes it after the transient resolve pipeline has drained.
+message IcebergV3ResolveMutation {
+  enum Phase {
+    PHASE_START = 0;
+    PHASE_END = 1;
+  }
+  uint32 sink_id = 1;
+  // Only meaningful for PHASE_START; empty/ignored for PHASE_END.
+  repeated string input_file_paths = 2;
+  Phase phase = 3;
+}
 message ListFinishMutation {
   // Associated source ID for this list operation.
   uint32 associated_source_id = 1;
@@ -211,6 +224,8 @@ message BarrierMutation {
     ResetSourceMutation reset_source = 18;
     // Inject specific offsets into source splits (UNSAFE)
     InjectSourceOffsetsMutation inject_source_offsets = 19;
+    // Signal a sink writer to enter compaction-resolve mode for Iceberg V3
+    IcebergV3ResolveMutation iceberg_v3_resolve = 20;
   }
 }
 
@@ -390,6 +405,21 @@ message IcebergWithPkIndexWriterNode {
 
 message IcebergWithPkIndexDvMergerNode {
   SinkDesc sink_desc = 1;
+}
+
+// Leaf node of the transient "resolve" pipeline spun up per Iceberg-V3 compaction.
+// It scans the freshly-rewritten OUTPUT data files and emits candidate rows
+// `[pk_col_0 .. pk_col_n, output_file: Varchar, output_pos: Int64]` (all Op::Insert) to be
+// hash-exchanged to the writer actors that hold the PK index. It is built fresh per compaction
+// with its parameters baked into the plan node, so it carries the iceberg connection inline.
+message IcebergV3ResolveNode {
+  // Carries the iceberg connection/config exactly like the writer node does (properties + secret
+  // refs + downstream PK), reusing the same table-loading path in `from_proto`.
+  SinkDesc sink_desc = 1;
+  // serde_json of `Vec<iceberg::spec::SerializedDataFile>`: the compaction OUTPUT files to scan.
+  bytes output_files = 2;
+  // PK column names in index-key order; resolved to iceberg field-ids to project the scan.
+  repeated string pk_column_names = 3;
 }
 
 message ProjectNode {
@@ -765,6 +795,13 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
+  // Whether this merge is allowed to start with zero upstream actors and have them attached later
+  // at runtime via a `MergeUpdate`. Normally a merge with no initial upstreams is a bug and the
+  // builder errors out. This flag is set only for special "deferred upstream" edges (e.g. the
+  // Iceberg V3 sink's compaction-resolve remap edge), where the upstream fragment is wired in by
+  // the meta service per-operation and detached afterwards. When true, the merge starts empty and
+  // sources barriers from its barrier subscription until upstreams are added.
+  bool allow_no_initial_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -1205,6 +1242,7 @@ message StreamNode {
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
     IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
     IcebergWithPkIndexDvMergerNode iceberg_with_pk_index_dv_merger = 157;
+    IcebergV3ResolveNode iceberg_v3_resolve = 158;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

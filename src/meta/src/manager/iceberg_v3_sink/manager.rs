@@ -101,28 +101,32 @@ impl IcebergV3SinkManager {
         coordinator.lock().await.commit().await
     }
 
-    /// Commit a V3 coordinated compaction: resolve file conflicts against the current snapshot and run an
-    /// iceberg `overwrite_files` transaction. Returns an error if the coordinator is not registered (sink
-    /// not active) or if the iceberg transaction fails.
-    pub async fn commit_compaction(
+    /// Arm a compaction-resolve window on the sink's coordinator at ATTACH time. The held
+    /// `{output_files, input_file_paths}` are folded into the bracketing-checkpoint epoch's commit as
+    /// an overwrite when the writer's `Resolver`-done report arrives. Errors only if the sink is not
+    /// registered (no active coordinator).
+    pub async fn arm_compaction_resolve(
         &self,
         sink_id: SinkId,
         output_files: Vec<SerializedDataFile>,
         input_file_paths: Vec<String>,
-        read_snapshot_id: i64,
-        pk_column_names: Vec<String>,
     ) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
         coordinator
             .lock()
             .await
-            .commit_compaction(
-                output_files,
-                input_file_paths,
-                read_snapshot_id,
-                pk_column_names,
-            )
-            .await
+            .arm_compaction(output_files, input_file_paths);
+        Ok(())
+    }
+
+    /// Whether the sink's coordinator still has an armed (not-yet-folded) compaction-resolve window.
+    /// Used by the completion trigger to decide whether the overwrite already committed (window
+    /// cleared) so it can fire `End` + DETACH. Returns `false` for an unregistered sink.
+    pub async fn has_pending_compaction(&self, sink_id: SinkId) -> bool {
+        let Ok(coordinator) = self.coordinator(sink_id) else {
+            return false;
+        };
+        coordinator.lock().await.has_pending_compaction()
     }
 
     /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown

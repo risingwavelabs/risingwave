@@ -346,7 +346,10 @@ impl CheckpointControl {
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
-                    | Command::InjectSourceOffsets { .. } => {
+                    | Command::InjectSourceOffsets { .. }
+                    | Command::IcebergV3AttachResolve(_)
+                    | Command::IcebergV3DetachResolve(_)
+                    | Command::IcebergV3ResolvePhase { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",

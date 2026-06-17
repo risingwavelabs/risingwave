@@ -1,0 +1,204 @@
+statement ok
+create secret compaction_pk_index_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Hosted-catalog connection pointing at a unique warehouse path so it does not
+# collide with other tests in this directory.
+statement ok
+create connection compaction_pk_index_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_v3_vacuum_test',
+    s3.access.key = secret compaction_pk_index_secret,
+    s3.secret.key = secret compaction_pk_index_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.compaction_pk_index_conn';
+
+# Non-partitioned v3 table with pk-index enabled.
+# CRITICAL: compaction only supports non-partitioned tables; partition_by is intentionally absent.
+statement ok
+create table t_v3_vacuum_pk(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 1,
+    format_version = 3,
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+# ---- Section 1: basic compaction (survivor path) ----
+# Insert 5 rows, delete 2, producing PositionDeletes (Puffin DV) files.
+
+statement ok
+insert into t_v3_vacuum_pk values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300), (4, 'diana', 400), (5, 'eve', 500);
+
+statement ok
+flush;
+
+statement ok
+delete from t_v3_vacuum_pk where id in (2, 4);
+
+statement ok
+flush;
+
+# Verify that Puffin PositionDeletes files were written before compaction.
+query T retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content = 'PositionDeletes'
+  and file_format = 'puffin';
+----
+t
+
+# Verify no EqualityDeletes (pk-index mode should only produce PositionDeletes).
+query T retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content = 'EqualityDeletes';
+----
+t
+
+# Verify data is correct before compaction.
+query ??? rowsort retry 3 backoff 1s
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+
+# First VACUUM FULL: rewrites surviving rows into a new data file.
+# (The puffin/DV files are still present after the first pass in v3.)
+statement ok
+VACUUM FULL t_v3_vacuum_pk;
+
+# Data must be correct immediately after the first VACUUM FULL.
+query ??? rowsort
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+
+# Second VACUUM FULL: cleans up the old data files and the puffin DV files.
+statement ok
+VACUUM FULL t_v3_vacuum_pk;
+
+# After two VACUUM FULLs there should be no PositionDeletes or EqualityDeletes files.
+query T retry 3 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content in ('PositionDeletes', 'EqualityDeletes');
+----
+t
+
+# There should be exactly one Data file (compacted).
+query T retry 3 backoff 1s
+select count(*) = 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content = 'Data';
+----
+t
+
+# Data is still correct after full convergence.
+query ??? rowsort
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+
+# ---- Section 2: re-compaction after a write (re-attach path) ----
+# Delete a surviving row and insert a new one to produce a fresh DV, then
+# compact again.  This exercises the attach→detach→re-attach code path.
+
+statement ok
+delete from t_v3_vacuum_pk where id = 3;
+
+statement ok
+insert into t_v3_vacuum_pk values(6, 'frank', 600);
+
+statement ok
+flush;
+
+# A new PositionDeletes file should appear.
+query T retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content = 'PositionDeletes'
+  and file_format = 'puffin';
+----
+t
+
+# Data is correct before re-compaction.
+query ??? rowsort retry 3 backoff 1s
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+5 eve 500
+6 frank 600
+
+# First VACUUM FULL of the re-attach cycle.
+statement ok
+VACUUM FULL t_v3_vacuum_pk;
+
+# Data still correct after first pass.
+query ??? rowsort
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+5 eve 500
+6 frank 600
+
+# Second VACUUM FULL clears residual DV files.
+statement ok
+VACUUM FULL t_v3_vacuum_pk;
+
+# No delete files remain.
+query T retry 3 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3_vacuum_pk'
+  and content in ('PositionDeletes', 'EqualityDeletes');
+----
+t
+
+# Data correct after re-compaction.
+query ??? rowsort
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+5 eve 500
+6 frank 600
+
+# ---- Section 3: idempotent VACUUM ----
+# A VACUUM FULL on an already-compacted table must succeed and leave data intact.
+
+statement ok
+VACUUM FULL t_v3_vacuum_pk;
+
+query ??? rowsort
+select * from t_v3_vacuum_pk;
+----
+1 alice 100
+5 eve 500
+6 frank 600
+
+# ---- Teardown ----
+
+statement ok
+DROP TABLE t_v3_vacuum_pk;
+
+statement ok
+DROP CONNECTION compaction_pk_index_conn;
+
+statement ok
+DROP SECRET compaction_pk_index_secret;

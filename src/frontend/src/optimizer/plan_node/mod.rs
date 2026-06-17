@@ -924,6 +924,12 @@ impl dyn StreamPlanNode {
             if let Some(stream_share) = self.as_stream_share() {
                 return stream_share.adhoc_to_stream_prost(state);
             }
+            if let Some(writer) = self.as_stream_iceberg_with_pk_index_writer() {
+                // The writer declares a hand-built second (remap) input edge whose upstream is
+                // attached at runtime, so it builds its full node ad-hoc rather than via the
+                // generic input recursion.
+                return writer.adhoc_to_stream_prost(state);
+            }
 
             let node = Some(self.try_to_stream_prost_body(state)?);
             let input = self

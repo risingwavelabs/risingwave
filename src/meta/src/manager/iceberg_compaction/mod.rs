@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use parking_lot::RwLock;
-use risingwave_common::id::WorkerId;
+use risingwave_common::id::{FragmentId, WorkerId};
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -33,10 +33,20 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::barrier::BarrierScheduler;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::rpc::metrics::MetaMetrics;
+
+/// Tracks an attached transient Iceberg-V3 compaction-resolve pipeline so a later DETACH (a
+/// separate task) can target the exact fragment created on attach. Fields are consumed by
+/// `detach_v3_resolve`, driven by the resolve-completion loop.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AttachedResolve {
+    pub writer_fragment_id: FragmentId,
+    pub resolve_fragment_id: FragmentId,
+}
 
 pub type IcebergCompactionManagerRef = Arc<IcebergCompactionManager>;
 
@@ -62,15 +72,23 @@ pub struct IcebergCompactionManager {
 
     pub metrics: Arc<MetaMetrics>,
 
-    /// Manager for V3 sink commit coordinators. Routes compaction reports from the compactor to
-    /// the per-sink coordinator.
+    /// Manager for V3 sink commit coordinators. Used at ATTACH time to arm the coordinator with the
+    /// held compaction state, and by the completion trigger to fire `End` + DETACH once the bracketing
+    /// epoch's overwrite has committed.
     iceberg_v3_sink_manager: IcebergV3SinkManager,
+
+    /// Used to schedule the V3 compaction-resolve ATTACH/DETACH commands onto the streaming graph
+    /// via the barrier worker. `None` in unit tests that do not exercise the barrier path.
+    barrier_scheduler: Option<BarrierScheduler>,
 }
 
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
     snapshot_expiration_sink_ids: HashSet<SinkId>,
     manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
+    /// Resolve pipelines currently attached, keyed by sink. Populated on ATTACH so a later DETACH
+    /// (a separate task) can target the exact resolve fragment.
+    attached_resolves: HashMap<SinkId, AttachedResolve>,
 }
 
 impl IcebergCompactionManager {
@@ -88,6 +106,7 @@ impl IcebergCompactionManager {
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
         iceberg_v3_sink_manager: IcebergV3SinkManager,
+        barrier_scheduler: Option<BarrierScheduler>,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -98,12 +117,14 @@ impl IcebergCompactionManager {
                     sink_schedules: HashMap::default(),
                     snapshot_expiration_sink_ids: HashSet::default(),
                     manual_compaction_waiters: HashMap::default(),
+                    attached_resolves: HashMap::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,
                 metrics,
                 iceberg_v3_sink_manager,
+                barrier_scheduler,
             }),
             compactor_streams_change_rx,
         )

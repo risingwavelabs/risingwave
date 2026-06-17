@@ -729,7 +729,19 @@ impl IcebergCompactionEventHandler {
     }
 
     async fn apply_report_task_event(&self, report: IcebergReportTask) {
-        self.compaction_manager.handle_report_task(report).await;
+        // `handle_report_task` may block on synchronous barrier round-trips (V3 compaction arms the
+        // coordinator and injects the `Start` + `AttachResolve` barriers, each of which awaits a full
+        // barrier collection). This method runs inline in the single shared iceberg compaction event
+        // loop, so awaiting it here would stall that loop — and therefore every compactor's
+        // `PullTask`/ack handling for ALL sinks — for the entire duration of the resolve attach (and
+        // forever if the attach ever hangs). Spawn it instead: the event loop returns immediately and
+        // keeps acking pull tasks; the report's state-machine update and any manual `VACUUM` waiter
+        // complete from the spawned task. Reports per sink are serialized by the per-sink track state
+        // machine (`is_processing_task`), so the spawn does not introduce a harmful ordering race.
+        let compaction_manager = self.compaction_manager.clone();
+        tokio::spawn(async move {
+            compaction_manager.handle_report_task(report).await;
+        });
     }
 }
 

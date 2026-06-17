@@ -46,6 +46,7 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
         iceberg_compactor_manager,
         metrics,
         iceberg_v3_sink_manager,
+        None,
     );
     manager
 }
@@ -117,6 +118,7 @@ fn empty_inner() -> IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
         snapshot_expiration_sink_ids: HashSet::new(),
         manual_compaction_waiters: HashMap::new(),
+        attached_resolves: HashMap::new(),
     }
 }
 
@@ -1108,10 +1110,10 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
 }
 
-/// A V3-coordinated report with a valid payload attempts the iceberg commit. In the test environment
-/// there is no registered coordinator, so `commit_compaction` returns "not registered". The state
-/// machine must NOT hang or panic: the routing failure converts to `finish_failed` so the scheduler
-/// can retry the task later. This guards against routing failures stalling the state machine.
+/// A V3-coordinated report with a valid payload triggers the attach path. In the test environment
+/// there is no barrier scheduler, so `route_v3_compaction_report` returns `false`. The state machine
+/// must NOT hang or panic: the routing failure converts to `finish_failed` so the scheduler can retry
+/// the task later. This guards against routing failures stalling the state machine.
 #[tokio::test]
 async fn test_handle_report_task_routes_v3_payload_and_finishes_track() {
     let manager = build_test_manager().await;
@@ -1140,10 +1142,9 @@ async fn test_handle_report_task_routes_v3_payload_and_finishes_track() {
         })
         .await;
 
-    // The commit failed (no coordinator registered), so the track transitions to Idle via
-    // finish_failed — the scheduler will retry. The key property is that the state machine ran
-    // and the task is no longer InFlight; it does not matter whether it finished as success or
-    // failed here since a real coordinator is needed for success.
+    // The routing returned false (no barrier scheduler in test), so the track transitions to Idle
+    // via finish_failed — the scheduler will retry. The key property is that the state machine ran
+    // and the task is no longer InFlight.
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));

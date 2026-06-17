@@ -13,4 +13,5 @@
 // limitations under the License.
 
 mod dv_merger;
+mod resolve_executor;
 mod writer;

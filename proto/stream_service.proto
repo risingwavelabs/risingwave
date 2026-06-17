@@ -15,6 +15,9 @@ enum PbIcebergV3SinkRole {
   PB_ICEBERG_V3_SINK_ROLE_UNSPECIFIED = 0;
   PB_ICEBERG_V3_SINK_ROLE_WRITER = 1;
   PB_ICEBERG_V3_SINK_ROLE_DV_MERGER = 2;
+  // The transient resolve-pipeline leaf: reports (role + epoch only, no metadata) once its
+  // output-file scan is exhausted, signaling meta to detach the pipeline and commit.
+  PB_ICEBERG_V3_SINK_ROLE_RESOLVER = 3;
 }
 
 message InjectBarrierRequest {

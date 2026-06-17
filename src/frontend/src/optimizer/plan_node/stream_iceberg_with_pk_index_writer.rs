@@ -18,8 +18,10 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
+use risingwave_pb::stream_plan::{
+    DispatcherType, IcebergWithPkIndexWriterNode, MergeNode, PbStreamNode,
+};
 
 use super::stream::prelude::*;
 use crate::TableCatalog;
@@ -31,6 +33,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, WatermarkColumns,
 };
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamIcebergWithPkIndexWriter` is the stateful writer executor for the Iceberg
@@ -80,6 +83,25 @@ fn output_schema() -> risingwave_common::catalog::Schema {
         Field::with_name(DataType::Varchar, "file_path"),
         Field::with_name(DataType::Int64, "position"),
     ])
+}
+
+/// Schema of the transient compaction-resolve "remap edge": the PK columns (in `downstream_pk`
+/// order, mirroring the leading columns of the pk_index state table) followed by the located
+/// `output_file` / `output_pos` of the rewritten data file. Candidate rows on this edge are
+/// hash-distributed by the PK, the same distribution as the pk_index state table, so each row
+/// lands on the writer actor that owns the corresponding PK index entry (distribution match).
+fn remap_edge_schema(sink_desc: &SinkDesc) -> Result<risingwave_common::catalog::Schema> {
+    let downstream_pk = sink_desc
+        .downstream_pk
+        .as_deref()
+        .context("Missing downstream PK in Iceberg sink desc")?;
+    let mut fields: Vec<Field> = downstream_pk
+        .iter()
+        .map(|&idx| Field::from(&sink_desc.columns[idx].column_desc))
+        .collect();
+    fields.push(Field::with_name(DataType::Varchar, "output_file"));
+    fields.push(Field::with_name(DataType::Int64, "output_pos"));
+    Ok(risingwave_common::catalog::Schema::new(fields))
 }
 
 fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
@@ -147,16 +169,78 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexWriter {
 impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexWriter }
 
 impl StreamNode for StreamIcebergWithPkIndexWriter {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        unreachable!(
+            "iceberg pk-index writer cannot be converted into a prost body -- call \
+             `adhoc_to_stream_prost` instead, since it declares a hand-built second input."
+        )
+    }
+}
+
+impl StreamIcebergWithPkIndexWriter {
+    /// The writer is a 2-input executor: the real upstream plus a transient compaction-resolve
+    /// "remap edge". The remap edge has no upstream fragment at plan/build time -- a meta-side
+    /// pipeline connects a `ResolveExecutor` fragment to it per-compaction at runtime and detaches
+    /// afterwards. We therefore cannot model it with a `StreamExchange` (which requires a real
+    /// input subtree). Instead, mirroring `StreamTableScan`'s backfill upstream, we hand-build a
+    /// second child `Merge` node whose upstream wiring is filled by the meta service when (and
+    /// only when) the resolve pipeline attaches. In steady state the writer fragment carries this
+    /// idle Merge with zero upstream actors; the executor's `from_proto` tolerates the second input.
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         let pk_index_table = self
             .pk_index_table
             .clone()
             .with_id(state.gen_table_id_wrapped());
 
-        NodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
-            sink_desc: Some(self.sink_desc.to_proto()),
-            pk_index_table: Some(pk_index_table.to_internal_table_prost()),
-        }))
+        let node_body =
+            PbNodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
+                sink_desc: Some(self.sink_desc.to_proto()),
+                pk_index_table: Some(pk_index_table.to_internal_table_prost()),
+            }));
+
+        // First input: the real upstream, built via the normal recursion.
+        let real_input = self.input.to_stream_prost(state)?;
+
+        // Second input: the idle remap edge. The merge node body is left default; its
+        // `upstream_fragment_id` / dispatcher is filled at runtime by the resolve pipeline. The
+        // resolve fragment must hash-distribute on the leading PK columns of this schema so rows
+        // reach the writer actor holding the matching pk_index entry.
+        let remap_schema = remap_edge_schema(&self.sink_desc)
+            .map_err(|e| anyhow::anyhow!(e).context("build iceberg remap edge schema"))?;
+        let remap_input = PbStreamNode {
+            node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
+                upstream_dispatcher_type: DispatcherType::Hash as i32,
+                // The remap edge has no upstream fragment at plan/build time: the resolve pipeline
+                // attaches one at runtime and detaches afterwards. Tell the merge builder to start
+                // this input empty instead of erroring on the missing upstream.
+                allow_no_initial_upstream: true,
+                ..Default::default()
+            }))),
+            identity: "IcebergRemapEdge".into(),
+            fields: remap_schema.to_prost(),
+            stream_key: vec![],
+            stream_kind: PbStreamKind::AppendOnly as i32,
+            input: vec![],
+            ..Default::default()
+        };
+
+        Ok(PbStreamNode {
+            fields: self.schema().to_prost(),
+            input: vec![real_input, remap_input],
+            node_body: Some(node_body),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
+            operator_id: self.base.id().to_stream_node_operator_id(),
+            identity: self.distill_to_string(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
+        })
     }
 }
 

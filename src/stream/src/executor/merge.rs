@@ -112,11 +112,18 @@ mod upstream {
         fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_;
         fn flush_buffered_watermarks(&mut self);
         fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>);
+        /// Whether the upstream currently has zero inputs. A deferred-upstream merge starts empty
+        /// and must source barriers from its subscription until upstreams are attached at runtime.
+        fn is_empty(&self) -> bool;
     }
 
     impl Upstream for MergeUpstream {
         fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
             self.inner.upstream_input_ids()
+        }
+
+        fn is_empty(&self) -> bool {
+            self.inner.is_empty()
         }
 
         fn flush_buffered_watermarks(&mut self) {
@@ -136,6 +143,11 @@ mod upstream {
     impl Upstream for SingletonUpstream {
         fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
             std::iter::once(self.id())
+        }
+
+        fn is_empty(&self) -> bool {
+            // A singleton receiver always has exactly one input.
+            false
         }
 
         fn flush_buffered_watermarks(&mut self) {
@@ -297,8 +309,11 @@ where
         );
 
         loop {
+            // A merge that currently has zero upstreams must source its barriers from the barrier
+            // subscription rather than from upstream inputs (which would never deliver one).
+            let upstream_is_empty = upstream.is_empty();
             let msg = barrier_buffer
-                .await_next_message(&mut upstream, &metrics)
+                .await_next_message(&mut upstream, &metrics, upstream_is_empty)
                 .await?;
             let msg = match msg {
                 DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
@@ -449,8 +464,16 @@ where
                 }
 
                 Poll::Ready(None) => {
-                    // See also the comments in `DynamicReceivers::poll_next`.
-                    unreachable!("Merge should always have upstream inputs");
+                    // `DynamicReceivers` yields `None` only when it has zero inputs. For a normal
+                    // merge that is unreachable. For a deferred-upstream merge (e.g. the Iceberg V3
+                    // remap edge) that started empty, this is expected: there are no upstreams yet,
+                    // so there is nothing to poll. Return any buffered chunk, then `Pending` so the
+                    // executor's barrier subscription drives progress until upstreams are attached.
+                    return if let Some(chunk_out) = self.chunk_builder.take() {
+                        Poll::Ready(Some(Ok(MessageInner::Chunk(chunk_out))))
+                    } else {
+                        Poll::Pending
+                    };
                 }
             }
         }

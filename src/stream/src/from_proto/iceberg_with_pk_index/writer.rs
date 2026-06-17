@@ -43,7 +43,18 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let [input]: [_; 1] = params.input.try_into().unwrap();
+        // The writer is structured as a 2-input executor: the real upstream (left) plus the
+        // transient compaction-resolve "remap edge" (right). The remap edge is connected at
+        // runtime by the resolve pipeline, so at steady state the fragment may carry only the real
+        // input. Tolerate both shapes: take the first input as the real upstream and treat any
+        // second input as the remap edge.
+        let mut inputs = params.input;
+        let remap_input = if inputs.len() >= 2 {
+            Some(inputs.pop().unwrap())
+        } else {
+            None
+        };
+        let [input]: [_; 1] = inputs.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_id: SinkId = sink_desc.get_id();
@@ -104,6 +115,8 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
         let exec = WriterExecutor::new(
             params.actor_context,
             input,
+            remap_input,
+            params.executor_stats.clone(),
             pk_indices,
             pk_index_state_table,
             writer,

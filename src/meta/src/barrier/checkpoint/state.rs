@@ -43,7 +43,10 @@ use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
     DatabaseCheckpointControl, IndependentCheckpointJobControl,
 };
-use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
+use crate::barrier::command::{
+    CreateStreamingJobCommandInfo, IcebergV3ResolveAttachPlan, IcebergV3ResolveDetachPlan,
+    PostCollectCommand, ReschedulePlan,
+};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
@@ -1480,6 +1483,27 @@ impl DatabaseCheckpointControl {
                 ));
                 self.apply_simple_command(mutation, "InjectSourceOffsets")
             }
+
+            Some(Command::IcebergV3AttachResolve(plan)) => {
+                self.apply_iceberg_v3_attach_resolve(*plan, partial_graph_manager, worker_nodes)?
+            }
+
+            Some(Command::IcebergV3DetachResolve(plan)) => {
+                self.apply_iceberg_v3_detach_resolve(plan)?
+            }
+
+            Some(Command::IcebergV3ResolvePhase {
+                sink_id,
+                phase,
+                input_file_paths,
+            }) => {
+                let mutation = Some(Command::iceberg_v3_resolve_phase_to_mutation(
+                    sink_id,
+                    phase,
+                    input_file_paths,
+                ));
+                self.apply_simple_command(mutation, "IcebergV3ResolvePhase")
+            }
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
@@ -1780,5 +1804,252 @@ impl DatabaseCheckpointControl {
         Ok(ApplyCommandInfo {
             jobs_to_wait: finished_snapshot_backfill_jobs,
         })
+    }
+
+    /// ATTACH a transient Iceberg-V3 compaction-resolve fragment onto the writer fragment's idle
+    /// remap `Merge`. Renders the resolve actors aligned to the writer's distribution (distribution
+    /// match), builds
+    /// the `IcebergV3ResolveNode`, registers the fragment in the in-memory inflight graph, and
+    /// produces the `Update` mutation (Hash dispatcher resolve->writer + `MergeUpdate`) together
+    /// with `actors_to_create` for the resolve actors.
+    #[expect(clippy::type_complexity)]
+    fn apply_iceberg_v3_attach_resolve(
+        &mut self,
+        plan: IcebergV3ResolveAttachPlan,
+        partial_graph_manager: &mut PartialGraphManager,
+        _worker_nodes: &HashMap<WorkerId, WorkerNode>,
+    ) -> MetaResult<(
+        Option<Mutation>,
+        HashSet<TableId>,
+        Option<StreamJobActorsToCreate>,
+        HashMap<WorkerId, HashSet<ActorId>>,
+        PostCollectCommand,
+    )> {
+        use risingwave_common::bail;
+        use risingwave_pb::stream_plan::stream_node::{NodeBody, PbStreamKind};
+        use risingwave_pb::stream_plan::{IcebergV3ResolveNode, PbStreamNode};
+
+        let env = partial_graph_manager.control_stream_manager().env.clone();
+
+        // The writer fragment must already be inflight: it owns the idle remap `Merge` and its live
+        // distribution is the template for the resolve actors.
+        let writer_info = self.database_info.fragment(plan.writer_fragment_id);
+
+        // Extract the writer's `SinkDesc` from its node body so the `ResolveExecutor` loads the same
+        // iceberg table via the same `from_proto` path. Mirrors the writer node, avoiding a separate
+        // catalog round-trip. From the same writer node we also capture its second input -- the idle
+        // remap `Merge` edge (`input[1]`) -- whose `fields` are the canonical resolve output schema
+        // (`[pk.., output_file: Varchar, output_pos: Int64]`) built by the frontend via
+        // `remap_edge_schema()`.
+        let mut sink_desc = None;
+        let mut remap_edge_fields = None;
+        risingwave_common::util::stream_graph_visitor::visit_stream_node(
+            &writer_info.nodes,
+            |node| {
+                if let Some(NodeBody::IcebergWithPkIndexWriter(writer)) = &node.node_body {
+                    sink_desc = writer.sink_desc.clone();
+                    // The writer is a 2-input executor; `input[1]` is the remap `Merge`. Copy its
+                    // `fields` so the resolve output schema is guaranteed identical to the edge the
+                    // writer reads (no drift between the two sites).
+                    remap_edge_fields = node.input.get(1).map(|merge| merge.fields.clone());
+                }
+            },
+        );
+        let Some(sink_desc) = sink_desc else {
+            bail!(
+                "writer fragment {} is not an iceberg pk-index writer; cannot attach resolve",
+                plan.writer_fragment_id
+            );
+        };
+        let Some(remap_edge_fields) = remap_edge_fields else {
+            bail!(
+                "iceberg pk-index writer fragment {} is missing its remap `Merge` input; cannot \
+                 attach resolve",
+                plan.writer_fragment_id
+            );
+        };
+
+        // Render the resolve actors aligned to the writer's distribution and worker placement, so
+        // each Hash-dispatched candidate row reaches the writer actor owning the matching pk-index
+        // entry (distribution match). This reuses the same template/aligner the auto-refresh-sink
+        // path uses.
+        let actor_template = EnsembleActorTemplate::from_existing_inflight_fragment(writer_info);
+        let resolve_distribution_type = writer_info.distribution_type;
+        let actor_assignments =
+            ComponentFragmentAligner::new_persistent(&actor_template, env.actor_id_generator())
+                .align_component_actor(resolve_distribution_type);
+
+        // The resolve fragment id is pre-allocated by the scheduling manager so it can record the
+        // mapping for a later DETACH (the barrier worker cannot report ids back).
+        let resolve_fragment_id: FragmentId = plan.resolve_fragment_id;
+
+        // Build the resolve node. `output_files` and `pk_column_names` come straight from the
+        // compaction report; the scan output schema is `[pk.., output_file, output_pos]`.
+        let resolve_node = PbStreamNode {
+            node_body: Some(NodeBody::IcebergV3Resolve(Box::new(IcebergV3ResolveNode {
+                sink_desc: Some(sink_desc),
+                output_files: plan.output_files.clone(),
+                pk_column_names: plan.pk_column_names.clone(),
+            }))),
+            // The resolve fragment is a leaf: it scans iceberg, it has no stream input.
+            input: vec![],
+            // The output schema MUST equal the writer's remap-edge schema (the `Merge` `input[1]`
+            // we copied above): `[pk.., output_file: Varchar, output_pos: Int64]`. The
+            // `ResolveExecutor` emits exactly this chunk; if `fields` is left empty, the
+            // `schema_check` wrapper panics ("column type mismatched at position 0") and crashes the
+            // compute node into a recovery loop.
+            fields: remap_edge_fields,
+            stream_key: vec![],
+            stream_kind: PbStreamKind::AppendOnly as i32,
+            identity: format!("IcebergV3Resolve({})", plan.sink_id),
+            ..Default::default()
+        };
+
+        // Materialize `StreamActor`s + `InflightActorInfo`s for the resolve fragment. The resolve
+        // fragment is transient and connector-config-agnostic (the iceberg config rides in
+        // `sink_desc`), so a default stream context suffices for its expr context.
+        let stream_context = StreamContext::default();
+        let mut resolve_actors: Vec<StreamActor> = Vec::with_capacity(actor_assignments.len());
+        let mut resolve_actor_worker: HashMap<ActorId, WorkerId> = HashMap::new();
+        let mut inflight_actors: HashMap<ActorId, InflightActorInfo> = HashMap::new();
+        for (&actor_id, (worker_id, vnode_bitmap)) in &actor_assignments {
+            resolve_actor_worker.insert(actor_id, *worker_id);
+            resolve_actors.push(StreamActor {
+                actor_id,
+                fragment_id: resolve_fragment_id,
+                vnode_bitmap: vnode_bitmap.clone(),
+                mview_definition: String::new(),
+                expr_context: Some(stream_context.to_expr_context()),
+                config_override: stream_context.config_override.clone(),
+            });
+            inflight_actors.insert(
+                actor_id,
+                InflightActorInfo {
+                    worker_id: *worker_id,
+                    vnode_bitmap: vnode_bitmap.clone(),
+                    splits: vec![],
+                },
+            );
+        }
+
+        // The Hash dispatcher keys on the leading PK columns of the resolve output (indices
+        // `0..pk_len`), which are exactly the writer's distribution columns; the output mapping is
+        // identity over the resolve output schema (`pk_len + 2` columns: pk.., output_file,
+        // output_pos).
+        let pk_len = plan.pk_column_names.len() as u32;
+        let dist_key_indices: Vec<u32> = (0..pk_len).collect();
+        let output_indices: Vec<u32> = (0..(pk_len + 2)).collect();
+
+        // Register the resolve fragment in the in-memory inflight graph under the writer's job, so
+        // the barrier worker routes barriers to the resolve actors. NB: this is in-memory only;
+        // persisting the transient fragment to the meta-store fragment catalog (for recovery) is a
+        // follow-up — the resolve pipeline is detached before the next compaction, so a recovery
+        // mid-resolve simply restarts the compaction.
+        let writer_job_id = self
+            .database_info
+            .job_id_by_fragment(plan.writer_fragment_id)
+            .expect("writer fragment must belong to a job");
+        let resolve_inflight = InflightFragmentInfo {
+            fragment_id: resolve_fragment_id,
+            distribution_type: resolve_distribution_type,
+            fragment_type_mask: writer_info.fragment_type_mask,
+            vnode_count: writer_info.vnode_count,
+            nodes: resolve_node.clone(),
+            actors: inflight_actors,
+            state_table_ids: HashSet::new(),
+        };
+        self.database_info.pre_apply_new_fragments([(
+            resolve_fragment_id,
+            writer_job_id,
+            resolve_inflight,
+        )]);
+
+        // Re-borrow after the mutable `pre_apply_new_fragments`.
+        let writer_info = self.database_info.fragment(plan.writer_fragment_id);
+        let mutation = Command::iceberg_v3_attach_resolve_to_mutation(
+            resolve_fragment_id,
+            resolve_distribution_type,
+            &resolve_actors,
+            &resolve_actor_worker,
+            plan.writer_fragment_id,
+            writer_info,
+            dist_key_indices,
+            output_indices,
+            partial_graph_manager.control_stream_manager(),
+            plan.database_id,
+        );
+
+        // Build `actors_to_create` for the resolve actors (the side channel that actually creates
+        // them on the compute nodes; the `Update` mutation carries no added actors).
+        let mut actors_to_create: StreamJobActorsToCreate = HashMap::new();
+        for actor in &resolve_actors {
+            let worker_id = resolve_actor_worker[&actor.actor_id];
+            actors_to_create
+                .entry(worker_id)
+                .or_default()
+                .entry(resolve_fragment_id)
+                .or_insert_with(|| (resolve_node.clone(), vec![], HashSet::new()))
+                .1
+                .push((actor.clone(), Default::default(), vec![]));
+        }
+
+        let (table_ids, node_actors) = self.collect_base_info();
+        Ok((
+            Some(mutation),
+            table_ids,
+            Some(actors_to_create),
+            node_actors,
+            PostCollectCommand::Command("IcebergV3AttachResolve".to_owned()),
+        ))
+    }
+
+    /// DETACH a previously attached resolve fragment: drop its actors and remove them from the
+    /// writer's remap `Merge`, restoring steady state. Symmetric inverse of attach.
+    #[expect(clippy::type_complexity)]
+    fn apply_iceberg_v3_detach_resolve(
+        &mut self,
+        plan: IcebergV3ResolveDetachPlan,
+    ) -> MetaResult<(
+        Option<Mutation>,
+        HashSet<TableId>,
+        Option<StreamJobActorsToCreate>,
+        HashMap<WorkerId, HashSet<ActorId>>,
+        PostCollectCommand,
+    )> {
+        let resolve_actor_ids: Vec<ActorId> = self
+            .database_info
+            .fragment(plan.resolve_fragment_id)
+            .actors
+            .keys()
+            .copied()
+            .collect();
+        let writer_info = self.database_info.fragment(plan.writer_fragment_id);
+        let mutation = Command::iceberg_v3_detach_resolve_to_mutation(
+            plan.resolve_fragment_id,
+            &resolve_actor_ids,
+            writer_info,
+        );
+
+        // Collect the per-worker actor set for THIS barrier BEFORE removing the resolve fragment, so
+        // the detach barrier is still routed to the resolve actors. They must receive it to (a) collect
+        // it (they carry `dropped_actors`, so this is their final barrier before they stop) and (b)
+        // forward it down their Hash dispatcher to the writer's remap `Merge`, which is `barrier_align`d
+        // — if the writer's input[1] never sees this barrier it wedges forever. Removing the fragment
+        // first (so `collect_base_info` excludes the resolve actors) is exactly the freeze bug; mirror
+        // the ReplaceStreamJob ordering, which collects base info before `post_apply_remove_fragments`.
+        let (table_ids, node_actors) = self.collect_base_info();
+
+        // Remove the transient resolve fragment from the inflight graph. This takes effect for the NEXT
+        // barrier; the current (detach) barrier was already routed to the resolve actors above.
+        self.database_info
+            .post_apply_remove_fragments(vec![plan.resolve_fragment_id]);
+
+        Ok((
+            Some(mutation),
+            table_ids,
+            None,
+            node_actors,
+            PostCollectCommand::Command("IcebergV3DetachResolve".to_owned()),
+        ))
     }
 }

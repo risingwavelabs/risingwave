@@ -99,6 +99,36 @@ impl EdgeBuilderFragmentInfo {
         }
     }
 
+    /// Build from freshly rendered actors that do not (yet) belong to any model `Fragment` or
+    /// inflight fragment. Used for the transient Iceberg-V3 resolve fragment, whose actors are
+    /// hand-rendered in the barrier worker and have no streaming-job catalog entry.
+    pub fn from_rendered_actors(
+        distribution_type: DistributionType,
+        actors: &[StreamActor],
+        actor_worker: &HashMap<ActorId, WorkerId>,
+        partial_graph_id: PartialGraphId,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Self {
+        let (actors, actor_location) = actors
+            .iter()
+            .map(|actor| {
+                (
+                    (actor.actor_id, actor.vnode_bitmap.clone()),
+                    (
+                        actor.actor_id,
+                        control_stream_manager.host_addr(actor_worker[&actor.actor_id]),
+                    ),
+                )
+            })
+            .unzip();
+        Self {
+            distribution_type,
+            actors,
+            actor_location,
+            partial_graph_id,
+        }
+    }
+
     /// Build from a model `Fragment` with separately provided actors and locations.
     pub fn from_fragment(
         fragment: &Fragment,

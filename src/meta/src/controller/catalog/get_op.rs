@@ -26,6 +26,54 @@ use crate::controller::utils::{
 };
 
 impl CatalogController {
+    /// Resolve the writer fragment id of an Iceberg-V3 pk-index sink job. The V3
+    /// `IcebergWithPkIndexWriter` fragment carries no `FragmentTypeFlag::Sink` (deliberately, to
+    /// avoid triggering generic sink coordination/recovery that the V3 sink — which owns its own
+    /// coordinator — does not expect). A flag-based lookup therefore cannot find it; we instead
+    /// match on the fragment's stream-node body type. There must be exactly one such writer
+    /// fragment per V3 sink job, mirroring the "exactly one" semantics of the regular sink lookup.
+    pub async fn get_iceberg_v3_writer_fragment_id(
+        &self,
+        sink_id: SinkId,
+    ) -> MetaResult<FragmentId> {
+        use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
+
+        let inner = self.inner.read().await;
+        // The writer fragment has no distinguishing type flag, so scan the job's fragments and inspect
+        // their stream-node bodies for the V3 writer node.
+        let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut writer_fragment_ids = Vec::new();
+        for (fragment_id, stream_node) in fragments {
+            let stream_node = stream_node.to_protobuf();
+            let mut is_writer = false;
+            visit_stream_node_body(&stream_node, |body| {
+                if let NodeBody::IcebergWithPkIndexWriter(_) = body {
+                    is_writer = true;
+                }
+            });
+            if is_writer {
+                writer_fragment_ids.push(fragment_id);
+            }
+        }
+
+        if writer_fragment_ids.len() != 1 {
+            return Err(anyhow!(
+                "expected exactly one iceberg-v3 writer fragment for sink {sink_id}, but got {}",
+                writer_fragment_ids.len()
+            )
+            .into());
+        }
+
+        Ok(writer_fragment_ids[0])
+    }
+
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)

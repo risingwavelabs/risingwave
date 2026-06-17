@@ -477,6 +477,7 @@ pub async fn start_service_as_election_leader(
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
         iceberg_v3_sink_manager.clone(),
+        Some(barrier_scheduler.clone()),
     );
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
@@ -487,6 +488,14 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
         env.opts.iceberg_gc_interval_sec,
+    ));
+
+    // Drives completion of attached V3 compaction-resolve pipelines. Runs in its own task (not inline
+    // with barrier completion) because it injects barriers/commands and would otherwise risk a
+    // re-entrant deadlock; a short interval keeps writers from staying blocked-in-resolve.
+    sub_tasks.push(IcebergCompactionManager::resolve_completion_loop(
+        iceberg_compaction_mgr.clone(),
+        Duration::from_secs(1),
     ));
 
     let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);

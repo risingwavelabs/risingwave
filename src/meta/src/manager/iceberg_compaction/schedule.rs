@@ -926,7 +926,15 @@ impl IcebergCompactionManager {
 
             let mut candidates = Vec::new();
             for (sink_id, track) in &guard.sink_schedules {
+                // Skip sinks with an in-flight V3 compaction-resolve pipeline. The resolve attaches a
+                // transient pipeline and only finishes (commits + detaches) some checkpoints later; until
+                // then the sink still looks "dirty" and its track returns to Idle as soon as the
+                // compactor report is processed. Without this guard a second compaction would be
+                // dispatched while the first resolve is still attached, double-attaching to the same
+                // writer fragment and wedging the attach barrier. The `attached_resolves` entry is
+                // cleared by `detach_v3_resolve` once the resolve completes, re-enabling scheduling.
                 if track.should_trigger(now)
+                    && !guard.attached_resolves.contains_key(sink_id)
                     && let CompactionTrackState::Idle {
                         next_compaction_time,
                         ..
@@ -1114,20 +1122,20 @@ impl IcebergCompactionManager {
         };
         let v3_input_bytes = report.v3_input_files.as_deref().unwrap_or(&[]);
 
-        let output_files: Vec<iceberg::spec::SerializedDataFile> = match serde_json::from_slice(
-            v3_output_bytes,
-        ) {
-            Ok(files) => files,
-            Err(e) => {
-                tracing::warn!(
-                    sink_id = %sink_id,
-                    task_id,
-                    error = %e,
-                    "Failed to deserialize v3_output_files from compaction report; skipping V3 routing"
-                );
-                return false;
-            }
-        };
+        // Validate the output-file payload up front so a malformed report is rejected before we
+        // schedule an attach. The raw bytes (not the decoded value) are forwarded into the resolve
+        // node, which re-decodes them on the compute side.
+        if let Err(e) =
+            serde_json::from_slice::<Vec<iceberg::spec::SerializedDataFile>>(v3_output_bytes)
+        {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                error = %e,
+                "Failed to deserialize v3_output_files from compaction report; skipping V3 routing"
+            );
+            return false;
+        }
         let input_file_paths: Vec<String> = match serde_json::from_slice(v3_input_bytes) {
             Ok(paths) => paths,
             Err(e) => {
@@ -1182,28 +1190,323 @@ impl IcebergCompactionManager {
             return false;
         };
 
-        match self
-            .iceberg_v3_sink_manager
-            .commit_compaction(
-                sink_id,
-                output_files,
-                input_file_paths,
-                read_snapshot_id,
-                pk_column_names,
-            )
+        // ATTACH a transient resolve pipeline onto the writer fragment so the writer repairs its
+        // PK index and emits a coordinated overwrite folded into the bracketing checkpoint epoch.
+        // `read_snapshot_id` is not used by the stream-resolve path: the resolver derives liveness
+        // from the writer's pk-index, not the read snapshot.
+        let _ = read_snapshot_id;
+        let Some(barrier_scheduler) = self.barrier_scheduler.clone() else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "no barrier scheduler available; cannot attach V3 resolve pipeline"
+            );
+            return false;
+        };
+
+        // Resolve the writer fragment + database for this sink, and pre-allocate the resolve
+        // fragment id so we can record the attachment for a later DETACH.
+        // The V3 writer fragment carries no `FragmentTypeFlag::Sink`, so it cannot be found via the
+        // generic sink-fragment lookup; match on the `IcebergWithPkIndexWriter` node body instead.
+        let writer_fragment_id = match self
+            .metadata_manager
+            .catalog_controller
+            .get_iceberg_v3_writer_fragment_id(sink_id)
             .await
         {
-            Ok(()) => true,
+            Ok(fragment_id) => fragment_id,
             Err(e) => {
                 tracing::warn!(
                     sink_id = %sink_id,
                     task_id,
                     error = %e.as_report(),
-                    "V3 compaction commit failed; compaction task will be retried"
+                    "Failed to resolve writer fragment for V3 resolve attach; skipping"
+                );
+                return false;
+            }
+        };
+        let database_id = match self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(sink_id)
+            .await
+        {
+            Ok(database_id) => database_id,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e.as_report(),
+                    "Failed to resolve database for V3 resolve attach; skipping"
+                );
+                return false;
+            }
+        };
+        let resolve_fragment_id = risingwave_common::id::FragmentId::from(
+            self.env
+                .id_gen_manager()
+                .generate::<{ crate::controller::id::IdCategory::Fragment }>() as u32,
+        );
+
+        // Decode the output files once for arming the coordinator (the raw bytes were validated
+        // decodable above). The coordinator folds these into the bracketing epoch's overwrite when the
+        // writer reports `Resolver`-done; the raw bytes still travel to the resolve node via the plan.
+        let output_files: Vec<iceberg::spec::SerializedDataFile> =
+            match serde_json::from_slice(v3_output_bytes) {
+                Ok(files) => files,
+                Err(e) => {
+                    tracing::warn!(
+                        sink_id = %sink_id,
+                        task_id,
+                        error = %e,
+                        "Failed to decode v3_output_files for coordinator arm; skipping V3 routing"
+                    );
+                    return false;
+                }
+            };
+
+        // Backstop against double-attach: if a resolve pipeline is already in flight for this sink
+        // (attached but not yet committed/detached), do NOT attach a second one onto the same writer
+        // fragment — that double-attach wedges the attach barrier. The scheduler already skips such
+        // sinks, but the manual `VACUUM` path can reach here directly, so guard again. Returning false
+        // re-queues the task; by the retry the first resolve has detached and the sink is compacted.
+        if self.inner.read().attached_resolves.contains_key(&sink_id) {
+            tracing::info!(
+                sink_id = %sink_id,
+                task_id,
+                "a V3 resolve pipeline is already attached for this sink; skipping double-attach"
+            );
+            return false;
+        }
+
+        // Arm the coordinator BEFORE opening the resolve window so the bracketing-checkpoint
+        // `Resolver`-done report always finds the held overwrite state.
+        if let Err(e) = self
+            .iceberg_v3_sink_manager
+            .arm_compaction_resolve(sink_id, output_files, input_file_paths.clone())
+            .await
+        {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                error = %e.as_report(),
+                "Failed to arm V3 compaction coordinator; skipping V3 routing"
+            );
+            return false;
+        }
+
+        let plan = crate::barrier::IcebergV3ResolveAttachPlan {
+            database_id,
+            sink_id,
+            writer_fragment_id,
+            resolve_fragment_id,
+            output_files: v3_output_bytes.clone(),
+            input_file_paths: input_file_paths.clone(),
+            pk_column_names,
+            parallelism: None,
+        };
+
+        // Ordering is load-bearing: the writer DROPS remap-edge candidates while not in resolve-mode,
+        // so the `Start` mutation MUST land on a barrier STRICTLY BEFORE the attach `Update` adds the
+        // resolve actors. `Start` and the attach `Update` cannot ride the same barrier (one is a bare
+        // mutation, the other an `Update`), so sequence them as two consecutive `run_command`s: the
+        // first await returns only once `Start` is collected, guaranteeing it precedes the attach.
+        tracing::info!(
+            target: "iceberg_v3_resolve",
+            sink_id = %sink_id,
+            task_id,
+            writer_fragment_id = %writer_fragment_id,
+            resolve_fragment_id = %resolve_fragment_id,
+            "injecting V3 resolve Start mutation (step 1/2)"
+        );
+        if let Err(e) = barrier_scheduler
+            .run_command(
+                database_id,
+                crate::barrier::Command::IcebergV3ResolvePhase {
+                    sink_id,
+                    phase: risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::Start,
+                    input_file_paths,
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                error = %e.as_report(),
+                "V3 compaction resolve Start injection failed; compaction task will be retried"
+            );
+            return false;
+        }
+
+        tracing::info!(
+            target: "iceberg_v3_resolve",
+            sink_id = %sink_id,
+            task_id,
+            resolve_fragment_id = %resolve_fragment_id,
+            "Start collected; injecting V3 AttachResolve Update mutation (step 2/2)"
+        );
+        match barrier_scheduler
+            .run_command(
+                database_id,
+                crate::barrier::Command::IcebergV3AttachResolve(Box::new(plan)),
+            )
+            .await
+        {
+            Ok(()) => {
+                tracing::info!(
+                    target: "iceberg_v3_resolve",
+                    sink_id = %sink_id,
+                    task_id,
+                    "V3 AttachResolve Update collected; resolve pipeline attached"
+                );
+                // Record the attachment so a later DETACH (a separate task) targets this fragment.
+                self.inner.write().attached_resolves.insert(
+                    sink_id,
+                    crate::manager::iceberg_compaction::AttachedResolve {
+                        writer_fragment_id,
+                        resolve_fragment_id,
+                    },
+                );
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e.as_report(),
+                    "V3 compaction resolve attach failed; compaction task will be retried"
                 );
                 false
             }
         }
+    }
+
+    /// Build and schedule the DETACH for a previously attached resolve pipeline. Injects the `End`
+    /// resolve-phase mutation FIRST (so the writer exits resolve-mode and resumes) on its own barrier,
+    /// then the detach `Update` that drops the resolve actors and clears the writer's remap `Merge`.
+    /// Mirrors the ordering of ATTACH (`End` before detach, just as `Start` precedes attach). Removes
+    /// the `attached_resolves` entry ONLY after both commands succeed, so a transient failure leaves
+    /// the entry in place and [`Self::resolve_completion_loop`] retries on the next tick instead of
+    /// leaking the transient fragment and wedging the writer. Keeping the entry until success also
+    /// keeps the scheduler's double-attach guard active across the whole detach window.
+    ///
+    /// Reached only via [`Self::try_complete_v3_resolve`], driven by [`Self::resolve_completion_loop`].
+    pub(crate) async fn detach_v3_resolve(&self, sink_id: SinkId) -> MetaResult<()> {
+        // Read (do NOT remove yet); the entry is dropped only after the End + Detach commands land.
+        let Some(attached) = self.inner.read().attached_resolves.get(&sink_id).copied() else {
+            return Ok(());
+        };
+        let Some(barrier_scheduler) = self.barrier_scheduler.clone() else {
+            return Ok(());
+        };
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(sink_id)
+            .await?;
+
+        // `End` first: the writer leaves resolve-mode and resumes its normal path BEFORE the resolve
+        // actors are dropped, symmetric to `Start` preceding attach.
+        barrier_scheduler
+            .run_command(
+                database_id,
+                crate::barrier::Command::IcebergV3ResolvePhase {
+                    sink_id,
+                    phase: risingwave_pb::stream_plan::iceberg_v3_resolve_mutation::Phase::End,
+                    input_file_paths: vec![],
+                },
+            )
+            .await?;
+
+        let plan = crate::barrier::IcebergV3ResolveDetachPlan {
+            database_id,
+            sink_id,
+            writer_fragment_id: attached.writer_fragment_id,
+            resolve_fragment_id: attached.resolve_fragment_id,
+        };
+        barrier_scheduler
+            .run_command(
+                database_id,
+                crate::barrier::Command::IcebergV3DetachResolve(plan),
+            )
+            .await?;
+
+        // Both commands landed; now it is safe to forget the attachment. A failure above returns early
+        // (via `?`) with the entry still present, so the completion loop retries the detach next tick.
+        self.inner.write().attached_resolves.remove(&sink_id);
+        Ok(())
+    }
+
+    /// Completion trigger: if the sink has an attached resolve pipeline whose overwrite has already
+    /// committed (the coordinator cleared its armed `pending_compaction` when it folded the overwrite
+    /// into the bracketing epoch), fire `End` + DETACH and tear the pipeline down. Idempotent and a
+    /// no-op when nothing is attached or the overwrite has not committed yet.
+    ///
+    /// Driven by [`Self::resolve_completion_loop`], which polls every attached sink on a short timer.
+    /// A timer (rather than an inline call from barrier-completion) is used deliberately: this method
+    /// injects barriers/commands via the `barrier_scheduler`, so calling it from inside the
+    /// barrier-completion critical section would risk a re-entrant deadlock.
+    pub(crate) async fn try_complete_v3_resolve(&self, sink_id: SinkId) -> MetaResult<()> {
+        let attached = self.inner.read().attached_resolves.contains_key(&sink_id);
+        if !attached {
+            return Ok(());
+        }
+        // The coordinator clears its armed window the moment it folds the overwrite into the bracketing
+        // epoch's pre-commit. A still-armed window means the `Resolver`-done report has not yet been
+        // processed, so the overwrite is not committed — hold the pipeline open.
+        if self
+            .iceberg_v3_sink_manager
+            .has_pending_compaction(sink_id)
+            .await
+        {
+            return Ok(());
+        }
+        self.detach_v3_resolve(sink_id).await
+    }
+
+    /// Periodic driver that completes attached V3 compaction-resolve pipelines. Runs in its OWN task
+    /// (spawned at meta boot) rather than inline with barrier completion: [`Self::try_complete_v3_resolve`]
+    /// injects barriers/commands through the `barrier_scheduler`, so driving it from within the
+    /// barrier-completion critical section could re-enter and deadlock. The interval is kept short so a
+    /// writer does not stay blocked-in-resolve much longer than necessary after its overwrite commits.
+    pub fn resolve_completion_loop(
+        manager: Arc<Self>,
+        interval: Duration,
+    ) -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tracing::info!(?interval, "Starting Iceberg V3 resolve-completion loop");
+            let mut ticker = tokio::time::interval(interval);
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        // Snapshot the keys under a short read lock and drop it before any await, so the
+                        // lock is never held across the per-sink command injection inside
+                        // `try_complete_v3_resolve`.
+                        let sink_ids = {
+                            let guard = manager.inner.read();
+                            guard.attached_resolves.keys().copied().collect::<Vec<_>>()
+                        };
+                        for sink_id in sink_ids {
+                            // One sink's failure must not stall completion of the others; log and continue.
+                            if let Err(e) = manager.try_complete_v3_resolve(sink_id).await {
+                                tracing::warn!(
+                                    sink_id = %sink_id,
+                                    error = %e.as_report(),
+                                    "Failed to complete V3 compaction resolve; will retry next tick"
+                                );
+                            }
+                        }
+                    },
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg V3 resolve-completion loop is stopped");
+                        return;
+                    }
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 
     pub async fn handle_report_task(&self, report: IcebergReportTask) {
