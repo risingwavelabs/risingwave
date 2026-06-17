@@ -136,7 +136,7 @@ pub async fn handle_alter_table_column(
     };
 
     if has_incoming_sinks && matches!(operation, AlterTableOperation::DropColumn { .. }) {
-        #[allow(clippy::needless_return_with_question_mark)]
+        #[expect(clippy::needless_return_with_question_mark)]
         return Err(ErrorCode::InvalidInputSyntax(
             "dropping columns in target table of sinks is not supported".to_owned(),
         ))?;
@@ -194,7 +194,7 @@ pub async fn handle_alter_table_column(
                     .iter()
                     .any(|x| matches!(x.option, ColumnOption::DefaultValue(_)))
             {
-                #[allow(clippy::needless_return_with_question_mark)]
+                #[expect(clippy::needless_return_with_question_mark)]
                 return Err(ErrorCode::InvalidInputSyntax(
                     "alter table add NOT NULL columns must have default value".to_owned(),
                 ))?;

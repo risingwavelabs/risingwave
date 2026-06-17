@@ -181,7 +181,7 @@ impl PartialEq<dyn DynEq + 'static> for dyn DynEq {
     }
 }
 
-#[allow(internal_eq_trait_method_impls)]
+#[expect(internal_eq_trait_method_impls)]
 impl Eq for dyn DynEq {
     fn assert_receiver_is_total_eq(&self) {}
 }

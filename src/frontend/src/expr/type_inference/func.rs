@@ -52,7 +52,7 @@ pub fn infer_type_with_sigmap(
         }
         FuncName::Aggregate(agg_kind) =>
         {
-            #[allow(clippy::collapsible_match)]
+            #[expect(clippy::collapsible_match)]
             if *agg_kind == PbAggKind::Grouping {
                 return Ok(DataType::Int32);
             }

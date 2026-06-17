@@ -174,7 +174,7 @@ fn with_additional_columns(
 }
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
-    #[allow(clippy::unnecessary_unwrap)]
+    #[expect(clippy::unnecessary_unwrap)]
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
         let primary_keys = self
@@ -277,7 +277,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         }
     }
 
-    #[allow(clippy::unnecessary_unwrap)]
+    #[expect(clippy::unnecessary_unwrap)]
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_table_split(&self, args: SplitSnapshotReadArgs) {
         // prepare rate limiter

@@ -635,7 +635,7 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
-#[allow(
+#[expect(
     clippy::large_stack_frames,
     reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
               post-layout generator stores only one arm at a time (~13–16 KiB)."

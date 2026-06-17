@@ -416,7 +416,7 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    #[allow(clippy::large_stack_frames)]
+    #[expect(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;

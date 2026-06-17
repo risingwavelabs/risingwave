@@ -185,7 +185,7 @@ impl Binder {
                     .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
                     .map(|(s, idxes)| (Ident::from_real_value(s), idxes))
                     .collect::<Vec<_>>();
-                #[allow(clippy::unnecessary_sort_by)]
+                #[expect(clippy::unnecessary_sort_by)]
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
 
                 let mut col_indices = Vec::new();

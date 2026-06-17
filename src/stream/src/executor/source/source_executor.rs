@@ -1141,7 +1141,7 @@ impl WaitCheckpointTaskBuilder {
         #[expect(clippy::single_match)]
         match &mut self.building_task {
             WaitCheckpointTask::CommitCdcOffset(offsets) => {
-                #[allow(clippy::collapsible_match)]
+                #[expect(clippy::collapsible_match)]
                 if !updated_splits.is_empty() {
                     // cdc source only has one split
                     assert_eq!(1, updated_splits.len());

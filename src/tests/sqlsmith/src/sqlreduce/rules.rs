@@ -531,7 +531,7 @@ pub fn generate_reduction_candidates(
 
     // Sort candidates by dependency-aware priority (higher priority first)
     // Independent clauses (WHERE, ORDER BY) tried first, then dependent ones (SELECT, GROUP BY)
-    #[allow(clippy::unnecessary_sort_by)]
+    #[expect(clippy::unnecessary_sort_by)]
     candidates.sort_by(|a, b| b.operation.priority().cmp(&a.operation.priority()));
 
     tracing::debug!(

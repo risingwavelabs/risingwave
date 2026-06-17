@@ -441,7 +441,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 ..
                                             }) =>
                                             {
-                                                #[allow(clippy::collapsible_match)]
+                                                #[expect(clippy::collapsible_match)]
                                                 if dropped_actors.contains(&self.actor_ctx.id) {
                                                     tracing::info!(
                                                         %table_id,
