@@ -485,7 +485,7 @@ pub struct SessionConfig {
     enable_locality_backfill: LocalityBackfillMode,
 
     /// Auto-enable locality backfill when estimated scan backfill data reaches this size in bytes.
-    /// Defaults to 10 GiB (10737418240 bytes).
+    /// Defaults to 10 `GiB` (10737418240 bytes).
     #[parameter(default = AUTO_LOCALITY_BACKFILL_MIN_SIZE)]
     auto_locality_backfill_min_size: u64,
 
