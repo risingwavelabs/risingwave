@@ -38,7 +38,6 @@ pub struct SourceCatalog {
     pub database_id: DatabaseId,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
-    pub append_only: bool,
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
@@ -106,6 +105,10 @@ impl SourceCatalog {
         self.with_properties
             .get_connector()
             .expect("connector name is missing")
+    }
+
+    pub fn is_append_only(&self) -> bool {
+        self.row_id_index.is_some()
     }
 
     pub fn is_iceberg_connector(&self) -> bool {
@@ -184,7 +187,6 @@ impl From<&PbSource> for SourceCatalog {
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
-        let append_only = row_id_index.is_some();
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
@@ -201,7 +203,6 @@ impl From<&PbSource> for SourceCatalog {
             database_id,
             columns,
             pk_col_ids,
-            append_only,
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,

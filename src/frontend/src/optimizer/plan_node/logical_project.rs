@@ -269,13 +269,15 @@ impl ToStream for LogicalProject {
                     .streaming_unsafe_allow_unmaterialized_impure_expr()
             });
         let should_materialize_expr = match new_input.stream_kind() {
-            StreamKind::AppendOnly => None,
-            StreamKind::Retract | StreamKind::Upsert if unsafe_allow_unmaterialized_impure_expr => {
+            StreamKind::AppendOnly | StreamKind::RowIdNotFilled { append_only: true } => None,
+            _ if unsafe_allow_unmaterialized_impure_expr => {
                 // This deliberately leaves impure expressions in `StreamProject` on retract/upsert
                 // streams. The behavior is unsafe and only enabled by the explicit session option.
                 None
             }
-            kind @ (StreamKind::Retract | StreamKind::Upsert) => {
+            kind @ (StreamKind::Retract
+            | StreamKind::Upsert
+            | StreamKind::RowIdNotFilled { append_only: false }) => {
                 // Extract impure functions to `MaterializedExprs` operator
                 let mut impure_field_names = BTreeMap::new();
                 let mut impure_expr_indices = HashSet::new();
@@ -298,12 +300,14 @@ impl ToStream for LogicalProject {
                     .collect();
                 if impure_exprs.is_empty() {
                     None
-                } else if kind == StreamKind::Upsert
-                    && new_input
-                        .stream_key()
-                        .into_iter()
-                        .flatten()
-                        .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
+                } else if matches!(
+                    kind,
+                    StreamKind::Upsert | StreamKind::RowIdNotFilled { append_only: false }
+                ) && new_input
+                    .stream_key()
+                    .into_iter()
+                    .flatten()
+                    .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
                 {
                     // We're operating on non-stream-key columns of upsert stream, no need to materialize.
                     None

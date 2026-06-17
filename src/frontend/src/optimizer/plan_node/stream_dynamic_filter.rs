@@ -52,7 +52,7 @@ impl StreamDynamicFilter {
         let out_kind = match left_kind {
             StreamKind::AppendOnly if condition_always_relax => StreamKind::AppendOnly,
             StreamKind::AppendOnly | StreamKind::Retract => StreamKind::Retract,
-            StreamKind::Upsert => unreachable!(),
+            StreamKind::Upsert | StreamKind::RowIdNotFilled { .. } => unreachable!(),
         };
 
         let base = PlanBase::new_stream_with_core(

@@ -87,7 +87,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .get_row_encode()
                         .ok()
                         .map(|row_encode| row_encode.as_str_name().into()),
-                    append_only: source.append_only,
+                    append_only: source.is_append_only(),
                     associated_table_id: source.associated_table_id,
                     connection_id: source.connection_id,
                     definition: source.create_sql_purified(),

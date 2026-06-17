@@ -113,9 +113,6 @@ impl LogicalSource {
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
-        if !source_catalog.append_only {
-            assert!(row_id_index.is_none());
-        }
 
         Self::new(
             Some(source_catalog),

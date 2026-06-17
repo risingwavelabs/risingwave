@@ -41,13 +41,18 @@ impl StreamRowIdGen {
         row_id_index: usize,
         distribution: Distribution,
     ) -> StreamRowIdGen {
+        let stream_kind = match input.stream_kind() {
+            StreamKind::RowIdNotFilled { append_only: true } => StreamKind::AppendOnly,
+            StreamKind::RowIdNotFilled { append_only: false } => StreamKind::Upsert,
+            kind => kind,
+        };
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             distribution,
-            input.stream_kind(),
+            stream_kind,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

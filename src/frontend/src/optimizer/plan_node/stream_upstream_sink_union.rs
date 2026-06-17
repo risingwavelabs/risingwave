@@ -63,7 +63,9 @@ impl StreamUpstreamSinkUnion {
     ) -> Self {
         // For upstream sink creating, we require that if the table doesn't define pk or the table is `append_only`, the
         // upstream sink must be `append_only`.
-        let stream_kind = if append_only || !user_defined_pk {
+        let stream_kind = if !user_defined_pk {
+            StreamKind::RowIdNotFilled { append_only: true }
+        } else if append_only {
             StreamKind::AppendOnly
         } else {
             StreamKind::Upsert

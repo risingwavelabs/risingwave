@@ -1095,7 +1095,6 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         database_id,
         columns,
         pk_col_ids,
-        append_only,
         owner: session.user_id(),
         info: source_info,
         row_id_index,

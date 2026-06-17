@@ -83,6 +83,15 @@ impl StreamUnion {
             if inputs.len() == 1 {
                 // Single input. Follow the input's kind.
                 inputs[0].stream_kind()
+            } else if inputs
+                .iter()
+                .any(|x| x.stream_kind().is_row_id_not_filled())
+            {
+                StreamKind::RowIdNotFilled {
+                    append_only: inputs
+                        .iter()
+                        .all(|x| x.stream_kind().is_semantic_append_only()),
+                }
             } else if inputs.iter().all(|x| x.stream_kind().is_append_only()) {
                 // Special case for append-only table. Either there will be a `RowIdGen` following the `Union`,
                 // or there will be a `Materialize` with conflict handling enabled. In both cases there

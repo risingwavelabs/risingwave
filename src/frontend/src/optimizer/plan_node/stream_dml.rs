@@ -28,25 +28,29 @@ pub struct StreamDml {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     column_descs: Vec<ColumnDesc>,
+    append_only: bool,
+    row_id_as_pk: bool,
 }
 
 impl StreamDml {
     // `append_only` indicates whether only `INSERT` is allowed.
-    pub fn new(input: PlanRef, append_only: bool, column_descs: Vec<ColumnDesc>) -> Self {
+    pub fn new(
+        input: PlanRef,
+        append_only: bool,
+        row_id_as_pk: bool,
+        column_descs: Vec<ColumnDesc>,
+    ) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.stream_kind().merge(if append_only {
-                // For append-only table. Either there will be a `RowIdGen` following the `Dml` and `Union`,
-                // or there will be a `Materialize` with conflict handling enabled. In both cases there
-                // will be no key conflict, so we can treat the merged stream as append-only here.
+            input.stream_kind().merge(if row_id_as_pk {
+                StreamKind::RowIdNotFilled { append_only }
+            } else if append_only {
                 StreamKind::AppendOnly
             } else {
-                // We cannot guarantee that there's no conflict on stream key between upstream
-                // source and DML input, so we must treat it as upsert here.
                 StreamKind::Upsert
             }),
             false,                   // TODO(rc): decide EOWC property
@@ -58,6 +62,8 @@ impl StreamDml {
             base,
             input,
             column_descs,
+            append_only,
+            row_id_as_pk,
         }
     }
 
@@ -87,7 +93,12 @@ impl PlanTreeNodeUnary<Stream> for StreamDml {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.append_only(), self.column_descs.clone())
+        Self::new(
+            input,
+            self.append_only,
+            self.row_id_as_pk,
+            self.column_descs.clone(),
+        )
     }
 }
 

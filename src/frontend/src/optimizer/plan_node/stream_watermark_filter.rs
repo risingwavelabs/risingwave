@@ -37,6 +37,15 @@ pub struct StreamWatermarkFilter {
 
 impl StreamWatermarkFilter {
     pub fn new(input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+        // `RowIdNotFilled` must be resolved by `StreamRowIdGen` before watermark filtering.
+        // Current callers are table planning and source scan planning; both should insert
+        // `StreamRowIdGen` first whenever the input has a hidden row id.
+        assert!(
+            !input.stream_kind().is_row_id_not_filled(),
+            "StreamWatermarkFilter does not support input with unfilled row id, got {}",
+            input.stream_kind()
+        );
+
         if watermark_descs.iter().any(|d| !d.with_ttl) {
             assert!(
                 input.append_only(),

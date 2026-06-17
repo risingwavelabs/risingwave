@@ -781,10 +781,14 @@ impl StreamSink {
                              Please use `type = 'append-only'` or `type = 'upsert'` instead.",
                         );
                     }
-                    if derived_stream_kind == StreamKind::Upsert {
+                    if matches!(
+                        derived_stream_kind,
+                        StreamKind::Upsert | StreamKind::RowIdNotFilled { .. }
+                    ) {
                         bail_invalid_input_syntax!(
-                            "The sink of upsert stream cannot be retract. \
+                            "The sink of {} stream cannot be retract. \
                              Please create a materialized view or sink-into-table with this query before sinking it.",
+                            derived_stream_kind,
                         );
                     }
                 }
@@ -798,6 +802,12 @@ impl StreamSink {
                 // as it is well supported by most sinks and reduces the amount of data written.
                 StreamKind::Retract | StreamKind::Upsert => SinkType::Upsert,
                 StreamKind::AppendOnly => SinkType::AppendOnly,
+                StreamKind::RowIdNotFilled { .. } => {
+                    bail_invalid_input_syntax!(
+                        "The sink of {} stream is not supported before row id is filled.",
+                        derived_stream_kind,
+                    );
+                }
             };
             Ok((sink_type, user_ignore_delete))
         }

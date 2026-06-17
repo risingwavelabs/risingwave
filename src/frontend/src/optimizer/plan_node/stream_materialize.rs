@@ -82,6 +82,12 @@ impl StreamMaterialize {
             | ConflictBehavior::DoUpdateIfNotNull => match input.stream_kind() {
                 StreamKind::AppendOnly => StreamKind::AppendOnly,
                 StreamKind::Retract | StreamKind::Upsert => StreamKind::Retract,
+                StreamKind::RowIdNotFilled { .. } => {
+                    risingwave_common::bail!(
+                        "{} stream is not supported as input of Materialize with conflict handling",
+                        input.stream_kind()
+                    )
+                }
             },
         };
         let base = PlanBase::new_stream(
@@ -144,6 +150,12 @@ impl StreamMaterialize {
         let conflict_behavior = match input.stream_kind() {
             StreamKind::Retract | StreamKind::AppendOnly => ConflictBehavior::NoCheck,
             StreamKind::Upsert => ConflictBehavior::Overwrite,
+            StreamKind::RowIdNotFilled { .. } => {
+                risingwave_common::bail!(
+                    "{} stream is not supported as input of Materialize",
+                    input.stream_kind()
+                )
+            }
         };
 
         let table = Self::derive_table_catalog(

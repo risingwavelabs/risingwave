@@ -118,9 +118,9 @@ impl GenericPlanNode for Source {
 
 impl Source {
     pub fn stream_kind(&self) -> StreamKind {
-        if let Some(catalog) = &self.catalog {
-            if catalog.append_only {
-                StreamKind::AppendOnly
+        if self.catalog.is_some() {
+            if self.row_id_index.is_some() {
+                StreamKind::RowIdNotFilled { append_only: true }
             } else {
                 // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
                 // trust the old record from external source.

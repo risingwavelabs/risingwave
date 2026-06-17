@@ -836,7 +836,13 @@ impl LogicalPlanRoot {
             kind: PrimaryKeyKind,
             column_descs: Vec<ColumnDesc>,
         ) -> Result<StreamPlanRef> {
-            let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
+            let mut dml_node = StreamDml::new(
+                stream_plan,
+                append_only,
+                kind != PrimaryKeyKind::UserDefinedPrimaryKey,
+                column_descs,
+            )
+            .into();
 
             // Add generated columns.
             dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
