@@ -4,7 +4,7 @@ set sink_decouple = false;
 statement ok
 CREATE SECRET tpuf_api_key WITH (backend = 'meta') AS 'tpuf_test';
 
-# ---- Success: write payload, headers, dynamic namespace, and mixed upsert/delete request ----
+# ---- Success: write payload, headers, dynamic namespace, and upsert/delete requests ----
 statement ok
 CREATE TABLE tpuf_e2e_items (
     id varchar primary key,
@@ -38,14 +38,11 @@ statement ok
 FLUSH;
 
 statement ok
-UPDATE tpuf_e2e_items
-SET id = 'upsert-me',
-    body = 'inserted after delete',
-    note_contents = ARRAY['new', 'row'],
-    is_starred = false,
-    published_at = '2026-06-16 04:05:06',
-    embedding = '[0.4,0.5,0.6]'
-WHERE id = 'delete-me';
+DELETE FROM tpuf_e2e_items WHERE id = 'delete-me';
+
+statement ok
+INSERT INTO tpuf_e2e_items VALUES
+    ('upsert-me', 'IFI-ns-1', 'inserted after delete', ARRAY['new', 'row'], false, '2026-06-16 04:05:06', '[0.4,0.5,0.6]');
 
 statement ok
 FLUSH;

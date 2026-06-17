@@ -715,19 +715,27 @@ fn unsupported_type(data_type: &str) -> SinkError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(madsim))]
     use std::io::{Read, Write};
+    #[cfg(not(madsim))]
     use std::net::TcpListener;
+    #[cfg(not(madsim))]
     use std::sync::mpsc;
+    #[cfg(not(madsim))]
     use std::thread;
 
+    #[cfg(not(madsim))]
+    use risingwave_common::array::StreamChunk;
+    #[cfg(not(madsim))]
     use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
-    use risingwave_common::array::{ListValue, StreamChunk, VectorVal};
+    use risingwave_common::array::{ListValue, VectorVal};
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{ListType, ScalarImpl, Timestamp};
     use serde_json::json;
 
     use super::*;
+    #[cfg(not(madsim))]
     use crate::sink::log_store::DeliveryFutureManager;
 
     #[test]
@@ -756,6 +764,7 @@ mod tests {
         assert_eq!(generated["vector"]["ann"], json!(true));
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_write_chunk_posts_batched_payload_and_headers() {
         let (base_url, request_rx, server_thread) = spawn_mock_http_server();
@@ -989,6 +998,7 @@ mod tests {
         assert_eq!(body["upsert_rows"][0]["vector"][0], json!(0.25));
     }
 
+    #[cfg(not(madsim))]
     fn spawn_mock_http_server() -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1030,6 +1040,7 @@ mod tests {
         (format!("http://{}", addr), request_rx, server_thread)
     }
 
+    #[cfg(not(madsim))]
     fn find_header_end(buf: &[u8]) -> Option<usize> {
         buf.windows(4).position(|window| window == b"\r\n\r\n")
     }

@@ -269,7 +269,10 @@ fn datum_to_json_object(
             }
             CustomJsonType::Turbopuffer => {
                 let value = f64::try_from(v).map_err(|err| {
-                    ArrayError::internal(format!("failed to convert decimal to f64: {err}"))
+                    ArrayError::internal(format!(
+                        "failed to convert decimal to f64: {}",
+                        err.as_report()
+                    ))
                 })?;
                 serde_json::Number::from_f64(value)
                     .map(Value::Number)

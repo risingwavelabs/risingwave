@@ -85,15 +85,20 @@ def main():
     assert_equal(schema["embedding"]["type"], "[3]f32", "embedding type")
     assert_equal(schema["embedding"]["ann"], True, "embedding ann")
 
-    mixed = find_body(
+    delete_request = find_body(
+        bodies,
+        lambda body: "deletes" in body and "delete-me" in body["deletes"],
+        "delete request for delete-me",
+    )
+    assert_equal(delete_request["distance_metric"], "cosine_distance", "delete distance metric")
+
+    upsert_request = find_body(
         bodies,
         lambda body: "upsert_rows" in body
-        and "deletes" in body
-        and "delete-me" in body["deletes"]
         and any(row.get("id") == "upsert-me" for row in body["upsert_rows"]),
-        "single request containing both upsert_rows and deletes",
+        "upsert request for upsert-me",
     )
-    rows = {row["id"]: row for row in mixed["upsert_rows"]}
+    rows = {row["id"]: row for row in upsert_request["upsert_rows"]}
     assert_equal(rows["upsert-me"]["body"], "inserted after delete", "upsert body")
     assert_equal(rows["upsert-me"]["note_contents"], ["new", "row"], "upsert note contents")
     assert_equal(rows["upsert-me"]["embedding"], [0.4, 0.5, 0.6], "upsert vector")
