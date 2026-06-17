@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::{HashMap, VecDeque};
+use std::mem;
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
@@ -21,25 +23,176 @@ use tracing::warn;
 
 use crate::sstable_info::SstableInfo;
 
+const CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE: usize = 256;
+
+#[derive(Debug, Clone, PartialEq)]
+struct CloneOptimizedVecDeque<T> {
+    front: VecDeque<T>,
+    middle: VecDeque<Arc<Vec<T>>>,
+    back: Vec<T>,
+}
+
+impl<T> Default for CloneOptimizedVecDeque<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> FromIterator<T> for CloneOptimizedVecDeque<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut middle = VecDeque::new();
+        let mut chunks = iter
+            .into_iter()
+            .array_chunks::<CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE>();
+        for chunk in chunks.by_ref() {
+            middle.push_back(Arc::new(Vec::from(chunk)));
+        }
+        let back = chunks
+            .into_remainder()
+            .map_or_else(Vec::new, Iterator::collect);
+
+        Self {
+            front: VecDeque::new(),
+            middle,
+            back,
+        }
+    }
+}
+
+impl<T> CloneOptimizedVecDeque<T> {
+    fn new() -> Self {
+        Self {
+            front: VecDeque::new(),
+            middle: VecDeque::new(),
+            back: Vec::new(),
+        }
+    }
+
+    fn push_back(&mut self, value: T) {
+        self.back.push(value);
+        if self.back.len() == CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE {
+            self.middle.push_back(Arc::new(mem::take(&mut self.back)));
+        }
+    }
+
+    fn pop_front(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.refill_front_if_needed();
+        self.front
+            .pop_front()
+            .or_else(|| (!self.back.is_empty()).then(|| self.back.remove(0)))
+    }
+
+    fn front(&self) -> Option<&T> {
+        self.front
+            .front()
+            .or_else(|| self.middle.front().and_then(|chunk| chunk.first()))
+            .or_else(|| self.back.first())
+    }
+
+    fn front_mut(&mut self) -> Option<&mut T>
+    where
+        T: Clone,
+    {
+        self.refill_front_if_needed();
+        self.front.front_mut().or_else(|| self.back.first_mut())
+    }
+
+    fn back(&self) -> Option<&T> {
+        self.back
+            .last()
+            .or_else(|| self.middle.back().and_then(|chunk| chunk.last()))
+            .or_else(|| self.front.back())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &T> {
+        self.front
+            .iter()
+            .chain(self.middle.iter().flat_map(|chunk| chunk.iter()))
+            .chain(self.back.iter())
+    }
+
+    fn iter_from(&self, index: usize) -> impl Iterator<Item = &T> {
+        let front_start = index.min(self.front.len());
+        let index = index.saturating_sub(self.front.len());
+
+        let middle_len = self.middle.len() * CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+        let middle_index = index.min(middle_len);
+        let middle_chunk_start = middle_index / CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+        let middle_item_start = middle_index % CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+        let back_start = index.saturating_sub(middle_len).min(self.back.len());
+
+        self.front
+            .range(front_start..)
+            .chain(
+                self.middle
+                    .range(middle_chunk_start..)
+                    .enumerate()
+                    .flat_map(move |(index, chunk)| {
+                        let start = if index == 0 { middle_item_start } else { 0 };
+                        chunk[start..].iter()
+                    }),
+            )
+            .chain(self.back[back_start..].iter())
+    }
+
+    fn partition_point<P>(&self, pred: P) -> usize
+    where
+        P: FnMut(&T) -> bool,
+    {
+        let mut pred = pred;
+        let front_pos = self.front.partition_point(|item| pred(item));
+        if front_pos < self.front.len() {
+            return front_pos;
+        }
+
+        let middle_chunk_pos = self.middle.partition_point(|chunk| {
+            pred(chunk.last().expect("middle chunks should be non-empty"))
+        });
+        if middle_chunk_pos < self.middle.len() {
+            let middle_item_pos = self.middle[middle_chunk_pos].partition_point(|item| pred(item));
+            return self.front.len()
+                + middle_chunk_pos * CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE
+                + middle_item_pos;
+        }
+
+        self.front.len()
+            + self.middle.len() * CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE
+            + self.back.partition_point(|item| pred(item))
+    }
+
+    fn refill_front_if_needed(&mut self)
+    where
+        T: Clone,
+    {
+        if !self.front.is_empty() {
+            return;
+        }
+
+        if let Some(chunk) = self.middle.pop_front() {
+            self.front =
+                VecDeque::from(Arc::try_unwrap(chunk).unwrap_or_else(|shared| (*shared).clone()));
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
     // older log at the front
-    VecDeque<EpochNewChangeLogCommon<T>>,
+    CloneOptimizedVecDeque<EpochNewChangeLogCommon<T>>,
 );
 
 impl<T> TableChangeLogCommon<T> {
     pub fn new(logs: impl IntoIterator<Item = EpochNewChangeLogCommon<T>>) -> Self {
-        let logs = logs.into_iter().collect::<VecDeque<_>>();
+        let logs = logs.into_iter().collect::<CloneOptimizedVecDeque<_>>();
         debug_assert!(logs.iter().flat_map(|log| log.epochs()).is_sorted());
         Self(logs)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> {
         self.0.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
-        self.0.iter_mut()
     }
 
     pub fn add_change_log(&mut self, new_change_log: EpochNewChangeLogCommon<T>) {
@@ -53,16 +206,6 @@ impl<T> TableChangeLogCommon<T> {
         self.0
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
-    }
-
-    pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
-        self.0.into_iter()
-    }
-
-    pub(crate) fn change_log_iter_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
-        self.0.iter_mut()
     }
 }
 
@@ -159,17 +302,22 @@ where
 }
 
 impl<T> TableChangeLogCommon<T> {
+    fn iter_starting_from_epoch(
+        &self,
+        epoch: u64,
+    ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
+        let start = self
+            .0
+            .partition_point(|epoch_change_log| epoch_change_log.checkpoint_epoch < epoch);
+        self.0.iter_from(start)
+    }
+
     pub fn filter_epoch(
         &self,
         (min_epoch, max_epoch): (u64, u64),
     ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
-        let start = self
-            .0
-            .partition_point(|epoch_change_log| epoch_change_log.checkpoint_epoch < min_epoch);
-        let end = self
-            .0
-            .partition_point(|epoch_change_log| epoch_change_log.first_epoch() <= max_epoch);
-        self.0.range(start..end)
+        self.iter_starting_from_epoch(min_epoch)
+            .take_while(move |epoch_change_log| epoch_change_log.first_epoch() <= max_epoch)
     }
 
     /// Get the `next_epoch` of the given `epoch`
@@ -179,18 +327,8 @@ impl<T> TableChangeLogCommon<T> {
     ///     - Err(()): `epoch` is not an existing or to exist one
     #[expect(clippy::result_unit_err)]
     pub fn next_epoch(&self, epoch: u64) -> Result<Option<u64>, ()> {
-        let start = self
-            .0
-            .partition_point(|epoch_change_log| epoch_change_log.checkpoint_epoch < epoch);
-        debug_assert!(
-            self.0
-                .range(start..)
-                .flat_map(|epoch_change_log| epoch_change_log.epochs())
-                .is_sorted()
-        );
         let mut later_epochs = self
-            .0
-            .range(start..)
+            .iter_starting_from_epoch(epoch)
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
             .skip_while(|log_epoch| *log_epoch < epoch);
         if let Some(first_epoch) = later_epochs.next() {
@@ -236,7 +374,10 @@ impl<T> TableChangeLogCommon<T> {
             .collect()
     }
 
-    pub fn truncate(&mut self, truncate_epoch: u64) {
+    pub fn truncate(&mut self, truncate_epoch: u64)
+    where
+        T: Clone,
+    {
         while let Some(change_log) = self.0.front()
             && change_log.checkpoint_epoch < truncate_epoch
         {
@@ -373,10 +514,69 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use itertools::Itertools;
 
-    use crate::change_log::{EpochNewChangeLog, TableChangeLogCommon};
+    use crate::change_log::{CloneOptimizedVecDeque, EpochNewChangeLog, TableChangeLogCommon};
     use crate::sstable_info::SstableInfo;
+
+    #[test]
+    fn test_clone_optimized_vec_deque_basic_operations() {
+        for len in [0, 1, 255, 256, 257, 600] {
+            let mut deque = (0..len).collect::<CloneOptimizedVecDeque<_>>();
+            assert_eq!(len, deque.iter().count());
+            assert_eq!((len > 0).then_some(&0), deque.front());
+            assert_eq!(len.checked_sub(1).as_ref(), deque.back());
+            assert_eq!((0..len).collect_vec(), deque.iter().copied().collect_vec());
+
+            let range_start = usize::from(len > 1);
+            let range_end = len.saturating_sub(usize::from(len > 2));
+            assert_eq!(
+                (range_start..range_end).collect_vec(),
+                deque
+                    .iter()
+                    .skip(range_start)
+                    .take(range_end - range_start)
+                    .copied()
+                    .collect_vec()
+            );
+
+            for expected in 0..len {
+                assert_eq!(Some(expected), deque.pop_front());
+            }
+            assert_eq!(None, deque.pop_front());
+        }
+    }
+
+    #[test]
+    fn test_clone_optimized_vec_deque_clone_shares_middle_chunks() {
+        let deque = (0..600).collect::<CloneOptimizedVecDeque<_>>();
+        assert_eq!(2, deque.middle.len());
+
+        let cloned = deque.clone();
+        assert!(
+            (0..deque.middle.len())
+                .all(|index| Arc::ptr_eq(&deque.middle[index], &cloned.middle[index]))
+        );
+        assert!(
+            deque
+                .middle
+                .iter()
+                .all(|chunk| Arc::strong_count(chunk) == 2)
+        );
+
+        let mut popped = deque;
+        let mut appended = cloned;
+        assert_eq!(Some(0), popped.pop_front());
+        appended.push_back(600);
+
+        assert_eq!((1..600).collect_vec(), popped.iter().copied().collect_vec());
+        assert_eq!(
+            (0..=600).collect_vec(),
+            appended.iter().copied().collect_vec()
+        );
+    }
 
     #[test]
     fn test_filter_epoch() {
@@ -413,7 +613,6 @@ mod tests {
                 let min_epoch = epochs[i];
                 let max_epoch = epochs[j];
                 let expected = table_change_log
-                    .0
                     .iter()
                     .filter(|log| {
                         min_epoch <= log.checkpoint_epoch && log.first_epoch() <= max_epoch
@@ -490,11 +689,9 @@ mod tests {
         let origin_table_change_log = table_change_log.clone();
         for truncate_epoch in 0..6 {
             table_change_log.truncate(truncate_epoch);
-            let expected_table_change_log = TableChangeLogCommon(
-                origin_table_change_log
-                    .0
-                    .iter()
-                    .filter_map(|epoch_change_log| {
+            let expected_table_change_log =
+                TableChangeLogCommon::new(origin_table_change_log.iter().filter_map(
+                    |epoch_change_log| {
                         let mut epoch_change_log = epoch_change_log.clone();
                         epoch_change_log
                             .non_checkpoint_epochs
@@ -506,10 +703,35 @@ mod tests {
                         } else {
                             Some(epoch_change_log)
                         }
-                    })
-                    .collect(),
-            );
+                    },
+                ));
             assert_eq!(expected_table_change_log, table_change_log);
         }
+    }
+
+    #[test]
+    fn test_table_change_log_large_clone_independent_mutation() {
+        let table_change_log =
+            TableChangeLogCommon::<SstableInfo>::new((0..600).map(|epoch| EpochNewChangeLog {
+                new_value: vec![],
+                old_value: vec![],
+                non_checkpoint_epochs: vec![],
+                checkpoint_epoch: epoch,
+            }));
+        let mut cloned = table_change_log.clone();
+
+        cloned.add_change_log(EpochNewChangeLog {
+            new_value: vec![],
+            old_value: vec![],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch: 600,
+        });
+        cloned.truncate(300);
+
+        assert_eq!(
+            (0..600).collect_vec(),
+            table_change_log.epochs().collect_vec()
+        );
+        assert_eq!((300..=600).collect_vec(), cloned.epochs().collect_vec());
     }
 }
