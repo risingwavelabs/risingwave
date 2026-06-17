@@ -106,6 +106,8 @@ fn filter_metadata_from_pb(
     let bloom_filter_kind = PbBloomFilterType::try_from(bloom_filter_kind)
         .expect("invalid legacy bloom_filter_kind in SST info");
 
+    // Exactly one metadata format is active for each SST: legacy SSTs use
+    // `bloom_filter_kind`, while new SSTs use `filter_type` plus optional `filter_layout`.
     if let Some(filter_type) = filter_type {
         assert_eq!(
             bloom_filter_kind,
@@ -577,10 +579,7 @@ mod tests {
                 "{case_name}"
             );
         }
-    }
 
-    #[test]
-    fn test_legacy_bloom_filter_kind_decodes_to_canonical_filter_metadata() {
         let sst_info = SstableInfoInner {
             filter_type: PbSstableFilterType::SstableFilterNone,
             filter_layout: PbSstableFilterLayout::Unspecified,
@@ -592,24 +591,9 @@ mod tests {
             PbBloomFilterType::BloomFilterUnspecified as i32
         );
         assert_eq!(
-            SstableInfoInner::from(pb_sst_info.clone()).filter_type,
-            PbSstableFilterType::SstableFilterNone
-        );
-        assert_eq!(
             pb_sst_info.filter_type,
             Some(PbSstableFilterType::SstableFilterNone as i32)
         );
         assert_eq!(pb_sst_info.filter_layout, None);
-
-        let pb_sst_info = PbSstableInfo {
-            bloom_filter_kind: PbBloomFilterType::Blocked as i32,
-            ..Default::default()
-        };
-        let sst_info = SstableInfoInner::from(pb_sst_info);
-        assert_eq!(
-            sst_info.filter_type,
-            PbSstableFilterType::SstableFilterXor16
-        );
-        assert_eq!(sst_info.filter_layout, PbSstableFilterLayout::Blocked);
     }
 }

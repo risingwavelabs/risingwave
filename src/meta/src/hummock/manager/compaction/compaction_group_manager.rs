@@ -907,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_compaction_config_rejects_invalid_filter_type() {
+    fn test_update_compaction_config_rejects_invalid_filter_metadata() {
         let mut config = CompactionConfigBuilder::new().build();
 
         assert!(
@@ -920,10 +920,7 @@ mod tests {
             )
             .is_err()
         );
-    }
 
-    #[test]
-    fn test_update_compaction_config_rejects_invalid_filter_layout() {
         let mut config = CompactionConfigBuilder::new().build();
 
         assert!(

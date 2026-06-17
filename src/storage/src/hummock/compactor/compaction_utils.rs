@@ -105,17 +105,6 @@ pub struct CompactionStatistics {
     pub iter_drop_key_counts: u64,
 }
 
-impl CompactionStatistics {
-    #[expect(dead_code)]
-    fn delete_ratio(&self) -> Option<u64> {
-        if self.iter_total_key_counts == 0 {
-            return None;
-        }
-
-        Some(self.iter_drop_key_counts / self.iter_total_key_counts)
-    }
-}
-
 #[derive(Clone, Default)]
 pub struct TaskConfig {
     pub(crate) key_range: KeyRange,
@@ -819,7 +808,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_by_copy_block_respects_plain_layout() {
+    async fn test_optimize_by_copy_block_respects_layout_policy() {
         let context = test_context().await;
         let compact_task = test_compact_task(
             PbSstableFilterLayout::Plain,
@@ -828,11 +817,7 @@ mod tests {
         );
 
         assert!(!optimize_by_copy_block(&compact_task, &context));
-    }
 
-    #[tokio::test]
-    async fn test_optimize_by_copy_block_respects_auto_threshold() {
-        let context = test_context().await;
         let compact_task = test_compact_task(
             PbSstableFilterLayout::Auto,
             Some(1024),
@@ -843,7 +828,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_by_copy_block_keeps_blocked_output_when_requested() {
+    async fn test_optimize_by_copy_block_supports_blocked_xor_filters() {
         let context = test_context().await;
         let compact_task = test_compact_task(
             PbSstableFilterLayout::Blocked,
@@ -852,11 +837,7 @@ mod tests {
         );
 
         assert!(optimize_by_copy_block(&compact_task, &context));
-    }
 
-    #[tokio::test]
-    async fn test_optimize_by_copy_block_supports_xor8() {
-        let context = test_context().await;
         let compact_task = test_compact_task(
             PbSstableFilterLayout::Blocked,
             Some(1024),

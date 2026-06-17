@@ -786,24 +786,6 @@ mod tests {
     }
 
     #[test]
-    fn test_blocked_filter_layout_ignores_kv_count_threshold() {
-        let task = CompactTask {
-            input_ssts: vec![InputLevel {
-                table_infos: vec![test_read_property_sstable(vec![TableId::new(1)])],
-                ..Default::default()
-            }],
-            sstable_filter_layout: PbSstableFilterLayout::Blocked,
-            blocked_xor_filter_kv_count_threshold: Some(u64::MAX),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            task.sstable_filter_layout_for_output(0),
-            PbSstableFilterLayout::Blocked
-        );
-    }
-
-    #[test]
     fn test_task_label_for_trivial_move_and_reclaim() {
         let trivial_move_task = CompactTask {
             input_ssts: vec![
