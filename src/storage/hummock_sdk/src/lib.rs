@@ -16,6 +16,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(btree_cursors)]
 #![feature(map_try_insert)]
+#![feature(iter_array_chunks)]
 
 mod key_cmp;
 
