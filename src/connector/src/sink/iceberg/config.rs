@@ -551,11 +551,7 @@ impl IcebergConfig {
                         SINK_TYPE_UPSERT
                     )));
                 }
-            } else if !config.enable_pk_index {
-                // When `enable_pk_index = true`, the planner auto-derives the iceberg pk
-                // from the upstream stream key, so the user does not need to spell it out
-                // in WITH options. The derived pk is written back into properties before
-                // this validation is consulted again at sink-construction time.
+            } else {
                 return Err(SinkError::Config(anyhow!(
                     "Must set `primary-key` in {}",
                     SINK_TYPE_UPSERT

@@ -1857,23 +1857,20 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_with = with_common.clone();
 
-    let enable_pk_index = handler_args
+    // Iceberg with pk index does not support auto schema change yet.
+    if !handler_args
         .with_options
         .get(ENABLE_PK_INDEX)
-        .is_some_and(|val| val.eq_ignore_ascii_case("true"));
-
-    // Iceberg with pk index does not support auto schema change yet.
-    if !enable_pk_index {
+        .is_some_and(|val| val.eq_ignore_ascii_case("true"))
+    {
         sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
     }
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
     } else {
+        sink_with.insert("primary_key".to_owned(), pks.join(","));
         sink_with.insert("type".to_owned(), "upsert".to_owned());
-        if !enable_pk_index {
-            sink_with.insert("primary_key".to_owned(), pks.join(","));
-        }
     }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //

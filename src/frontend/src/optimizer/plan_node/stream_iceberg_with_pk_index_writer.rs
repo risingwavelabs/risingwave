@@ -24,12 +24,14 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::stream::prelude::*;
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
+use crate::optimizer::plan_node::utils::{
+    Distill, IndicesDisplay, TableCatalogBuilder, childless_record,
+};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{
-    Distribution, FunctionalDependencySet, MonotonicityMap, RequiredDist, WatermarkColumns,
+    Distribution, FunctionalDependencySet, MonotonicityMap, WatermarkColumns,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -65,19 +67,10 @@ impl StreamIcebergWithPkIndexWriter {
             WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
-
-        let downstream_pk = sink
-            .sink_desc()
-            .downstream_pk
-            .as_deref()
-            .context("Missing downstream PK in Iceberg sink desc")?;
-        let input = RequiredDist::shard_by_key(sink.schema().len(), downstream_pk)
-            .streaming_enforce_if_not_satisfies(sink.input())
-            .expect("distribution enforcement is infallible");
         let pk_index_table = build_iceberg_pk_state_table(sink.sink_desc())?;
         Ok(Self {
             base,
-            input,
+            input: sink.input(),
             sink_desc: sink.sink_desc().clone(),
             pk_index_table,
         })
@@ -96,7 +89,7 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
 
     let downstream_pk = sink_desc
         .downstream_pk
-        .as_deref()
+        .as_ref()
         .context("Missing downstream PK in Iceberg sink desc")?;
     for &idx in downstream_pk {
         builder.add_column(&Field::from(&sink_desc.columns[idx].column_desc));
@@ -125,13 +118,11 @@ impl Distill for StreamIcebergWithPkIndexWriter {
         let mut vec = Vec::with_capacity(2);
         vec.push(("columns", column_names));
         if let Some(pk) = &self.sink_desc.downstream_pk {
-            let column_names = pk
-                .iter()
-                .map(|&idx| self.sink_desc.columns[idx].name_with_hidden().to_string())
-                .map(Pretty::from)
-                .collect();
-            let column_names = Pretty::Array(column_names);
-            vec.push(("downstream_pk", column_names));
+            let sink_pk = IndicesDisplay {
+                indices: pk,
+                schema: self.input.schema(),
+            };
+            vec.push(("downstream_pk", sink_pk.distill()));
         }
 
         childless_record("StreamIcebergWithPkIndexWriter", vec)
@@ -230,62 +221,5 @@ mod tests {
         assert_eq!(table.read_prefix_len_hint, 1);
         assert_eq!(table.owner, DEFAULT_SUPER_USER_ID);
         assert_eq!(table.stream_job_status, StreamJobStatus::Creating);
-    }
-
-    #[test]
-    fn test_build_iceberg_pk_state_table_with_multi_column_pk() {
-        // Simulate planner output where the derived pk spans several stream-key columns, e.g. a
-        // hidden upstream column (`order_id`) promoted to visible and carried in verbatim.
-        let mut desc = test_sink_desc();
-        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
-            "order_id",
-            ColumnId::new(3),
-            DataType::Int64,
-        )));
-        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
-            "shard_id",
-            ColumnId::new(4),
-            DataType::Int64,
-        )));
-        desc.downstream_pk = Some(vec![1, 3, 4]); // v1, order_id, shard_id
-
-        let table = build_iceberg_pk_state_table(&desc).unwrap();
-
-        let names: Vec<_> = table
-            .columns()
-            .iter()
-            .map(|c| c.name().to_owned())
-            .collect();
-        assert_eq!(
-            names,
-            vec!["v1", "order_id", "shard_id", "file_path", "position"]
-        );
-        assert_eq!(table.pk().len(), 3);
-        assert_eq!(table.distribution_key(), &[0, 1, 2]);
-        assert_eq!(table.read_prefix_len_hint, 3);
-    }
-
-    #[test]
-    fn test_build_iceberg_pk_state_table_with_visible_extra_only() {
-        // Simulate planner output: downstream_pk = [user_pk, visible_extra].
-        let mut desc = test_sink_desc();
-        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
-            "order_id",
-            ColumnId::new(3),
-            DataType::Int64,
-        )));
-        desc.downstream_pk = Some(vec![1, 3]); // v1, order_id
-
-        let table = build_iceberg_pk_state_table(&desc).unwrap();
-
-        let names: Vec<_> = table
-            .columns()
-            .iter()
-            .map(|c| c.name().to_owned())
-            .collect();
-        assert_eq!(names, vec!["v1", "order_id", "file_path", "position"]);
-        assert_eq!(table.pk().len(), 2);
-        assert_eq!(table.distribution_key(), &[0, 1]);
-        assert_eq!(table.read_prefix_len_hint, 2);
     }
 }

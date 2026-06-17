@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
 use risingwave_storage::StateStore;
 
 use super::super::sink::build_sink_param;
-use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Executor, IcebergWriterImpl, StreamExecutorError, WriterExecutor};
 use crate::from_proto::ExecutorBuilder;
@@ -65,17 +65,8 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             return Err(anyhow!("missing downstream pk in iceberg sink desc").into());
         }
 
-        let (sink_param, columns) =
+        let (sink_param, _columns) =
             build_sink_param(sink_desc, properties_with_secret, ICEBERG_SINK)?;
-
-        // Indices of the visible columns, i.e. the ones actually written to Iceberg. Hidden
-        // columns carried by the input chunk for PK derivation are projected away by the writer.
-        let write_col_indices = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, col)| !col.is_hidden)
-            .map(|(idx, _)| idx)
-            .collect::<Vec<_>>();
 
         let table = create_and_validate_table_impl(&config, &sink_param)
             .await
@@ -87,7 +78,6 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             params.vnode_bitmap.clone().map(Arc::new),
         )
         .enable_preload_all_rows_by_config(&params.config)
-        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
         .build()
         .await;
 
@@ -110,15 +100,20 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             time_zone: params.actor_context.time_zone,
         };
         let writer = IcebergWriterImpl::build(&config, table, &writer_param)?;
+        let pk_matched = params
+            .info
+            .stream_key
+            .iter()
+            .all(|i| pk_indices.contains(i));
 
         let exec = WriterExecutor::new(
             params.actor_context,
             input,
             pk_indices,
             pk_index_state_table,
-            write_col_indices,
             writer,
             params.config.developer.chunk_size,
+            pk_matched,
             sink_id,
             params.local_barrier_manager.clone(),
         );

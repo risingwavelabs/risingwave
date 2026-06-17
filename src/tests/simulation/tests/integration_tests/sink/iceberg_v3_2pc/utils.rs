@@ -87,6 +87,8 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
         .run(&format!("SET streaming_parallelism = {}", parallelism))
         .await?;
 
+    // TABLE with PRIMARY KEY: stream key is (id,) which the MV inherits, so the
+    // downstream sink's `primary_key = 'id'` matches the upstream stream key.
     session
         .run("CREATE TABLE test_v3_table (id int PRIMARY KEY, name varchar)")
         .await?;
@@ -112,6 +114,7 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
                is_exactly_once = 'true', \
                enable_pk_index = 'true', \
                format_version = '3', \
+               primary_key = 'id', \
                type = 'upsert' \
              )",
         )
