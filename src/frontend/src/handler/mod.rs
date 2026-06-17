@@ -269,7 +269,6 @@ impl HandlerArgs {
     }
 }
 
-#[allow(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,

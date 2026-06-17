@@ -519,7 +519,6 @@ enum CoordinatorWorkerEvent {
 }
 
 impl CoordinatorWorker {
-    #[allow(clippy::large_stack_frames)]
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
