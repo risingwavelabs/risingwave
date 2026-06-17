@@ -683,7 +683,7 @@ impl<'a> Tokenizer<'a> {
             self.error("Unterminated dollar-quoted string")
         } else {
             // syntax: $SomeTag$.....$SomeTag$
-            value.push_str(&self.peeking_take_while(|ch| ch.is_alphanumeric() || ch == '_'));
+            value.push_str(&self.peeking_take_while(|ch| ch.is_ascii_alphanumeric() || ch == '_'));
 
             if let Some('$') = self.peek() {
                 if !is_valid_dollar_quote_tag(&value) {
