@@ -28,7 +28,7 @@ const CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE: usize = 256;
 #[derive(Debug, Clone, PartialEq)]
 struct CloneOptimizedVecDeque<T> {
     front: VecDeque<T>,
-    middle: VecDeque<Arc<Vec<T>>>,
+    middle: VecDeque<Arc<[T; CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE]>>,
     back: Vec<T>,
 }
 
@@ -45,7 +45,7 @@ impl<T> FromIterator<T> for CloneOptimizedVecDeque<T> {
             .into_iter()
             .array_chunks::<CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE>();
         for chunk in chunks.by_ref() {
-            middle.push_back(Arc::new(Vec::from(chunk)));
+            middle.push_back(Arc::new(chunk));
         }
         let back = chunks
             .into_remainder()
@@ -71,7 +71,10 @@ impl<T> CloneOptimizedVecDeque<T> {
     fn push_back(&mut self, value: T) {
         self.back.push(value);
         if self.back.len() == CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE {
-            self.middle.push_back(Arc::new(mem::take(&mut self.back)));
+            let Ok(chunk) = mem::take(&mut self.back).try_into() else {
+                unreachable!("back should be full");
+            };
+            self.middle.push_back(Arc::new(chunk));
         }
     }
 
@@ -80,9 +83,10 @@ impl<T> CloneOptimizedVecDeque<T> {
         T: Clone,
     {
         self.refill_front_if_needed();
-        self.front
-            .pop_front()
-            .or_else(|| (!self.back.is_empty()).then(|| self.back.remove(0)))
+        self.front.pop_front().or_else(|| {
+            debug_assert!(self.middle.is_empty());
+            (!self.back.is_empty()).then(|| self.back.remove(0))
+        })
     }
 
     fn front(&self) -> Option<&T> {
@@ -97,7 +101,10 @@ impl<T> CloneOptimizedVecDeque<T> {
         T: Clone,
     {
         self.refill_front_if_needed();
-        self.front.front_mut().or_else(|| self.back.first_mut())
+        self.front.front_mut().or_else(|| {
+            debug_assert!(self.middle.is_empty());
+            self.back.first_mut()
+        })
     }
 
     fn back(&self) -> Option<&T> {
@@ -514,6 +521,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::iter::once;
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -535,8 +543,7 @@ mod tests {
             assert_eq!(
                 (range_start..range_end).collect_vec(),
                 deque
-                    .iter()
-                    .skip(range_start)
+                    .iter_from(range_start)
                     .take(range_end - range_start)
                     .copied()
                     .collect_vec()
@@ -547,6 +554,28 @@ mod tests {
             }
             assert_eq!(None, deque.pop_front());
         }
+    }
+
+    #[test]
+    fn test_clone_optimized_vec_deque_front_mut() {
+        let mut back_only = (0..3).collect::<CloneOptimizedVecDeque<_>>();
+        *back_only.front_mut().expect("non-empty") = 10;
+        assert_eq!(vec![10, 1, 2], back_only.iter().copied().collect_vec());
+
+        let original = (0..600).collect::<CloneOptimizedVecDeque<_>>();
+        let mut cloned = original.clone();
+        *cloned.front_mut().expect("non-empty") = 1000;
+
+        assert_eq!(Some(&0), original.front());
+        assert_eq!(Some(&1000), cloned.front());
+        assert_eq!(
+            (0..600).collect_vec(),
+            original.iter().copied().collect_vec()
+        );
+        assert_eq!(
+            once(1000).chain(1..600).collect_vec(),
+            cloned.iter().copied().collect_vec()
+        );
     }
 
     #[test]
