@@ -29,8 +29,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
-use risingwave_pb::hummock::compact_task::PbTaskType;
-use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbSstableFilterType, PbTableSchema};
+use risingwave_pb::hummock::{PbLevelType, PbSstableFilterType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -90,6 +89,10 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         );
         Ok(builder)
     }
+
+    fn partitioned_meta_block_count(&self) -> usize {
+        self.options.partitioned_meta_block_count
+    }
 }
 
 /// `CompactionStatistics` will count the results of each compact split
@@ -103,16 +106,7 @@ pub struct CompactionStatistics {
     pub iter_drop_key_counts: u64,
 }
 
-impl CompactionStatistics {
-    #[expect(dead_code)]
-    fn delete_ratio(&self) -> Option<u64> {
-        if self.iter_total_key_counts == 0 {
-            return None;
-        }
-
-        Some(self.iter_drop_key_counts / self.iter_total_key_counts)
-    }
-}
+impl CompactionStatistics {}
 
 #[derive(Clone, Default)]
 pub struct TaskConfig {
@@ -133,7 +127,6 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
-    #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         key_range: KeyRange,
         cache_policy: CachePolicy,
@@ -154,7 +147,6 @@ impl TaskConfig {
         }
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub fn with_disable_drop_column_optimization(mut self, disable: bool) -> Self {
         self.disable_drop_column_optimization = disable;
         self
@@ -261,13 +253,18 @@ pub async fn generate_splits(
             ));
         }
         let mut indexes = vec![];
+        let mut local_stats = StoreLocalStatistic::default();
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
             let sstable = context
                 .sstable_store
-                .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                .meta_index(sstable_info, &mut local_stats)
                 .await?;
-            indexes.extend(sstable.meta.block_metas.iter().map(|block| {
+            let block_metas = context
+                .sstable_store
+                .get_partitioned_block_metas(&sstable, &mut local_stats)
+                .await?;
+            indexes.extend(block_metas.iter().map(|block| {
                 let data_size = block.len;
                 let full_key = FullKey {
                     user_key: FullKey::decode(&block.smallest_key).user_key,
@@ -277,6 +274,7 @@ pub async fn generate_splits(
                 (data_size as u64, full_key)
             }));
         }
+        local_stats.report_compactor(context.compactor_metrics.as_ref());
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
@@ -556,60 +554,8 @@ async fn check_result<
     Ok(true)
 }
 
-pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorContext) -> bool {
-    let input_ssts = compact_task.read_input_ssts().collect_vec();
-    let compaction_size = input_ssts_size(&input_ssts);
-    optimize_by_copy_block_with_input(compact_task, context, &input_ssts, compaction_size)
-}
-
-fn optimize_by_copy_block_with_input(
-    compact_task: &CompactTask,
-    context: &CompactorContext,
-    input_ssts: &[&SstableInfo],
-    compaction_size: u64,
-) -> bool {
-    let all_ssts_are_blocked_filter = input_ssts
-        .iter()
-        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
-    let current_filter_type = compact_task.sstable_filter_kind;
-    let all_ssts_match_filter_family = input_ssts
-        .iter()
-        .all(|table_info| table_info.filter_type_compatible_with(current_filter_type));
-    // Fast compaction path can only preserve blocked filters by copying block payloads (and their
-    // per-block filter bytes). If the output-SST-level heuristic now wants a plain filter, fall back
-    // to the normal compaction path to rebuild filters. This intentionally lets tasks that were
-    // previously classified as blocked by total task key count move back to plain output filters.
-    let output_capacity = estimate_task_output_capacity(context.clone(), compact_task);
-    let estimated_output_key_count =
-        estimate_output_key_count_for_input_ssts(input_ssts.iter().copied(), output_capacity);
-    let output_wants_blocked_filter =
-        compact_task.should_use_block_based_filter_for_output(estimated_output_key_count as u64);
-
-    let delete_key_count = input_ssts
-        .iter()
-        .map(|table_info| table_info.stale_key_count + table_info.range_tombstone_count)
-        .sum::<u64>();
-    let total_key_count = input_ssts
-        .iter()
-        .map(|table_info| table_info.total_key_count)
-        .sum::<u64>();
-
-    let single_table = compact_task.get_table_ids_from_input_ssts().count() == 1;
-    context.storage_opts.enable_fast_compaction
-        && current_filter_type == PbSstableFilterType::SstableFilterXor16
-        && all_ssts_are_blocked_filter
-        && all_ssts_match_filter_family
-        && output_wants_blocked_filter
-        && !compact_task.contains_range_tombstone()
-        && !compact_task.contains_ttl()
-        && !compact_task.contains_split_sst()
-        && single_table
-        && compact_task.target_level > 0
-        && compact_task.input_ssts.len() == 2
-        && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
-        && delete_key_count * 100
-            < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type == PbTaskType::Dynamic
+pub fn optimize_by_copy_block(_compact_task: &CompactTask, _context: &CompactorContext) -> bool {
+    false
 }
 
 pub async fn generate_splits_for_task(
@@ -693,8 +639,7 @@ fn read_sstable_size_and_count<'a>(
 pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &CompactorContext) -> usize {
     let input_ssts = compact_task.read_input_ssts().collect_vec();
     let compaction_size = input_ssts_size(&input_ssts);
-    let optimize_by_copy_block =
-        optimize_by_copy_block_with_input(compact_task, context, &input_ssts, compaction_size);
+    let optimize_by_copy_block = optimize_by_copy_block(compact_task, context);
 
     if optimize_by_copy_block {
         return 1;
@@ -728,81 +673,7 @@ pub fn calculate_task_parallelism_impl(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::level::InputLevel;
-    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
-    use risingwave_pb::hummock::compact_task::PbTaskType;
-    use risingwave_pb::hummock::{
-        PbBloomFilterType, PbLevelType, PbSstableFilterLayout, PbSstableFilterType,
-    };
-
-    use super::{
-        CompactTask, CompactorContext, estimate_output_key_count_by_size, optimize_by_copy_block,
-    };
-    use crate::hummock::compactor::new_compaction_await_tree_reg_ref;
-    use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::monitor::CompactorMetrics;
-    use crate::opts::StorageOpts;
-
-    fn test_sstable(
-        table_id: TableId,
-        total_key_count: u64,
-    ) -> risingwave_hummock_sdk::sstable_info::SstableInfo {
-        SstableInfoInner {
-            object_id: 1.into(),
-            sst_id: 1.into(),
-            table_ids: vec![table_id],
-            total_key_count,
-            sst_size: 1024,
-            uncompressed_file_size: 1024,
-            bloom_filter_kind: PbBloomFilterType::Blocked,
-            filter_type: PbSstableFilterType::SstableFilterXor16,
-            ..Default::default()
-        }
-        .into()
-    }
-
-    async fn test_context() -> CompactorContext {
-        CompactorContext::new_local_compact_context(
-            Arc::new(StorageOpts::default()),
-            mock_sstable_store().await,
-            Arc::new(CompactorMetrics::unused()),
-            Some(new_compaction_await_tree_reg_ref(
-                await_tree::Config::default(),
-            )),
-        )
-    }
-
-    fn test_compact_task(
-        layout: PbSstableFilterLayout,
-        blocked_xor_filter_kv_count_threshold: Option<u64>,
-    ) -> CompactTask {
-        let table_id = TableId::new(1);
-        CompactTask {
-            input_ssts: vec![
-                InputLevel {
-                    level_idx: 1,
-                    level_type: PbLevelType::Nonoverlapping,
-                    table_infos: vec![test_sstable(table_id, 10)],
-                },
-                InputLevel {
-                    level_idx: 2,
-                    level_type: PbLevelType::Nonoverlapping,
-                    table_infos: vec![test_sstable(table_id, 10)],
-                },
-            ],
-            existing_table_ids: vec![table_id],
-            target_level: 2,
-            target_file_size: 1024,
-            task_type: PbTaskType::Dynamic,
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
-            sstable_filter_layout: layout,
-            blocked_xor_filter_kv_count_threshold,
-            ..Default::default()
-        }
-    }
+    use super::estimate_output_key_count_by_size;
 
     #[test]
     fn test_estimate_output_key_count_by_size_scales_to_output_sst() {
@@ -811,29 +682,5 @@ mod tests {
 
         assert_eq!(estimated_key_count, 256 * 1024);
         assert_eq!(estimate_output_key_count_by_size(100, 0, 0), 100);
-    }
-
-    #[tokio::test]
-    async fn test_optimize_by_copy_block_respects_plain_layout() {
-        let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Plain, Some(1));
-
-        assert!(!optimize_by_copy_block(&compact_task, &context));
-    }
-
-    #[tokio::test]
-    async fn test_optimize_by_copy_block_respects_auto_threshold() {
-        let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1024));
-
-        assert!(!optimize_by_copy_block(&compact_task, &context));
-    }
-
-    #[tokio::test]
-    async fn test_optimize_by_copy_block_keeps_blocked_output_when_requested() {
-        let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Blocked, Some(1024));
-
-        assert!(optimize_by_copy_block(&compact_task, &context));
     }
 }

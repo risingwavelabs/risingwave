@@ -116,6 +116,13 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::min_sstable_size_mb")]
     pub min_sstable_size_mb: u32,
 
+    /// Number of data blocks per v3 metadata shard.
+    #[serde(
+        default = "default::storage::partitioned_meta_block_count",
+        deserialize_with = "deserialize_partitioned_meta_block_count"
+    )]
+    pub partitioned_meta_block_count: usize,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub data_file_cache: FileCacheConfig,
@@ -547,6 +554,19 @@ where
     if value == 0 {
         return Err(D::Error::custom(
             "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
+fn deserialize_partitioned_meta_block_count<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.partitioned_meta_block_count must be greater than 0",
         ));
     }
     Ok(value)
@@ -1011,6 +1031,10 @@ pub mod default {
 
         pub fn min_sstable_size_mb() -> u32 {
             32
+        }
+
+        pub fn partitioned_meta_block_count() -> usize {
+            8
         }
 
         pub fn min_sst_size_for_streaming_upload() -> u64 {

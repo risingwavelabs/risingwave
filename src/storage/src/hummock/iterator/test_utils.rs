@@ -37,8 +37,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType, SstableStoreConfig,
-    SstableStoreRef, TableHolder,
+    HummockValue, PartitionedSstableMetaHolder, SstableBuilderOptions, SstableIterator,
+    SstableIteratorType, SstableStoreConfig, SstableStoreRef, estimate_meta_cache_entry_size,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -71,6 +71,7 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
+        .with_weighter(estimate_meta_cache_entry_size)
         .storage()
         .build()
         .await
@@ -190,7 +191,7 @@ pub async fn gen_iterator_test_sstable_base(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
     total: usize,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,
@@ -210,7 +211,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
     object_id: u64,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     gen_test_sstable(
         default_builder_opt_for_test(),
         object_id,
@@ -271,7 +272,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
     sstable_store: SstableStoreRef,
     total: usize,
     epoch_base: u64,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,

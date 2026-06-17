@@ -77,22 +77,41 @@ pub async fn get_from_sstable_info(
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<impl HummockIterator>> {
-    let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
+    let sstable = sstable_store_ref
+        .meta_index(sstable_info, local_stats)
+        .await?;
+    let index = &sstable.index;
 
-    // SST filter key is the distribution key, which does not need to be the prefix of pk, and does not
-    // contain `TablePrefix` and `VnodePrefix`.
-    if let Some(hash) = dist_key_hash
-        && !hit_sstable_filter(
-            &sstable,
-            &(
-                Bound::Included(full_key.user_key),
-                Bound::Included(full_key.user_key),
-            ),
-            hash,
-            local_stats,
-        )
-    {
-        return Ok(None);
+    if let Some(hash) = dist_key_hash {
+        let user_key_range = (
+            Bound::Included(full_key.user_key),
+            Bound::Included(full_key.user_key),
+        );
+        let mut may_match = false;
+        let mut checked_filter = false;
+        for desc in index.filter_candidate_shards_by_user_key(full_key) {
+            let shard = sstable_store_ref
+                .get_meta_shard_holder(sstable.id, index.filter_type, desc, local_stats)
+                .await?;
+            checked_filter = true;
+            if shard.may_match(&user_key_range, hash) {
+                local_stats.partitioned_meta_shard_filter_positive_counts += 1;
+                may_match = true;
+                break;
+            }
+
+            local_stats.partitioned_meta_shard_filter_negative_counts += 1;
+        }
+
+        if checked_filter {
+            local_stats.bloom_filter_check_counts += 1;
+        }
+        if !may_match {
+            if checked_filter {
+                local_stats.bloom_filter_true_negative_counts += 1;
+            }
+            return Ok(None);
+        }
     }
 
     let mut iter = SstableIterator::create(
@@ -120,18 +139,38 @@ pub async fn get_from_sstable_info(
     Ok(value)
 }
 
-pub fn hit_sstable_filter(
-    sstable_ref: &Sstable,
+pub async fn hit_sstable_filter_with_partitioned_meta(
+    sstable_store_ref: &SstableStoreRef,
+    sstable_ref: &PartitionedSstableMeta,
     user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,
     local_stats: &mut StoreLocalStatistic,
-) -> bool {
-    local_stats.bloom_filter_check_counts += 1;
-    let may_exist = sstable_ref.may_match_hash(user_key_range, prefix_hash);
-    if !may_exist {
-        local_stats.bloom_filter_true_negative_counts += 1;
+) -> HummockResult<bool> {
+    let index = &sstable_ref.index;
+    let mut checked_filter = false;
+    let mut may_match = false;
+    for desc in index.filter_candidate_shards_by_user_key_range(user_key_range) {
+        let shard = sstable_store_ref
+            .get_meta_shard_holder(sstable_ref.id, index.filter_type, desc, local_stats)
+            .await?;
+        checked_filter = true;
+
+        if shard.may_match(user_key_range, prefix_hash) {
+            local_stats.partitioned_meta_shard_filter_positive_counts += 1;
+            may_match = true;
+            break;
+        }
+
+        local_stats.partitioned_meta_shard_filter_negative_counts += 1;
     }
-    may_exist
+
+    if checked_filter {
+        local_stats.bloom_filter_check_counts += 1;
+        if !may_match {
+            local_stats.bloom_filter_true_negative_counts += 1;
+        }
+    }
+    Ok(may_match)
 }
 
 /// Get `user_value` from `ImmutableMemtable`

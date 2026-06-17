@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use foyer::{HybridCacheEntry, RangeBoundsExt};
+use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -38,8 +38,8 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
-    SstableStoreRef, TableHolder,
+    Block, BlockMeta, HummockError, HummockResult, PartitionedSstableMetaHolder, RecentFilterTrait,
+    SstableBlockIndex, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -51,6 +51,8 @@ pub struct CacheRefillMetrics {
     pub refill_duration: HistogramVec,
     pub refill_total: GenericCounterVec<AtomicU64>,
     pub refill_bytes: GenericCounterVec<AtomicU64>,
+    pub sst_store_read_counts: GenericCounterVec<AtomicU64>,
+    pub sst_store_read_bytes: GenericCounterVec<AtomicU64>,
 
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
@@ -94,6 +96,20 @@ impl CacheRefillMetrics {
             "refill_bytes",
             "refill bytes",
             &["type", "op"],
+            registry,
+        )
+        .unwrap();
+        let sst_store_read_counts = register_int_counter_vec_with_registry!(
+            "refill_sst_store_read_counts",
+            "Total number of object reads issued by SST store during cache refill",
+            &["type"],
+            registry,
+        )
+        .unwrap();
+        let sst_store_read_bytes = register_int_counter_vec_with_registry!(
+            "refill_sst_store_read_bytes",
+            "Total bytes read from object store by SST store during cache refill",
+            &["type"],
             registry,
         )
         .unwrap();
@@ -156,6 +172,8 @@ impl CacheRefillMetrics {
             refill_duration,
             refill_total,
             refill_bytes,
+            sst_store_read_counts,
+            sst_store_read_bytes,
 
             data_refill_success_duration,
             meta_refill_success_duration,
@@ -358,6 +376,79 @@ struct CacheRefillTask {
 }
 
 impl CacheRefillTask {
+    fn report_sst_store_read_stats(stats: &StoreLocalStatistic) {
+        let report_sst_store_read = |metric_type: &str, count: u64, bytes: u64| {
+            if count > 0 {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .sst_store_read_counts
+                    .with_label_values(&[metric_type])
+                    .inc_by(count);
+            }
+            if bytes > 0 {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .sst_store_read_bytes
+                    .with_label_values(&[metric_type])
+                    .inc_by(bytes);
+            }
+        };
+        report_sst_store_read(
+            "data_block_fill",
+            stats.sst_store_data_block_fill_read_count,
+            stats.sst_store_data_block_fill_read_bytes,
+        );
+        report_sst_store_read(
+            "data_block_not_fill",
+            stats.sst_store_data_block_not_fill_read_count,
+            stats.sst_store_data_block_not_fill_read_bytes,
+        );
+        report_sst_store_read(
+            "data_block_disable",
+            stats.sst_store_data_block_disable_read_count,
+            stats.sst_store_data_block_disable_read_bytes,
+        );
+        report_sst_store_read(
+            "data_prefetch",
+            stats.sst_store_data_prefetch_read_count,
+            stats.sst_store_data_prefetch_read_bytes,
+        );
+        report_sst_store_read(
+            "meta_index",
+            stats.sst_store_meta_index_read_count,
+            stats.sst_store_meta_index_read_bytes,
+        );
+        report_sst_store_read(
+            "meta_shard",
+            stats.sst_store_meta_shard_read_count,
+            stats.sst_store_meta_shard_read_bytes,
+        );
+    }
+
+    async fn load_refill_sstable(
+        context: &CacheRefillContext,
+        sst: PartitionedSstableMetaHolder,
+        _purpose: &'static str,
+    ) -> HummockResult<RefillSstable> {
+        let mut stats = StoreLocalStatistic::default();
+        let block_metas = context
+            .sstable_store
+            .get_partitioned_block_metas(&sst, &mut stats)
+            .await?;
+        Self::report_sst_store_read_stats(&stats);
+        Ok(RefillSstable { sst, block_metas })
+    }
+
+    async fn load_refill_sstables(
+        context: &CacheRefillContext,
+        ssts: impl IntoIterator<Item = PartitionedSstableMetaHolder>,
+        purpose: &'static str,
+    ) -> HummockResult<Vec<RefillSstable>> {
+        try_join_all(
+            ssts.into_iter()
+                .map(|sst| Self::load_refill_sstable(context, sst, purpose)),
+        )
+        .await
+    }
+
     async fn run(self) {
         let tasks = self
             .deltas
@@ -384,7 +475,7 @@ impl CacheRefillTask {
     async fn meta_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
-    ) -> HummockResult<Vec<TableHolder>> {
+    ) -> HummockResult<Vec<PartitionedSstableMetaHolder>> {
         let tasks = delta
             .insert_sst_infos
             .iter()
@@ -399,7 +490,14 @@ impl CacheRefillTask {
                 };
 
                 let now = Instant::now();
-                let res = context.sstable_store.sstable(info, &mut stats).await;
+                let res = context.sstable_store.meta_index(info, &mut stats).await;
+                if let Ok(sst) = &res {
+                    context
+                        .sstable_store
+                        .get_partitioned_meta_shards(sst, &mut stats)
+                        .await?;
+                }
+                Self::report_sst_store_read_stats(&stats);
                 stats.discard();
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
@@ -416,8 +514,8 @@ impl CacheRefillTask {
     /// Get sstable inheritance info in unit level.
     fn get_units_to_refill_by_inheritance(
         context: &CacheRefillContext,
-        ssts: &[TableHolder],
-        parent_ssts: impl IntoIterator<Item = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>,
+        ssts: &[RefillSstable],
+        parent_ssts: impl IntoIterator<Item = RefillSstable>,
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
@@ -445,12 +543,12 @@ impl CacheRefillTask {
 
         for psst in parent_ssts {
             for pblk in 0..psst.block_count() {
-                let pleft = &psst.meta.block_metas[pblk].smallest_key;
+                let pleft = &psst.block_metas[pblk].smallest_key;
                 let pright = if pblk + 1 == psst.block_count() {
                     // `largest_key` can be included or excluded, both are treated as included here
-                    &psst.meta.largest_key
+                    psst.sst.largest_key()
                 } else {
-                    &psst.meta.block_metas[pblk + 1].smallest_key
+                    &psst.block_metas[pblk + 1].smallest_key
                 };
 
                 // partition point: unit.right < pblk.left
@@ -467,13 +565,14 @@ impl CacheRefillTask {
                 // overlapping: uleft..uright
                 for u in units.iter().take(uright).skip(uleft) {
                     let unit = SstableUnit {
-                        sst_obj_id: u.sst.id,
+                        sst_obj_id: u.sst.sst.id,
                         blks: u.blks.clone(),
                     };
                     if res.contains(&unit) {
                         continue;
                     }
-                    if context.config.skip_recent_filter || recent_filter.contains(&(psst.id, pblk))
+                    if context.config.skip_recent_filter
+                        || recent_filter.contains(&(psst.sst.id, pblk))
                     {
                         res.insert(unit);
                     }
@@ -497,7 +596,7 @@ impl CacheRefillTask {
     async fn data_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
-        holders: Vec<TableHolder>,
+        holders: Vec<PartitionedSstableMetaHolder>,
     ) {
         // Skip data cache refill if data disk cache is not enabled.
         if !context.sstable_store.block_cache().is_hybrid() {
@@ -542,6 +641,15 @@ impl CacheRefillTask {
                     .sum::<u64>(),
             );
 
+        let holders = match Self::load_refill_sstables(context, holders, "data_refill_insert").await
+        {
+            Ok(holders) => holders,
+            Err(e) => {
+                tracing::error!(error = %e.as_report(), "load block metas for data cache refill error");
+                return;
+            }
+        };
+
         if delta.insert_sst_level == 0 || context.config.skip_recent_filter {
             Self::data_file_cache_refill_full_impl(context, delta, holders).await;
         } else {
@@ -552,7 +660,7 @@ impl CacheRefillTask {
     async fn data_file_cache_refill_full_impl(
         context: &CacheRefillContext,
         _delta: &SstDeltaInfo,
-        holders: Vec<TableHolder>,
+        holders: Vec<RefillSstable>,
     ) {
         let unit = context.config.unit;
 
@@ -562,7 +670,7 @@ impl CacheRefillTask {
             for blk_start in (0..sst.block_count()).step_by(unit) {
                 let blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
                 let unit = SstableUnit {
-                    sst_obj_id: sst.id,
+                    sst_obj_id: sst.sst.id,
                     blks: blk_start..blk_end,
                 };
                 futures.push(
@@ -576,13 +684,13 @@ impl CacheRefillTask {
     async fn data_file_cache_impl(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
-        holders: Vec<TableHolder>,
+        holders: Vec<RefillSstable>,
     ) {
         let sstable_store = context.sstable_store.clone();
         let futures = delta.delete_sst_object_ids.iter().map(|sst_obj_id| {
             let store = &sstable_store;
             async move {
-                let res = store.sstable_cached(*sst_obj_id).await;
+                let res = store.meta_index_cached(*sst_obj_id).await;
                 match res {
                     Ok(Some(_)) => GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_parent_meta_lookup_hit_total
@@ -596,15 +704,31 @@ impl CacheRefillTask {
             }
         });
         let parent_ssts = match try_join_all(futures).await {
-            Ok(parent_ssts) => parent_ssts.into_iter().flatten(),
+            Ok(parent_ssts) => match Self::load_refill_sstables(
+                context,
+                parent_ssts.into_iter().flatten(),
+                "data_refill_parent",
+            )
+            .await
+            {
+                Ok(parent_ssts) => parent_ssts,
+                Err(e) => {
+                    return tracing::error!(
+                        error = %e.as_report(),
+                        "load old block metas for data cache refill error"
+                    );
+                }
+            },
             Err(e) => {
                 return tracing::error!(error = %e.as_report(), "get old meta from cache error");
             }
         };
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, parent_ssts);
 
-        let ssts: HashMap<HummockSstableObjectId, TableHolder> =
-            holders.into_iter().map(|meta| (meta.id, meta)).collect();
+        let ssts: HashMap<HummockSstableObjectId, RefillSstable> = holders
+            .into_iter()
+            .map(|meta| (meta.sst.id, meta))
+            .collect();
         let futures = units.into_iter().map(|unit| {
             let ssts = &ssts;
             async move {
@@ -619,7 +743,7 @@ impl CacheRefillTask {
 
     async fn data_file_cache_refill_unit(
         context: &CacheRefillContext,
-        sst: &Sstable,
+        sst: &RefillSstable,
         unit: SstableUnit,
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
@@ -627,7 +751,7 @@ impl CacheRefillTask {
         let recent_filter = sstable_store.recent_filter();
 
         // update filter for sst id only
-        recent_filter.insert((sst.id, usize::MAX));
+        recent_filter.insert((sst.sst.id, usize::MAX));
 
         let blocks = unit.blks.size().unwrap();
 
@@ -648,7 +772,7 @@ impl CacheRefillTask {
         for blk in unit.blks {
             let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
             let key = SstableBlockIndex {
-                sst_id: sst.id,
+                sst_id: sst.sst.id,
                 block_idx: blk as u64,
             };
 
@@ -675,7 +799,7 @@ impl CacheRefillTask {
 
                 let data = sstable_store
                     .store()
-                    .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
+                    .read(&sstable_store.get_sst_data_path(sst.sst.id), range.clone())
                     .await?;
                 let mut futures = vec![];
                 for (w, r, uc) in contexts {
@@ -716,6 +840,26 @@ impl CacheRefillTask {
 }
 
 #[derive(Debug)]
+struct RefillSstable {
+    sst: PartitionedSstableMetaHolder,
+    block_metas: Vec<BlockMeta>,
+}
+
+impl RefillSstable {
+    fn block_count(&self) -> usize {
+        self.block_metas.len()
+    }
+
+    fn calculate_block_info(&self, block_index: usize) -> (Range<usize>, usize) {
+        let block_meta = &self.block_metas[block_index];
+        let range =
+            block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
+        let uncompressed_capacity = block_meta.uncompressed_size as usize;
+        (range, uncompressed_capacity)
+    }
+}
+
+#[derive(Debug)]
 pub struct SstableBlock {
     pub sst_obj_id: HummockSstableObjectId,
     pub blk_idx: usize,
@@ -749,35 +893,111 @@ impl PartialOrd for SstableUnit {
 
 #[derive(Debug)]
 struct Unit<'a> {
-    sst: &'a Sstable,
+    sst: &'a RefillSstable,
     blks: Range<usize>,
 }
 
 impl<'a> Unit<'a> {
-    fn new(sst: &'a Sstable, unit: usize, uidx: usize) -> Self {
+    fn new(sst: &'a RefillSstable, unit: usize, uidx: usize) -> Self {
         let blks = unit * uidx..std::cmp::min(unit * (uidx + 1), sst.block_count());
         Self { sst, blks }
     }
 
-    fn smallest_key(&self) -> &Vec<u8> {
-        &self.sst.meta.block_metas[self.blks.start].smallest_key
+    fn smallest_key(&self) -> &[u8] {
+        &self.sst.block_metas[self.blks.start].smallest_key
     }
 
     // `largest_key` can be included or excluded, both are treated as included here
-    fn largest_key(&self) -> &Vec<u8> {
+    fn largest_key(&self) -> &[u8] {
         if self.blks.end == self.sst.block_count() {
-            &self.sst.meta.largest_key
+            self.sst.sst.largest_key()
         } else {
-            &self.sst.meta.block_metas[self.blks.end].smallest_key
+            &self.sst.block_metas[self.blks.end].smallest_key
         }
     }
 
-    fn units(sst: &Sstable, unit: usize) -> usize {
+    fn units(sst: &RefillSstable, unit: usize) -> usize {
         sst.block_count() / unit
             + if sst.block_count().is_multiple_of(unit) {
                 0
             } else {
                 1
             }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::time::Duration;
+
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::HummockSstableObjectId;
+    use tokio::sync::Semaphore;
+
+    use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_impl, test_key_of, test_value_of,
+    };
+    use crate::hummock::{CachePolicy, HummockValue, Xor16FilterBuilder};
+
+    #[tokio::test]
+    async fn test_partitioned_meta_data_refill_loads_shard_block_metas() {
+        let sstable_store = mock_sstable_store().await;
+        let mut opts = default_builder_opt_for_test();
+        opts.block_capacity = 128;
+        opts.partitioned_meta_block_count = 2;
+
+        let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opts,
+            1,
+            (0..10).map(|idx| (test_key_of(idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            HashMap::from([(0, VirtualNode::COUNT_FOR_TEST)]),
+            HashMap::from([(0, None)]),
+        )
+        .await;
+        let holder = sstable_store
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+
+        let context = CacheRefillContext {
+            config: Arc::new(CacheRefillConfig {
+                timeout: Duration::from_secs(10),
+                data_refill_levels: HashSet::from([0]),
+                meta_refill_concurrency: 0,
+                concurrency: 1,
+                unit: 2,
+                threshold: 0.0,
+                skip_recent_filter: true,
+            }),
+            meta_refill_concurrency: None,
+            concurrency: Arc::new(Semaphore::new(1)),
+            sstable_store: sstable_store.clone(),
+        };
+
+        let refill_sst = CacheRefillTask::load_refill_sstable(
+            &context,
+            holder.clone(),
+            "test_partitioned_meta_refill",
+        )
+        .await
+        .unwrap();
+        assert_eq!(refill_sst.block_count(), holder.block_count());
+        assert!(!refill_sst.block_metas.is_empty());
+
+        CacheRefillTask::data_file_cache_refill_unit(
+            &context,
+            &refill_sst,
+            SstableUnit {
+                sst_obj_id: HummockSstableObjectId::new(1),
+                blks: 0..std::cmp::min(2, refill_sst.block_count()),
+            },
+        )
+        .await
+        .unwrap();
     }
 }

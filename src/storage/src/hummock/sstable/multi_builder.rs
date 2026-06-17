@@ -46,6 +46,8 @@ pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
     type Filter: FilterBuilder;
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
+
+    fn partitioned_meta_block_count(&self) -> usize;
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -406,6 +408,10 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         );
 
         Ok(builder)
+    }
+
+    fn partitioned_meta_block_count(&self) -> usize {
+        self.options.partitioned_meta_block_count
     }
 }
 

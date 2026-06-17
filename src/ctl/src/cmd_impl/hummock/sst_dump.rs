@@ -36,7 +36,8 @@ use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
+    Block, BlockHolder, BlockIterator, BlockMeta, CompressionAlgorithm, PARTITIONED_META_VERSION,
+    SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -239,17 +240,25 @@ pub async fn sst_dump_via_sstable_store(
         vnode_statistics: None,
     }
     .into();
-    let sstable_cache = sstable_store
-        .sstable(&sstable_info, &mut StoreLocalStatistic::default())
+    let mut stats = StoreLocalStatistic::default();
+    let sstable = sstable_store.meta_index(&sstable_info, &mut stats).await?;
+    let meta_shards = sstable_store
+        .get_partitioned_meta_shards(&sstable, &mut stats)
         .await?;
-    let sstable = sstable_cache.as_ref();
-    let sstable_meta = &sstable.meta;
-    let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
-    let largest_key = FullKey::decode(&sstable_meta.largest_key);
+    let bloom_filter_size = meta_shards
+        .iter()
+        .map(|shard| shard.filter.len())
+        .sum::<usize>();
+    let block_metas = meta_shards
+        .iter()
+        .flat_map(|shard| shard.block_metas.iter().cloned())
+        .collect_vec();
+    let smallest_key = FullKey::decode(sstable.smallest_key());
+    let largest_key = FullKey::decode(sstable.largest_key());
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable_meta.estimated_size);
+    println!("File Size: {}", sstable.estimated_size());
 
     println!("Key Range:");
     println!(
@@ -257,20 +266,20 @@ pub async fn sst_dump_via_sstable_store(
         smallest_key, largest_key,
     );
 
-    println!("Estimated Table Size: {}", sstable_meta.estimated_size);
-    println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
-    println!("Key Count: {}", sstable_meta.key_count);
-    println!("Version: {}", sstable_meta.version);
+    println!("Estimated Table Size: {}", sstable.estimated_size());
+    println!("Bloom Filter Size: {}", bloom_filter_size);
+    println!("Key Count: {}", sstable.index.key_count);
+    println!("Version: {}", PARTITIONED_META_VERSION);
 
-    println!("Block Count: {}", sstable.block_count());
-    for i in 0..sstable.block_count() {
+    println!("Block Count: {}", block_metas.len());
+    for (i, block_meta) in block_metas.iter().enumerate() {
         if let Some(block_id) = &args.block_id {
             if *block_id == i as u64 {
-                print_block(i, table_data, sstable_store, sstable, args).await?;
+                print_block(i, table_data, sstable_store, object_id, block_meta, args).await?;
                 return Ok(());
             }
         } else {
-            print_block(i, table_data, sstable_store, sstable, args).await?;
+            print_block(i, table_data, sstable_store, object_id, block_meta, args).await?;
         }
     }
     Ok(())
@@ -294,15 +303,15 @@ async fn print_block(
     block_idx: usize,
     table_data: &TableData,
     sstable_store: &SstableStore,
-    sst: &Sstable,
+    object_id: HummockSstableObjectId,
+    block_meta: &BlockMeta,
     args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
     println!("\tBlock {}", block_idx);
     println!("\t-----------");
 
-    let block_meta = &sst.meta.block_metas[block_idx];
     let smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let data_path = sstable_store.get_sst_data_path(sst.id);
+    let data_path = sstable_store.get_sst_data_path(object_id);
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();

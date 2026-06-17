@@ -132,13 +132,13 @@ mod test {
         let mut stats = StoreLocalStatistic::default();
         let mut iter = MergeIterator::new(vec![
             SstableIterator::create(
-                sstable_store.sstable(&table0, &mut stats).await.unwrap(),
+                sstable_store.meta_index(&table0, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
                 &table0,
             ),
             SstableIterator::create(
-                sstable_store.sstable(&table1, &mut stats).await.unwrap(),
+                sstable_store.meta_index(&table1, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
                 &table1,

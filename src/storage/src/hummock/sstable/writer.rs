@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
 
 use super::multi_builder::UploadJoinHandle;
-use super::{Block, BlockMeta};
+use super::{Block, BlockMeta, MetaPartitionIndex, MetaShard};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     CachePolicy, HummockResult, RecentFilterTrait, SstableBlockIndex, SstableBuilderOptions,
@@ -40,8 +40,17 @@ pub trait SstableWriter: Send {
 
     async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()>;
 
-    /// Finish writing the SST.
+    #[cfg(any(test, feature = "test"))]
     async fn finish(self, meta: SstableMeta) -> HummockResult<Self::Output>;
+
+    /// Finish writing an SST whose metadata bytes are already encoded.
+    async fn finish_partitioned_meta(
+        self,
+        meta: SstableMeta,
+        partitioned_index: MetaPartitionIndex,
+        meta_shards: Vec<MetaShard>,
+        encoded_meta: Vec<u8>,
+    ) -> HummockResult<Self::Output>;
 
     /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
@@ -80,8 +89,20 @@ impl SstableWriter for InMemWriter {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test"))]
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         meta.encode_to(&mut self.buf);
+        Ok((Bytes::from(self.buf), meta))
+    }
+
+    async fn finish_partitioned_meta(
+        mut self,
+        meta: SstableMeta,
+        _partitioned_index: MetaPartitionIndex,
+        _meta_shards: Vec<MetaShard>,
+        encoded_meta: Vec<u8>,
+    ) -> HummockResult<Self::Output> {
+        self.buf.extend_from_slice(&encoded_meta);
         Ok((Bytes::from(self.buf), meta))
     }
 
@@ -196,6 +217,7 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test"))]
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
@@ -209,22 +231,66 @@ impl SstableWriter for BatchUploadWriter {
                 t
             });
 
-            // Upload data to object store.
             self.sstable_store
                 .clone()
                 .put_sst_data(self.object_id, data)
                 .await?;
-            self.sstable_store.insert_meta_cache(self.object_id, meta);
 
-            // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
             self.sstable_store
                 .recent_filter()
                 .insert((self.object_id, usize::MAX));
 
-            // Add block cache.
             if let CachePolicy::Fill(hint) = self.policy {
-                // The `block_info` may be empty when there is only range-tombstones, because we
-                //  store them in meta-block.
+                for (block_idx, block) in self.block_info.into_iter().enumerate() {
+                    self.sstable_store.block_cache().insert_with_properties(
+                        SstableBlockIndex {
+                            sst_id: self.object_id,
+                            block_idx: block_idx as _,
+                        },
+                        Box::new(block),
+                        HybridCacheProperties::default().with_hint(hint),
+                    );
+                }
+            }
+            Ok(())
+        });
+        Ok(join_handle)
+    }
+
+    async fn finish_partitioned_meta(
+        mut self,
+        _meta: SstableMeta,
+        partitioned_index: MetaPartitionIndex,
+        meta_shards: Vec<MetaShard>,
+        encoded_meta: Vec<u8>,
+    ) -> HummockResult<Self::Output> {
+        fail_point!("data_upload_err");
+        let join_handle = tokio::spawn(async move {
+            self.buf.extend_from_slice(&encoded_meta);
+            let data = Bytes::from(self.buf);
+            let _tracker = self.tracker.map(|mut t| {
+                if !t.try_increase_memory(data.capacity() as u64) {
+                    tracing::debug!("failed to allocate increase memory for data file, sst object id: {}, file size: {}",
+                                    self.object_id, data.capacity());
+                }
+                t
+            });
+
+            self.sstable_store
+                .clone()
+                .put_sst_data(self.object_id, data)
+                .await?;
+            self.sstable_store.insert_partitioned_meta_cache(
+                self.object_id,
+                partitioned_index,
+                meta_shards,
+            )?;
+
+            self.sstable_store
+                .recent_filter()
+                .insert((self.object_id, usize::MAX));
+
+            if let CachePolicy::Fill(hint) = self.policy {
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
                     self.sstable_store.block_cache().insert_with_properties(
                         SstableBlockIndex {
@@ -311,6 +377,7 @@ impl SstableWriter for StreamingUploadWriter {
             .map_err(Into::into)
     }
 
+    #[cfg(any(test, feature = "test"))]
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let metadata = Bytes::from(meta.encode_to_bytes());
 
@@ -327,12 +394,54 @@ impl SstableWriter for StreamingUploadWriter {
 
             assert!(!meta.block_metas.is_empty());
 
-            // Upload data to object store.
             self.object_uploader.finish().await?;
-            // Add meta cache.
-            self.sstable_store.insert_meta_cache(self.object_id, meta);
 
-            // Add block cache.
+            if let CachePolicy::Fill(hint) = self.policy
+                && !self.blocks.is_empty()
+            {
+                for (block_idx, block) in self.blocks.into_iter().enumerate() {
+                    self.sstable_store.block_cache().insert_with_properties(
+                        SstableBlockIndex {
+                            sst_id: self.object_id,
+                            block_idx: block_idx as _,
+                        },
+                        Box::new(block),
+                        HybridCacheProperties::default().with_hint(hint),
+                    );
+                }
+            }
+            Ok(())
+        });
+        Ok(join_handle)
+    }
+
+    async fn finish_partitioned_meta(
+        mut self,
+        _meta: SstableMeta,
+        partitioned_index: MetaPartitionIndex,
+        meta_shards: Vec<MetaShard>,
+        encoded_meta: Vec<u8>,
+    ) -> HummockResult<UploadJoinHandle> {
+        self.object_uploader
+            .write_bytes(Bytes::from(encoded_meta))
+            .await?;
+        let join_handle = tokio::spawn(async move {
+            let uploader_memory_usage = self.object_uploader.get_memory_usage();
+            let _tracker = self.tracker.map(|mut t| {
+                    if !t.try_increase_memory(uploader_memory_usage) {
+                        tracing::debug!("failed to allocate increase memory for data file, sst object id: {}, file size: {}",
+                                        self.object_id, uploader_memory_usage);
+                    }
+                    t
+                });
+
+            self.object_uploader.finish().await?;
+            self.sstable_store.insert_partitioned_meta_cache(
+                self.object_id,
+                partitioned_index,
+                meta_shards,
+            )?;
+
             if let CachePolicy::Fill(hint) = self.policy
                 && !self.blocks.is_empty()
             {
@@ -456,10 +565,32 @@ impl SstableWriter for UnifiedSstableWriter {
         }
     }
 
+    #[cfg(any(test, feature = "test"))]
     async fn finish(self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         match self {
             UnifiedSstableWriter::StreamingSstableWriter(stream) => stream.finish(meta).await,
             UnifiedSstableWriter::BatchSstableWriter(batch) => batch.finish(meta).await,
+        }
+    }
+
+    async fn finish_partitioned_meta(
+        self,
+        meta: SstableMeta,
+        partitioned_index: MetaPartitionIndex,
+        meta_shards: Vec<MetaShard>,
+        encoded_meta: Vec<u8>,
+    ) -> HummockResult<UploadJoinHandle> {
+        match self {
+            UnifiedSstableWriter::StreamingSstableWriter(stream) => {
+                stream
+                    .finish_partitioned_meta(meta, partitioned_index, meta_shards, encoded_meta)
+                    .await
+            }
+            UnifiedSstableWriter::BatchSstableWriter(batch) => {
+                batch
+                    .finish_partitioned_meta(meta, partitioned_index, meta_shards, encoded_meta)
+                    .await
+            }
         }
     }
 

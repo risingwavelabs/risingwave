@@ -46,6 +46,9 @@ pub struct HummockStateStoreMetrics {
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
     pub vnode_pruning_counts: RelabeledGuardedIntCounterVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
+    pub sst_store_read_counts: RelabeledGuardedIntCounterVec,
+    pub sst_store_read_bytes: RelabeledGuardedIntCounterVec,
+    pub partitioned_meta_counts: RelabeledGuardedIntCounterVec,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
@@ -180,6 +183,48 @@ impl HummockStateStoreMetrics {
             MetricLevel::Info,
             sst_store_block_request_counts,
             metric_level,
+        );
+
+        let sst_store_read_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_sst_store_read_counts",
+            "Total number of object reads issued by SST store, grouped by logical read source",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let sst_store_read_counts = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            sst_store_read_counts,
+            metric_level,
+            1,
+        );
+
+        let sst_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "state_store_sst_store_read_bytes",
+            "Total bytes read from object store by SST store, grouped by logical read source",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let sst_store_read_bytes = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            sst_store_read_bytes,
+            metric_level,
+            1,
+        );
+
+        let partitioned_meta_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_partitioned_meta_counts",
+            "Counters for the partitioned SST metadata prototype",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let partitioned_meta_counts = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            partitioned_meta_counts,
+            metric_level,
+            1,
         );
 
         let iter_scan_key_counts = register_guarded_int_counter_vec_with_registry!(
@@ -601,6 +646,9 @@ impl HummockStateStoreMetrics {
             iter_merge_sstable_counts,
             vnode_pruning_counts,
             sst_store_block_request_counts,
+            sst_store_read_counts,
+            sst_store_read_bytes,
+            partitioned_meta_counts,
             iter_scan_key_counts,
             get_shared_buffer_hit_counts,
             remote_read_time,

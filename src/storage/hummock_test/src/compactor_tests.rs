@@ -32,7 +32,7 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compact_task::CompactTask;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
-        FullKey, TABLE_PREFIX_LEN, TableKey, next_key, prefix_slice_with_vnode,
+        FullKey, TABLE_PREFIX_LEN, TableKey, UserKey, next_key, prefix_slice_with_vnode,
         prefixed_range_with_vnode,
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
@@ -70,7 +70,9 @@ pub(crate) mod tests {
         ConcatIterator, NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState,
         PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
-    use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+    use risingwave_storage::hummock::sstable_store::{
+        PartitionedSstableMetaHolder, SstableStoreRef,
+    };
     use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
@@ -313,14 +315,14 @@ pub(crate) mod tests {
         for output_table in &output_tables {
             let table = storage
                 .sstable_store()
-                .sstable(output_table, &mut StoreLocalStatistic::default())
+                .meta_index(output_table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
             let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
             assert!(
-                table.meta.estimated_size > target_table_size,
-                "table.meta.estimated_size {} <= target_table_size {}",
-                table.meta.estimated_size,
+                table.estimated_size() > target_table_size,
+                "table.estimated_size {} <= target_table_size {}",
+                table.estimated_size(),
                 target_table_size
             );
         }
@@ -631,10 +633,10 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += global_storage
                 .sstable_store()
-                .sstable(&table, &mut StoreLocalStatistic::default())
+                .meta_index(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .meta
+                .index
                 .key_count;
         }
         assert_eq!((kv_count / 2) as u32, key_count);
@@ -833,10 +835,10 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(&table, &mut StoreLocalStatistic::default())
+                .meta_index(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .meta
+                .index
                 .key_count;
         }
         let expect_count = kv_count as u32 - retention_seconds_expire_second + 1;
@@ -1040,10 +1042,10 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table, &mut StoreLocalStatistic::default())
+                .meta_index(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .meta
+                .index
                 .key_count;
         }
         let expect_count = kv_count as u32;
@@ -1219,6 +1221,29 @@ pub(crate) mod tests {
     }
 
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
+
+    async fn partitioned_tables_may_match_hash(
+        sstable_store: &SstableStoreRef,
+        tables: &[PartitionedSstableMetaHolder],
+        key_ref: UserKey<&[u8]>,
+        hash: u64,
+        stats: &mut StoreLocalStatistic,
+    ) -> bool {
+        let user_key_range = (Bound::Included(key_ref), Bound::Included(key_ref));
+        for table in tables {
+            for desc in &table.index.shards {
+                let shard = sstable_store
+                    .get_meta_shard_holder(table.id, table.index.filter_type, desc, stats)
+                    .await
+                    .unwrap();
+                if shard.may_match(&user_key_range, hash) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     async fn check_compaction_result(
         sstable_store: SstableStoreRef,
         ret: Vec<SstableInfo>,
@@ -1229,11 +1254,21 @@ pub(crate) mod tests {
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
         for sst_info in &fast_ret {
-            fast_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            fast_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
 
         for sst_info in &ret {
-            normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            normal_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
         assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
         assert!(can_concat(&ret));
@@ -1282,12 +1317,26 @@ pub(crate) mod tests {
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key = fast_iter.key();
             let key_ref = key.user_key.as_ref();
-            assert!(normal_tables.iter().any(|table| {
-                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
-            }));
-            assert!(fast_tables.iter().any(|table| {
-                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
-            }));
+            assert!(
+                partitioned_tables_may_match_hash(
+                    &sstable_store,
+                    &normal_tables,
+                    key_ref,
+                    hash,
+                    &mut stats,
+                )
+                .await
+            );
+            assert!(
+                partitioned_tables_may_match_hash(
+                    &sstable_store,
+                    &fast_tables,
+                    key_ref,
+                    hash,
+                    &mut stats,
+                )
+                .await
+            );
             normal_iter.next().await.unwrap();
             fast_iter.next().await.unwrap();
             count += 1;
@@ -1858,11 +1907,21 @@ pub(crate) mod tests {
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
         for sst_info in &fast_ret {
-            fast_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            fast_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
 
         for sst_info in &ret {
-            normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            normal_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));
@@ -2683,8 +2742,8 @@ pub(crate) mod tests {
         let fast_ret = fast_ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
 
         assert_eq!(
-            fast_stats.iter_total_key_counts, 0,
-            "merge/raw-copy regression should stay on skip/raw-copy paths instead of row-wise iteration",
+            fast_stats.iter_total_key_counts, 2,
+            "mixed-table shards must fall back to row-wise iteration after shard-level filters",
         );
         check_compaction_result(sstable_store, normal_ret, fast_ret, capacity).await;
     }

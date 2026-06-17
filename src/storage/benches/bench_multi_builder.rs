@@ -102,6 +102,10 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
 
         Ok(builder)
     }
+
+    fn partitioned_meta_block_count(&self) -> usize {
+        self.options.partitioned_meta_block_count
+    }
 }
 
 fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {

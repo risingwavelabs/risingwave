@@ -62,7 +62,7 @@ use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
     ReadVersionTuple, Sstable, SstableIterator, get_from_batch, get_from_sstable_info,
-    hit_sstable_filter,
+    hit_sstable_filter_with_partitioned_meta,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -1051,16 +1051,18 @@ impl HummockVersionReader {
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
-                .sstable(sstable_info, local_stats)
+                .meta_index(sstable_info, local_stats)
                 .await?;
 
             if let Some(prefix_hash) = filter_prefix_hash.as_ref()
-                && !hit_sstable_filter(
+                && !hit_sstable_filter_with_partitioned_meta(
+                    &self.sstable_store,
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
                     local_stats,
                 )
+                .await?
             {
                 continue;
             }
@@ -1081,7 +1083,6 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
-
             if level.level_type == LevelType::Nonoverlapping {
                 let mut table_infos =
                     prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id)
@@ -1103,16 +1104,18 @@ impl HummockVersionReader {
 
                     let sstable = self
                         .sstable_store
-                        .sstable(sstable_info, local_stats)
+                        .meta_index(sstable_info, local_stats)
                         .await?;
 
                     if let Some(dist_hash) = filter_prefix_hash.as_ref()
-                        && !hit_sstable_filter(
+                        && !hit_sstable_filter_with_partitioned_meta(
+                            &self.sstable_store,
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
                         )
+                        .await?
                     {
                         continue;
                     }
@@ -1140,16 +1143,18 @@ impl HummockVersionReader {
                 for sstable_info in fetch_meta_req {
                     let sstable = self
                         .sstable_store
-                        .sstable(sstable_info, local_stats)
+                        .meta_index(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
                     if let Some(dist_hash) = filter_prefix_hash.as_ref()
-                        && !hit_sstable_filter(
+                        && !hit_sstable_filter_with_partitioned_meta(
+                            &self.sstable_store,
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
                         )
+                        .await?
                     {
                         continue;
                     }
@@ -1228,7 +1233,9 @@ impl HummockVersionReader {
                 let read_options = read_options.clone();
                 async move {
                     let mut local_stat = StoreLocalStatistic::default();
-                    let table_holder = sstable_store.sstable(sstable_info, &mut local_stat).await?;
+                    let table_holder = sstable_store
+                        .meta_index(sstable_info, &mut local_stat)
+                        .await?;
                     Ok::<_, HummockError>((
                         SstableIterator::new(
                             table_holder,
@@ -1783,15 +1790,14 @@ mod tests {
             ),
         ];
         kvs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        let (_, mut sstable_info): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
-            gen_test_sstable_with_table_ids(
-                opts,
-                10,
-                kvs.into_iter(),
-                sstable_store.clone(),
-                vec![table_id.as_raw_id()],
-            )
-            .await;
+        let (_, mut sstable_info) = gen_test_sstable_with_table_ids(
+            opts,
+            10,
+            kvs.into_iter(),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
         // Override vnode stats to ensure the queried key falls inside the recorded range.
         let mut inner = sstable_info.get_inner();
         inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
@@ -1884,15 +1890,14 @@ mod tests {
             ),
         ];
         kvs1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        let (_, mut sst1): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
-            gen_test_sstable_with_table_ids(
-                opts.clone(),
-                11,
-                kvs1.into_iter(),
-                sstable_store.clone(),
-                vec![table_id.as_raw_id()],
-            )
-            .await;
+        let (_, mut sst1) = gen_test_sstable_with_table_ids(
+            opts.clone(),
+            11,
+            kvs1.into_iter(),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
         let mut sst1_inner = sst1.get_inner();
         sst1_inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
             vnode,
@@ -1912,15 +1917,14 @@ mod tests {
             HummockValue::put(Bytes::from_static(b"hit")),
         )];
         kvs2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        let (_, mut sst2): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
-            gen_test_sstable_with_table_ids(
-                opts,
-                12,
-                kvs2.into_iter(),
-                sstable_store.clone(),
-                vec![table_id.as_raw_id()],
-            )
-            .await;
+        let (_, mut sst2) = gen_test_sstable_with_table_ids(
+            opts,
+            12,
+            kvs2.into_iter(),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
         let mut sst2_inner = sst2.get_inner();
         sst2_inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
             vnode,

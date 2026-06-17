@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use foyer::Hint;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{BlockMeta, MetaShardDesc, SstableIteratorReadOptions};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
+    BlockIterator, CachePolicy, HummockResult, MetaShardHolder, PartitionedSstableMetaHolder,
+    SstableIteratorType, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -36,24 +37,39 @@ pub struct BackwardSstableIterator {
     cur_idx: usize,
 
     /// Reference to the sstable
-    sst: TableHolder,
+    sst: PartitionedSstableMetaHolder,
 
     sstable_store: SstableStoreRef,
-
     stats: StoreLocalStatistic,
 
     // used for checking if the block is valid, filter out the block that is not in the table-id range
     read_block_meta_range: (usize, usize),
+    read_table_id_range: (TableId, TableId),
+
+    partitioned_shard_idx: Option<u32>,
+    partitioned_shard: Option<MetaShardHolder>,
 }
 
 impl BackwardSstableIterator {
     pub fn new(
-        sstable: TableHolder,
+        sstable: PartitionedSstableMetaHolder,
         sstable_store: SstableStoreRef,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        let mut start_idx = 0;
-        let mut end_idx = sstable.meta.block_metas.len() - 1;
+        Self::new_with_options(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+            sstable_info_ref,
+        )
+    }
+
+    fn new_with_options(
+        sstable: PartitionedSstableMetaHolder,
+        sstable_store: SstableStoreRef,
+        _options: Arc<SstableIteratorReadOptions>,
+        sstable_info_ref: &SstableInfo,
+    ) -> Self {
         assert!(
             !sstable_info_ref.table_ids.is_empty(),
             "BackwardSstableIterator: SST {} (object {}) has empty table_ids",
@@ -70,61 +86,19 @@ impl BackwardSstableIterator {
             read_table_id_range.0,
             read_table_id_range.1
         );
-        let block_meta_count = sstable.meta.block_metas.len();
+
+        let index = &sstable.index;
+        let block_meta_count = index.block_count as usize;
         assert!(block_meta_count > 0);
-        assert!(
-            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.1,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-
-        while start_idx < block_meta_count
-            && sstable.meta.block_metas[start_idx].table_id() < read_table_id_range.0
-        {
-            start_idx += 1;
-        }
-        // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
-        assert!(
-            start_idx < block_meta_count,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-
-        while end_idx > start_idx
-            && sstable.meta.block_metas[end_idx].table_id() > read_table_id_range.1
-        {
-            end_idx -= 1;
-        }
-        assert!(
-            end_idx >= start_idx,
-            "end_idx {} < start_idx {} block_meta_count {}",
-            end_idx,
-            start_idx,
-            block_meta_count
-        );
+        let read_block_meta_range = index
+            .block_range_for_table_id_range(read_table_id_range)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table id range {} - {} not found in partitioned meta shard descs",
+                    read_table_id_range.0, read_table_id_range.1
+                )
+            });
+        let end_idx = read_block_meta_range.1;
 
         Self {
             block_iter: None,
@@ -132,7 +106,10 @@ impl BackwardSstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            read_block_meta_range: (start_idx, end_idx),
+            read_block_meta_range,
+            read_table_id_range,
+            partitioned_shard_idx: None,
+            partitioned_shard: None,
         }
     }
 
@@ -145,12 +122,19 @@ impl BackwardSstableIterator {
         if idx >= self.sst.block_count() as isize || idx < self.read_block_meta_range.0 as isize {
             self.block_iter = None;
         } else {
+            let idx = idx as usize;
+            let Some(block_meta) = self.partitioned_block_meta(idx).await? else {
+                self.block_iter = None;
+                return Ok(());
+            };
             let block = self
                 .sstable_store
-                .get(
-                    &self.sst,
-                    idx as usize,
-                    crate::hummock::CachePolicy::Fill(Hint::Normal),
+                .get_by_block_meta(
+                    self.sst.id,
+                    self.sst.estimated_size(),
+                    idx,
+                    &block_meta,
+                    CachePolicy::Fill(Hint::Normal),
                     &mut self.stats,
                 )
                 .await?;
@@ -162,10 +146,92 @@ impl BackwardSstableIterator {
             }
 
             self.block_iter = Some(block_iter);
-            self.cur_idx = idx as usize;
+            self.cur_idx = idx;
         }
 
         Ok(())
+    }
+
+    fn partitioned_desc_by_block_idx(&self, idx: usize) -> Option<MetaShardDesc> {
+        let index = &self.sst.index;
+        let shard_idx = index
+            .shards
+            .partition_point(|shard| shard.first_block_idx as usize <= idx)
+            .saturating_sub(1);
+        let desc = index.shards.get(shard_idx)?;
+        if idx < desc.first_block_idx as usize + desc.block_count as usize {
+            Some(desc.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn ensure_partitioned_shard_loaded(&mut self, desc: &MetaShardDesc) -> HummockResult<()> {
+        if self.partitioned_shard_idx == Some(desc.shard_idx) {
+            return Ok(());
+        }
+
+        let filter_type = self.sst.index.filter_type;
+        let shard = self
+            .sstable_store
+            .get_meta_shard_holder(self.sst.id, filter_type, desc, &mut self.stats)
+            .await?;
+        self.partitioned_shard_idx = Some(desc.shard_idx);
+        self.partitioned_shard = Some(shard);
+        Ok(())
+    }
+
+    async fn partitioned_block_meta(&mut self, idx: usize) -> HummockResult<Option<BlockMeta>> {
+        let Some(desc) = self.partitioned_desc_by_block_idx(idx) else {
+            return Ok(None);
+        };
+        self.ensure_partitioned_shard_loaded(&desc).await?;
+        let shard = self
+            .partitioned_shard
+            .as_ref()
+            .expect("partitioned shard should be loaded");
+        let local_idx = idx.saturating_sub(shard.first_block_idx as usize);
+        Ok(shard.block_metas.get(local_idx).cloned())
+    }
+
+    async fn skip_partitioned_table_ids_outside_range(&mut self) -> HummockResult<()> {
+        while self.is_valid() {
+            let table_id = self.key().user_key.table_id;
+            if table_id > self.read_table_id_range.1 {
+                self.seek_idx(self.cur_idx as isize - 1, None).await?;
+            } else if table_id < self.read_table_id_range.0 {
+                self.block_iter = None;
+                break;
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn calculate_partitioned_block_idx_by_key(
+        &mut self,
+        key: FullKey<&[u8]>,
+    ) -> HummockResult<usize> {
+        let Some(desc) = self.sst.index.locate_shard_by_key(key).cloned() else {
+            return Ok(self.read_block_meta_range.0);
+        };
+        let desc_start_idx = desc.first_block_idx as usize;
+        let desc_end_idx = desc_start_idx + desc.block_count as usize - 1;
+        if desc_end_idx < self.read_block_meta_range.0 {
+            return Ok(self.read_block_meta_range.0);
+        }
+        if desc_start_idx > self.read_block_meta_range.1 {
+            return Ok(self.read_block_meta_range.1);
+        }
+        self.ensure_partitioned_shard_loaded(&desc).await?;
+        let shard = self
+            .partitioned_shard
+            .as_ref()
+            .expect("partitioned shard should be loaded");
+        let local_idx = shard.locate_block_by_key(key);
+        Ok((shard.first_block_idx as usize + local_idx)
+            .clamp(self.read_block_meta_range.0, self.read_block_meta_range.1))
     }
 }
 
@@ -176,10 +242,11 @@ impl HummockIterator for BackwardSstableIterator {
         self.stats.total_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         if block_iter.try_prev() {
-            Ok(())
+            self.skip_partitioned_table_ids_outside_range().await
         } else {
             // seek to the previous block
-            self.seek_idx(self.cur_idx as isize - 1, None).await
+            self.seek_idx(self.cur_idx as isize - 1, None).await?;
+            self.skip_partitioned_table_ids_outside_range().await
         }
     }
 
@@ -201,29 +268,30 @@ impl HummockIterator for BackwardSstableIterator {
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
         self.seek_idx(self.read_block_meta_range.1 as isize, None)
-            .await
+            .await?;
+        self.skip_partitioned_table_ids_outside_range().await
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+        if key.user_key.table_id < self.read_table_id_range.0 {
+            self.block_iter = None;
+            return Ok(());
+        }
+
+        if key.user_key.table_id > self.read_table_id_range.1 {
+            self.rewind().await?;
+            return Ok(());
+        }
+
+        let block_idx = self.calculate_partitioned_block_idx_by_key(key).await?;
         let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
+        while !self.is_valid() && self.cur_idx > self.read_block_meta_range.0 {
             // Seek to prev block
-            self.seek_idx(block_idx - 1, None).await?;
+            self.seek_idx(self.cur_idx as isize - 1, None).await?;
         }
+        self.skip_partitioned_table_ids_outside_range().await?;
 
         Ok(())
     }
@@ -242,12 +310,17 @@ impl HummockIterator for BackwardSstableIterator {
 
 impl SstableIteratorType for BackwardSstableIterator {
     fn create(
-        sstable: TableHolder,
+        sstable: PartitionedSstableMetaHolder,
         sstable_store: SstableStoreRef,
-        _: Arc<SstableIteratorReadOptions>,
+        read_options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        BackwardSstableIterator::new(sstable, sstable_store, sstable_info_ref)
+        BackwardSstableIterator::new_with_options(
+            sstable,
+            sstable_store,
+            read_options,
+            sstable_info_ref,
+        )
     }
 }
 
@@ -281,7 +354,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(handle.meta.block_metas.len() > 10);
+        assert!(handle.block_count() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store, &sstable_info);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -306,7 +379,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.block_count() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store, &sstable_info);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -553,6 +626,49 @@ mod tests {
 
                 let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
                     default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let mut sstable_iter = BackwardSstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2.into()],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(1, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+                let mut opt = default_builder_opt_for_test();
+                opt.partitioned_meta_block_count = 8;
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    opt,
                     10,
                     kv_pairs.into_iter(),
                     sstable_store.clone(),

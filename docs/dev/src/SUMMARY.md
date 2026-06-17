@@ -43,6 +43,7 @@
     - [Streaming Parallelism Configuration](./design/streaming-parallelism.md)
 - [State Store](./design/state-store-overview.md)
     - [Shared Buffer](./design/shared-buffer.md)
+    - [Hummock Partitioned SST Meta and Filter](./design/hummock-partitioned-sst-meta.md)
     - [Relational Table](./design/relational-table.md)
     - [Multiple Object Storage Backends](./design/multi-object-store.md)
 - [Meta Service](./design/meta-service.md)
