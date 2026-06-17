@@ -47,10 +47,19 @@ impl StreamDml {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.stream_kind().merge(if row_id_as_pk {
+                // For row-id table. There will be a `RowIdGen` following the `Dml` and `Union`.
+                // Until then the row-id key is not filled, so track the stream with the
+                // frontend-only kind.
                 StreamKind::RowIdNotFilled { append_only }
             } else if append_only {
+                // For append-only table. Either there will be a `RowIdGen` following the `Dml` and
+                // `Union`, or there will be a `Materialize` with conflict handling enabled. In
+                // both cases there will be no key conflict, so we can treat the merged stream as
+                // append-only here.
                 StreamKind::AppendOnly
             } else {
+                // We cannot guarantee that there's no conflict on stream key between upstream
+                // source and DML input, so we must treat it as upsert here.
                 StreamKind::Upsert
             }),
             false,                   // TODO(rc): decide EOWC property
