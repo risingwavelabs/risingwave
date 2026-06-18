@@ -26,6 +26,7 @@ use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::{bail, ensure};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
@@ -271,6 +272,12 @@ impl PulsarBrokerReader {
     async fn into_data_stream(mut self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset.take();
+        let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
+            matches!(
+                col_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Headers(_) | AdditionalColumnType::HeaderInner(_))
+            )
+        });
         #[for_await]
         for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
             let msgs = msgs
@@ -307,7 +314,7 @@ impl PulsarBrokerReader {
                     }
                 }
 
-                let msg = SourceMessage::from(msg);
+                let msg = SourceMessage::from_pulsar_message(msg, require_message_header);
                 res.push(msg);
             }
             yield res;
