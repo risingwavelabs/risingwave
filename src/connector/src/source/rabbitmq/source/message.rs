@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::Display;
-use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use lapin::message::Delivery;
 use lapin::options::BasicAckOptions;
@@ -30,6 +31,52 @@ static RABBITMQ_ACK_CONSUMER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_ack_consumer_id() -> u64 {
     RABBITMQ_ACK_CONSUMER_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Debug, Default)]
+pub struct RabbitmqAckTracker {
+    tokens: Arc<Mutex<HashSet<String>>>,
+}
+
+impl RabbitmqAckTracker {
+    fn track(&self, ack_token: &str) -> Weak<Mutex<HashSet<String>>> {
+        if let Ok(mut tokens) = self.tokens.lock() {
+            tokens.insert(ack_token.to_owned());
+        }
+        Arc::downgrade(&self.tokens)
+    }
+}
+
+impl Drop for RabbitmqAckTracker {
+    fn drop(&mut self) {
+        // This only handles in-process reader/actor teardown. If the whole compute
+        // process is killed, Rust destructors do not run, but the process-local ack
+        // cache and metric handles disappear with the process and RabbitMQ requeues
+        // unacked deliveries when the AMQP connection closes.
+        let tokens = if let Ok(mut tokens) = self.tokens.lock() {
+            tokens.drain().collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+        if tokens.is_empty() {
+            return;
+        }
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                for ack_token in tokens {
+                    if let Some(entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
+                        entry.dec_unacked_count();
+                    }
+                }
+            });
+        } else {
+            tracing::warn!(
+                token_count = tokens.len(),
+                "RabbitMQ ack tracker dropped outside a Tokio runtime; stale ack cache entries may remain until process exit",
+            );
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -70,10 +117,15 @@ impl RabbitmqAckMetricLabels {
 pub struct RabbitmqAckEntry {
     acker: lapin::acker::Acker,
     metric_labels: RabbitmqAckMetricLabels,
+    tracker: Weak<Mutex<HashSet<String>>>,
 }
 
 impl RabbitmqAckEntry {
-    fn new(acker: lapin::acker::Acker, metric_labels: RabbitmqAckMetricLabels) -> Self {
+    fn new(
+        acker: lapin::acker::Acker,
+        metric_labels: RabbitmqAckMetricLabels,
+        tracker: Weak<Mutex<HashSet<String>>>,
+    ) -> Self {
         GLOBAL_SOURCE_METRICS
             .rabbitmq_unacked_message_count
             .with_label_values(&metric_labels.label_values())
@@ -81,6 +133,7 @@ impl RabbitmqAckEntry {
         Self {
             acker,
             metric_labels,
+            tracker,
         }
     }
 
@@ -89,6 +142,14 @@ impl RabbitmqAckEntry {
             .rabbitmq_unacked_message_count
             .with_label_values(&self.metric_labels.label_values())
             .dec();
+    }
+
+    fn untrack(&self, ack_token: &str) {
+        if let Some(tracker) = self.tracker.upgrade()
+            && let Ok(mut tokens) = tracker.lock()
+        {
+            tokens.remove(ack_token);
+        }
     }
 }
 
@@ -107,6 +168,7 @@ impl RabbitmqMessage {
         split_id: SplitId,
         queue: String,
         ack_consumer_id: u64,
+        ack_tracker: &RabbitmqAckTracker,
         delivery: Delivery,
         source_ctx: &SourceContextRef,
     ) -> Self {
@@ -128,10 +190,11 @@ impl RabbitmqMessage {
         let ack_entry = RabbitmqAckEntry::new(
             acker,
             RabbitmqAckMetricLabels::new(&split_id, &queue, source_ctx),
+            ack_tracker.track(&ack_token),
         );
-        if let Some(old_entry) = RABBITMQ_ACK_CACHE.get(&ack_token).await {
-            RABBITMQ_ACK_CACHE.invalidate(&ack_token).await;
+        if let Some(old_entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
             old_entry.dec_unacked_count();
+            old_entry.untrack(&ack_token);
         }
         RABBITMQ_ACK_CACHE
             .insert(ack_token.clone(), ack_entry)
@@ -179,10 +242,30 @@ pub fn ack_token(
 pub async fn ack_delivery(ack_token: String) -> crate::error::ConnectorResult<bool> {
     if let Some(entry) = RABBITMQ_ACK_CACHE.get(&ack_token).await {
         entry.acker.ack(BasicAckOptions::default()).await?;
-        RABBITMQ_ACK_CACHE.invalidate(&ack_token).await;
-        entry.dec_unacked_count();
+        if let Some(entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
+            entry.dec_unacked_count();
+            entry.untrack(&ack_token);
+        }
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ack_token;
+    use crate::source::SplitId;
+
+    #[test]
+    fn ack_token_is_scoped_beyond_delivery_tag() {
+        let split_id = SplitId::from("0");
+        let first = ack_token(1, 10, &split_id, "queue:orders", 100, 1);
+        let different_source = ack_token(2, 10, &split_id, "queue:orders", 100, 1);
+        let different_consumer = ack_token(1, 10, &split_id, "queue:orders", 101, 1);
+
+        assert_ne!(first, different_source);
+        assert_ne!(first, different_consumer);
+        assert!(first.contains("queue%3Aorders"));
     }
 }

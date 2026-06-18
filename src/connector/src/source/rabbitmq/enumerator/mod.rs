@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use lapin::Connection;
 
 use super::{RabbitmqProperties, RabbitmqSplit};
 use crate::error::ConnectorResult;
@@ -22,7 +21,6 @@ use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 pub struct RabbitmqSplitEnumerator {
     properties: RabbitmqProperties,
     queues: Vec<String>,
-    connection: Connection,
 }
 
 #[async_trait]
@@ -38,17 +36,10 @@ impl SplitEnumerator for RabbitmqSplitEnumerator {
         let queues = properties.queue_names()?;
         let connection = properties.connect().await?;
         properties.check_queues(&connection, &queues).await?;
-        Ok(Self {
-            properties,
-            queues,
-            connection,
-        })
+        Ok(Self { properties, queues })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<RabbitmqSplit>> {
-        self.properties
-            .check_queues(&self.connection, &self.queues)
-            .await?;
         Ok(vec![RabbitmqSplit::template(
             self.queues.clone(),
             self.properties.max_connections(),
