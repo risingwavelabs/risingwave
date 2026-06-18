@@ -1138,23 +1138,18 @@ impl WaitCheckpointTaskBuilder {
     }
 
     fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
-        #[expect(clippy::single_match)]
-        match &mut self.building_task {
-            WaitCheckpointTask::CommitCdcOffset(offsets) => {
-                #[expect(clippy::collapsible_match)]
-                if !updated_splits.is_empty() {
-                    // cdc source only has one split
-                    assert_eq!(1, updated_splits.len());
-                    for (split_id, split_impl) in updated_splits {
-                        if split_impl.is_cdc_split() {
-                            *offsets = Some((split_id, split_impl.get_cdc_split_offset()));
-                        } else {
-                            unreachable!()
-                        }
-                    }
+        if let WaitCheckpointTask::CommitCdcOffset(offsets) = &mut self.building_task
+            && !updated_splits.is_empty()
+        {
+            // cdc source only has one split
+            assert_eq!(1, updated_splits.len());
+            for (split_id, split_impl) in updated_splits {
+                if split_impl.is_cdc_split() {
+                    *offsets = Some((split_id, split_impl.get_cdc_split_offset()));
+                } else {
+                    unreachable!()
                 }
             }
-            _ => {}
         }
     }
 

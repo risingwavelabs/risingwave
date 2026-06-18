@@ -303,11 +303,8 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
 
-            let mut start_id = 2;
-            #[expect(clippy::explicit_counter_loop)]
-            for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
-                start_id += 1;
+            for (i, sst) in task.input.input_levels[0].table_infos.iter().enumerate() {
+                assert_eq!(2 + i as u64, sst.sst_id);
             }
 
             assert_eq!(task.input.input_levels[1].level_idx, 4);
@@ -354,11 +351,8 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
-            let mut start_id = 8;
-            #[expect(clippy::explicit_counter_loop)]
-            for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.sst_id);
-                start_id += 1;
+            for (i, sst) in task.input.input_levels[0].table_infos.iter().enumerate() {
+                assert_eq!(8 + i as u64, sst.sst_id);
             }
 
             assert!(
