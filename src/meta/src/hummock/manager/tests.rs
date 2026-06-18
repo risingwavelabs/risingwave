@@ -3493,6 +3493,72 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
 }
 
 #[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_refreshes_write_limits() {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .level0_stop_write_threshold_sub_level_number(1)
+        .build();
+    let (_env, hummock_manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, None).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into())])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(1),
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(1, vec![64], test_epoch(1))],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(2),
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(2, vec![80], test_epoch(2))],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        hummock_manager.write_limits().await.contains_key(&cg_64),
+        "the parent group should enter write stop before normalize"
+    );
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert!(split_count > 0);
+
+    let write_limits = hummock_manager.write_limits().await;
+    assert!(
+        write_limits.is_empty(),
+        "normalize split should refresh write limits after rewriting L0 sub-levels"
+    );
+}
+
+#[tokio::test]
 async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
     let mut opts = MetaOpts::test(false);
     opts.enable_compaction_group_normalize = true;
