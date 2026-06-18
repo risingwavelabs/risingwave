@@ -298,6 +298,22 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end rabbitmq source test"
+    command: "ci/scripts/e2e-source-rabbitmq-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-rabbitmq-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-rabbitmq-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-rabbitmq-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end nats source test"
     command: "ci/scripts/e2e-source-nats-test.sh -p ci-dev"
     if: |

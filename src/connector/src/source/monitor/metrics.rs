@@ -15,8 +15,8 @@
 use std::sync::{Arc, LazyLock};
 
 use prometheus::{
-    IntCounterVec, Registry, exponential_buckets, histogram_opts,
-    register_int_counter_vec_with_registry,
+    IntCounterVec, IntGaugeVec, Registry, exponential_buckets, histogram_opts,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
@@ -156,8 +156,14 @@ pub struct SourceMetrics {
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
 
+    /// Total successful acks during checkpoint for source connectors.
+    pub connector_ack_success_count: IntCounterVec,
     /// Total ack failures (RPC errors and timeouts) during checkpoint for source connectors.
     pub connector_ack_failure_count: IntCounterVec,
+
+    /// `RabbitMQ` deliveries accepted by RW but not acked at a completed checkpoint yet.
+    /// This tracks consumer-side in-flight lag, not broker-side queue depth.
+    pub rabbitmq_unacked_message_count: IntGaugeVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -294,10 +300,33 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let connector_ack_success_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_success_count",
+            "Total number of successful acks during checkpoint for source connectors",
+            &["source_name", "connector_type"],
+            registry
+        )
+        .unwrap();
+
         let connector_ack_failure_count = register_int_counter_vec_with_registry!(
             "source_connector_ack_failure_count",
             "Total number of ack failures during checkpoint for source connectors",
             &["source_name", "connector_type", "error_type"],
+            registry
+        )
+        .unwrap();
+
+        let rabbitmq_unacked_message_count = register_int_gauge_vec_with_registry!(
+            "source_rabbitmq_unacked_message_count",
+            "RabbitMQ messages delivered to RisingWave but not acked at a completed checkpoint yet",
+            &[
+                "source_id",
+                "source_name",
+                "actor_id",
+                "fragment_id",
+                "split_id",
+                "queue"
+            ],
             registry
         )
         .unwrap();
@@ -321,7 +350,9 @@ impl SourceMetrics {
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
 
+            connector_ack_success_count,
             connector_ack_failure_count,
+            rabbitmq_unacked_message_count,
         }
     }
 }

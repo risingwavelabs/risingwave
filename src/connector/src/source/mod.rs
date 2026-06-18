@@ -25,6 +25,7 @@ pub mod prelude {
     pub use crate::source::nats::NatsSplitEnumerator;
     pub use crate::source::nexmark::NexmarkSplitEnumerator;
     pub use crate::source::pulsar::PulsarSplitEnumerator;
+    pub use crate::source::rabbitmq::RabbitmqSplitEnumerator;
     pub use crate::source::test_source::TestSourceSplitEnumerator as TestSplitEnumerator;
     pub type AzblobSplitEnumerator =
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalAzblob>;
@@ -57,6 +58,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+pub mod rabbitmq;
 pub mod utils;
 
 mod util;
@@ -72,6 +74,7 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
+pub use rabbitmq::RABBITMQ_CONNECTOR;
 use utils::feature_gated_source_mod;
 
 pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
@@ -99,6 +102,9 @@ pub use crate::source::filesystem::opendal_source::{
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
+use crate::source::rabbitmq::source::{
+    ack_delivery as ack_rabbitmq_delivery, drop_delivery as drop_rabbitmq_delivery,
+};
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -128,6 +134,7 @@ pub enum WaitCheckpointTask {
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
     AckPulsarMessage(Vec<(String, ArrayRef)>),
+    AckRabbitmqMessage(Vec<ArrayRef>),
 }
 
 impl WaitCheckpointTask {
@@ -144,6 +151,9 @@ impl WaitCheckpointTask {
                 WaitCheckpointTask::AckNatsJetStream(context.clone(), vec![], *ack_policy)
             }
             WaitCheckpointTask::AckPulsarMessage(_) => WaitCheckpointTask::AckPulsarMessage(vec![]),
+            WaitCheckpointTask::AckRabbitmqMessage(_) => {
+                WaitCheckpointTask::AckRabbitmqMessage(vec![])
+            }
         }
     }
 
@@ -336,6 +346,61 @@ impl WaitCheckpointTask {
                                 source_name,
                             )
                             .await;
+                        }
+                    }
+                }
+            }
+            WaitCheckpointTask::AckRabbitmqMessage(ack_token_arrs) => {
+                const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+                for ack_token in ack_token_arrs
+                    .iter()
+                    .flat_map(|arr| arr.as_utf8().iter().flatten().map(ToOwned::to_owned))
+                {
+                    match tokio::time::timeout(
+                        ACK_RPC_TIMEOUT,
+                        ack_rabbitmq_delivery(ack_token.clone()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(true)) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_success_count
+                                .with_label_values(&[source_name, "rabbitmq"])
+                                .inc();
+                        }
+                        Ok(Ok(false)) => {
+                            tracing::debug!(
+                                source_id = source_id_label,
+                                source_name,
+                                ack_token,
+                                "RabbitMQ delivery was already acked or no longer tracked",
+                            );
+                        }
+                        Ok(Err(e)) => {
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&[source_name, "rabbitmq", "error"])
+                                .inc();
+                            tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
+                                error = %e.as_report(),
+                                ack_token,
+                                "failed to ack RabbitMQ message",
+                            );
+                        }
+                        Err(_) => {
+                            drop_rabbitmq_delivery(&ack_token).await;
+                            crate::source::monitor::GLOBAL_SOURCE_METRICS
+                                .connector_ack_failure_count
+                                .with_label_values(&[source_name, "rabbitmq", "timeout"])
+                                .inc();
+                            tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
+                                ack_token,
+                                "RabbitMQ ack timed out after {ACK_RPC_TIMEOUT:?}",
+                            );
                         }
                     }
                 }
