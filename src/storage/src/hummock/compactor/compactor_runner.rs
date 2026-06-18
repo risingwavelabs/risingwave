@@ -115,6 +115,7 @@ impl CompactorRunner {
                 use_block_based_filter,
                 sstable_filter_kind: task.sstable_filter_kind,
                 table_vnode_partition: task.table_vnode_partition.clone(),
+                table_id_to_watermark_type: task.build_table_watermark_serde_types(),
                 table_schemas: task
                     .table_schemas
                     .iter()

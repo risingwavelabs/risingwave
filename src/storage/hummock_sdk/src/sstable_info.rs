@@ -57,6 +57,7 @@ pub struct SstableInfoInner {
     pub filter_type: PbSstableFilterType,
     pub sst_size: u64,
     pub vnode_statistics: Option<VnodeStatistics>,
+    pub max_watermark_column_value: Option<Bytes>,
 }
 
 impl SstableInfoInner {
@@ -80,6 +81,9 @@ impl SstableInfoInner {
             for (min_key, max_key) in vnode_statistics.vnode_user_key_ranges.values() {
                 basic += size_of::<u32>() + min_key.encoded_len() + max_key.encoded_len();
             }
+        }
+        if let Some(max_watermark_column_value) = &self.max_watermark_column_value {
+            basic += max_watermark_column_value.len();
         }
 
         basic
@@ -183,6 +187,7 @@ impl From<PbSstableInfo> for SstableInfoInner {
                 .vnode_statistics
                 .as_ref()
                 .map(VnodeStatistics::from),
+            max_watermark_column_value: pb_sstable_info.max_watermark_column_value.map(Into::into),
         }
     }
 }
@@ -226,6 +231,10 @@ impl From<&PbSstableInfo> for SstableInfoInner {
                 .vnode_statistics
                 .as_ref()
                 .map(VnodeStatistics::from),
+            max_watermark_column_value: pb_sstable_info
+                .max_watermark_column_value
+                .clone()
+                .map(Into::into),
         }
     }
 }
@@ -269,6 +278,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
                 .vnode_statistics
                 .as_ref()
                 .map(PbVnodeStatistics::from),
+            max_watermark_column_value: sstable_info.max_watermark_column_value.map(Into::into),
         }
     }
 }
@@ -309,6 +319,10 @@ impl From<&SstableInfoInner> for PbSstableInfo {
                 .vnode_statistics
                 .as_ref()
                 .map(PbVnodeStatistics::from),
+            max_watermark_column_value: sstable_info
+                .max_watermark_column_value
+                .clone()
+                .map(Into::into),
         }
     }
 }

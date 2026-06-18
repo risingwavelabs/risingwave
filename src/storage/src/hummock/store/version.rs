@@ -1528,6 +1528,7 @@ mod tests {
             filter_type: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
+            max_watermark_column_value: None,
         }
         .into();
         let pb_level = PbLevel {

@@ -28,6 +28,7 @@ use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
@@ -90,6 +91,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
         let table_id_to_vnode =
             HashMap::from_iter(vec![(TableId::default(), VirtualNode::COUNT_FOR_TEST)]);
 
+        let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
 
         let builder = SstableBuilder::for_test(
@@ -97,6 +99,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             writer,
             self.options.clone(),
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 

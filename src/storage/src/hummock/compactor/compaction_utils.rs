@@ -24,10 +24,12 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbSstableFilterType, PbTableSchema};
@@ -57,6 +59,7 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub policy: CachePolicy,
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    pub table_id_to_watermark_type: HashMap<StateTableId, WatermarkSerdeType>,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
 }
@@ -86,6 +89,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             Self::Filter::create(self.options.filter_builder_options()),
             self.options.clone(),
             self.compaction_catalog_agent_ref.clone(),
+            self.table_id_to_watermark_type.clone(),
             Some(self.limiter.clone()),
         );
         Ok(builder)
@@ -124,6 +128,7 @@ pub struct TaskConfig {
     pub(crate) sstable_filter_kind: PbSstableFilterType,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
+    pub(crate) table_id_to_watermark_type: HashMap<StateTableId, WatermarkSerdeType>,
     /// `TableId` -> `TableSchema`
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
@@ -149,6 +154,7 @@ impl TaskConfig {
             use_block_based_filter,
             sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             table_vnode_partition: BTreeMap::default(),
+            table_id_to_watermark_type: HashMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
         }
@@ -593,8 +599,21 @@ fn optimize_by_copy_block_with_input(
         .iter()
         .map(|table_info| table_info.total_key_count)
         .sum::<u64>();
-
     let single_table = compact_task.get_table_ids_from_input_ssts().count() == 1;
+    let is_optimization_rejected_by_watermark = if single_table {
+        let single_table_id = compact_task.get_table_ids_from_input_ssts().next().unwrap();
+        compact_task
+            .pk_prefix_table_watermarks
+            .contains_key(&single_table_id)
+            || compact_task
+                .non_pk_prefix_table_watermarks
+                .contains_key(&single_table_id)
+            || compact_task
+                .value_table_watermarks
+                .contains_key(&single_table_id)
+    } else {
+        false
+    };
     context.storage_opts.enable_fast_compaction
         && current_filter_type == PbSstableFilterType::SstableFilterXor16
         && all_ssts_are_blocked_filter
@@ -604,6 +623,7 @@ fn optimize_by_copy_block_with_input(
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
         && single_table
+        && !is_optimization_rejected_by_watermark
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size

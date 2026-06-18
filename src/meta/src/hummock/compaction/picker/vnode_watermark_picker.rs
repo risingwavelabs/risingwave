@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
@@ -30,7 +29,7 @@ impl VnodeWatermarkCompactionPicker {
         Self {}
     }
 
-    /// The current implementation only picks trivial reclaim task for the bottommost level.
+    /// The current implementation only picks trivial reclaim tasks.
     /// Must modify `is_trivial_reclaim`, if non-trivial reclaim is supported in the future.
     pub fn pick_compaction(
         &mut self,
@@ -42,7 +41,7 @@ impl VnodeWatermarkCompactionPicker {
         let mut select_input_ssts = vec![];
         for sst_info in &level.table_infos {
             if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
-                && should_delete_sst_by_watermark(sst_info, table_watermarks)
+                && should_trivial_reclaim_sst_by_watermark(sst_info, table_watermarks)
             {
                 select_input_ssts.push(sst_info.clone());
             }
@@ -72,167 +71,216 @@ impl VnodeWatermarkCompactionPicker {
     }
 }
 
-fn should_delete_sst_by_watermark(
+fn should_trivial_reclaim_sst_by_watermark(
     sst_info: &SstableInfo,
     table_watermarks: &BTreeMap<TableId, ReadTableWatermark>,
 ) -> bool {
-    // Both table id and vnode must be identical for both the left and right keys in a SST.
-    // As more data is written to the bottommost level, they will eventually become identical.
-    let left_key = FullKey::decode(&sst_info.key_range.left);
-    let right_key = FullKey::decode(&sst_info.key_range.right);
-    if left_key.user_key.table_id != right_key.user_key.table_id {
-        return false;
-    }
-    if left_key.user_key.table_key.vnode_part() != right_key.user_key.table_key.vnode_part() {
-        return false;
-    }
-    let Some(watermarks) = table_watermarks.get(&left_key.user_key.table_id) else {
+    let Some(max_watermark_column_value) = sst_info.max_watermark_column_value.as_ref() else {
         return false;
     };
-    should_delete_key_by_watermark(&left_key.user_key.table_key, watermarks)
-        && should_delete_key_by_watermark(&right_key.user_key.table_key, watermarks)
+    let [table_id] = sst_info.table_ids.as_slice() else {
+        return false;
+    };
+    let Some(watermarks) = table_watermarks.get(table_id) else {
+        return false;
+    };
+    let Some(table_watermark) = table_watermark_for_reclaim(watermarks) else {
+        return false;
+    };
+    watermarks
+        .direction
+        .key_filter_by_watermark(max_watermark_column_value, table_watermark)
 }
 
-fn should_delete_key_by_watermark(
-    table_key: &TableKey<&[u8]>,
-    watermark: &ReadTableWatermark,
-) -> bool {
-    let (vnode, key) = table_key.split_vnode();
-    let Some(w) = watermark.vnode_watermarks.get(&vnode) else {
-        return false;
-    };
-    watermark.direction.key_filter_by_watermark(key, w)
+// Returns the lower bound watermark across all vnodes.
+fn table_watermark_for_reclaim(watermarks: &ReadTableWatermark) -> Option<&bytes::Bytes> {
+    match watermarks.direction {
+        risingwave_hummock_sdk::table_watermark::WatermarkDirection::Ascending => {
+            watermarks.vnode_watermarks.values().min()
+        }
+        risingwave_hummock_sdk::table_watermark::WatermarkDirection::Descending => {
+            watermarks.vnode_watermarks.values().max()
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::{BufMut, Bytes, BytesMut};
+    use std::collections::BTreeMap;
+
+    use bytes::Bytes;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::Levels;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 
-    use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
+    use crate::hummock::compaction::picker::vnode_watermark_picker::{
+        VnodeWatermarkCompactionPicker, should_trivial_reclaim_sst_by_watermark,
+        table_watermark_for_reclaim,
+    };
+    use crate::hummock::compaction::selector::tests::{generate_level, generate_table_impl};
+    use crate::hummock::level_handler::LevelHandler;
 
     #[test]
-    fn test_should_delete_sst_by_watermark() {
+    fn test_should_trivial_reclaim_sst_by_watermark() {
         let table_watermarks = maplit::btreemap! {
             1.into() => ReadTableWatermark {
                 direction: WatermarkDirection::Ascending,
                 vnode_watermarks: maplit::btreemap! {
-                    VirtualNode::from_index(16) => "some_watermark_key_8".into(),
-                    VirtualNode::from_index(17) => "some_watermark_key_8".into(),
+                    VirtualNode::from_index(16) => Bytes::from_static(b"some_watermark_key_8"),
+                    VirtualNode::from_index(17) => Bytes::from_static(b"some_watermark_key_9"),
                 },
             },
-        };
-        let table_key = |vnode_part: usize, key_part: &str| {
-            let mut builder = BytesMut::new();
-            builder.put_slice(&VirtualNode::from_index(vnode_part).to_be_bytes());
-            builder.put_slice(&Bytes::copy_from_slice(key_part.as_bytes()));
-            TableKey(builder.freeze())
         };
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
-            key_range: KeyRange {
-                left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0)
-                    .encode()
-                    .into(),
-                right: FullKey::new(2.into(), table_key(16, "some_watermark_key_2"), 0)
-                    .encode()
-                    .into(),
-                right_exclusive: true,
-            },
             table_ids: vec![2.into()],
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_1")),
             ..Default::default()
         }
         .into();
         assert!(
-            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
+            !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching watermark found"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
-            key_range: KeyRange {
-                left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0)
-                    .encode()
-                    .into(),
-                right: FullKey::new(1.into(), table_key(14, "some_watermark_key_2"), 0)
-                    .encode()
-                    .into(),
-                right_exclusive: true,
-            },
-            table_ids: vec![1.into()],
+            table_ids: vec![1.into(), 2.into()],
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_1")),
             ..Default::default()
         }
         .into();
         assert!(
-            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because no matching vnode found"
+            !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
+            "should fail because max_watermark_column_value is only tracked for single-table SSTs"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
-            key_range: KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
-                    .encode()
-                    .into(),
-                right: FullKey::new(1.into(), table_key(17, "some_watermark_key_2"), 0)
-                    .encode()
-                    .into(),
-                right_exclusive: true,
-            },
             table_ids: vec![1.into()],
+            max_watermark_column_value: None,
             ..Default::default()
         }
         .into();
         assert!(
-            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because different vnodes found"
+            !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
+            "should fail because max_watermark_column_value is absent"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
-            key_range: KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
-                    .encode()
-                    .into(),
-                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_9"), 0)
-                    .encode()
-                    .into(),
-                right_exclusive: true,
-            },
             table_ids: vec![1.into()],
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_9")),
             ..Default::default()
         }
         .into();
         assert!(
-            !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because right key is greater than watermark"
+            !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
+            "should fail because max_watermark_column_value is not filtered by the table watermark"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
-            key_range: KeyRange {
-                left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
-                    .encode()
-                    .into(),
-                right: FullKey::new(1.into(), table_key(16, "some_watermark_key_2"), 0)
-                    .encode()
-                    .into(),
-                right_exclusive: true,
-            },
             table_ids: vec![1.into()],
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_7")),
             ..Default::default()
         }
         .into();
-        assert!(should_delete_sst_by_watermark(&sst_info, &table_watermarks));
+        assert!(
+            should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
+            "should use the lower bound watermark across all vnodes of the table"
+        );
+    }
+
+    #[test]
+    fn test_table_watermark_for_reclaim_respects_direction() {
+        let ascending = ReadTableWatermark {
+            direction: WatermarkDirection::Ascending,
+            vnode_watermarks: maplit::btreemap! {
+                VirtualNode::from_index(1) => Bytes::from_static(b"key_8"),
+                VirtualNode::from_index(2) => Bytes::from_static(b"key_9"),
+            },
+        };
+        assert_eq!(
+            table_watermark_for_reclaim(&ascending),
+            Some(&Bytes::from_static(b"key_8"))
+        );
+
+        let descending = ReadTableWatermark {
+            direction: WatermarkDirection::Descending,
+            vnode_watermarks: maplit::btreemap! {
+                VirtualNode::from_index(1) => Bytes::from_static(b"key_8"),
+                VirtualNode::from_index(2) => Bytes::from_static(b"key_9"),
+            },
+        };
+        assert_eq!(
+            table_watermark_for_reclaim(&descending),
+            Some(&Bytes::from_static(b"key_9"))
+        );
+    }
+
+    #[test]
+    fn test_pick_compaction_last_level() {
+        let level_2_sst = SstableInfoInner {
+            max_watermark_column_value: Some(Bytes::from_static(b"key_9")),
+            ..generate_table_impl(1, 1, 0, 100, 1)
+        }
+        .into();
+        let level_3_sst = SstableInfoInner {
+            max_watermark_column_value: Some(Bytes::from_static(b"key_8")),
+            ..generate_table_impl(2, 1, 101, 200, 1)
+        }
+        .into();
+        let level_4_sst = SstableInfoInner {
+            max_watermark_column_value: Some(Bytes::from_static(b"key_7")),
+            ..generate_table_impl(3, 1, 201, 300, 1)
+        }
+        .into();
+
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, vec![level_2_sst]),
+                generate_level(3, vec![level_3_sst]),
+                generate_level(4, vec![level_4_sst]),
+            ],
+            ..Default::default()
+        };
+        let level_handlers = vec![
+            LevelHandler::new(0),
+            LevelHandler::new(1),
+            LevelHandler::new(2),
+            LevelHandler::new(3),
+            LevelHandler::new(4),
+        ];
+        let table_watermarks = BTreeMap::from([(
+            1.into(),
+            ReadTableWatermark {
+                direction: WatermarkDirection::Ascending,
+                vnode_watermarks: maplit::btreemap! {
+                    VirtualNode::from_index(1) => Bytes::from_static(b"key_8"),
+                },
+            },
+        )]);
+
+        let mut picker = VnodeWatermarkCompactionPicker::new();
+        let ret = picker
+            .pick_compaction(&levels, &level_handlers, &table_watermarks)
+            .unwrap();
+
+        assert_eq!(ret.input_levels.len(), 2);
+        assert_eq!(ret.input_levels[0].level_idx, 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 3);
+        assert_eq!(ret.input_levels[1].level_idx, 4);
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        assert_eq!(ret.target_level, 4);
+        assert_eq!(ret.total_file_count, 1);
     }
 }

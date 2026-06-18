@@ -30,6 +30,7 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{
     EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId,
 };
@@ -169,12 +170,14 @@ pub async fn gen_test_sstable_data(
         TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
+    let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
     let mut b = SstableBuilder::for_test(
         0,
         mock_sst_writer(&opts),
         opts,
         table_id_to_vnode,
+        table_id_to_watermark_type,
         table_id_to_watermark_serde,
     );
     for (key, value) in kv_iter {
@@ -281,6 +284,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         F::create(opts.filter_builder_options()),
         opts,
         compaction_catalog_agent_ref,
+        HashMap::default(),
         None,
     );
 

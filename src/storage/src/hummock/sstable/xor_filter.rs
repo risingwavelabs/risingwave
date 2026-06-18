@@ -838,6 +838,7 @@ mod tests {
             BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
             opts,
             compaction_catalog_agent_ref,
+            HashMap::default(),
             None,
         );
         let mut rng = rand::rng();

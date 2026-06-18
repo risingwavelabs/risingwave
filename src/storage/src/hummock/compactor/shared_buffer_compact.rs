@@ -438,6 +438,7 @@ impl SharedBufferCompactRunner {
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 table_vnode_partition,
+                table_id_to_watermark_type: HashMap::default(),
                 use_block_based_filter,
                 // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
                 sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,

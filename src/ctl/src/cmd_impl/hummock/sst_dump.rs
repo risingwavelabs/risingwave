@@ -237,6 +237,7 @@ pub async fn sst_dump_via_sstable_store(
         filter_type: Default::default(),
         sst_size: 0,
         vnode_statistics: None,
+        max_watermark_column_value: None,
     }
     .into();
     let sstable_cache = sstable_store
