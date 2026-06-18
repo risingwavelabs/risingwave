@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
 
 use lapin::message::Delivery;
 use lapin::options::BasicAckOptions;
@@ -40,9 +40,7 @@ pub struct RabbitmqAckTracker {
 
 impl RabbitmqAckTracker {
     fn track(&self, ack_token: &str) -> Weak<Mutex<HashSet<String>>> {
-        if let Ok(mut tokens) = self.tokens.lock() {
-            tokens.insert(ack_token.to_owned());
-        }
+        lock_tracker_tokens(&self.tokens).insert(ack_token.to_owned());
         Arc::downgrade(&self.tokens)
     }
 }
@@ -53,11 +51,9 @@ impl Drop for RabbitmqAckTracker {
         // process is killed, Rust destructors do not run, but the process-local ack
         // cache and metric handles disappear with the process and RabbitMQ requeues
         // unacked deliveries when the AMQP connection closes.
-        let tokens = if let Ok(mut tokens) = self.tokens.lock() {
-            tokens.drain().collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        let tokens = lock_tracker_tokens(&self.tokens)
+            .drain()
+            .collect::<Vec<_>>();
         if tokens.is_empty() {
             return;
         }
@@ -145,10 +141,20 @@ impl RabbitmqAckEntry {
     }
 
     fn untrack(&self, ack_token: &str) {
-        if let Some(tracker) = self.tracker.upgrade()
-            && let Ok(mut tokens) = tracker.lock()
-        {
-            tokens.remove(ack_token);
+        if let Some(tracker) = self.tracker.upgrade() {
+            lock_tracker_tokens(&tracker).remove(ack_token);
+        }
+    }
+}
+
+fn lock_tracker_tokens(tokens: &Mutex<HashSet<String>>) -> MutexGuard<'_, HashSet<String>> {
+    match tokens.lock() {
+        Ok(tokens) => tokens,
+        Err(poisoned) => {
+            tracing::warn!(
+                "RabbitMQ ack tracker mutex was poisoned; recovering tracked ack tokens"
+            );
+            poisoned.into_inner()
         }
     }
 }
