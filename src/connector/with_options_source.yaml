@@ -1463,7 +1463,7 @@ RabbitmqProperties:
     field_type: bool
     comments: |-
       Check queues exist with passive declare instead of creating them.
-      This defaults to true because the customer owns queue lifecycle on the broker side.
+      This source only supports customer-owned queues, so this must stay true.
     required: false
   - name: consumer_tag_prefix
     field_type: String

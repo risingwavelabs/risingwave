@@ -132,7 +132,7 @@ pub struct RabbitmqProperties {
     pub blocked_connection_timeout: Option<u64>,
 
     /// Check queues exist with passive declare instead of creating them.
-    /// This defaults to true because the customer owns queue lifecycle on the broker side.
+    /// This source only supports customer-owned queues, so this must stay true.
     #[serde(rename = "queue.passive")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub queue_passive: Option<bool>,
@@ -256,6 +256,10 @@ impl RabbitmqProperties {
             self.max_connections() <= DEFAULT_MAX_CONNECTIONS,
             "RabbitMQ source max_connections must be <= 5 to honor broker vhost connection limits"
         );
+        ensure!(
+            self.queue_passive(),
+            "RabbitMQ source only supports queue.passive=true because queue lifecycle is owned by the broker/user"
+        );
         Ok(())
     }
 
@@ -313,7 +317,7 @@ impl RabbitmqProperties {
                     queue.as_str(),
                     QueueDeclareOptions {
                         passive: self.queue_passive(),
-                        durable: !self.queue_passive(),
+                        durable: false,
                         exclusive: false,
                         auto_delete: false,
                         nowait: false,
@@ -388,6 +392,18 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("max_connections")
+        );
+    }
+
+    #[test]
+    fn reject_queue_creation() {
+        let props = parse(&[("queue.passive", "false")]);
+        assert!(
+            props
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("queue.passive=true")
         );
     }
 }
