@@ -65,6 +65,44 @@ statement ok
 CREATE TABLE schema.t(id INT);
 
 statement ok
+CREATE TABLE schema.schema_target(id INT PRIMARY KEY);
+
+statement ok
+CREATE SOURCE schema.schema_source (id INT) WITH (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '10',
+    datagen.rows.per.second = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE MATERIALIZED VIEW schema.schema_mv AS SELECT schema.t.id FROM schema.t;
+
+statement ok
+CREATE VIEW schema_view AS SELECT schema.t.id FROM schema.t;
+
+statement ok
+CREATE INDEX schema_index ON schema.t(id);
+
+statement ok
+CREATE SINK schema.schema_sink AS SELECT * FROM schema.schema_mv WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+CREATE SINK schema.schema_into_sink INTO schema.schema_target
+AS SELECT id FROM schema.t WITH (
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+CREATE SUBSCRIPTION schema.schema_subscription FROM schema.schema_mv WITH (
+    retention = '1D'
+);
+
+statement ok
 CREATE DATABASE database;
 
 query TT
@@ -224,6 +262,38 @@ ALTER TABLE msrc1 RENAME TO src1;
 statement ok
 ALTER SCHEMA schema RENAME TO schema1;
 
+query TT rowsort
+SELECT relation_type, name
+FROM rw_relations
+WHERE name IN (
+    't',
+    'schema_target',
+    'schema_source',
+    'schema_mv',
+    'schema_view',
+    'schema_index',
+    'schema_sink',
+    'schema_into_sink',
+    'schema_subscription'
+)
+  AND position('schema1.' IN definition) > 0
+  AND position('schema.' IN definition) = 0;
+----
+index schema_index
+materialized view schema_mv
+sink schema_into_sink
+sink schema_sink
+source schema_source
+subscription schema_subscription
+table schema_target
+table t
+view schema_view
+
+query T
+SELECT definition FROM rw_indexes WHERE name = 'schema_index';
+----
+CREATE INDEX schema_index ON schema1.t(id)
+
 statement error
 ALTER SCHEMA pg_catalog RENAME TO pg_catalog1;
 
@@ -238,6 +308,30 @@ DROP DATABASE database1;
 
 statement ok
 SELECT * FROM schema1.t;
+
+statement ok
+DROP SINK schema1.schema_sink;
+
+statement ok
+DROP SINK schema1.schema_into_sink;
+
+statement ok
+DROP SUBSCRIPTION schema1.schema_subscription;
+
+statement ok
+DROP INDEX schema1.schema_index;
+
+statement ok
+DROP MATERIALIZED VIEW schema1.schema_mv;
+
+statement ok
+DROP VIEW schema_view;
+
+statement ok
+DROP SOURCE schema1.schema_source;
+
+statement ok
+DROP TABLE schema1.schema_target;
 
 statement ok
 DROP TABLE schema1.t;
