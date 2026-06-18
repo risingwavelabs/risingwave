@@ -72,14 +72,14 @@ impl StreamReaderBuilder {
                                 tracing::info!(
                                     target: "auto_schema_change",
                                     "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
+                                let _ = finish_tx.send(());
                             }
                             Err(e) => {
                                 tracing::error!(
                                     target: "auto_schema_change",
                                     error = %e.as_report(), "schema change error");
 
-                                finish_tx.send(()).unwrap();
+                                let _ = finish_tx.send(());
                             }
                         }
                     }
