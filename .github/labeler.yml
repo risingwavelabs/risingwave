@@ -141,6 +141,12 @@ labels:
   - "e2e_test\\/source_inline\\/mqtt\\/.*"
   - "src\\/connector\\/src\\/source\\/mqtt\\/.*"
 
+- label: "ci/run-e2e-rabbitmq-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-rabbitmq-test\\.sh"
+  - "e2e_test\\/source_inline\\/rabbitmq\\/.*"
+  - "src\\/connector\\/src\\/source\\/rabbitmq\\/.*"
+
 - label: "ci/run-e2e-nats-source-tests"
   files:
   - "ci\\/scripts\\/e2e-source-nats-test\\.sh"
