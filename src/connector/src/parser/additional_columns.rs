@@ -31,7 +31,7 @@ use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
-    NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, RABBITMQ_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -96,6 +96,10 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                 ]),
             ),
             (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
+            (
+                RABBITMQ_CONNECTOR,
+                HashSet::from(["offset", "partition", "payload"]),
+            ),
         ])
     });
 

@@ -1,0 +1,69 @@
+control substitution on
+
+statement ok
+set streaming_use_shared_source to false;
+
+statement ok
+set streaming_parallelism to 4;
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py health
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py publish-json --exchange rw_slt_rabbitmq_exchange --routing-key rw.slt.rabbitmq --count 100
+
+statement ok
+create table t_rabbitmq_source (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queue = 'rw_slt_rabbitmq_queue',
+  prefetch_count = '50',
+  max_connections = '5',
+  queue.passive = 'true'
+) format plain encode json;
+
+statement ok
+flush;
+
+query T retry 6 backoff 2s
+select count(*) >= 100 from t_rabbitmq_source;
+----
+t
+
+query T retry 6 backoff 2s
+select count(distinct id) >= 100 from t_rabbitmq_source where id >= 0 and id < 100;
+----
+t
+
+query T retry 6 backoff 2s
+select count(*) > 0 from t_rabbitmq_source where id = 0 and value = 'message_0';
+----
+t
+
+query T retry 6 backoff 2s
+select count(*) > 0 from t_rabbitmq_source where id = 50 and value = 'message_50';
+----
+t
+
+query T retry 6 backoff 2s
+select count(*) > 0 from t_rabbitmq_source where id = 99 and value = 'message_99';
+----
+t
+
+statement ok
+drop table t_rabbitmq_source;
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+
+statement ok
+set streaming_use_shared_source to true;

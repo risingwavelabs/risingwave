@@ -1133,6 +1133,9 @@ impl WaitCheckpointTaskBuilder {
                 let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
                 arrays.push((pulsar_ack_channel_id, offset_col));
             }
+            WaitCheckpointTask::AckRabbitmqMessage(arrays) => {
+                arrays.push(offset_col);
+            }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
     }

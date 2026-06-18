@@ -1404,6 +1404,71 @@ PulsarProperties:
     field_type: bool
     required: false
     default: Default::default
+RabbitmqProperties:
+  fields:
+  - name: url
+    field_type: String
+    comments: |-
+      AMQP broker URL. Both `amqp://` and `amqps://` are supported by the AMQP client.
+      Credentials and vhost can be encoded in this URL.
+    required: true
+  - name: queue
+    field_type: String
+    comments: A single queue name to consume. Use either `queue` or `queues`.
+    required: false
+  - name: queues
+    field_type: String
+    comments: Comma-separated queue names. Each queue has at most one active consumer in one RW source.
+    required: false
+  - name: prefetch_count
+    field_type: u16
+    comments: '`RabbitMQ` prefetch count. Platform Science recommends 20-50 and allows up to 1000.'
+    required: false
+    allow_alter_on_fly: true
+  - name: prefetch_size
+    field_type: u32
+    comments: '`RabbitMQ` prefetch size. `RabbitMQ` does not support non-zero values.'
+    required: false
+  - name: max_connections
+    field_type: usize
+    comments: Maximum active AMQP connections opened by this source across adaptive splits.
+    required: false
+  - name: heartbeat_interval
+    field_type: u16
+    comments: AMQP heartbeat interval in seconds.
+    required: false
+  - name: frame_max
+    field_type: u32
+    comments: AMQP frame max. Defaults to 131072 (128KiB).
+    required: false
+  - name: connection_attempts
+    field_type: usize
+    comments: Connection attempts before surfacing an error.
+    required: false
+  - name: retry_delay
+    field_type: u64
+    comments: Fixed retry delay in seconds between connection attempts.
+    required: false
+  - name: socket_timeout
+    field_type: u64
+    comments: Socket/connect timeout in seconds.
+    required: false
+  - name: blocked_connection_timeout
+    field_type: u64
+    comments: |-
+      Configurable for compatibility with `RabbitMQ` client settings. This source currently
+      consumes only, so broker blocked-connection events are observed but do not gate publish IO.
+    required: false
+  - name: queue.passive
+    field_type: bool
+    comments: |-
+      Check queues exist with passive declare instead of creating them.
+      This defaults to true because the customer owns queue lifecycle on the broker side.
+    required: false
+  - name: consumer_tag_prefix
+    field_type: String
+    comments: Consumer tag prefix used to make `RabbitMQ` consumers observable.
+    required: false
 TestSourceProperties:
   fields:
   - name: properties

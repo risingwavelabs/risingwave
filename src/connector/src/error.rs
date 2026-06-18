@@ -28,6 +28,7 @@ use crate::schema::schema_registry::{
 use crate::sink::SinkError;
 use crate::source::mqtt::MqttError;
 use crate::source::nats::NatsJetStreamError;
+use crate::source::rabbitmq::RabbitmqError;
 
 def_anyhow_newtype! {
     pub ConnectorError,
@@ -81,6 +82,8 @@ def_anyhow_newtype! {
     rumqttc::v5::OptionError => "MQTT Option error",
     rumqttc::v5::ConnectionError => "MQTT Connection error",
     MqttError => "MQTT Source error",
+    lapin::Error => "RabbitMQ error",
+    RabbitmqError => "RabbitMQ Source error",
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",

@@ -141,6 +141,9 @@ impl SourceReader {
                 }
             }
             ConnectorProperties::Pulsar(_) => Some(WaitCheckpointTask::AckPulsarMessage(vec![])),
+            ConnectorProperties::Rabbitmq(_) => {
+                Some(WaitCheckpointTask::AckRabbitmqMessage(vec![]))
+            }
             _ => None,
         })
     }
