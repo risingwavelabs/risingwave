@@ -16,7 +16,7 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
@@ -95,7 +95,8 @@ pub struct RabbitmqProperties {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub prefetch_size: Option<u32>,
 
-    /// Maximum active AMQP connections opened by this source across adaptive splits.
+    /// Maximum active AMQP consumer connections opened by this source across adaptive splits.
+    /// If the broker enforces a per-vhost connection limit, deploy at most one source per vhost.
     #[serde(rename = "max_connections")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_connections: Option<usize>,
@@ -125,8 +126,8 @@ pub struct RabbitmqProperties {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub socket_timeout: Option<u64>,
 
-    /// Configurable for compatibility with `RabbitMQ` client settings. This source currently
-    /// consumes only, so broker blocked-connection events are observed but do not gate publish IO.
+    /// Close and restart the source reader after the broker keeps the connection blocked for this
+    /// duration. Blocked connections can prevent checkpoint-time acks from being written.
     #[serde(rename = "blocked_connection_timeout")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub blocked_connection_timeout: Option<u64>,
@@ -182,6 +183,13 @@ impl RabbitmqProperties {
             !queues.is_empty(),
             "RabbitMQ source requires at least one non-empty queue"
         );
+        let mut seen_queues = HashSet::with_capacity(queues.len());
+        for queue in &queues {
+            ensure!(
+                seen_queues.insert(queue),
+                "RabbitMQ source queue `{queue}` is listed more than once; use at most one consumer per queue"
+            );
+        }
         Ok(queues)
     }
 
@@ -257,6 +265,10 @@ impl RabbitmqProperties {
             "RabbitMQ source max_connections must be <= 5 to honor broker vhost connection limits"
         );
         ensure!(
+            self.blocked_connection_timeout() > Duration::ZERO,
+            "RabbitMQ source blocked_connection_timeout must be greater than 0"
+        );
+        ensure!(
             self.queue_passive(),
             "RabbitMQ source only supports queue.passive=true because queue lifecycle is owned by the broker/user"
         );
@@ -270,8 +282,17 @@ impl RabbitmqProperties {
             scheme => bail!("RabbitMQ source URL must use amqp:// or amqps://, got {scheme}://"),
         }
 
+        let query_pairs = url
+            .query_pairs()
+            .filter(|(key, _)| key != "heartbeat" && key != "frame_max")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        url.set_query(None);
         {
             let mut query = url.query_pairs_mut();
+            for (key, value) in query_pairs {
+                query.append_pair(&key, &value);
+            }
             query.append_pair("heartbeat", &self.heartbeat_interval().to_string());
             query.append_pair("frame_max", &self.frame_max().to_string());
         }
@@ -372,6 +393,19 @@ mod tests {
     }
 
     #[test]
+    fn reject_duplicate_queues() {
+        let mut props = parse(&[("queues", "q1,q2,q1")]);
+        props.queue = None;
+        assert!(
+            props
+                .queue_names()
+                .unwrap_err()
+                .to_string()
+                .contains("listed more than once")
+        );
+    }
+
+    #[test]
     fn reject_non_zero_prefetch_size() {
         let props = parse(&[("prefetch_size", "1")]);
         assert!(
@@ -405,5 +439,36 @@ mod tests {
                 .to_string()
                 .contains("queue.passive=true")
         );
+    }
+
+    #[test]
+    fn reject_zero_blocked_connection_timeout() {
+        let props = parse(&[("blocked_connection_timeout", "0")]);
+        assert!(
+            props
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("blocked_connection_timeout")
+        );
+    }
+
+    #[test]
+    fn connection_url_overrides_heartbeat_and_frame_max_query() {
+        let props = parse(&[
+            (
+                "url",
+                "amqps://guest:guest@example.com:5671/vhost?heartbeat=10&frame_max=4096&locale=en_US",
+            ),
+            ("heartbeat_interval", "600"),
+            ("frame_max", "131072"),
+        ]);
+
+        let url = props.connection_url().unwrap();
+        assert!(url.contains("locale=en_US"));
+        assert!(url.contains("heartbeat=600"));
+        assert!(url.contains("frame_max=131072"));
+        assert!(!url.contains("heartbeat=10"));
+        assert!(!url.contains("frame_max=4096"));
     }
 }

@@ -1431,7 +1431,9 @@ RabbitmqProperties:
     required: false
   - name: max_connections
     field_type: usize
-    comments: Maximum active AMQP connections opened by this source across adaptive splits.
+    comments: |-
+      Maximum active AMQP consumer connections opened by this source across adaptive splits.
+      If the broker enforces a per-vhost connection limit, deploy at most one source per vhost.
     required: false
   - name: heartbeat_interval
     field_type: u16
@@ -1456,8 +1458,8 @@ RabbitmqProperties:
   - name: blocked_connection_timeout
     field_type: u64
     comments: |-
-      Configurable for compatibility with `RabbitMQ` client settings. This source currently
-      consumes only, so broker blocked-connection events are observed but do not gate publish IO.
+      Close and restart the source reader after the broker keeps the connection blocked for this
+      duration. Blocked connections can prevent checkpoint-time acks from being written.
     required: false
   - name: queue.passive
     field_type: bool

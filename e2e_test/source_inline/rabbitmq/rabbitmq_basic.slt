@@ -9,6 +9,49 @@ set streaming_parallelism to 4;
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py health
 
+statement error prefetch_count must be <= 1000
+create table t_rabbitmq_invalid_prefetch_count (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queue = 'rw_slt_rabbitmq_queue',
+  prefetch_count = '1001'
+) format plain encode json;
+
+statement error prefetch_size=0
+create table t_rabbitmq_invalid_prefetch_size (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queue = 'rw_slt_rabbitmq_queue',
+  prefetch_size = '1'
+) format plain encode json;
+
+statement error listed more than once
+create table t_rabbitmq_duplicate_queue (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queues = 'rw_slt_rabbitmq_queue,rw_slt_rabbitmq_queue'
+) format plain encode json;
+
+statement error queue.passive=true
+create table t_rabbitmq_create_queue (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queue = 'rw_slt_rabbitmq_queue',
+  queue.passive = 'false'
+) format plain encode json;
+
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
 
@@ -64,6 +107,64 @@ drop table t_rabbitmq_source;
 
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2 --routing-key rw.slt.rabbitmq.multi.2
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2 --routing-key rw.slt.rabbitmq.multi.2
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py publish-json --exchange rw_slt_rabbitmq_exchange_multi_1 --routing-key rw.slt.rabbitmq.multi.1 --count 20
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py publish-json --exchange rw_slt_rabbitmq_exchange_multi_2 --routing-key rw.slt.rabbitmq.multi.2 --count 20
+
+statement ok
+create table t_rabbitmq_multi_queue_source (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queues = 'rw_slt_rabbitmq_queue_multi_1,rw_slt_rabbitmq_queue_multi_2',
+  prefetch_count = '20',
+  max_connections = '5',
+  queue.passive = 'true'
+) format plain encode json;
+
+statement ok
+flush;
+
+query T retry 6 backoff 2s
+select count(*) >= 40 from t_rabbitmq_multi_queue_source;
+----
+t
+
+query T retry 6 backoff 2s
+select count(*) > 0 from t_rabbitmq_multi_queue_source where id = 0 and value = 'message_0';
+----
+t
+
+query T retry 6 backoff 2s
+select count(*) > 0 from t_rabbitmq_multi_queue_source where id = 19 and value = 'message_19';
+----
+t
+
+statement ok
+drop table t_rabbitmq_multi_queue_source;
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
+
+system ok
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2 --routing-key rw.slt.rabbitmq.multi.2
 
 statement ok
 set streaming_use_shared_source to true;
