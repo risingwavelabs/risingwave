@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::filter_utils::{
-    must_resolve_sstable_filter_kind, must_resolve_sstable_filter_layout,
+    must_resolve_sstable_filter_layout, must_resolve_sstable_filter_type,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
@@ -72,7 +72,7 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub base_level: usize,
     pub compression_algorithm: String,
-    pub sstable_filter_kind: PbSstableFilterType,
+    pub sstable_filter_type: PbSstableFilterType,
     pub sstable_filter_layout: PbSstableFilterLayout,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
@@ -186,7 +186,7 @@ pub fn create_compaction_task(
             base_level,
             input.target_level,
         ),
-        sstable_filter_kind: must_resolve_sstable_filter_kind(
+        sstable_filter_type: must_resolve_sstable_filter_type(
             compaction_config,
             base_level,
             input.target_level,

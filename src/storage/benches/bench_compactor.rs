@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::PbTableSchema;
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbTableSchema};
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
@@ -305,7 +305,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
             KeyRange::inf(),
             CachePolicy::Disable,
             false,
-            true,
+            PbSstableFilterLayout::Blocked,
             Default::default(),
         )
     });
@@ -453,36 +453,50 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        true,
-        Default::default(),
+        PbSstableFilterLayout::Blocked,
+        HashMap::new(),
     );
 
-    let mut task_config_schema = task_config_no_schema.clone();
-    task_config_schema.table_schemas.insert(
-        10.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32).collect(),
-        },
-    );
-    task_config_schema.table_schemas.insert(
-        11.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32).collect(),
-        },
+    let task_config_schema = TaskConfig::for_test(
+        KeyRange::inf(),
+        CachePolicy::Disable,
+        false,
+        PbSstableFilterLayout::Blocked,
+        HashMap::from([
+            (
+                10.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32).collect(),
+                },
+            ),
+            (
+                11.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32).collect(),
+                },
+            ),
+        ]),
     );
 
-    let mut task_config_schema_cause_drop = task_config_no_schema.clone();
-    task_config_schema_cause_drop.table_schemas.insert(
-        10.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32 / 2).collect(),
-        },
-    );
-    task_config_schema_cause_drop.table_schemas.insert(
-        11.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32 / 2).collect(),
-        },
+    let task_config_schema_cause_drop = TaskConfig::for_test(
+        KeyRange::inf(),
+        CachePolicy::Disable,
+        false,
+        PbSstableFilterLayout::Blocked,
+        HashMap::from([
+            (
+                10.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32 / 2).collect(),
+                },
+            ),
+            (
+                11.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32 / 2).collect(),
+                },
+            ),
+        ]),
     );
 
     let get_iter = || {
