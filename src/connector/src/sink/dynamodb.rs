@@ -208,25 +208,28 @@ struct DynamoDbRequest {
 }
 
 impl DynamoDbRequest {
-    fn extract_pk(&self) -> Option<HashMap<String, AttributeValue>> {
-        let key = match (&self.inner.put_request(), &self.inner.delete_request()) {
-            (Some(put_req), None) => &put_req.item,
-            (None, Some(del_req)) => &del_req.key,
-            _ => return None,
-        };
-        let pk = key
-            .iter()
-            .filter(|(k, _)| self.key_items.contains(k))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        Some(pk)
+    fn extract_key(&self) -> Option<&HashMap<String, AttributeValue>> {
+        match (&self.inner.put_request(), &self.inner.delete_request()) {
+            (Some(put_req), None) => Some(&put_req.item),
+            (None, Some(del_req)) => Some(&del_req.key),
+            _ => None,
+        }
     }
 
     fn has_same_pk(&self, other: &Self) -> bool {
-        match (self.extract_pk(), other.extract_pk()) {
-            (Some(pk), Some(other_pk)) => pk == other_pk,
-            _ => false,
-        }
+        let Some(key) = self.extract_key() else {
+            return false;
+        };
+        let Some(other_key) = other.extract_key() else {
+            return false;
+        };
+
+        self.key_items.iter().all(|key_item| {
+            matches!(
+                (key.get(key_item), other_key.get(key_item)),
+                (Some(value), Some(other_value)) if value == other_value
+            )
+        })
     }
 }
 
