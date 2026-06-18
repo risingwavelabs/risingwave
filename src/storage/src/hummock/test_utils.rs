@@ -218,7 +218,7 @@ pub async fn put_sst(
             filter_builder.switch_block(None);
         }
 
-        filter_builder.finish(None)
+        filter_builder.finish(None).unwrap_or_default()
     };
 
     meta.meta_offset = writer.data_len() as u64;

@@ -58,6 +58,7 @@ use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
 
+use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
@@ -450,6 +451,11 @@ impl HummockManager {
                 }
             }
 
+            let in_progress_compactions = InProgressCompactionView::for_group(
+                compact_task_assignment.tree_ref().values(),
+                compaction_group_id,
+            );
+
             while let Some(picked_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -466,6 +472,7 @@ impl HummockManager {
                 developer_config.clone(),
                 &version.latest_version().table_watermarks,
                 &version.latest_version().state_table_info,
+                &in_progress_compactions,
             ) {
                 let compaction_group_levels = version
                     .latest_version()
