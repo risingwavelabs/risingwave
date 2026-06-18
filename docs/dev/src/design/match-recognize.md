@@ -124,19 +124,24 @@ to keep the factorial bounded).
 `MatchRecognizeExecutor` follows the standard append-only, watermark-driven executor shape (compare
 `eowc_over_window`):
 
-- **Buffering.** Each input row is buffered into its partition's in-memory `PartitionState` and
-  written through to the state table. Rows may arrive out of order.
+- **Buffering.** Each input row is written through to the state table; nothing is held in memory
+  between watermarks. Rows may arrive out of order.
 - **Matching on watermark.** When the watermark on the leading `ORDER BY` column advances to `w`,
-  every buffered row with `order_key <= w` is final. The partition buffer is sorted by the `ORDER BY`
-  columns and the matcher runs over the safe prefix. A match is emitted once a later safe row follows
-  it (so the greedy match is known maximal); `AFTER MATCH SKIP` decides where the scan resumes.
+  the executor scans the state table for its owned vnodes and groups the rows by partition. Every
+  row with `order_key <= w` is final; each partition's rows are sorted by the `ORDER BY` columns and
+  the matcher runs over the safe prefix. A match is emitted once a later safe row follows it (so the
+  greedy match is known maximal); `AFTER MATCH SKIP` decides where the scan resumes. This
+  per-watermark working set is bounded by the live (unfinalized) window and is not retained between
+  watermarks.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
   known only once the match and its per-row variable labels are found, so each measure's synthetic
   row is built from the matched rows and the expression evaluated then. `WITHIN` is enforced during
   matching, pruning candidates that would push the span past the bound.
 - **Eviction.** Rows before the earliest position that could still *begin* a match are deleted from
-  the buffer and the state table; a partition whose buffer becomes empty is dropped from the map.
-  Together with the watermark this bounds state to the live (unfinalized) window.
+  the state table. Because every watermark scans all live partitions, expired rows are released even
+  from partitions that receive no new input — an idle partition does not retain dead rows. Together
+  with the watermark this bounds state to the live (unfinalized) window (see
+  [State bound and `WITHIN`](#state-bound-and-within)).
 
 Matching is **not incremental**: each advancing watermark re-runs the matcher from the start of the
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
@@ -151,16 +156,42 @@ id. Only the raw buffered rows are persisted — the NFA is recompiled from the 
 `DEFINE`/`MEASURES` are evaluated at match time, so neither is stored. (This is less state than
 Flink's CEP, which persists the partial-match SharedBuffer.)
 
-- **Recovery.** On startup the buffer is rebuilt by scanning the state table per owned vnode
-  (an empty-prefix scan cannot compute a vnode on a distributed table).
-- **Rescaling.** On a vnode-bitmap change the set of partitions an actor owns shifts, so the buffer
-  is reloaded from the (migrated) state table when `post_yield_barrier` reports the cache may be
-  stale — dropping partitions no longer owned and picking up new ones.
+- **Recovery.** The state table is authoritative, so there is no in-memory buffer to rebuild: after
+  recovery the next watermark simply scans the (restored) state table per owned vnode (an empty-prefix
+  scan cannot compute a vnode on a distributed table).
+- **Rescaling.** On a vnode-bitmap change the set of partitions an actor owns shifts; the state table
+  migrates the affected vnodes, and the next watermark scans whatever the actor now owns. There is no
+  in-memory cache to reload or drop.
 - **Parallelism.** Matching is independent per partition, so the input is hash-sharded by the
   `PARTITION BY` key and each actor owns its partitions' state.
+
+### State bound and `WITHIN`
+
+State is bounded to the **live (unfinalized) window** — the rows that could still begin or extend a
+match. What bounds that window depends on whether the pattern carries a `WITHIN` clause:
+
+- **With `WITHIN <interval>`** the span of any match is capped, so once the watermark passes a row's
+  `order_key + interval` that row can no longer begin or extend a match and is evicted. State per
+  partition is bounded by the `WITHIN` window, and total state by that window times the number of
+  live partitions.
+- **Without `WITHIN`** a buffered prefix can be completed by an arbitrarily distant future row — e.g.
+  `PATTERN (A B)` retains an `A` until some later `B` arrives, however long that takes — so an
+  unmatched partial is kept indefinitely. This is correct SQL semantics (a streaming join without a
+  time bound retains its build side the same way), but it means state is bounded only by the number
+  of distinct `PARTITION BY` keys, not by time. For an unbounded key space (per-session, per-device,
+  …) it grows without limit.
+
+Resident memory is bounded either way — the executor streams partitions from the state table and
+holds nothing between watermarks — so the unbounded quantity is the *persisted* state on the storage
+engine, not process memory. To bound it, add a `WITHIN` clause; the binder emits a `NOTICE` when a
+`MATCH_RECOGNIZE` has none, as a reminder. An opt-in state TTL (dropping partials older than a
+configurable age, trading completeness for a hard bound) is possible future work.
 
 ## Limitations and future work
 
 - `ALL ROWS PER MATCH`, batch execution, and non-append-only input are not supported.
 - Matching is non-incremental (re-runs over the live window per watermark).
+- Without a `WITHIN` clause, unmatched partials are retained indefinitely, so persisted state is
+  bounded only by `PARTITION BY` key cardinality (see [State bound and `WITHIN`](#state-bound-and-within));
+  the binder emits a `NOTICE` in that case.
 - Anchors (`^`, `$`) and pattern exclusions (`{- … -}`) are parsed but rejected at planning time.

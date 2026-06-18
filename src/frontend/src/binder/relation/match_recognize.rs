@@ -205,7 +205,18 @@ impl Binder {
                     vec![diff, bound],
                 )?))
             }
-            None => None,
+            None => {
+                // No WITHIN: an unmatched partial can be completed by an arbitrarily distant future
+                // row, so it is retained until matched. State is then bounded only by PARTITION BY
+                // key cardinality, not by time. Warn the author (a client NOTICE, visible in the
+                // CREATE output); we do not forbid it, matching SQL semantics and Flink's behaviour.
+                crate::session::current::notice_to_user(
+                    "MATCH_RECOGNIZE without a WITHIN clause retains unmatched partial matches \
+                     indefinitely: its state is bounded by the number of distinct PARTITION BY keys, \
+                     not by time. Add a WITHIN clause to bound state to a time window.",
+                );
+                None
+            }
         };
 
         // Snapshot the input columns so each pattern variable can be registered as an alias over
