@@ -703,6 +703,7 @@ impl ConnectorProperties {
             ConnectorProperties::Kinesis(_)
                 | ConnectorProperties::Nats(_)
                 | ConnectorProperties::GooglePubsub(_)
+                | ConnectorProperties::Rabbitmq(_)
         )
     }
 
@@ -710,7 +711,9 @@ impl ConnectorProperties {
     pub fn enable_adaptive_splits(&self) -> bool {
         matches!(
             self,
-            ConnectorProperties::Nats(_) | ConnectorProperties::GooglePubsub(_)
+            ConnectorProperties::Nats(_)
+                | ConnectorProperties::GooglePubsub(_)
+                | ConnectorProperties::Rabbitmq(_)
         )
     }
 
