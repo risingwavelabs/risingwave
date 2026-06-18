@@ -67,6 +67,7 @@ impl VnodeWatermarkCompactionPicker {
             ],
             target_level: level.level_idx as usize,
             target_sub_level_id: level.sub_level_id,
+            skip_target_range_conflict_check: true,
             ..Default::default()
         })
     }
@@ -110,10 +111,22 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
+    use risingwave_pb::hummock::LevelType;
 
-    use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
+    use crate::hummock::compaction::picker::vnode_watermark_picker::{
+        VnodeWatermarkCompactionPicker, should_delete_sst_by_watermark,
+    };
+    use crate::hummock::level_handler::LevelHandler;
+
+    fn table_key(vnode_part: usize, key_part: &str) -> TableKey<Bytes> {
+        let mut builder = BytesMut::new();
+        builder.put_slice(&VirtualNode::from_index(vnode_part).to_be_bytes());
+        builder.put_slice(&Bytes::copy_from_slice(key_part.as_bytes()));
+        TableKey(builder.freeze())
+    }
 
     #[test]
     fn test_should_delete_sst_by_watermark() {
@@ -125,12 +138,6 @@ mod tests {
                     VirtualNode::from_index(17) => "some_watermark_key_8".into(),
                 },
             },
-        };
-        let table_key = |vnode_part: usize, key_part: &str| {
-            let mut builder = BytesMut::new();
-            builder.put_slice(&VirtualNode::from_index(vnode_part).to_be_bytes());
-            builder.put_slice(&Bytes::copy_from_slice(key_part.as_bytes()));
-            TableKey(builder.freeze())
         };
 
         let sst_info = SstableInfoInner {
@@ -234,5 +241,22 @@ mod tests {
         }
         .into();
         assert!(should_delete_sst_by_watermark(&sst_info, &table_watermarks));
+
+        let levels = Levels {
+            levels: vec![Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping,
+                table_infos: vec![sst_info],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let level_handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let input = VnodeWatermarkCompactionPicker::new()
+            .pick_compaction(&levels, &level_handlers, &table_watermarks)
+            .unwrap();
+
+        assert!(input.skip_target_range_conflict_check);
     }
 }
