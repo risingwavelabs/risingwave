@@ -93,8 +93,8 @@ impl StreamMatchRecognize {
         }
         tbl_builder.add_order_column(0, OrderType::ascending());
         // Distribute the state by the partition columns so each actor owns its partitions' state.
-        // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan over the actor's vnodes,
-        // so we must not assert a partition-length prefix on iteration.
+        // read_prefix_len_hint = 0: the watermark scan iterates each owned vnode with an empty prefix
+        // (it cannot compute a vnode from an empty prefix), so we must not assert a prefix length.
         tbl_builder.build(partition_positions, 0)
     }
 }
