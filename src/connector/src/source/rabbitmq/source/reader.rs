@@ -21,7 +21,7 @@ use lapin::{Connection, Consumer};
 use risingwave_common::ensure;
 use rw_futures_util::select_all;
 
-use super::message::RabbitmqMessage;
+use super::message::{RabbitmqMessage, next_ack_consumer_id};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
@@ -31,7 +31,7 @@ use crate::source::{
 };
 
 pub struct RabbitmqSplitReader {
-    consumers: Vec<(String, Consumer)>,
+    consumers: Vec<(String, u64, Consumer)>,
     #[expect(dead_code)]
     connection: Option<Connection>,
     split: RabbitmqSplit,
@@ -73,6 +73,7 @@ impl SplitReader for RabbitmqSplitReader {
 
         let mut consumers = Vec::with_capacity(split.queues().len());
         for queue in split.queues() {
+            let ack_consumer_id = next_ack_consumer_id();
             let channel = connection.create_channel().await?;
             channel
                 .basic_qos(
@@ -81,10 +82,11 @@ impl SplitReader for RabbitmqSplitReader {
                 )
                 .await?;
             let consumer_tag = format!(
-                "{}-{}-{}-{}",
+                "{}-{}-{}-{}-{}",
                 properties.consumer_tag_prefix(),
                 source_ctx.source_id.as_raw_id(),
                 source_ctx.actor_id,
+                ack_consumer_id,
                 queue
             );
             let consumer = channel
@@ -100,7 +102,7 @@ impl SplitReader for RabbitmqSplitReader {
                     FieldTable::default(),
                 )
                 .await?;
-            consumers.push((queue.clone(), consumer));
+            consumers.push((queue.clone(), ack_consumer_id, consumer));
         }
 
         Ok(Self {
@@ -128,26 +130,39 @@ impl RabbitmqSplitReader {
 
         let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
         let split_id = self.split.id();
-        let streams = self.consumers.into_iter().map(|(queue, consumer)| {
-            consumer.map(move |delivery| delivery.map(|delivery| (queue.clone(), delivery)))
-        });
+        let streams = self
+            .consumers
+            .into_iter()
+            .map(|(queue, ack_consumer_id, consumer)| {
+                consumer.map(move |delivery| {
+                    delivery.map(|delivery| (queue.clone(), ack_consumer_id, delivery))
+                })
+            });
         let mut messages = select_all(streams);
 
         while let Some(first) = messages.next().await {
             let mut batch = Vec::with_capacity(capacity);
-            let (queue, delivery) = first?;
+            let (queue, ack_consumer_id, delivery) = first?;
             batch.push(SourceMessage::from(
-                RabbitmqMessage::new(split_id.clone(), queue, delivery, &self.source_ctx).await,
+                RabbitmqMessage::new(
+                    split_id.clone(),
+                    queue,
+                    ack_consumer_id,
+                    delivery,
+                    &self.source_ctx,
+                )
+                .await,
             ));
 
             while batch.len() < capacity {
                 match messages.next().now_or_never() {
                     Some(Some(delivery)) => {
-                        let (queue, delivery) = delivery?;
+                        let (queue, ack_consumer_id, delivery) = delivery?;
                         batch.push(SourceMessage::from(
                             RabbitmqMessage::new(
                                 split_id.clone(),
                                 queue,
+                                ack_consumer_id,
                                 delivery,
                                 &self.source_ctx,
                             )
