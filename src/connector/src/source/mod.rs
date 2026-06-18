@@ -102,9 +102,7 @@ pub use crate::source::filesystem::opendal_source::{
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
-use crate::source::rabbitmq::source::{
-    ack_delivery as ack_rabbitmq_delivery, drop_delivery as drop_rabbitmq_delivery,
-};
+use crate::source::rabbitmq::source::ack_delivery as ack_rabbitmq_delivery;
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -390,7 +388,6 @@ impl WaitCheckpointTask {
                             );
                         }
                         Err(_) => {
-                            drop_rabbitmq_delivery(&ack_token).await;
                             crate::source::monitor::GLOBAL_SOURCE_METRICS
                                 .connector_ack_failure_count
                                 .with_label_values(&[source_name, "rabbitmq", "timeout"])
@@ -399,7 +396,7 @@ impl WaitCheckpointTask {
                                 source_id = source_id_label,
                                 source_name,
                                 ack_token,
-                                "RabbitMQ ack timed out after {ACK_RPC_TIMEOUT:?}",
+                                "RabbitMQ ack timed out after {ACK_RPC_TIMEOUT:?}; keeping delivery tracked until the channel closes or a later ack succeeds",
                             );
                         }
                     }

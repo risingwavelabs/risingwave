@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lapin::message::Delivery;
 use lapin::options::BasicAckOptions;
@@ -23,6 +25,12 @@ use crate::source::{SourceContextRef, SourceMessage, SourceMeta, SplitId};
 
 pub static RABBITMQ_ACK_CACHE: LazyLock<MokaCache<String, RabbitmqAckEntry>> =
     LazyLock::new(|| moka::future::Cache::builder().build());
+
+static RABBITMQ_ACK_CONSUMER_ID: AtomicU64 = AtomicU64::new(1);
+
+pub fn next_ack_consumer_id() -> u64 {
+    RABBITMQ_ACK_CONSUMER_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Clone, Debug)]
 pub struct RabbitmqAckMetricLabels {
@@ -89,6 +97,7 @@ pub struct RabbitmqMessage {
     pub split_id: SplitId,
     pub queue: String,
     pub delivery_tag: u64,
+    pub ack_token: String,
     pub payload: Vec<u8>,
     pub redelivered: bool,
 }
@@ -97,6 +106,7 @@ impl RabbitmqMessage {
     pub async fn new(
         split_id: SplitId,
         queue: String,
+        ack_consumer_id: u64,
         delivery: Delivery,
         source_ctx: &SourceContextRef,
     ) -> Self {
@@ -107,7 +117,14 @@ impl RabbitmqMessage {
             acker,
             ..
         } = delivery;
-        let ack_token = ack_token(&split_id, &queue, delivery_tag);
+        let ack_token = ack_token(
+            source_ctx.source_id.as_raw_id(),
+            source_ctx.actor_id,
+            &split_id,
+            &queue,
+            ack_consumer_id,
+            delivery_tag,
+        );
         let ack_entry = RabbitmqAckEntry::new(
             acker,
             RabbitmqAckMetricLabels::new(&split_id, &queue, source_ctx),
@@ -116,18 +133,21 @@ impl RabbitmqMessage {
             RABBITMQ_ACK_CACHE.invalidate(&ack_token).await;
             old_entry.dec_unacked_count();
         }
-        RABBITMQ_ACK_CACHE.insert(ack_token, ack_entry).await;
+        RABBITMQ_ACK_CACHE
+            .insert(ack_token.clone(), ack_entry)
+            .await;
         Self {
             split_id,
             queue,
             delivery_tag,
+            ack_token,
             payload: data,
             redelivered,
         }
     }
 
     pub fn offset(&self) -> String {
-        ack_token(&self.split_id, &self.queue, self.delivery_tag)
+        self.ack_token.clone()
     }
 }
 
@@ -144,29 +164,25 @@ impl From<RabbitmqMessage> for SourceMessage {
     }
 }
 
-pub fn ack_token(split_id: &SplitId, queue: &str, delivery_tag: u64) -> String {
+pub fn ack_token(
+    source_id: impl Display,
+    actor_id: impl Display,
+    split_id: &SplitId,
+    queue: &str,
+    ack_consumer_id: u64,
+    delivery_tag: u64,
+) -> String {
     let queue = urlencoding::encode(queue);
-    format!("{split_id}:{queue}:{delivery_tag}")
+    format!("{source_id}:{actor_id}:{split_id}:{queue}:{ack_consumer_id}:{delivery_tag}")
 }
 
 pub async fn ack_delivery(ack_token: String) -> crate::error::ConnectorResult<bool> {
     if let Some(entry) = RABBITMQ_ACK_CACHE.get(&ack_token).await {
-        let result = entry.acker.ack(BasicAckOptions::default()).await;
+        entry.acker.ack(BasicAckOptions::default()).await?;
         RABBITMQ_ACK_CACHE.invalidate(&ack_token).await;
         entry.dec_unacked_count();
-        result?;
         Ok(true)
     } else {
         Ok(false)
-    }
-}
-
-pub async fn drop_delivery(ack_token: &str) -> bool {
-    if let Some(entry) = RABBITMQ_ACK_CACHE.get(ack_token).await {
-        RABBITMQ_ACK_CACHE.invalidate(ack_token).await;
-        entry.dec_unacked_count();
-        true
-    } else {
-        false
     }
 }
