@@ -187,15 +187,52 @@ impl WaitCheckpointTask {
             }
             WaitCheckpointTask::AckPulsarMessage(ack_array) => {
                 if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
-                    let encode_message_id_data = to_cumulative_ack
+                    let Some(encode_message_id_data) = to_cumulative_ack
                         .as_bytea()
                         .iter()
                         .last()
                         .flatten()
                         .map(|x| x.to_owned())
-                        .unwrap();
-                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
-                        let _ = ack_tx.send(encode_message_id_data);
+                    else {
+                        crate::source::monitor::GLOBAL_SOURCE_METRICS
+                            .connector_ack_failure_count
+                            .with_label_values(&[source_name, "pulsar", "empty_message_id"])
+                            .inc();
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            "skip Pulsar ack because the checkpoint ack batch has no message id",
+                        );
+                        return;
+                    };
+
+                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await else {
+                        crate::source::monitor::GLOBAL_SOURCE_METRICS
+                            .connector_ack_failure_count
+                            .with_label_values(&[source_name, "pulsar", "channel_missing"])
+                            .inc();
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            "skip Pulsar ack because the ack channel is missing",
+                        );
+                        return;
+                    };
+
+                    if let Err(e) = ack_tx.send(encode_message_id_data) {
+                        crate::source::monitor::GLOBAL_SOURCE_METRICS
+                            .connector_ack_failure_count
+                            .with_label_values(&[source_name, "pulsar", "channel_send_error"])
+                            .inc();
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            error = %e,
+                            "failed to send Pulsar ack message id to the reader ack channel",
+                        );
                     }
                 }
             }

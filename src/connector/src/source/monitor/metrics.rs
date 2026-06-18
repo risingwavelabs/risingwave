@@ -158,6 +158,8 @@ pub struct SourceMetrics {
 
     /// Total ack failures (RPC errors and timeouts) during checkpoint for source connectors.
     pub connector_ack_failure_count: IntCounterVec,
+    /// Total successful acks after checkpoint for source connectors.
+    pub connector_ack_success_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -301,6 +303,13 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
+        let connector_ack_success_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_success_count",
+            "Total number of successful acks after checkpoint for source connectors",
+            &["source_name", "connector_type"],
+            registry
+        )
+        .unwrap();
 
         SourceMetrics {
             partition_input_count,
@@ -322,6 +331,7 @@ impl SourceMetrics {
             kinesis_lag_latency_ms,
 
             connector_ack_failure_count,
+            connector_ack_success_count,
         }
     }
 }
