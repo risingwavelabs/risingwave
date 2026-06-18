@@ -111,6 +111,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
+    /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
+    ///
+    /// - `1` means no chunk-level concurrency.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_project_expr_concurrency")]
+    pub project_expr_concurrency: usize,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
