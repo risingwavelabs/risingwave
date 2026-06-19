@@ -9,7 +9,18 @@ set streaming_parallelism to 4;
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py health
 
-statement error prefetch_count must be <= 1000
+statement error prefetch_count must be between 1 and 1000
+create table t_rabbitmq_zero_prefetch_count (
+  id int,
+  value varchar
+) with (
+  connector = 'rabbitmq',
+  url = '${RABBITMQ_AMQP_URL}',
+  queue = 'rw_slt_rabbitmq_queue',
+  prefetch_count = '0'
+) format plain encode json;
+
+statement error prefetch_count must be between 1 and 1000
 create table t_rabbitmq_invalid_prefetch_count (
   id int,
   value varchar
