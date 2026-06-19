@@ -14,7 +14,7 @@
 
 use std::future::Future;
 
-use futures::future::{Either, select};
+use futures::future::{Either, pending, select};
 use futures::pin_mut;
 use futures::stream::FuturesOrdered;
 use multimap::MultiMap;
@@ -25,8 +25,23 @@ use risingwave_expr::expr::NonStrictExpression;
 
 use crate::executor::prelude::*;
 
-type ProjectChunkFuture = impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
-type PendingProjectChunks = FuturesOrdered<ProjectChunkFuture>;
+type ProjectMessageFuture = impl Future<Output = StreamExecutorResult<ProjectedMessage>> + Send;
+type PendingProjectMessages = FuturesOrdered<ProjectMessageFuture>;
+
+enum ProjectMessageInput {
+    Chunk(StreamChunk),
+    Watermark {
+        watermark: Watermark,
+        out_col_indices: Vec<usize>,
+    },
+    Barrier(Barrier),
+}
+
+enum ProjectedMessage {
+    Chunk(StreamChunk),
+    Watermark(Vec<Watermark>),
+    Barrier(Barrier),
+}
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -121,47 +136,45 @@ pub async fn apply_project_exprs(
 }
 
 impl Inner {
-    #[define_opaque(ProjectChunkFuture)]
-    fn map_filter_chunk(
+    #[define_opaque(ProjectMessageFuture)]
+    fn project_message(
         exprs: Arc<Vec<NonStrictExpression>>,
         eliminate_noop_updates: bool,
-        chunk: StreamChunk,
-    ) -> ProjectChunkFuture {
+        input: ProjectMessageInput,
+    ) -> ProjectMessageFuture {
         async move {
-            let mut new_chunk = apply_project_exprs(&exprs, chunk).await?;
-            if eliminate_noop_updates {
-                new_chunk = new_chunk.eliminate_adjacent_noop_update();
+            match input {
+                ProjectMessageInput::Chunk(chunk) => {
+                    let mut new_chunk = apply_project_exprs(&exprs, chunk).await?;
+                    if eliminate_noop_updates {
+                        new_chunk = new_chunk.eliminate_adjacent_noop_update();
+                    }
+                    Ok(ProjectedMessage::Chunk(new_chunk))
+                }
+                ProjectMessageInput::Watermark {
+                    watermark,
+                    out_col_indices,
+                } => {
+                    let mut ret = vec![];
+                    for out_col_idx in out_col_indices {
+                        let derived_watermark = watermark
+                            .clone()
+                            .transform_with_expr(&exprs[out_col_idx], out_col_idx)
+                            .await;
+                        if let Some(derived_watermark) = derived_watermark {
+                            ret.push(derived_watermark);
+                        } else {
+                            warn!(
+                                "a NULL watermark is derived with the expression {}!",
+                                out_col_idx
+                            );
+                        }
+                    }
+                    Ok(ProjectedMessage::Watermark(ret))
+                }
+                ProjectMessageInput::Barrier(barrier) => Ok(ProjectedMessage::Barrier(barrier)),
             }
-            Ok(new_chunk)
         }
-    }
-
-    async fn handle_watermark(
-        exprs: &[NonStrictExpression],
-        watermark_derivations: &MultiMap<usize, usize>,
-        watermark: Watermark,
-    ) -> StreamExecutorResult<Vec<Watermark>> {
-        let out_col_indices = match watermark_derivations.get_vec(&watermark.col_idx) {
-            Some(v) => v,
-            None => return Ok(vec![]),
-        };
-        let mut ret = vec![];
-        for out_col_idx in out_col_indices {
-            let out_col_idx = *out_col_idx;
-            let derived_watermark = watermark
-                .clone()
-                .transform_with_expr(&exprs[out_col_idx], out_col_idx)
-                .await;
-            if let Some(derived_watermark) = derived_watermark {
-                ret.push(derived_watermark);
-            } else {
-                warn!(
-                    "a NULL watermark is derived with the expression {}!",
-                    out_col_idx
-                );
-            }
-        }
-        Ok(ret)
     }
 
     fn update_last_nondec_expr_values(
@@ -169,39 +182,29 @@ impl Inner {
         last_nondec_expr_values: &mut [Option<ScalarImpl>],
         new_chunk: &StreamChunk,
     ) {
-        if !nondecreasing_expr_indices.is_empty()
-            && let Some((_, first_visible_row)) = new_chunk.rows().next()
         {
-            // it's ok to use the first row here, just one chunk delay
-            first_visible_row
-                .project(nondecreasing_expr_indices)
-                .iter()
-                .enumerate()
-                .for_each(|(idx, value)| {
-                    last_nondec_expr_values[idx] = Some(
-                        value
-                            .to_owned_datum()
-                            .expect("non-decreasing expression should never be NULL"),
-                    );
-                });
+            {
+                {
+                    {
+                        if !nondecreasing_expr_indices.is_empty()
+                            && let Some((_, first_visible_row)) = new_chunk.rows().next()
+                        {
+                            // it's ok to use the first row here, just one chunk delay
+                            first_visible_row
+                                .project(nondecreasing_expr_indices)
+                                .iter()
+                                .enumerate()
+                                .for_each(|(idx, value)| {
+                                    last_nondec_expr_values[idx] =
+                                        Some(value.to_owned_datum().expect(
+                                            "non-decreasing expression should never be NULL",
+                                        ));
+                                });
+                        }
+                    }
+                }
+            }
         }
-    }
-
-    async fn next_projected_chunk(
-        pending_project_chunks: &mut PendingProjectChunks,
-        nondecreasing_expr_indices: &[usize],
-        last_nondec_expr_values: &mut [Option<ScalarImpl>],
-    ) -> StreamExecutorResult<StreamChunk> {
-        let new_chunk = pending_project_chunks
-            .next()
-            .await
-            .expect("pending project chunks should not be empty")?;
-        Self::update_last_nondec_expr_values(
-            nondecreasing_expr_indices,
-            last_nondec_expr_values,
-            &new_chunk,
-        );
-        Ok(new_chunk)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -221,113 +224,110 @@ impl Inner {
         let mut is_paused = first_barrier.is_pause_on_startup();
         yield Message::Barrier(first_barrier);
 
-        let mut pending_project_chunks = PendingProjectChunks::new();
+        let mut pending_project_messages = PendingProjectMessages::new();
 
         loop {
-            if pending_project_chunks.len() >= project_expr_concurrency {
-                let new_chunk = Self::next_projected_chunk(
-                    &mut pending_project_chunks,
-                    &nondecreasing_expr_indices,
-                    &mut last_nondec_expr_values,
-                )
-                .await?;
-                yield Message::Chunk(new_chunk);
-                continue;
-            }
-
-            let msg = if pending_project_chunks.is_empty() {
-                input.next().await.ok_or_else(|| {
-                    StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
-                })??
-            } else {
-                let next_projected_chunk = Self::next_projected_chunk(
-                    &mut pending_project_chunks,
-                    &nondecreasing_expr_indices,
-                    &mut last_nondec_expr_values,
-                );
-                let next_input_msg = async {
+            let has_pending_project_message = !pending_project_messages.is_empty();
+            let can_read_input = pending_project_messages.len() < project_expr_concurrency;
+            let next_projected_message = async {
+                if has_pending_project_message {
+                    pending_project_messages
+                        .next()
+                        .await
+                        .expect("pending project messages should not be empty")
+                } else {
+                    pending().await
+                }
+            };
+            let next_input_msg = async {
+                if can_read_input {
                     input.next().await.ok_or_else(|| {
                         StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
                     })?
-                };
-
-                pin_mut!(next_projected_chunk);
-                pin_mut!(next_input_msg);
-
-                match select(next_projected_chunk, next_input_msg).await {
-                    Either::Left((new_chunk, _)) => {
-                        yield Message::Chunk(new_chunk?);
-                        continue;
-                    }
-                    Either::Right((msg, _)) => msg?,
+                } else {
+                    pending().await
                 }
             };
 
-            match msg {
-                Message::Watermark(w) => {
-                    while !pending_project_chunks.is_empty() {
-                        let new_chunk = Self::next_projected_chunk(
-                            &mut pending_project_chunks,
+            pin_mut!(next_projected_message);
+            pin_mut!(next_input_msg);
+
+            match select(next_projected_message, next_input_msg).await {
+                Either::Left((projected_message, _)) => match projected_message? {
+                    ProjectedMessage::Chunk(new_chunk) => {
+                        Self::update_last_nondec_expr_values(
                             &nondecreasing_expr_indices,
                             &mut last_nondec_expr_values,
-                        )
-                        .await?;
+                            &new_chunk,
+                        );
                         yield Message::Chunk(new_chunk);
                     }
-
-                    let watermarks =
-                        Self::handle_watermark(&exprs, &watermark_derivations, w).await?;
-                    for watermark in watermarks {
-                        yield Message::Watermark(watermark)
-                    }
-                }
-                Message::Chunk(chunk) => {
-                    pending_project_chunks.push_back(Self::map_filter_chunk(
-                        exprs.clone(),
-                        eliminate_noop_updates,
-                        chunk,
-                    ));
-                }
-                Message::Barrier(barrier) => {
-                    while !pending_project_chunks.is_empty() {
-                        let new_chunk = Self::next_projected_chunk(
-                            &mut pending_project_chunks,
-                            &nondecreasing_expr_indices,
-                            &mut last_nondec_expr_values,
-                        )
-                        .await?;
-                        yield Message::Chunk(new_chunk);
-                    }
-
-                    if !is_paused {
-                        for (&expr_idx, value) in nondecreasing_expr_indices
-                            .iter()
-                            .zip_eq_fast(&mut last_nondec_expr_values)
-                        {
-                            if let Some(value) = std::mem::take(value) {
-                                yield Message::Watermark(Watermark::new(
-                                    expr_idx,
-                                    exprs[expr_idx].return_type(),
-                                    value,
-                                ))
-                            }
+                    ProjectedMessage::Watermark(watermarks) => {
+                        for watermark in watermarks {
+                            yield Message::Watermark(watermark);
                         }
                     }
-
-                    if let Some(mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::Pause => {
-                                is_paused = true;
+                    ProjectedMessage::Barrier(barrier) => {
+                        if !is_paused {
+                            for (&expr_idx, value) in nondecreasing_expr_indices
+                                .iter()
+                                .zip_eq_fast(&mut last_nondec_expr_values)
+                            {
+                                if let Some(value) = std::mem::take(value) {
+                                    yield Message::Watermark(Watermark::new(
+                                        expr_idx,
+                                        exprs[expr_idx].return_type(),
+                                        value,
+                                    ))
+                                }
                             }
-                            Mutation::Resume => {
-                                is_paused = false;
-                            }
-                            _ => (),
                         }
-                    }
 
-                    yield Message::Barrier(barrier);
-                }
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => {
+                                    is_paused = true;
+                                }
+                                Mutation::Resume => {
+                                    is_paused = false;
+                                }
+                                _ => (),
+                            }
+                        }
+
+                        yield Message::Barrier(barrier);
+                    }
+                },
+                Either::Right((msg, _)) => match msg? {
+                    Message::Watermark(w) => {
+                        let out_col_indices = match watermark_derivations.get_vec(&w.col_idx) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        pending_project_messages.push_back(Self::project_message(
+                            exprs.clone(),
+                            eliminate_noop_updates,
+                            ProjectMessageInput::Watermark {
+                                watermark: w,
+                                out_col_indices: out_col_indices.clone(),
+                            },
+                        ));
+                    }
+                    Message::Chunk(chunk) => {
+                        pending_project_messages.push_back(Self::project_message(
+                            exprs.clone(),
+                            eliminate_noop_updates,
+                            ProjectMessageInput::Chunk(chunk),
+                        ));
+                    }
+                    Message::Barrier(barrier) => {
+                        pending_project_messages.push_back(Self::project_message(
+                            exprs.clone(),
+                            eliminate_noop_updates,
+                            ProjectMessageInput::Barrier(barrier),
+                        ));
+                    }
+                },
             }
         }
     }
@@ -477,6 +477,45 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FirstProjectExprWaitsForStartedCount {
+        started_count: Arc<AtomicUsize>,
+        started_notify: Arc<Notify>,
+        unblock_first_at_started_count: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl Expression for FirstProjectExprWaitsForStartedCount {
+        fn return_type(&self) -> DataType {
+            DataType::Int64
+        }
+
+        async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
+            let call_idx = self.started_count.fetch_add(1, atomic::Ordering::SeqCst);
+            self.started_notify.notify_waiters();
+            if call_idx == 0 {
+                loop {
+                    let notified = self.started_notify.notified();
+                    if self.started_count.load(atomic::Ordering::SeqCst)
+                        >= self.unblock_first_at_started_count
+                    {
+                        break;
+                    }
+                    notified.await;
+                }
+            }
+
+            Ok(ValueImpl::Scalar {
+                value: Some((call_idx as i64).into()),
+                capacity: input.capacity(),
+            })
+        }
+
+        async fn eval_row(&self, _input: &OwnedRow) -> expr::Result<Datum> {
+            Ok(Some(0_i64.into()))
+        }
+    }
+
     #[tokio::test]
     async fn test_projection_evaluates_chunks_concurrently_before_barrier() {
         let schema = Schema {
@@ -562,6 +601,207 @@ mod tests {
             )
         );
 
+        assert!(proj.next().await.unwrap().unwrap().is_stop());
+    }
+
+    #[tokio::test]
+    async fn test_projection_keeps_concurrency_across_barrier() {
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, StreamKey::new());
+
+        let started_count = Arc::new(AtomicUsize::new(0));
+        let started_notify = Arc::new(Notify::new());
+        let test_expr = NonStrictExpression::for_test(FirstProjectExprWaitsForStartedCount {
+            started_count: started_count.clone(),
+            started_notify: started_notify.clone(),
+            unblock_first_at_started_count: 3,
+        });
+
+        let proj = ProjectExecutor::new(
+            actor_context_with_project_expr_concurrency(4),
+            source,
+            vec![test_expr],
+            MultiMap::new(),
+            vec![],
+            false,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 1",
+        ));
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 2",
+        ));
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 3",
+        ));
+        tx.push_barrier(test_epoch(3), true);
+
+        let first_msg = timeout(Duration::from_secs(5), async {
+            let next_msg = proj.next();
+            pin_mut!(next_msg);
+            let mut first_msg = None;
+            loop {
+                let notified = started_notify.notified();
+                if started_count.load(atomic::Ordering::SeqCst) >= 3 {
+                    break;
+                }
+                tokio::select! {
+                    _ = notified => {}
+                    msg = &mut next_msg => {
+                        if started_count.load(atomic::Ordering::SeqCst) < 3 {
+                            panic!("project executor emitted before the post-barrier chunk started: {msg:?}");
+                        }
+                        first_msg = Some(msg.unwrap().unwrap());
+                        break;
+                    }
+                }
+            }
+            match first_msg {
+                Some(msg) => msg,
+                None => next_msg.await.unwrap().unwrap(),
+            }
+        })
+        .await
+        .expect("post-barrier chunk expression did not start");
+
+        assert_eq!(
+            *first_msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 0"
+            )
+        );
+        assert_eq!(
+            *proj.next().await.unwrap().unwrap().as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 1"
+            )
+        );
+        proj.expect_barrier().await;
+        assert_eq!(
+            *proj.next().await.unwrap().unwrap().as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+        assert!(proj.next().await.unwrap().unwrap().is_stop());
+    }
+
+    #[tokio::test]
+    async fn test_projection_keeps_concurrency_across_watermark() {
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, StreamKey::new());
+
+        let started_count = Arc::new(AtomicUsize::new(0));
+        let started_notify = Arc::new(Notify::new());
+        let test_expr = NonStrictExpression::for_test(FirstProjectExprWaitsForStartedCount {
+            started_count: started_count.clone(),
+            started_notify: started_notify.clone(),
+            unblock_first_at_started_count: 3,
+        });
+
+        let proj = ProjectExecutor::new(
+            actor_context_with_project_expr_concurrency(4),
+            source,
+            vec![test_expr],
+            MultiMap::from_iter(vec![(0, 0)].into_iter()),
+            vec![],
+            false,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 1",
+        ));
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 2",
+        ));
+        tx.push_int64_watermark(0, 100);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 3",
+        ));
+        tx.push_barrier(test_epoch(2), true);
+
+        let first_msg = timeout(Duration::from_secs(5), async {
+            let next_msg = proj.next();
+            pin_mut!(next_msg);
+            let mut first_msg = None;
+            loop {
+                let notified = started_notify.notified();
+                if started_count.load(atomic::Ordering::SeqCst) >= 3 {
+                    break;
+                }
+                tokio::select! {
+                    _ = notified => {}
+                    msg = &mut next_msg => {
+                        if started_count.load(atomic::Ordering::SeqCst) < 3 {
+                            panic!("project executor emitted before the post-watermark chunk started: {msg:?}");
+                        }
+                        first_msg = Some(msg.unwrap().unwrap());
+                        break;
+                    }
+                }
+            }
+            match first_msg {
+                Some(msg) => msg,
+                None => next_msg.await.unwrap().unwrap(),
+            }
+        })
+        .await
+        .expect("post-watermark chunk expression did not start");
+
+        assert_eq!(
+            *first_msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 0"
+            )
+        );
+        assert_eq!(
+            *proj.next().await.unwrap().unwrap().as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 1"
+            )
+        );
+        assert_eq!(
+            proj.expect_watermark().await,
+            Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(0)
+            }
+        );
+        assert_eq!(
+            *proj.next().await.unwrap().unwrap().as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
         assert!(proj.next().await.unwrap().unwrap().is_stop());
     }
 
