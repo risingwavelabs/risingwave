@@ -468,13 +468,18 @@ mod write_chunk_future {
                     let mut retry_count = 0;
 
                     loop {
+                        let return_consumed_capacity = if retry_count == 0 {
+                            ReturnConsumedCapacity::None
+                        } else {
+                            ReturnConsumedCapacity::Total
+                        };
                         let reqs = hashmap! {
                             table.clone() => req_items.clone(),
                         };
                         let result = client
                             .batch_write_item()
                             .set_request_items(Some(reqs))
-                            .return_consumed_capacity(ReturnConsumedCapacity::None)
+                            .return_consumed_capacity(return_consumed_capacity)
                             .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
                             .send()
                             .await;
@@ -484,6 +489,13 @@ mod write_chunk_future {
                                 let unprocessed_items =
                                     output.unprocessed_items().cloned().unwrap_or_default();
                                 if unprocessed_items.is_empty() {
+                                    if retry_count > 0 {
+                                        tracing::warn!(
+                                            retry_count,
+                                            consumed_capacity = ?output.consumed_capacity(),
+                                            "DynamoDB batch write retry succeeded"
+                                        );
+                                    }
                                     return Ok(());
                                 }
 
@@ -510,6 +522,7 @@ mod write_chunk_future {
                         tracing::warn!(
                             retry_count,
                             delay_ms,
+                            unprocessed_items_count = req_items.len(),
                             "retrying DynamoDB batch write"
                         );
                         sleep(Duration::from_millis(delay_ms)).await;
