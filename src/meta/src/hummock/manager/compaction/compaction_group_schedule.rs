@@ -1663,7 +1663,7 @@ impl GroupMergeValidator {
             // check whether the group is in the write stop state after merge
             let l0_sub_level_count_after_merge =
                 group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
-            if GroupStateValidator::write_stop_l0_file_count(
+            if GroupStateValidator::write_stop_sub_level_count(
                 (l0_sub_level_count_after_merge as f64
                     * opts.compaction_group_merge_dimension_threshold) as usize,
                 group.compaction_group_config.compaction_config().deref(),
@@ -1674,8 +1674,13 @@ impl GroupMergeValidator {
                 )));
             }
 
-            let l0_file_count_after_merge =
-                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+            let l0_file_count_after_merge = group_levels
+                .l0
+                .sub_levels
+                .iter()
+                .chain(next_group_levels.l0.sub_levels.iter())
+                .map(|level| level.table_infos.len())
+                .sum::<usize>();
             if GroupStateValidator::write_stop_l0_file_count(
                 (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
                     as usize,
@@ -1703,8 +1708,8 @@ impl GroupMergeValidator {
 
             // check whether the group is in the emergency state after merge
             if GroupStateValidator::emergency_l0_file_count(
-                (l0_sub_level_count_after_merge as f64
-                    * opts.compaction_group_merge_dimension_threshold) as usize,
+                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                    as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
