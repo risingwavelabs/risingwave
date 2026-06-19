@@ -3083,56 +3083,72 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
 /// the same unmergeable pair infinitely (167K+ error log spam).
 #[tokio::test]
 async fn test_try_merge_compaction_group_error_propagation() {
-    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .level0_stop_write_threshold_sub_level_number(10)
+        .level0_stop_write_threshold_max_sst_count(Some(6))
+        .emergency_level0_sst_file_count(Some(100))
+        .build();
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env_with_config(80, config).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
         worker_id as _,
     ));
 
-    // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
+    // StateDefault(2): [200, 202], MaterializedView(3): [100, 201]
     hummock_manager
         .register_table_ids_for_test(&[
-            (100, StaticCompactionGroupId::StateDefault),
-            (102, StaticCompactionGroupId::StateDefault),
+            (200, StaticCompactionGroupId::StateDefault),
+            (202, StaticCompactionGroupId::StateDefault),
         ])
         .await
         .unwrap();
     hummock_manager
         .register_table_ids_for_test(&[
-            (101, StaticCompactionGroupId::MaterializedView),
-            (200, StaticCompactionGroupId::MaterializedView),
+            (100, StaticCompactionGroupId::MaterializedView),
+            (201, StaticCompactionGroupId::MaterializedView),
         ])
         .await
         .unwrap();
 
     // Commit SSTs so that split can proceed
-    let sst_1 = gen_local_sstable_info(1, vec![100, 102], test_epoch(20));
-    let sst_2 = gen_local_sstable_info(2, vec![101, 200], test_epoch(20));
+    let epoch = test_epoch(20);
     hummock_meta_client
         .commit_epoch(
-            30,
+            epoch,
             SyncResult {
-                uncommitted_ssts: vec![sst_1, sst_2],
+                uncommitted_ssts: vec![
+                    gen_local_sstable_info(1, vec![200, 202], epoch),
+                    gen_local_sstable_info(2, vec![100, 201], epoch),
+                    gen_local_sstable_info(3, vec![100, 201], epoch),
+                    gen_local_sstable_info(4, vec![100, 201], epoch),
+                    gen_local_sstable_info(5, vec![100, 201], epoch),
+                ],
                 ..Default::default()
             },
         )
         .await
         .unwrap();
 
-    // Split table 101 out of MV(3) → Group_X = [101].
-    // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
+    // Split table 201 out of MV(3) → Group_X = [201].
+    // Now StateDefault(2)=[200,202] and Group_X=[201] have overlapping table ID ranges.
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
             StaticCompactionGroupId::MaterializedView,
-            &[101.into()],
+            &[201.into()],
             None,
         )
         .await
         .unwrap();
 
     let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault;
-    let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
+    let mv_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView;
+    let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await;
     assert_ne!(state_default_id, group_x_id);
+    assert_ne!(mv_id, group_x_id);
 
     let group_infos = hummock_manager.calculate_compaction_group_statistic().await;
     let sd_stat = group_infos
@@ -3143,10 +3159,26 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .iter()
         .find(|g| g.group_id == group_x_id)
         .unwrap();
+    let mv_stat = group_infos.iter().find(|g| g.group_id == mv_id).unwrap();
 
     let throughput_manager = TableWriteThroughputStatisticManager::new(100);
     let created_tables: HashSet<TableId> =
-        HashSet::from_iter(vec![100.into(), 101.into(), 102.into(), 200.into()]);
+        HashSet::from_iter(vec![100.into(), 200.into(), 201.into(), 202.into()]);
+
+    // Group_X and MaterializedView are each below the L0 SST count write-stop threshold, but the
+    // merged group should be rejected by the post-merge L0 SST count check.
+    let result = hummock_manager
+        .try_merge_compaction_group(&throughput_manager, gx_stat, mv_stat, &created_tables)
+        .await;
+    let err =
+        result.expect_err("try_merge_compaction_group must reject merged L0 SST count write stop");
+    assert!(
+        err.as_report()
+            .to_string()
+            .contains("will trigger write stop after merge"),
+        "unexpected merge rejection: {}",
+        err.as_report()
+    );
 
     // Must return Err for overlapping groups — guards against the swallowed-error regression.
     let result = hummock_manager
