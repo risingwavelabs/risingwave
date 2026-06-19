@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
 use std::future::Future;
-use std::time::Instant;
 
 use futures::future::{Either, select};
 use futures::pin_mut;
@@ -26,23 +24,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
 use crate::executor::prelude::*;
-use crate::task::ActorId;
 
-type ProjectChunkFuture = impl Future<Output = StreamExecutorResult<ProjectedChunk>> + Send;
+type ProjectChunkFuture = impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
 type PendingProjectChunks = FuturesOrdered<ProjectChunkFuture>;
-
-struct ProjectedChunk {
-    chunk_seq: u64,
-    finished_at: Instant,
-    chunk: StreamChunk,
-}
-
-fn project_exprs_contain_openai_embedding(exprs: &[NonStrictExpression]) -> bool {
-    exprs.iter().any(|expr| {
-        let expr_debug = format!("{expr:?}");
-        expr_debug.contains("OpenAiEmbedding")
-    })
-}
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -53,7 +37,7 @@ pub struct ProjectExecutor {
 }
 
 struct Inner {
-    actor_id: ActorId,
+    _ctx: ActorContextRef,
 
     /// Expressions of the current projection.
     exprs: Arc<Vec<NonStrictExpression>>,
@@ -71,10 +55,6 @@ struct Inner {
 
     /// Maximum number of chunks with in-flight projection evaluation.
     project_expr_concurrency: usize,
-
-    /// Whether to log detailed chunk-level projection execution for `OpenAI` embedding
-    /// projections.
-    enable_project_openai_embedding_detail_log: bool,
 }
 
 impl ProjectExecutor {
@@ -93,31 +73,16 @@ impl ProjectExecutor {
             0 => usize::MAX,
             concurrency => concurrency,
         };
-        let enable_project_openai_embedding_detail_log = ctx
-            .config
-            .developer
-            .enable_project_openai_embedding_detail_log
-            && project_exprs_contain_openai_embedding(&exprs);
-        if enable_project_openai_embedding_detail_log {
-            tracing::info!(
-                actor_id = ?ctx.id,
-                project_expr_concurrency,
-                expr_count = exprs.len(),
-                "openai embedding project detail logging enabled"
-            );
-        }
-        let actor_id = ctx.id;
         Self {
             input,
             inner: Inner {
-                actor_id,
+                _ctx: ctx,
                 exprs: Arc::new(exprs),
                 watermark_derivations,
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 eliminate_noop_updates,
                 project_expr_concurrency,
-                enable_project_openai_embedding_detail_log,
             },
         }
     }
@@ -161,40 +126,13 @@ impl Inner {
         exprs: Arc<Vec<NonStrictExpression>>,
         eliminate_noop_updates: bool,
         chunk: StreamChunk,
-        actor_id: ActorId,
-        enable_project_openai_embedding_detail_log: bool,
-        chunk_seq: u64,
     ) -> ProjectChunkFuture {
-        let input_row_count = chunk.cardinality();
         async move {
-            if enable_project_openai_embedding_detail_log {
-                tracing::info!(
-                    actor_id = ?actor_id,
-                    chunk_seq,
-                    input_row_count,
-                    "openai embedding project chunk mapping started"
-                );
-            }
-            let start = Instant::now();
             let mut new_chunk = apply_project_exprs(&exprs, chunk).await?;
             if eliminate_noop_updates {
                 new_chunk = new_chunk.eliminate_adjacent_noop_update();
             }
-            let output_row_count = new_chunk.cardinality();
-            if enable_project_openai_embedding_detail_log {
-                tracing::info!(
-                    actor_id = ?actor_id,
-                    chunk_seq,
-                    elapsed_ms = start.elapsed().as_millis(),
-                    output_row_count,
-                    "openai embedding project chunk mapping finished"
-                );
-            }
-            Ok(ProjectedChunk {
-                chunk_seq,
-                finished_at: Instant::now(),
-                chunk: new_chunk,
-            })
+            Ok(new_chunk)
         }
     }
 
@@ -251,55 +189,31 @@ impl Inner {
 
     async fn next_projected_chunk(
         pending_project_chunks: &mut PendingProjectChunks,
-        pending_chunk_seqs: &mut VecDeque<u64>,
         nondecreasing_expr_indices: &[usize],
         last_nondec_expr_values: &mut [Option<ScalarImpl>],
-        actor_id: ActorId,
-        enable_project_openai_embedding_detail_log: bool,
     ) -> StreamExecutorResult<StreamChunk> {
-        let ProjectedChunk {
-            chunk_seq,
-            finished_at,
-            chunk,
-        } = pending_project_chunks
+        let new_chunk = pending_project_chunks
             .next()
             .await
             .expect("pending project chunks should not be empty")?;
-        let expected_chunk_seq = pending_chunk_seqs
-            .pop_front()
-            .expect("pending chunk seqs should not be empty");
-        debug_assert_eq!(chunk_seq, expected_chunk_seq);
-        let output_row_count = chunk.cardinality();
-        if enable_project_openai_embedding_detail_log {
-            tracing::info!(
-                actor_id = ?actor_id,
-                chunk_seq,
-                pending_project_chunks = pending_project_chunks.len(),
-                pending_chunk_seqs = ?pending_chunk_seqs,
-                finished_to_dequeue_ms = finished_at.elapsed().as_millis(),
-                output_row_count,
-                "openai embedding project chunk mapping dequeued"
-            );
-        }
         Self::update_last_nondec_expr_values(
             nondecreasing_expr_indices,
             last_nondec_expr_values,
-            &chunk,
+            &new_chunk,
         );
-        Ok(chunk)
+        Ok(new_chunk)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(self, input: Executor) {
         let Inner {
-            actor_id,
+            _ctx: _,
             exprs,
             watermark_derivations,
             nondecreasing_expr_indices,
             mut last_nondec_expr_values,
             eliminate_noop_updates,
             project_expr_concurrency,
-            enable_project_openai_embedding_detail_log,
         } = self;
 
         let mut input = input.execute();
@@ -308,26 +222,13 @@ impl Inner {
         yield Message::Barrier(first_barrier);
 
         let mut pending_project_chunks = PendingProjectChunks::new();
-        let mut pending_chunk_seqs = VecDeque::new();
-        let mut next_chunk_seq = 0;
 
         loop {
             if pending_project_chunks.len() >= project_expr_concurrency {
-                if enable_project_openai_embedding_detail_log {
-                    tracing::info!(
-                        actor_id = ?actor_id,
-                        pending_project_chunks = pending_project_chunks.len(),
-                        pending_chunk_seqs = ?pending_chunk_seqs,
-                        "openai embedding project concurrency limit reached"
-                    );
-                }
                 let new_chunk = Self::next_projected_chunk(
                     &mut pending_project_chunks,
-                    &mut pending_chunk_seqs,
                     &nondecreasing_expr_indices,
                     &mut last_nondec_expr_values,
-                    actor_id,
-                    enable_project_openai_embedding_detail_log,
                 )
                 .await?;
                 yield Message::Chunk(new_chunk);
@@ -341,11 +242,8 @@ impl Inner {
             } else {
                 let next_projected_chunk = Self::next_projected_chunk(
                     &mut pending_project_chunks,
-                    &mut pending_chunk_seqs,
                     &nondecreasing_expr_indices,
                     &mut last_nondec_expr_values,
-                    actor_id,
-                    enable_project_openai_embedding_detail_log,
                 );
                 let next_input_msg = async {
                     input.next().await.ok_or_else(|| {
@@ -367,23 +265,11 @@ impl Inner {
 
             match msg {
                 Message::Watermark(w) => {
-                    if enable_project_openai_embedding_detail_log {
-                        tracing::info!(
-                            actor_id = ?actor_id,
-                            pending_project_chunks = pending_project_chunks.len(),
-                            pending_chunk_seqs = ?pending_chunk_seqs,
-                            watermark_col_idx = w.col_idx,
-                            "openai embedding project draining chunks before watermark"
-                        );
-                    }
                     while !pending_project_chunks.is_empty() {
                         let new_chunk = Self::next_projected_chunk(
                             &mut pending_project_chunks,
-                            &mut pending_chunk_seqs,
                             &nondecreasing_expr_indices,
                             &mut last_nondec_expr_values,
-                            actor_id,
-                            enable_project_openai_embedding_detail_log,
                         )
                         .await?;
                         yield Message::Chunk(new_chunk);
@@ -396,57 +282,18 @@ impl Inner {
                     }
                 }
                 Message::Chunk(chunk) => {
-                    let chunk_seq = next_chunk_seq;
-                    next_chunk_seq += 1;
-                    if enable_project_openai_embedding_detail_log {
-                        let input_row_count = chunk.cardinality();
-                        tracing::info!(
-                            actor_id = ?actor_id,
-                            chunk_seq,
-                            pending_project_chunks_before_enqueue = pending_project_chunks.len(),
-                            pending_chunk_seqs = ?pending_chunk_seqs,
-                            input_row_count,
-                            "openai embedding project chunk mapping enqueued"
-                        );
-                    }
                     pending_project_chunks.push_back(Self::map_filter_chunk(
                         exprs.clone(),
                         eliminate_noop_updates,
                         chunk,
-                        actor_id,
-                        enable_project_openai_embedding_detail_log,
-                        chunk_seq,
                     ));
-                    pending_chunk_seqs.push_back(chunk_seq);
-                    if enable_project_openai_embedding_detail_log {
-                        tracing::info!(
-                            actor_id = ?actor_id,
-                            chunk_seq,
-                            pending_project_chunks_after_enqueue = pending_project_chunks.len(),
-                            pending_chunk_seqs = ?pending_chunk_seqs,
-                            "openai embedding project pending chunks updated"
-                        );
-                    }
                 }
                 Message::Barrier(barrier) => {
-                    if enable_project_openai_embedding_detail_log {
-                        tracing::info!(
-                            actor_id = ?actor_id,
-                            pending_project_chunks = pending_project_chunks.len(),
-                            pending_chunk_seqs = ?pending_chunk_seqs,
-                            barrier_epoch = barrier.epoch.curr,
-                            is_paused,
-                            "openai embedding project draining chunks before barrier"
-                        );
-                    }
                     while !pending_project_chunks.is_empty() {
                         let new_chunk = Self::next_projected_chunk(
                             &mut pending_project_chunks,
-                            &mut pending_chunk_seqs,
                             &nondecreasing_expr_indices,
                             &mut last_nondec_expr_values,
-                            actor_id,
-                            enable_project_openai_embedding_detail_log,
                         )
                         .await?;
                         yield Message::Chunk(new_chunk);

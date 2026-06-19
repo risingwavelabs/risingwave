@@ -231,10 +231,6 @@ pub mod default {
             1
         }
 
-        pub fn stream_enable_project_openai_embedding_detail_log() -> bool {
-            false
-        }
-
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }
