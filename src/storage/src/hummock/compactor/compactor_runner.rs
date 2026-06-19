@@ -568,6 +568,32 @@ pub async fn compact_with_agent(
     )
 }
 
+pub(crate) async fn acquire_complete_catalog_agent(
+    compaction_catalog_manager_ref: &CompactionCatalogManagerRef,
+    read_table_ids: Vec<StateTableId>,
+) -> HummockResult<CompactionCatalogAgentRef> {
+    let expected_table_ids = read_table_ids.iter().copied().collect::<HashSet<_>>();
+    let compaction_catalog_agent_ref = compaction_catalog_manager_ref
+        .acquire(read_table_ids)
+        .await?;
+    let acquired_table_ids = compaction_catalog_agent_ref
+        .table_ids()
+        .collect::<HashSet<_>>();
+
+    if acquired_table_ids != expected_table_ids {
+        let diff = expected_table_ids
+            .symmetric_difference(&acquired_table_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        return Err(HummockError::other(format!(
+            "some table ids are not acquired: {:?}",
+            diff
+        )));
+    }
+
+    Ok(compaction_catalog_agent_ref)
+}
+
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
@@ -585,23 +611,14 @@ pub async fn compact(
     Option<MemoryTracker>,
 ) {
     let read_table_ids = compact_task.get_table_ids_from_input_ssts().collect_vec();
-    let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
-        .acquire(read_table_ids.clone())
-        .await
-    {
-        Ok(compaction_catalog_agent_ref) => {
-            let acquire_table_ids: HashSet<StateTableId> =
-                compaction_catalog_agent_ref.table_ids().collect();
-            if acquire_table_ids.len() != read_table_ids.len() {
-                let diff = read_table_ids
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-                    .symmetric_difference(&acquire_table_ids)
-                    .cloned()
-                    .collect::<Vec<_>>();
+    let compaction_catalog_agent_ref =
+        match acquire_complete_catalog_agent(&compaction_catalog_manager_ref, read_table_ids).await
+        {
+            Ok(compaction_catalog_agent_ref) => compaction_catalog_agent_ref,
+            Err(e) => {
                 tracing::warn!(
-                    dif= ?diff,
-                    "Some table ids are not acquired."
+                    error = %e.as_report(),
+                    "Failed to acquire complete compaction catalog agent"
                 );
                 return (
                     compact_done(
@@ -613,25 +630,7 @@ pub async fn compact(
                     None,
                 );
             }
-
-            compaction_catalog_agent_ref
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e.as_report(),
-                "Failed to acquire compaction catalog agent"
-            );
-            return (
-                compact_done(
-                    compact_task,
-                    compactor_context.clone(),
-                    vec![],
-                    TaskStatus::ExecuteFailed,
-                ),
-                None,
-            );
-        }
-    };
+        };
 
     compact_with_agent(
         compactor_context,
