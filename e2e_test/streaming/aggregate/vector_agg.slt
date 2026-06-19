@@ -1,0 +1,46 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table vector_agg_input (
+    id int primary key,
+    embedding vector(3)
+);
+
+statement ok
+create materialized view vector_agg_mv as
+select sum(embedding) as sum_embedding, avg(embedding) as avg_embedding
+from vector_agg_input;
+
+statement ok
+insert into vector_agg_input values
+    (1, '[1,2,3]'),
+    (2, '[4,5,6]'),
+    (3, '[7,8,9]');
+
+query
+select * from vector_agg_mv;
+----
+[12,15,18] [4,5,6]
+
+statement ok
+delete from vector_agg_input where id = 2;
+
+query
+select * from vector_agg_mv;
+----
+[8,10,12] [4,5,6]
+
+statement ok
+delete from vector_agg_input where id = 1;
+
+query
+select * from vector_agg_mv;
+----
+[7,8,9] [7,8,9]
+
+statement ok
+drop materialized view vector_agg_mv;
+
+statement ok
+drop table vector_agg_input;

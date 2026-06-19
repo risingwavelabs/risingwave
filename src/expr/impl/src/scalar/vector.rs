@@ -295,6 +295,32 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 }
 
 /// ```slt
+/// query T
+/// SELECT '[2,4,6]'::vector(3) / 2::bigint;
+/// ----
+/// [1,2,3]
+///
+/// query error division by zero
+/// SELECT '[1,2,3]'::vector(3) / 0::bigint;
+/// ```
+#[function(
+    "divide(vector, int8) -> vector",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
+fn vector_divide(vector: VectorRef<'_>, divisor: i64) -> Result<VectorVal> {
+    if divisor == 0 {
+        return Err(ExprError::DivisionByZero);
+    }
+
+    vector
+        .as_raw_slice()
+        .iter()
+        .map(|value| Finite32::try_from((*value as f64 / divisor as f64) as f32))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOutOfRange)
+}
+
+/// ```slt
 /// query R
 /// SELECT '[1,2,3]'::vector(3) || '[4,5]';
 /// ----

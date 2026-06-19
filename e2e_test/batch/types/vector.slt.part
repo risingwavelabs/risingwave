@@ -48,3 +48,21 @@ SELECT id, embedding FROM embedding_pk ORDER BY embedding;
 
 statement ok
 drop table embedding_pk;
+
+# Vector aggregates
+
+query
+select sum(embedding), avg(embedding)
+from (values
+    ('[1,2,3]'::vector(3)),
+    ('[4,5,6]'::vector(3)),
+    (null::vector(3))
+) as t(embedding);
+----
+[5,7,9] [2.5,3.5,4.5]
+
+query
+select sum(embedding), avg(embedding)
+from (select null::vector(3) as embedding) as t;
+----
+NULL NULL

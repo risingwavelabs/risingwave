@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use num_traits::{CheckedAdd, CheckedSub};
+use risingwave_common::array::Finite32;
+use risingwave_common::types::{ScalarRef, VectorRef, VectorVal};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, aggregate};
 
 #[aggregate("sum(int2) -> int8")]
@@ -40,6 +43,43 @@ where
     }
 }
 
+#[aggregate("sum(vector) -> vector", type_infer = "|args| Ok(args[0].clone())")]
+fn sum_vector(
+    state: Option<VectorVal>,
+    input: Option<VectorRef<'_>>,
+    retract: bool,
+) -> Result<Option<VectorVal>> {
+    let Some(input) = input else {
+        return Ok(state);
+    };
+    let Some(state) = state else {
+        if !retract {
+            return Ok(Some(input.to_owned_scalar()));
+        }
+        return input
+            .as_raw_slice()
+            .iter()
+            .map(|value| Finite32::try_from(-value).map_err(|_| ExprError::NumericOutOfRange))
+            .try_collect()
+            .map(Some);
+    };
+
+    state
+        .as_raw_slice()
+        .iter()
+        .zip_eq_fast(input.as_raw_slice())
+        .map(|(state, input)| {
+            let value = if retract {
+                state - input
+            } else {
+                state + input
+            };
+            Finite32::try_from(value).map_err(|_| ExprError::NumericOutOfRange)
+        })
+        .try_collect()
+        .map(Some)
+}
+
 #[aggregate("avg(int2) -> decimal", rewritten)]
 #[aggregate("avg(int4) -> decimal", rewritten)]
 #[aggregate("avg(int8) -> decimal", rewritten)]
@@ -48,6 +88,11 @@ where
 #[aggregate("avg(float8) -> float8", rewritten)]
 #[aggregate("avg(int256) -> float8", rewritten)]
 #[aggregate("avg(interval) -> interval", rewritten)]
+#[aggregate(
+    "avg(vector) -> vector",
+    rewritten,
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn _avg() {}
 
 #[aggregate("stddev_pop(int2) -> decimal", rewritten)]
@@ -170,8 +215,10 @@ mod tests {
     use futures_util::FutureExt;
     use risingwave_common::array::*;
     use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
-    use risingwave_common::types::{Datum, Decimal};
-    use risingwave_expr::aggregate::{AggCall, build_append_only};
+    use risingwave_common::types::{DataType, Datum, Decimal};
+    use risingwave_expr::aggregate::{
+        AggArgs, AggCall, AggType, PbAggKind, build_append_only, build_retractable,
+    };
     use test::Bencher;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
@@ -247,6 +294,81 @@ mod tests {
             + 1926.0",
         );
         test_agg("(sum:float8 $0:float8)", input, Some(f64::NAN.into()));
+    }
+
+    #[test]
+    fn sum_vector_retract() {
+        let vector = |values: [f32; 3]| {
+            VectorVal::from_iter(values.map(|value| Finite32::try_from(value).unwrap()))
+        };
+        let array = |values: Vec<VectorVal>| {
+            let mut builder = VectorArrayBuilder::with_type(values.len(), DataType::Vector(3));
+            for value in &values {
+                builder.append(Some(value.to_ref()));
+            }
+            builder.finish().into_ref()
+        };
+        let input = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![array(vec![
+                vector([1.0, 2.0, 3.0]),
+                vector([4.0, 5.0, 6.0]),
+                vector([7.0, 8.0, 9.0]),
+            ])],
+        );
+        let expected = vector([12.0, 15.0, 18.0]);
+        let agg_call = AggCall {
+            agg_type: AggType::Builtin(PbAggKind::Sum),
+            args: AggArgs::from_iter([(DataType::Vector(3), 0)]),
+            return_type: DataType::Vector(3),
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+            direct_args: vec![],
+        };
+        let agg = build_retractable(&agg_call).unwrap();
+        let mut state = agg.create_state().unwrap();
+        agg.update(&mut state, &input)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            agg.get_result(&state).now_or_never().unwrap().unwrap(),
+            Some(expected.into())
+        );
+
+        // In two-phase aggregation, a partial aggregate may receive a deletion-only chunk.
+        let input = StreamChunk::new(vec![Op::Delete], vec![array(vec![vector([4.0, 5.0, 6.0])])]);
+        let expected = vector([-4.0, -5.0, -6.0]);
+        let mut state = agg.create_state().unwrap();
+        agg.update(&mut state, &input)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            agg.get_result(&state).now_or_never().unwrap().unwrap(),
+            Some(expected.into())
+        );
+
+        let input = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            vec![array(vec![
+                vector([1.0, 2.0, 3.0]),
+                vector([4.0, 5.0, 6.0]),
+                vector([7.0, 8.0, 9.0]),
+                vector([4.0, 5.0, 6.0]),
+            ])],
+        );
+        let expected = vector([8.0, 10.0, 12.0]);
+        let mut state = agg.create_state().unwrap();
+        agg.update(&mut state, &input)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            agg.get_result(&state).now_or_never().unwrap().unwrap(),
+            Some(expected.into())
+        );
     }
 
     /// Even if there is no element after some insertions and equal number of deletion operations,
