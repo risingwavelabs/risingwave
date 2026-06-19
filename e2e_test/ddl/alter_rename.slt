@@ -420,3 +420,48 @@ statement ok
 DROP TABLE c;
 
 # END references in changelog
+
+# BEGIN schema-aware relation references
+
+statement ok
+CREATE SCHEMA a;
+
+statement ok
+CREATE SCHEMA b;
+
+statement ok
+CREATE TABLE a.foo(f1 INT);
+
+statement ok
+CREATE TABLE b.foo(f1 INT);
+
+statement ok
+CREATE MATERIALIZED VIEW schema_aware_rename_mv AS
+SELECT * FROM a.foo
+UNION ALL
+SELECT * FROM b.foo;
+
+statement ok
+ALTER TABLE a.foo RENAME TO bar;
+
+query T
+SELECT definition FROM rw_materialized_views WHERE name = 'schema_aware_rename_mv';
+----
+CREATE MATERIALIZED VIEW schema_aware_rename_mv AS SELECT * FROM a.bar AS foo UNION ALL SELECT * FROM b.foo
+
+statement ok
+DROP MATERIALIZED VIEW schema_aware_rename_mv;
+
+statement ok
+DROP TABLE a.bar;
+
+statement ok
+DROP TABLE b.foo;
+
+statement ok
+DROP SCHEMA a;
+
+statement ok
+DROP SCHEMA b;
+
+# END schema-aware relation references

@@ -26,8 +26,15 @@ use risingwave_sqlparser::parser::Parser;
 
 #[derive(Clone, Copy)]
 pub enum RenameOperation<'a> {
-    RelationName { from: &'a str, to: &'a str },
-    SchemaName { from: &'a str, to: &'a str },
+    RelationName {
+        from_schema: Option<&'a str>,
+        from: &'a str,
+        to: &'a str,
+    },
+    SchemaName {
+        from: &'a str,
+        to: &'a str,
+    },
 }
 
 /// Updates the name of a relation or schema in the target of a relation's `Create` statement.
@@ -200,9 +207,19 @@ fn rewrite_create_target(name: &mut ObjectName, operation: RenameOperation<'_>) 
 
 fn rewrite_reference_name(name: &mut ObjectName, operation: RenameOperation<'_>) -> bool {
     match operation {
-        RenameOperation::RelationName { from, to } => {
+        RenameOperation::RelationName {
+            from_schema,
+            from,
+            to,
+        } => {
             let idx = name.0.len() - 1;
             if name.0[idx].real_value() != from {
+                return false;
+            }
+            if name.0.len() >= 2
+                && let Some(from_schema) = from_schema
+                && name.0[idx - 1].real_value() != from_schema
+            {
                 return false;
             }
             name.0[idx] = Ident::from_real_value(to);
@@ -606,6 +623,14 @@ impl IndexItemRewriter {
 mod tests {
     use super::*;
 
+    fn relation_rename<'a>(from: &'a str, to: &'a str) -> RenameOperation<'a> {
+        RenameOperation::RelationName {
+            from_schema: None,
+            from,
+            to,
+        }
+    }
+
     #[test]
     fn test_alter_table_rename() {
         let definition = "CREATE TABLE foo (a int, b int)";
@@ -614,6 +639,7 @@ mod tests {
         let actual = alter_relation_rename(
             definition,
             RenameOperation::RelationName {
+                from_schema: None,
                 from: "foo",
                 to: new_name,
             },
@@ -676,8 +702,23 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected = "CREATE INDEX idx1 ON bar(v1 DESC, v2)";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_rename_relation_refs_with_schema() {
+        let definition =
+            "CREATE MATERIALIZED VIEW mv AS SELECT * FROM a.foo UNION ALL SELECT * FROM b.foo";
+        let expected = "CREATE MATERIALIZED VIEW mv AS SELECT * FROM a.bar AS foo UNION ALL SELECT * FROM b.foo";
+        let actual = alter_relation_rename_refs(
+            definition,
+            RenameOperation::RelationName {
+                from_schema: Some("a"),
+                from: "foo",
+                to: "bar",
+            },
+        );
         assert_eq!(expected, actual);
     }
 
@@ -689,8 +730,7 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE SINK sink_t FROM bar WITH (connector = 'kafka', format = 'append_only')";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 
@@ -702,26 +742,22 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM bar AS foo";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.* FROM foo";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.* FROM bar AS foo";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM bar AS foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo AS bar WHERE bar.v1 = 1";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar AS bar WHERE bar.v1 = 1";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 
@@ -745,8 +781,7 @@ mod tests {
                             (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM bar AS foo) ORDER BY (SELECT foo.v6 FROM bar AS foo)) FROM bar AS foo)\
                           ) \
                         FROM bar AS foo";
-        let actual =
-            alter_relation_rename_refs(definition, RenameOperation::RelationName { from, to });
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 }

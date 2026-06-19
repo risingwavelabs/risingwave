@@ -2106,6 +2106,7 @@ pub async fn rename_relation(
                 relation.definition = alter_relation_rename(
                     &relation.definition,
                     RenameOperation::RelationName {
+                        from_schema: None,
                         from: &old_name,
                         to: object_name,
                     },
@@ -2258,6 +2259,23 @@ pub async fn rename_relation_refer(
 
     use crate::controller::rename::{RenameOperation, alter_relation_rename_refs};
 
+    let schema_id: Option<SchemaId> = Object::find_by_id(object_id)
+        .select_only()
+        .column(object::Column::SchemaId)
+        .into_tuple::<Option<SchemaId>>()
+        .one(txn)
+        .await?
+        .flatten();
+    let schema_id = schema_id
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema of relation", object_id))?;
+    let schema_name: String = Schema::find_by_id(schema_id)
+        .select_only()
+        .column(schema::Column::Name)
+        .into_tuple()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+
     let mut to_update_relations = vec![];
     macro_rules! rename_relation_ref {
         ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
@@ -2269,6 +2287,7 @@ pub async fn rename_relation_refer(
             relation.definition = alter_relation_rename_refs(
                 &relation.definition,
                 RenameOperation::RelationName {
+                    from_schema: Some(&schema_name),
                     from: old_name,
                     to: object_name,
                 },
