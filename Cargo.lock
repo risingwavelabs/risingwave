@@ -5215,9 +5215,9 @@ dependencies = [
 
 [[package]]
 name = "ethnum"
-version = "1.5.0"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b90ca2580b73ab6a1f724b76ca11ab632df820fd6040c336200d2c1df7b3c82c"
+checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 dependencies = [
  "serde",
 ]
@@ -11593,7 +11593,7 @@ dependencies = [
  "foyer",
  "futures",
  "hashbrown 0.14.5",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "hex",
  "http 1.4.0",
  "http-body 1.0.1",

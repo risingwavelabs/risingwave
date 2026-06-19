@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap};
-use std::mem;
+use std::{assert_matches, mem};
 
 use anyhow::anyhow;
 use futures::stream::select;

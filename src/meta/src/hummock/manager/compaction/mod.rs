@@ -1562,8 +1562,8 @@ impl Compaction {
         compaction_group_id: CompactionGroupId,
     ) -> Vec<CompactTaskAssignment> {
         self.compact_task_assignment
-            .iter()
-            .filter_map(|(_, assignment)| {
+            .values()
+            .filter_map(|assignment| {
                 if assignment.compact_task.compaction_group_id == compaction_group_id {
                     Some(assignment.clone())
                 } else {

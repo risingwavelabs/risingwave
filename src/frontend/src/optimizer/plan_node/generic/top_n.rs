@@ -129,7 +129,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
         debug_assert!(
             group_key.iter().all(|&idx| idx < input.schema().len()),
             "Invalid group keys {:?} input schema size = {}",
-            &group_key,
+            group_key,
             input.schema().len()
         );
 

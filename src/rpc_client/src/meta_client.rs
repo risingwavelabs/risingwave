@@ -2396,7 +2396,8 @@ impl MetaMemberManagement {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
                                     .await
-                                    .context("failed to create client")?;
+                                    .context("failed to create client")
+                                    .map_err(RpcError::from)?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
@@ -2408,7 +2409,8 @@ impl MetaMemberManagement {
                         let resp = client
                             .members(MembersRequest {})
                             .await
-                            .context("failed to fetch members")?;
+                            .context("failed to fetch members")
+                            .map_err(RpcError::from)?;
 
                         resp.into_inner().members
                     };

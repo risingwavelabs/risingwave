@@ -256,16 +256,17 @@ impl BatchRefreshJobCheckpointControl {
                 );
             }
 
-            let entry_fragment_parallelism = ensemble
-                .entry_fragments()
-                .map(|fid| fragments[&fid].parallelism.clone())
-                .dedup()
-                .exactly_one()
-                .map_err(|_| {
-                    anyhow!(
-                        "entry fragments have inconsistent parallelism settings in batch refresh job"
-                    )
-                })?;
+            let entry_fragment_parallelism = Itertools::exactly_one(
+                ensemble
+                    .entry_fragments()
+                    .map(|fid| fragments[&fid].parallelism.clone())
+                    .dedup(),
+            )
+            .map_err(|_| {
+                anyhow!(
+                    "entry fragments have inconsistent parallelism settings in batch refresh job"
+                )
+            })?;
 
             let actor_template = EnsembleActorTemplate::render_new(
                 streaming_job_model,

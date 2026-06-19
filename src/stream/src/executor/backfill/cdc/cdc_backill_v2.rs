@@ -439,20 +439,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             Mutation::Update(UpdateMutation {
                                                 dropped_actors,
                                                 ..
-                                            }) => {
-                                                if dropped_actors.contains(&self.actor_ctx.id) {
-                                                    tracing::info!(
-                                                        %table_id,
-                                                        upstream_table_name,
-                                                        "CdcBackfill has been dropped due to config change"
-                                                    );
-                                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                                        yield Message::Chunk(chunk);
-                                                    }
-                                                    yield Message::Barrier(barrier);
-                                                    let () = futures::future::pending().await;
-                                                    unreachable!();
+                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                                tracing::info!(
+                                                    %table_id,
+                                                    upstream_table_name,
+                                                    "CdcBackfill has been dropped due to config change"
+                                                );
+                                                for chunk in upstream_chunk_buffer.drain(..) {
+                                                    yield Message::Chunk(chunk);
                                                 }
+                                                yield Message::Barrier(barrier);
+                                                let () = futures::future::pending().await;
+                                                unreachable!();
                                             }
                                             _ => (),
                                         }

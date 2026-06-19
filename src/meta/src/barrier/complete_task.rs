@@ -294,7 +294,8 @@ impl CompletingTask {
                 let join_result: MetaResult<_> = try {
                     join_handle
                         .await
-                        .context("failed to join completing command")??
+                        .context("failed to join completing command")
+                        .map_err(MetaError::from)??
                 };
                 // It's important to reset the completing_command after await no matter the result is err
                 // or not, and otherwise the join handle will be polled again after ready.

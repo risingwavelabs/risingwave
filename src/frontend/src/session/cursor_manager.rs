@@ -1164,7 +1164,7 @@ impl CursorManager {
         let mut subscription_cursor_nums = 0;
         let mut invalid_subscription_cursor_nums = 0;
         let mut subscription_cursor_last_fetch_duration = HashMap::new();
-        for (_, cursor) in self.cursor_map.lock().await.iter() {
+        for cursor in self.cursor_map.lock().await.values() {
             if let Cursor::Subscription(subscription_cursor) = cursor {
                 subscription_cursor_nums += 1;
                 if matches!(subscription_cursor.state, State::Invalid) {
