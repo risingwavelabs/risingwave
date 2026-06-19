@@ -23,8 +23,8 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnPulsarMessageIdData,
-    AdditionalColumnTimestamp, AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject,
-    AdditionalTableName,
+    AdditionalColumnRabbitmqAckData, AdditionalColumnTimestamp, AdditionalDatabaseName,
+    AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -34,10 +34,13 @@ use crate::source::{
     NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, RABBITMQ_CONNECTOR,
 };
 
-// Hidden additional columns connectors which do not support `include` syntax.
-pub static COMMON_COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
+// Hidden source-state columns used by connectors that do not support `INCLUDE`.
+pub static COMMON_SOURCE_STATE_ADDITIONAL_COLUMNS: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["partition", "offset"]));
 
+// Public columns supported by the SQL `INCLUDE` syntax. Do not add a column here
+// only because the source executor needs it internally: user-facing metadata must
+// have source-level semantics, not expose RisingWave's checkpoint plumbing.
 pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet<&'static str>>> =
     LazyLock::new(|| {
         HashMap::from([
@@ -96,10 +99,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                 ]),
             ),
             (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
-            (
-                RABBITMQ_CONNECTOR,
-                HashSet::from(["offset", "partition", "payload"]),
-            ),
+            (RABBITMQ_CONNECTOR, HashSet::from(["payload"])),
         ])
     });
 
@@ -122,6 +122,17 @@ pub fn get_supported_additional_columns(
         CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS.as_ref()
     } else {
         COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name)
+    }
+}
+
+fn get_source_state_additional_columns(connector_name: &str) -> &HashSet<&'static str> {
+    match connector_name {
+        OPENDAL_S3_CONNECTOR | GCS_CONNECTOR | AZBLOB_CONNECTOR | POSIX_FS_CONNECTOR => {
+            COMPATIBLE_ADDITIONAL_COLUMNS
+                .get(connector_name)
+                .expect("file source connectors must define file/offset additional columns")
+        }
+        _ => &COMMON_SOURCE_STATE_ADDITIONAL_COLUMNS,
     }
 }
 
@@ -162,7 +173,7 @@ pub fn build_additional_column_desc(
         reject_unknown_connector,
     ) {
         (Some(compat_cols), _) => compat_cols,
-        (None, false) => &COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
+        (None, false) => &COMMON_SOURCE_STATE_ADDITIONAL_COLUMNS,
         (None, true) => {
             bail!(
                 "additional column is not supported for connector {}, acceptable connectors: {:?}",
@@ -171,6 +182,26 @@ pub fn build_additional_column_desc(
             );
         }
     };
+    build_additional_column_desc_with_compat(
+        column_id,
+        connector_name,
+        additional_col_type,
+        column_alias,
+        inner_field_name,
+        data_type,
+        compatible_columns,
+    )
+}
+
+fn build_additional_column_desc_with_compat(
+    column_id: ColumnId,
+    connector_name: &str,
+    additional_col_type: &str,
+    column_alias: Option<String>,
+    inner_field_name: Option<&str>,
+    data_type: Option<&DataType>,
+    compatible_columns: &HashSet<&'static str>,
+) -> ConnectorResult<ColumnDesc> {
     if !compatible_columns.contains(additional_col_type) {
         bail!(
             "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
@@ -299,6 +330,16 @@ pub fn build_additional_column_desc(
                 )),
             },
         ),
+        "rabbitmq_ack_data" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Bytea,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::RabbitmqAckData(
+                    AdditionalColumnRabbitmqAckData {},
+                )),
+            },
+        ),
         _ => unreachable!(),
     };
 
@@ -333,6 +374,36 @@ pub fn derive_pulsar_message_id_data_column(
     );
 }
 
+pub fn derive_rabbitmq_ack_data_column(
+    connector_name: &str,
+    column_exist: &mut Vec<bool>,
+    additional_columns: &mut Vec<ColumnDesc>,
+    skip_col_id: bool,
+) {
+    // `rabbitmq_ack_data` is an internal checkpoint column. Keep it out of
+    // `COMMON_SOURCE_STATE_ADDITIONAL_COLUMNS`, which intentionally models only
+    // partition/file plus offset state for existing callers.
+    let max_column_id = additional_columns
+        .iter()
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id));
+
+    column_exist.push(false);
+    additional_columns.push(ColumnDesc::named_with_additional_column(
+        format!("_rw_{connector_name}_ack_data"),
+        if skip_col_id {
+            ColumnId::placeholder()
+        } else {
+            max_column_id.next()
+        },
+        DataType::Bytea,
+        AdditionalColumn {
+            column_type: Some(AdditionalColumnType::RabbitmqAckData(
+                AdditionalColumnRabbitmqAckData {},
+            )),
+        },
+    ));
+}
+
 /// Utility function for adding partition and offset columns to the columns, if not specified by the user.
 ///
 /// ## Returns
@@ -357,23 +428,20 @@ pub fn source_add_partition_offset_cols(
     };
 
     let additional_columns: Vec<_> = {
-        let compat_col_types = COMPATIBLE_ADDITIONAL_COLUMNS
-            .get(connector_name)
-            .unwrap_or(&COMMON_COMPATIBLE_ADDITIONAL_COLUMNS);
+        let compat_col_types = get_source_state_additional_columns(connector_name);
         ["partition", "file", "offset"]
             .iter()
             .filter_map(|col_type| {
                 if compat_col_types.contains(col_type) {
                     Some(
-                        build_additional_column_desc(
+                        build_additional_column_desc_with_compat(
                             assign_col_id(),
                             connector_name,
                             col_type,
                             None,
                             None,
                             None,
-                            false,
-                            false,
+                            compat_col_types,
                         )
                         .unwrap(),
                     )
@@ -457,8 +525,6 @@ pub fn get_kafka_header_item_datatype() -> DataType {
 
 #[cfg(test)]
 mod test {
-    use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-
     use super::*;
 
     #[test]
@@ -503,5 +569,139 @@ mod test {
             Some(AdditionalColumnType::HeaderInner(ref header))
                 if header.inner_field == "tenant"
         );
+    }
+
+    #[test]
+    fn test_rabbitmq_public_additional_columns_exclude_internal_state() {
+        let supported = get_supported_additional_columns(RABBITMQ_CONNECTOR, false).unwrap();
+        assert_eq!(supported, &HashSet::from(["payload"]));
+
+        let payload_desc = build_additional_column_desc(
+            ColumnId::placeholder(),
+            RABBITMQ_CONNECTOR,
+            "payload",
+            None,
+            None,
+            None,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(payload_desc.data_type, DataType::Jsonb);
+
+        for internal_col_type in ["offset", "partition"] {
+            let err = build_additional_column_desc(
+                ColumnId::placeholder(),
+                RABBITMQ_CONNECTOR,
+                internal_col_type,
+                None,
+                None,
+                None,
+                true,
+                false,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("is not supported for connector rabbitmq")
+            );
+        }
+
+        let (_, hidden_state_columns) =
+            source_add_partition_offset_cols(&[], RABBITMQ_CONNECTOR, true);
+        assert_eq!(hidden_state_columns.len(), 2);
+        assert_eq!(hidden_state_columns[0].name, "_rw_rabbitmq_partition");
+        assert_matches::assert_matches!(
+            hidden_state_columns[0].additional_column.column_type,
+            Some(AdditionalColumnType::Partition(_))
+        );
+        assert_eq!(hidden_state_columns[1].name, "_rw_rabbitmq_offset");
+        assert_matches::assert_matches!(
+            hidden_state_columns[1].additional_column.column_type,
+            Some(AdditionalColumnType::Offset(_))
+        );
+
+        let mut column_exist = vec![true, true];
+        let mut hidden_ack_columns = hidden_state_columns.clone();
+        derive_rabbitmq_ack_data_column(
+            RABBITMQ_CONNECTOR,
+            &mut column_exist,
+            &mut hidden_ack_columns,
+            true,
+        );
+        assert_eq!(column_exist, vec![true, true, false]);
+        let ack_column = hidden_ack_columns.last().unwrap();
+        assert_eq!(ack_column.name, "_rw_rabbitmq_ack_data");
+        assert_eq!(ack_column.data_type, DataType::Bytea);
+        assert_eq!(ack_column.column_id, ColumnId::placeholder());
+        assert_matches::assert_matches!(
+            ack_column.additional_column.column_type,
+            Some(AdditionalColumnType::RabbitmqAckData(_))
+        );
+    }
+
+    #[test]
+    fn test_file_connectors_keep_file_offset_state_columns() {
+        for connector in [
+            OPENDAL_S3_CONNECTOR,
+            GCS_CONNECTOR,
+            AZBLOB_CONNECTOR,
+            POSIX_FS_CONNECTOR,
+        ] {
+            let supported = get_supported_additional_columns(connector, false).unwrap();
+            assert!(supported.contains("file"));
+            assert!(supported.contains("offset"));
+            assert!(supported.contains("payload"));
+
+            let (columns_exist, hidden_state_columns) =
+                source_add_partition_offset_cols(&[], connector, true);
+            assert_eq!(columns_exist, vec![false, false]);
+            assert_eq!(
+                hidden_state_columns[0].name,
+                format!("_rw_{connector}_file")
+            );
+            assert_matches::assert_matches!(
+                hidden_state_columns[0].additional_column.column_type,
+                Some(AdditionalColumnType::Filename(_))
+            );
+            assert_eq!(
+                hidden_state_columns[1].name,
+                format!("_rw_{connector}_offset")
+            );
+            assert_matches::assert_matches!(
+                hidden_state_columns[1].additional_column.column_type,
+                Some(AdditionalColumnType::Offset(_))
+            );
+
+            let user_file = ColumnCatalog::visible(
+                build_additional_column_desc(
+                    ColumnId::placeholder(),
+                    connector,
+                    "file",
+                    None,
+                    None,
+                    None,
+                    true,
+                    false,
+                )
+                .unwrap(),
+            );
+            let user_offset = ColumnCatalog::visible(
+                build_additional_column_desc(
+                    ColumnId::placeholder(),
+                    connector,
+                    "offset",
+                    None,
+                    None,
+                    None,
+                    true,
+                    false,
+                )
+                .unwrap(),
+            );
+            let (columns_exist, _) =
+                source_add_partition_offset_cols(&[user_file, user_offset], connector, true);
+            assert_eq!(columns_exist, vec![true, true]);
+        }
     }
 }
