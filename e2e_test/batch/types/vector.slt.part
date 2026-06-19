@@ -66,3 +66,21 @@ select sum(embedding), avg(embedding)
 from (select null::vector(3) as embedding) as t;
 ----
 NULL NULL
+
+query
+select avg(embedding)
+from (values
+    ('[3e38,3e38,3e38]'::vector(3)),
+    ('[3e38,3e38,3e38]'::vector(3))
+) as t(embedding);
+----
+[300000000000000000000000000000000000000,300000000000000000000000000000000000000,300000000000000000000000000000000000000]
+
+query
+select avg(distinct embedding)
+from (values
+    ('[1,2,3]'::vector(3)),
+    ('[1,2,3]'::vector(3))
+) as t(embedding);
+----
+[1,2,3]

@@ -921,14 +921,26 @@ impl FunctionAttr {
         let get_result = if custom_state.is_some() {
             quote! { Ok(state.downcast_ref::<#state_type>().into()) }
         } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
-            && impl_.finalize.is_some()
+            && let Some(finalize) = &impl_.finalize
         {
+            let finalize = match finalize.return_type_kind {
+                ReturnTypeKind::T => quote! { Some(self.function.finalize(state).into()) },
+                ReturnTypeKind::Option => {
+                    quote! { self.function.finalize(state).map(Into::into) }
+                }
+                ReturnTypeKind::Result => {
+                    quote! { Some(self.function.finalize(state)?.into()) }
+                }
+                ReturnTypeKind::ResultOption => {
+                    quote! { self.function.finalize(state)?.map(Into::into) }
+                }
+            };
             quote! {
                 let state = match state.as_datum() {
                     Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
                     None => return Ok(None),
                 };
-                Ok(Some(self.function.finalize(state).into()))
+                Ok(#finalize)
             }
         } else {
             quote! { Ok(state.as_datum().clone()) }

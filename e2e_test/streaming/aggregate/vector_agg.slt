@@ -40,6 +40,17 @@ select * from vector_agg_mv;
 [7,8,9] [7,8,9]
 
 statement ok
+insert into vector_agg_input values (4, null);
+
+statement ok
+delete from vector_agg_input where id = 3;
+
+query
+select * from vector_agg_mv;
+----
+NULL NULL
+
+statement ok
 drop materialized view vector_agg_mv;
 
 statement ok
