@@ -44,6 +44,7 @@ use crate::source::SourceProperties;
 pub const RABBITMQ_CONNECTOR: &str = "rabbitmq";
 
 const DEFAULT_PREFETCH_COUNT: u16 = 50;
+const MAX_PREFETCH_COUNT: u16 = 1000;
 const DEFAULT_PREFETCH_SIZE: u32 = 0;
 const DEFAULT_MAX_CONNECTIONS: usize = 5;
 const DEFAULT_CONNECTION_ATTEMPTS: usize = 5;
@@ -84,7 +85,8 @@ pub struct RabbitmqProperties {
     #[serde(rename = "queues")]
     pub queues: Option<String>,
 
-    /// `RabbitMQ` prefetch count. Platform Science recommends 20-50 and allows up to 1000.
+    /// `RabbitMQ` prefetch count. Platform Science recommends 20-50. Valid range is
+    /// 1-1000 because `RabbitMQ` treats 0 as unlimited.
     #[serde(rename = "prefetch_count")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -253,8 +255,8 @@ impl RabbitmqProperties {
             "RabbitMQ source only supports prefetch_size=0 because RabbitMQ ignores non-zero prefetch sizes"
         );
         ensure!(
-            self.prefetch_count() <= 1000,
-            "RabbitMQ source prefetch_count must be <= 1000"
+            (1..=MAX_PREFETCH_COUNT).contains(&self.prefetch_count()),
+            "RabbitMQ source prefetch_count must be between 1 and 1000 because RabbitMQ treats 0 as unlimited"
         );
         ensure!(
             self.max_connections() > 0,
@@ -414,6 +416,18 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("prefetch_size=0")
+        );
+    }
+
+    #[test]
+    fn reject_zero_prefetch_count() {
+        let props = parse(&[("prefetch_count", "0")]);
+        assert!(
+            props
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("between 1 and 1000")
         );
     }
 
