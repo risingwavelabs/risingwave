@@ -209,6 +209,7 @@ exchange_batched_permits = 256
 exchange_concurrent_barriers = 1
 exchange_concurrent_dispatchers = 0
 project_expr_concurrency = 1
+enable_project_openai_embedding_detail_log = false
 dml_channel_initial_permits = 32768
 hash_agg_max_dirty_groups_heap_size = 67108864
 memory_controller_threshold_aggressive = 0.9

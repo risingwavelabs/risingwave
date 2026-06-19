@@ -118,6 +118,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_project_expr_concurrency")]
     pub project_expr_concurrency: usize,
 
+    /// Enables detailed `ProjectExecutor` logs for projections containing `openai_embedding`.
+    ///
+    /// This is intended for troubleshooting chunk-level concurrent projection execution and may
+    /// produce a large amount of log output.
+    #[serde(default = "default::developer::stream_enable_project_openai_embedding_detail_log")]
+    pub enable_project_openai_embedding_detail_log: bool,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
