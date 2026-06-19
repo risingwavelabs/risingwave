@@ -434,6 +434,7 @@ impl CompactionSelector for DynamicLevelSelector {
             level_handlers,
             selector_stats,
             developer_config,
+            in_progress_compactions,
             ..
         } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
@@ -459,6 +460,18 @@ impl CompactionSelector for DynamicLevelSelector {
 
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
+                if !ret.skip_target_range_conflict_check
+                    && in_progress_compactions.has_conflict_with_input(&ret)
+                {
+                    stats.skip_by_overlapping += 1;
+                    selector_stats.skip_picker.push((
+                        picker_info.select_level,
+                        picker_info.target_level,
+                        stats,
+                    ));
+                    continue;
+                }
+
                 ret.add_pending_task(task_id, level_handlers);
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
@@ -492,22 +505,53 @@ pub mod tests {
 
     use itertools::Itertools;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_hummock_sdk::level::Levels;
+    use risingwave_hummock_sdk::HummockCompactionTaskId;
+    use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment};
+    use risingwave_hummock_sdk::level::{InputLevel, Levels};
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+    use risingwave_pb::hummock::LevelType;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
 
-    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
     use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
-        generate_tables, push_tables_level0_nonoverlapping,
+        generate_table, generate_tables, push_tables_level0_nonoverlapping,
     };
     use crate::hummock::compaction::selector::{
-        CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
+        CompactionSelector, CompactionSelectorContext, DynamicLevelSelector,
+        DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
+    use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionTask};
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;
+
+    fn pick_compaction_with_in_progress(
+        selector: &mut DynamicLevelSelector,
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        selector_stats: &mut LocalSelectorStatistic,
+        in_progress_compactions: &InProgressCompactionView,
+    ) -> Option<CompactionTask> {
+        selector.pick_compaction(
+            task_id,
+            CompactionSelectorContext {
+                group,
+                levels,
+                member_table_ids: &BTreeSet::new(),
+                level_handlers,
+                selector_stats,
+                table_id_to_options: &HashMap::default(),
+                developer_config: Arc::new(CompactionDeveloperConfig::default()),
+                table_watermarks: &HashMap::default(),
+                state_table_info: &HummockVersionStateTableInfo::empty(),
+                in_progress_compactions,
+            },
+        )
+    }
 
     #[test]
     fn test_dynamic_level() {
@@ -725,6 +769,99 @@ pub mod tests {
             ),
         );
         assert!(compaction.is_none());
+    }
+
+    #[test]
+    fn test_trivial_move_skips_in_progress_target_overlap() {
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(1000)
+            .max_bytes_for_level_multiplier(10)
+            .max_level(4)
+            .max_compaction_bytes(10000)
+            .level0_sub_level_compact_level_count(20)
+            .sst_allowed_trivial_move_min_size(Some(0))
+            .sst_allowed_trivial_move_max_count(Some(10))
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
+        let group_config = CompactionGroup::new(9, config);
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, vec![]),
+                generate_level(3, vec![]),
+                generate_level(4, vec![generate_table(878784, 1, 565, 633, 1)]),
+            ],
+            l0: generate_l0_nonoverlapping_sublevels(vec![
+                generate_table(877832, 1, 706, 718, 1),
+                generate_table(877833, 1, 800, 2000, 1),
+            ]),
+            ..Default::default()
+        };
+        let in_progress = InProgressCompactionView::for_group(
+            &[CompactTaskAssignment {
+                compact_task: CompactTask {
+                    task_id: 15040,
+                    compaction_group_id: 9.into(),
+                    target_level: 4,
+                    input_ssts: vec![
+                        InputLevel {
+                            level_idx: 0,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: vec![generate_table(881160, 1, 592, 722, 1)],
+                        },
+                        InputLevel {
+                            level_idx: 4,
+                            level_type: LevelType::Nonoverlapping,
+                            table_infos: vec![generate_table(878784, 1, 565, 633, 1)],
+                        },
+                    ],
+                    ..Default::default()
+                },
+                context_id: 1.into(),
+            }],
+            9.into(),
+        );
+
+        let mut selector = DynamicLevelSelector::default();
+        let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
+        let mut local_stats = LocalSelectorStatistic::default();
+        let empty_in_progress = InProgressCompactionView::default();
+        let compaction = pick_compaction_with_in_progress(
+            &mut selector,
+            1,
+            &group_config,
+            &levels,
+            &mut levels_handlers,
+            &mut local_stats,
+            &empty_in_progress,
+        )
+        .unwrap();
+        assert_eq!(compaction.input.target_level, 4);
+        assert!(compaction.input.input_levels[1].table_infos.is_empty());
+        assert!(
+            compaction.input.input_levels[0]
+                .table_infos
+                .iter()
+                .any(|sst| sst.sst_id.as_raw_id() == 877832)
+        );
+
+        let mut selector = DynamicLevelSelector::default();
+        let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
+        let mut local_stats = LocalSelectorStatistic::default();
+        assert!(
+            pick_compaction_with_in_progress(
+                &mut selector,
+                2,
+                &group_config,
+                &levels,
+                &mut levels_handlers,
+                &mut local_stats,
+                &in_progress,
+            )
+            .is_none()
+        );
+        assert_eq!(local_stats.skip_picker.len(), 1);
+        assert_eq!(local_stats.skip_picker[0].2.skip_by_overlapping, 1);
     }
 
     #[test]

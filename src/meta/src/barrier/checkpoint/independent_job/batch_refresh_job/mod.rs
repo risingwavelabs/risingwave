@@ -975,48 +975,59 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
     ) {
-        partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
-
-        // Check if snapshot stop barrier committed (FinishingSnapshot → Idle).
-        // Note: must check status first; target_upstream_epoch in ConsumingLogStore may
-        // coincidentally equal snapshot_epoch when no new upstream commits occurred.
-        if let BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. } = &self.status
-            && completed_epoch == self.snapshot_epoch
-        {
-            assert!(
-                tracking_job.is_none(),
-                "tracking job should have been taken at start_completing"
-            );
-            info!(
-                job_id = %self.job_id,
-                completed_epoch,
-                "batch refresh job: snapshot done, transitioned to idle, removing partial graph"
-            );
-            partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
-            self.status = BatchRefreshJobStatus::Idle {
-                last_committed_epoch: completed_epoch,
-            };
-            return;
-        }
-
-        // Check if logstore consumption is done (target_upstream_epoch committed).
-        if let BatchRefreshJobStatus::ConsumingLogStore {
-            target_upstream_epoch,
-            ..
-        } = &self.status
-            && completed_epoch == *target_upstream_epoch
-        {
-            let target = *target_upstream_epoch;
-            info!(
-                job_id = %self.job_id,
-                completed_epoch,
-                target_upstream_epoch = target,
-                "batch refresh job: logstore done, transitioned to idle, removing partial graph"
-            );
-            partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
-            self.status = BatchRefreshJobStatus::Idle {
-                last_committed_epoch: target,
-            };
+        match &self.status {
+            BatchRefreshJobStatus::ConsumingSnapshot { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+            }
+            BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. }
+                if completed_epoch == self.snapshot_epoch =>
+            {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                assert!(
+                    tracking_job.is_none(),
+                    "tracking job should have been taken at start_completing"
+                );
+                info!(
+                    job_id = %self.job_id,
+                    completed_epoch,
+                    "batch refresh job: snapshot done, transitioned to idle, removing partial graph"
+                );
+                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: completed_epoch,
+                };
+            }
+            BatchRefreshJobStatus::FinishingSnapshot { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+            }
+            BatchRefreshJobStatus::ConsumingLogStore {
+                target_upstream_epoch,
+                ..
+            } if completed_epoch == *target_upstream_epoch => {
+                let target = *target_upstream_epoch;
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                info!(
+                    job_id = %self.job_id,
+                    completed_epoch,
+                    target_upstream_epoch = target,
+                    "batch refresh job: logstore done, transitioned to idle, removing partial graph"
+                );
+                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: target,
+                };
+            }
+            BatchRefreshJobStatus::ConsumingLogStore { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+            }
+            BatchRefreshJobStatus::Resetting { .. } => {
+                // The job was dropped while the completing task was running in the background.
+                // The partial graph has already been reset, so skip the ack.
+            }
+            BatchRefreshJobStatus::Idle { .. }
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
+                unreachable!("batch refresh job should not be completing in this state")
+            }
         }
     }
 
