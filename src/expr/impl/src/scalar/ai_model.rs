@@ -110,27 +110,30 @@ impl OpenAiEmbedding {
         let mut backoff = OPENAI_EMBEDDING_RETRY_BASE_DELAY;
         loop {
             let timer = self.metrics.latency.start_timer();
-            let result = self
-                .context
-                .client
-                .embeddings()
-                .create(request.clone())
-                .await
-                .map_err(|e| {
-                    ExprError::Custom(format!(
-                        "failed to get embedding from OpenAI: {}",
-                        e.as_report()
-                    ))
-                })
-                .and_then(|response| {
-                    if response.data.len() != expected_embedding_count {
-                        return Err(ExprError::Custom(
-                            "number of embeddings returned from OpenAI does not match the number of texts"
-                                .into(),
-                        ));
-                    }
-                    Ok(response.data)
-                });
+            let result = {
+                let _inflight_request_guard =
+                    OpenAiEmbeddingInflightRequestGuard::new(&self.metrics.inflight_requests);
+                self.context
+                    .client
+                    .embeddings()
+                    .create(request.clone())
+                    .await
+                    .map_err(|e| {
+                        ExprError::Custom(format!(
+                            "failed to get embedding from OpenAI: {}",
+                            e.as_report()
+                        ))
+                    })
+                    .and_then(|response| {
+                        if response.data.len() != expected_embedding_count {
+                            return Err(ExprError::Custom(
+                                "number of embeddings returned from OpenAI does not match the number of texts"
+                                    .into(),
+                            ));
+                        }
+                        Ok(response.data)
+                    })
+            };
 
             match result {
                 Ok(embeddings) => {
@@ -151,6 +154,25 @@ impl OpenAiEmbedding {
                 }
             }
         }
+    }
+}
+
+struct OpenAiEmbeddingInflightRequestGuard {
+    inflight_requests: LabelGuardedIntGauge,
+}
+
+impl OpenAiEmbeddingInflightRequestGuard {
+    fn new(inflight_requests: &LabelGuardedIntGauge) -> Self {
+        inflight_requests.inc();
+        Self {
+            inflight_requests: inflight_requests.clone(),
+        }
+    }
+}
+
+impl Drop for OpenAiEmbeddingInflightRequestGuard {
+    fn drop(&mut self) {
+        self.inflight_requests.dec();
     }
 }
 
@@ -287,6 +309,8 @@ struct OpenAiEmbeddingMetricsVec {
     latency: LabelGuardedHistogramVec,
     /// Total number of non-null, non-empty input rows submitted to `OpenAI` embedding requests.
     input_rows: LabelGuardedIntCounterVec,
+    /// Number of in-flight `OpenAI` embedding requests.
+    inflight_requests: LabelGuardedIntGaugeVec,
 }
 
 /// Monitor metrics for `openai_embedding`.
@@ -300,6 +324,8 @@ struct OpenAiEmbeddingMetrics {
     latency: LabelGuardedHistogram,
     /// Total number of non-null, non-empty input rows submitted to `OpenAI` embedding requests.
     input_rows: LabelGuardedIntCounter,
+    /// Number of in-flight `OpenAI` embedding requests.
+    inflight_requests: LabelGuardedIntGauge,
 }
 
 /// Global `openai_embedding` metrics.
@@ -338,12 +364,20 @@ impl OpenAiEmbeddingMetricsVec {
             registry
         )
         .unwrap();
+        let inflight_requests = register_guarded_int_gauge_vec_with_registry!(
+            "openai_embedding_inflight_requests",
+            "Number of in-flight OpenAI embedding requests",
+            labels,
+            registry
+        )
+        .unwrap();
 
         Self {
             success_count,
             failure_count,
             latency,
             input_rows,
+            inflight_requests,
         }
     }
 
@@ -355,6 +389,7 @@ impl OpenAiEmbeddingMetricsVec {
             failure_count: self.failure_count.with_guarded_label_values(labels),
             latency: self.latency.with_guarded_label_values(labels),
             input_rows: self.input_rows.with_guarded_label_values(labels),
+            inflight_requests: self.inflight_requests.with_guarded_label_values(labels),
         }
     }
 }
