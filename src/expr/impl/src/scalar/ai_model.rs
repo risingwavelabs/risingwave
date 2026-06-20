@@ -111,8 +111,11 @@ impl OpenAiEmbedding {
         loop {
             let timer = self.metrics.latency.start_timer();
             let result = {
-                let _inflight_request_guard =
-                    OpenAiEmbeddingInflightRequestGuard::new(&self.metrics.inflight_requests);
+                let _inflight_guard = OpenAiEmbeddingInflightGuard::new(
+                    &self.metrics.inflight_requests,
+                    &self.metrics.inflight_rows,
+                    expected_embedding_count,
+                );
                 self.context
                     .client
                     .embeddings()
@@ -157,22 +160,33 @@ impl OpenAiEmbedding {
     }
 }
 
-struct OpenAiEmbeddingInflightRequestGuard {
+struct OpenAiEmbeddingInflightGuard {
     inflight_requests: LabelGuardedIntGauge,
+    inflight_rows: LabelGuardedIntGauge,
+    row_count: i64,
 }
 
-impl OpenAiEmbeddingInflightRequestGuard {
-    fn new(inflight_requests: &LabelGuardedIntGauge) -> Self {
+impl OpenAiEmbeddingInflightGuard {
+    fn new(
+        inflight_requests: &LabelGuardedIntGauge,
+        inflight_rows: &LabelGuardedIntGauge,
+        row_count: usize,
+    ) -> Self {
+        let row_count = row_count.try_into().unwrap_or(i64::MAX);
         inflight_requests.inc();
+        inflight_rows.add(row_count);
         Self {
             inflight_requests: inflight_requests.clone(),
+            inflight_rows: inflight_rows.clone(),
+            row_count,
         }
     }
 }
 
-impl Drop for OpenAiEmbeddingInflightRequestGuard {
+impl Drop for OpenAiEmbeddingInflightGuard {
     fn drop(&mut self) {
         self.inflight_requests.dec();
+        self.inflight_rows.sub(self.row_count);
     }
 }
 
@@ -311,6 +325,8 @@ struct OpenAiEmbeddingMetricsVec {
     input_rows: LabelGuardedIntCounterVec,
     /// Number of in-flight `OpenAI` embedding requests.
     inflight_requests: LabelGuardedIntGaugeVec,
+    /// Number of input rows in in-flight `OpenAI` embedding requests.
+    inflight_rows: LabelGuardedIntGaugeVec,
 }
 
 /// Monitor metrics for `openai_embedding`.
@@ -326,6 +342,8 @@ struct OpenAiEmbeddingMetrics {
     input_rows: LabelGuardedIntCounter,
     /// Number of in-flight `OpenAI` embedding requests.
     inflight_requests: LabelGuardedIntGauge,
+    /// Number of input rows in in-flight `OpenAI` embedding requests.
+    inflight_rows: LabelGuardedIntGauge,
 }
 
 /// Global `openai_embedding` metrics.
@@ -371,6 +389,13 @@ impl OpenAiEmbeddingMetricsVec {
             registry
         )
         .unwrap();
+        let inflight_rows = register_guarded_int_gauge_vec_with_registry!(
+            "openai_embedding_inflight_rows",
+            "Number of input rows in in-flight OpenAI embedding requests",
+            labels,
+            registry
+        )
+        .unwrap();
 
         Self {
             success_count,
@@ -378,6 +403,7 @@ impl OpenAiEmbeddingMetricsVec {
             latency,
             input_rows,
             inflight_requests,
+            inflight_rows,
         }
     }
 
@@ -390,6 +416,7 @@ impl OpenAiEmbeddingMetricsVec {
             latency: self.latency.with_guarded_label_values(labels),
             input_rows: self.input_rows.with_guarded_label_values(labels),
             inflight_requests: self.inflight_requests.with_guarded_label_values(labels),
+            inflight_rows: self.inflight_rows.with_guarded_label_values(labels),
         }
     }
 }
