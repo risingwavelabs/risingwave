@@ -300,7 +300,7 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// ----
 /// [1,2,3]
 ///
-/// query error division by zero
+/// query error Division by zero
 /// SELECT '[1,2,3]'::vector(3) / 0::bigint;
 /// ```
 #[function(

@@ -15,6 +15,7 @@
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_common::array::{F64Array, Finite32};
 use risingwave_common::types::{DataType, ListRef, ListValue, VectorRef, VectorVal};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, aggregate};
 
 #[aggregate("sum(int2) -> int8")]
@@ -52,7 +53,7 @@ fn vector_state(state: ListValue, input: VectorRef<'_>, delta: f64) -> ListValue
             .collect()
     };
     values[0] += delta;
-    for (sum, input) in values[1..].iter_mut().zip(input.as_raw_slice()) {
+    for (sum, input) in values[1..].iter_mut().zip_eq_fast(input.as_raw_slice()) {
         *sum += delta * *input as f64;
     }
     if values[0] == 0.0 {
