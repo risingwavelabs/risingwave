@@ -27,7 +27,7 @@ create table t(v int);
 statement ok
 COMMENT ON TABLE t IS $$hello$$;
 
-query TIIIT
+query T
 SELECT
     d.description
 FROM
