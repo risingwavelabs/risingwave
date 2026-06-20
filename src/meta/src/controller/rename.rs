@@ -99,6 +99,8 @@ pub fn alter_relation_rename_refs(definition: &str, operation: RenameOperation<'
         .into_iter()
         .exactly_one()
         .expect("should contains only one statement");
+    let original_stmt =
+        matches!(operation, RenameOperation::SchemaName { .. }).then(|| stmt.clone());
 
     match &mut stmt {
         Statement::CreateTable {
