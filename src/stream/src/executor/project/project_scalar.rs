@@ -145,7 +145,9 @@ impl Inner {
         async move {
             match input {
                 ProjectMessageInput::Chunk(chunk) => {
-                    let mut new_chunk = apply_project_exprs(&exprs, chunk).await?;
+                    let mut new_chunk = apply_project_exprs(&exprs, chunk)
+                        .instrument_await("project_eval_chunk")
+                        .await?;
                     if eliminate_noop_updates {
                         new_chunk = new_chunk.eliminate_adjacent_noop_update();
                     }
@@ -225,10 +227,11 @@ impl Inner {
         yield Message::Barrier(first_barrier);
 
         let mut pending_project_messages = PendingProjectMessages::new();
+        let mut pending_project_chunks = 0;
 
         loop {
             let has_pending_project_message = !pending_project_messages.is_empty();
-            let can_read_input = pending_project_messages.len() < project_expr_concurrency;
+            let can_read_input = pending_project_chunks < project_expr_concurrency;
             let next_projected_message = async {
                 if has_pending_project_message {
                     pending_project_messages
@@ -255,6 +258,7 @@ impl Inner {
             match select(next_projected_message, next_input_msg).await {
                 Either::Left((projected_message, _)) => match projected_message? {
                     ProjectedMessage::Chunk(new_chunk) => {
+                        pending_project_chunks -= 1;
                         Self::update_last_nondec_expr_values(
                             &nondecreasing_expr_indices,
                             &mut last_nondec_expr_values,
@@ -319,6 +323,7 @@ impl Inner {
                             eliminate_noop_updates,
                             ProjectMessageInput::Chunk(chunk),
                         ));
+                        pending_project_chunks += 1;
                     }
                     Message::Barrier(barrier) => {
                         pending_project_messages.push_back(Self::project_message(
@@ -621,7 +626,7 @@ mod tests {
         });
 
         let proj = ProjectExecutor::new(
-            actor_context_with_project_expr_concurrency(4),
+            actor_context_with_project_expr_concurrency(3),
             source,
             vec![test_expr],
             MultiMap::new(),
@@ -718,7 +723,7 @@ mod tests {
         });
 
         let proj = ProjectExecutor::new(
-            actor_context_with_project_expr_concurrency(4),
+            actor_context_with_project_expr_concurrency(3),
             source,
             vec![test_expr],
             MultiMap::from_iter(vec![(0, 0)].into_iter()),
