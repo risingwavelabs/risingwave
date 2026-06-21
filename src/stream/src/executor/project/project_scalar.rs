@@ -52,7 +52,7 @@ pub struct ProjectExecutor {
 }
 
 struct Inner {
-    _ctx: ActorContextRef,
+    actor_id: ActorId,
 
     /// Expressions of the current projection.
     exprs: Arc<Vec<NonStrictExpression>>,
@@ -91,7 +91,7 @@ impl ProjectExecutor {
         Self {
             input,
             inner: Inner {
-                _ctx: ctx,
+                actor_id: ctx.id,
                 exprs: Arc::new(exprs),
                 watermark_derivations,
                 nondecreasing_expr_indices,
@@ -212,7 +212,7 @@ impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(self, input: Executor) {
         let Inner {
-            _ctx: _,
+            actor_id,
             exprs,
             watermark_derivations,
             nondecreasing_expr_indices,
@@ -224,14 +224,19 @@ impl Inner {
         let mut input = input.execute();
         let first_barrier = expect_first_barrier(&mut input).await?;
         let mut is_paused = first_barrier.is_pause_on_startup();
+        let mut received_stop_barrier = first_barrier.is_stop(actor_id);
         yield Message::Barrier(first_barrier);
+        if received_stop_barrier {
+            return Ok(());
+        }
 
         let mut pending_project_messages = PendingProjectMessages::new();
         let mut pending_project_chunks = 0;
 
         loop {
             let has_pending_project_message = !pending_project_messages.is_empty();
-            let can_read_input = pending_project_chunks < project_expr_concurrency;
+            let can_read_input =
+                !received_stop_barrier && pending_project_chunks < project_expr_concurrency;
             let next_projected_message = async {
                 if has_pending_project_message {
                     pending_project_messages
@@ -299,7 +304,11 @@ impl Inner {
                             }
                         }
 
+                        let should_stop = barrier.is_stop(actor_id);
                         yield Message::Barrier(barrier);
+                        if should_stop {
+                            break;
+                        }
                     }
                 },
                 Either::Right((msg, _)) => match msg? {
@@ -326,6 +335,9 @@ impl Inner {
                         pending_project_chunks += 1;
                     }
                     Message::Barrier(barrier) => {
+                        if barrier.is_stop(actor_id) {
+                            received_stop_barrier = true;
+                        }
                         pending_project_messages.push_back(Self::project_message(
                             exprs.clone(),
                             eliminate_noop_updates,
@@ -354,6 +366,7 @@ mod tests {
     use tokio::time::timeout;
 
     use super::*;
+    use crate::executor::StopMutation;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
 
@@ -432,6 +445,44 @@ mod tests {
 
         tx.push_barrier(test_epoch(2), true);
         assert!(proj.next().await.unwrap().unwrap().is_stop());
+    }
+
+    #[tokio::test]
+    async fn test_projection_does_not_poll_after_stop_barrier() {
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, StreamKey::new());
+
+        let test_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
+
+        let proj = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
+            vec![test_expr],
+            MultiMap::new(),
+            vec![],
+            false,
+        );
+        let mut proj = proj.boxed().execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        proj.expect_barrier().await;
+
+        tx.send_barrier(
+            Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Stop(StopMutation {
+                dropped_actors: std::iter::once(123.into()).collect(),
+                ..Default::default()
+            })),
+        );
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I
+            + 1",
+        ));
+
+        assert!(proj.next().await.unwrap().unwrap().is_stop());
+        assert!(proj.next().await.is_none());
     }
 
     #[derive(Debug)]
