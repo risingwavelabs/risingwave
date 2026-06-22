@@ -87,6 +87,7 @@ feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 
 use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
+use futures::{StreamExt, stream};
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
@@ -350,55 +351,65 @@ impl WaitCheckpointTask {
             }
             WaitCheckpointTask::AckRabbitmqMessage(ack_token_arrs) => {
                 const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-                for ack_token in ack_token_arrs
+                const MAX_CONCURRENT_ACKS: usize = 32;
+
+                let ack_tokens = ack_token_arrs
                     .iter()
                     .flat_map(|arr| arr.as_utf8().iter().flatten().map(ToOwned::to_owned))
-                {
-                    match tokio::time::timeout(
-                        ACK_RPC_TIMEOUT,
-                        ack_rabbitmq_delivery(ack_token.clone()),
-                    )
-                    .await
-                    {
-                        Ok(Ok(true)) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_success_count
-                                .with_label_values(&[source_name, "rabbitmq"])
-                                .inc();
-                        }
-                        Ok(Ok(false)) => {
-                            tracing::debug!(
-                                source_id = source_id_label,
-                                source_name,
-                                ack_token,
-                                "RabbitMQ delivery was already acked or no longer tracked",
-                            );
-                        }
-                        Ok(Err(e)) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "rabbitmq", "error"])
-                                .inc();
-                            tracing::error!(
-                                source_id = source_id_label,
-                                source_name,
-                                error = %e.as_report(),
-                                ack_token,
-                                "failed to ack RabbitMQ message",
-                            );
-                        }
-                        Err(_) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "rabbitmq", "timeout"])
-                                .inc();
-                            tracing::error!(
-                                source_id = source_id_label,
-                                source_name,
-                                ack_token,
-                                "RabbitMQ ack timed out after {ACK_RPC_TIMEOUT:?}; keeping delivery tracked until the channel closes or a later ack succeeds",
-                            );
-                        }
+                    .collect::<Vec<_>>();
+                let ack_count = ack_tokens.len();
+                let source_id = source_id_label.clone();
+                let source_name = source_name.to_owned();
+                let task_source_name = source_name.clone();
+                let mut ack_task = tokio::spawn(async move {
+                    stream::iter(ack_tokens)
+                        .for_each_concurrent(MAX_CONCURRENT_ACKS, |ack_token| {
+                            let source_id = source_id.clone();
+                            let source_name = task_source_name.clone();
+                            async move {
+                                match ack_rabbitmq_delivery(ack_token.clone()).await {
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        tracing::debug!(
+                                            source_id,
+                                            source_name,
+                                            ack_token,
+                                            "RabbitMQ delivery was already acked or no longer tracked",
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            source_id,
+                                            source_name,
+                                            error = %e.as_report(),
+                                            ack_token,
+                                            "failed to ack RabbitMQ message; broker will requeue it if the reader channel closes before the ack succeeds",
+                                        );
+                                    }
+                                }
+                            }
+                        })
+                        .await;
+                });
+
+                match tokio::time::timeout(ACK_RPC_TIMEOUT, &mut ack_task).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::error!(
+                            source_id = source_id_label,
+                            source_name,
+                            error = %e.as_report(),
+                            ack_count,
+                            "RabbitMQ checkpoint ack task failed",
+                        );
+                    }
+                    Err(_) => {
+                        tracing::error!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_count,
+                            "RabbitMQ checkpoint ack task did not finish after {ACK_RPC_TIMEOUT:?}; acking continues in the background so committed deliveries are not abandoned",
+                        );
                     }
                 }
             }
