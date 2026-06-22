@@ -53,6 +53,7 @@ const DEFAULT_SOCKET_TIMEOUT_SECONDS: u64 = 10;
 const DEFAULT_BLOCKED_CONNECTION_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_HEARTBEAT_INTERVAL_SECONDS: u16 = 600;
 const DEFAULT_FRAME_MAX: u32 = 131_072;
+const MAX_CONSUMER_TAG_PREFIX_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Error)]
 pub struct RabbitmqError(String);
@@ -274,6 +275,10 @@ impl RabbitmqProperties {
             self.queue_passive(),
             "RabbitMQ source only supports queue.passive=true because queue lifecycle is owned by the broker/user"
         );
+        ensure!(
+            self.consumer_tag_prefix().len() <= MAX_CONSUMER_TAG_PREFIX_BYTES,
+            "RabbitMQ source consumer_tag_prefix must be at most {MAX_CONSUMER_TAG_PREFIX_BYTES} bytes"
+        );
         Ok(())
     }
 
@@ -464,6 +469,19 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("blocked_connection_timeout")
+        );
+    }
+
+    #[test]
+    fn reject_too_long_consumer_tag_prefix() {
+        let prefix = "x".repeat(MAX_CONSUMER_TAG_PREFIX_BYTES + 1);
+        let props = parse(&[("consumer_tag_prefix", &prefix)]);
+        assert!(
+            props
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("consumer_tag_prefix")
         );
     }
 

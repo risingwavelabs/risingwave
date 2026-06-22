@@ -21,7 +21,6 @@ use lapin::message::Delivery;
 use lapin::options::BasicAckOptions;
 use moka::future::Cache as MokaCache;
 
-use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{SourceContextRef, SourceMessage, SourceMeta, SplitId};
 
 pub static RABBITMQ_ACK_CACHE: LazyLock<MokaCache<String, RabbitmqAckEntry>> =
@@ -47,10 +46,6 @@ impl RabbitmqAckTracker {
 
 impl Drop for RabbitmqAckTracker {
     fn drop(&mut self) {
-        // This only handles in-process reader/actor teardown. If the whole compute
-        // process is killed, Rust destructors do not run, but the process-local ack
-        // cache and metric handles disappear with the process and RabbitMQ requeues
-        // unacked deliveries when the AMQP connection closes.
         let tokens = lock_tracker_tokens(&self.tokens)
             .drain()
             .collect::<Vec<_>>();
@@ -61,9 +56,7 @@ impl Drop for RabbitmqAckTracker {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 for ack_token in tokens {
-                    if let Some(entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
-                        entry.dec_unacked_count();
-                    }
+                    RABBITMQ_ACK_CACHE.remove(&ack_token).await;
                 }
             });
         } else {
@@ -76,68 +69,14 @@ impl Drop for RabbitmqAckTracker {
 }
 
 #[derive(Clone, Debug)]
-pub struct RabbitmqAckMetricLabels {
-    source_id: String,
-    source_name: String,
-    actor_id: String,
-    fragment_id: String,
-    split_id: String,
-    queue: String,
-}
-
-impl RabbitmqAckMetricLabels {
-    fn new(split_id: &SplitId, queue: &str, source_ctx: &SourceContextRef) -> Self {
-        Self {
-            source_id: source_ctx.source_id.to_string(),
-            source_name: source_ctx.source_name.clone(),
-            actor_id: source_ctx.actor_id.to_string(),
-            fragment_id: source_ctx.fragment_id.to_string(),
-            split_id: split_id.as_ref().to_owned(),
-            queue: queue.to_owned(),
-        }
-    }
-
-    fn label_values(&self) -> [&str; 6] {
-        [
-            &self.source_id,
-            &self.source_name,
-            &self.actor_id,
-            &self.fragment_id,
-            &self.split_id,
-            &self.queue,
-        ]
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct RabbitmqAckEntry {
     acker: lapin::acker::Acker,
-    metric_labels: RabbitmqAckMetricLabels,
     tracker: Weak<Mutex<HashSet<String>>>,
 }
 
 impl RabbitmqAckEntry {
-    fn new(
-        acker: lapin::acker::Acker,
-        metric_labels: RabbitmqAckMetricLabels,
-        tracker: Weak<Mutex<HashSet<String>>>,
-    ) -> Self {
-        GLOBAL_SOURCE_METRICS
-            .rabbitmq_unacked_message_count
-            .with_label_values(&metric_labels.label_values())
-            .inc();
-        Self {
-            acker,
-            metric_labels,
-            tracker,
-        }
-    }
-
-    fn dec_unacked_count(&self) {
-        GLOBAL_SOURCE_METRICS
-            .rabbitmq_unacked_message_count
-            .with_label_values(&self.metric_labels.label_values())
-            .dec();
+    fn new(acker: lapin::acker::Acker, tracker: Weak<Mutex<HashSet<String>>>) -> Self {
+        Self { acker, tracker }
     }
 
     fn untrack(&self, ack_token: &str) {
@@ -193,17 +132,15 @@ impl RabbitmqMessage {
             ack_consumer_id,
             delivery_tag,
         );
-        let ack_entry = RabbitmqAckEntry::new(
-            acker,
-            RabbitmqAckMetricLabels::new(&split_id, &queue, source_ctx),
-            ack_tracker.track(&ack_token),
-        );
-        if let Some(old_entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
-            old_entry.dec_unacked_count();
-            old_entry.untrack(&ack_token);
-        }
+        // RabbitMQ delivery tags are only valid on the channel that delivered the message.
+        // The token therefore scopes the tag to this reader-owned consumer and is used only
+        // for checkpoint-time acknowledgement while the channel is alive. If the reader or
+        // connection closes before the checkpoint ack, RabbitMQ requeues the unacked delivery.
         RABBITMQ_ACK_CACHE
-            .insert(ack_token.clone(), ack_entry)
+            .insert(
+                ack_token.clone(),
+                RabbitmqAckEntry::new(acker, ack_tracker.track(&ack_token)),
+            )
             .await;
         Self {
             split_id,
@@ -249,7 +186,6 @@ pub async fn ack_delivery(ack_token: String) -> crate::error::ConnectorResult<bo
     if let Some(entry) = RABBITMQ_ACK_CACHE.get(&ack_token).await {
         entry.acker.ack(BasicAckOptions::default()).await?;
         if let Some(entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
-            entry.dec_unacked_count();
             entry.untrack(&ack_token);
         }
         Ok(true)
