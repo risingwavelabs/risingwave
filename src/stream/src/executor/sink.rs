@@ -339,6 +339,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.sink_param.downstream_pk.clone(),
             self.non_append_only_behavior,
             metrics.sink_chunk_buffer_size,
+            self.sink.is_sink_into_table(),
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
 
@@ -550,6 +551,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         downstream_pk: Option<Vec<usize>>,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
+        sink_into_table: bool,
         skip_compact: bool,
     ) {
         // To reorder records, we need to buffer chunks of the entire epoch.
@@ -598,7 +600,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         //    to eliminate any unnecessary updates to external systems. This also rewrites the
                         //    `DELETE` and `INSERT` operations on the same key into `UPDATE` operations, which
                         //    usually have more efficient implementation.
-                        if let Some(downstream_pk) = &downstream_pk {
+                        //
+                        //    Skip this for sink-into-table. The target table's conflict handler must observe
+                        //    every row-level change in order to preserve semantics such as `DO UPDATE IF NOT NULL`
+                        //    and version-column based conflict resolution.
+                        if let Some(downstream_pk) = &downstream_pk
+                            && !sink_into_table
+                        {
                             let chunks = dispatch_output_kind!(sink_type, KIND, {
                                 StreamChunkCompactor::new(downstream_pk.clone(), chunks)
                                     .into_compacted_chunks_reconstructed::<KIND>(
@@ -650,7 +658,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if !sink_type.is_append_only()
                             && let Some(downstream_pk) = &downstream_pk
                         {
-                            if skip_compact {
+                            if sink_into_table {
+                                // Preserve every row-level change for sink-into-table so the target
+                                // table can apply its own conflict semantics.
+                            } else if skip_compact {
                                 // We can only skip compaction if the keys are exactly the same, not just
                                 // matching by being a subset.
                                 assert_eq!(&stream_key, downstream_pk);
@@ -1173,6 +1184,185 @@ mod test {
         assert_eq!(chunk_msg.into_chunk().unwrap().compact_vis(), expected);
 
         // The last barrier message.
+        executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sink_into_table_preserves_same_barrier_partial_updates_for_mismatched_pk() {
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::btreemap! {
+            "connector".into() => "table".into(),
+        };
+
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+                is_hidden: false,
+            },
+        ];
+        let schema: Schema = columns
+            .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect();
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I  I  I
+                  + 1 10  1",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I  I  I
+                  + 1 20  2",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+        ])
+        .into_executor(schema.clone(), vec![0, 2]);
+
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            sink_name: "test".into(),
+            properties,
+            columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
+            downstream_pk: Some(vec![0]),
+            sink_type: SinkType::Upsert,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let info = ExecutorInfo::for_test(schema, vec![0, 2], "SinkExecutor".to_owned(), 0);
+        let sink = build_sink(sink_param.clone()).unwrap();
+
+        let sink_executor = SinkExecutor::new(
+            ActorContext::for_test(0),
+            info,
+            source,
+            SinkWriterParam::for_test(),
+            sink,
+            sink_param,
+            columns,
+            BoundedInMemLogStoreFactory::for_test(1),
+            1024,
+            vec![DataType::Int64, DataType::Int64, DataType::Int64],
+            None,
+        )
+        .unwrap();
+
+        let mut executor = sink_executor.boxed().execute();
+
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact_vis(),
+            StreamChunk::from_pretty(
+                " I  I  I
+                  + 1 10  1
+                  + 1 20  2",
+            )
+        );
+
+        executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_sink_into_table_preserves_same_key_rows_without_reorder() {
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::btreemap! {
+            "connector".into() => "table".into(),
+        };
+
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+                is_hidden: false,
+            },
+        ];
+        let schema: Schema = columns
+            .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect();
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I  I
+                  + 1 10
+                  + 1 20",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+        ])
+        .into_executor(schema.clone(), vec![0]);
+
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            sink_name: "test".into(),
+            properties,
+            columns: columns.iter().map(|col| col.column_desc.clone()).collect(),
+            downstream_pk: Some(vec![0]),
+            sink_type: SinkType::Upsert,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let info = ExecutorInfo::for_test(schema, vec![0], "SinkExecutor".to_owned(), 0);
+        let sink = build_sink(sink_param.clone()).unwrap();
+
+        let sink_executor = SinkExecutor::new(
+            ActorContext::for_test(0),
+            info,
+            source,
+            SinkWriterParam::for_test(),
+            sink,
+            sink_param,
+            columns,
+            BoundedInMemLogStoreFactory::for_test(1),
+            1024,
+            vec![DataType::Int64, DataType::Int64],
+            None,
+        )
+        .unwrap();
+
+        let mut executor = sink_executor.boxed().execute();
+
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact_vis(),
+            StreamChunk::from_pretty(
+                " I  I
+                  + 1 10
+                  + 1 20",
+            )
+        );
+
         executor.next().await.unwrap().unwrap();
     }
 
