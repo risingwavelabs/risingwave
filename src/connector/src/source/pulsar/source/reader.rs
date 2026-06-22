@@ -30,6 +30,7 @@ use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
+use crate::source::monitor::ConnectorAckFailureType;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
@@ -341,12 +342,12 @@ struct PulsarConsumeStream {
 }
 
 impl PulsarConsumeStream {
-    fn inc_ack_failure_count(&self, error_type: &str) {
-        self.source_ctx
-            .metrics
-            .connector_ack_failure_count
-            .with_label_values(&[self.source_ctx.source_name.as_str(), "pulsar", error_type])
-            .inc();
+    fn inc_ack_failure_count(&self, failure_type: ConnectorAckFailureType) {
+        self.source_ctx.metrics.inc_connector_ack_failure_count(
+            self.source_ctx.source_name.as_str(),
+            "pulsar",
+            failure_type,
+        );
     }
 
     fn inc_ack_success_count(&self) {
@@ -361,7 +362,7 @@ impl PulsarConsumeStream {
         let message_id = match MessageIdData::decode(message_id_bytes.as_slice()) {
             Ok(message_id) => message_id,
             Err(e) => {
-                self.inc_ack_failure_count("decode_error");
+                self.inc_ack_failure_count(ConnectorAckFailureType::DecodeError);
                 tracing::warn!(
                     source_id = %self.source_ctx.source_id,
                     source_name = self.source_ctx.source_name.as_str(),
@@ -397,7 +398,7 @@ impl PulsarConsumeStream {
                     self.inc_ack_success_count();
                 }
                 Err(e) => {
-                    self.inc_ack_failure_count("broker_error");
+                    self.inc_ack_failure_count(ConnectorAckFailureType::BrokerError);
                     tracing::warn!(
                         source_id = %self.source_ctx.source_id,
                         source_name = self.source_ctx.source_name.as_str(),
