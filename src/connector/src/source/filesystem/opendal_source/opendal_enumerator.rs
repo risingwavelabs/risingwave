@@ -68,9 +68,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
         match lister.try_next().await {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
-                return Err(anyhow!(e)
-                    .context("fail to create source, please check your config.")
-                    .into());
+                return Err(anyhow!("fail to create source, please check your config: {e}").into());
             }
         }
     }
@@ -112,7 +110,16 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                         let mut t = meta.last_modified();
                         let mut size = meta.content_length() as i64;
                         if t.is_none() || size == 0 {
-                            let stat_meta = op.stat(&name).await.ok()?;
+                            let stat_meta = match op.stat(&name).await {
+                                Ok(stat_meta) => stat_meta,
+                                Err(err) => {
+                                    return Some((
+                                        Err(anyhow!("failed to stat listed object {name}: {err}")
+                                            .into()),
+                                        object_lister,
+                                    ));
+                                }
+                            };
                             t = stat_meta.last_modified();
                             size = stat_meta.content_length() as i64;
                         }

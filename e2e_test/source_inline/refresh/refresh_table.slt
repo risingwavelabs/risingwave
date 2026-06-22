@@ -48,6 +48,18 @@ Caused by:
 statement ok
 DROP TABLE non_refreshable_t;
 
+# FULL_RELOAD is intentionally whitelisted to connectors with refresh-aware
+# list/fetch executors. Streaming-only connectors must be rejected at DDL time.
+statement error FULL_RELOAD refresh mode is only supported for connectors
+CREATE TABLE unsupported_full_reload_t (id int PRIMARY KEY) WITH (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '1',
+    datagen.rows.per.second = '1',
+    refresh_mode = 'FULL_RELOAD'
+);
+
 # ----
 # refreshable table without PRIMARY KEY
 statement error

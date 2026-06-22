@@ -31,9 +31,9 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchPosixFsListExecutor,
-    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchOpendalFsListExecutor,
+    BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
+    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::from_proto::source::is_full_reload_refresh;
 
@@ -199,6 +199,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 let is_legacy_fs_connector = source.with_properties.is_legacy_fs_connector();
                 let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
+                let is_s3_connector = source
+                    .with_properties
+                    .get_connector()
+                    .map(|c| {
+                        c.eq_ignore_ascii_case(risingwave_connector::source::OPENDAL_S3_CONNECTOR)
+                    })
+                    .unwrap_or(false);
 
                 if is_legacy_fs_connector {
                     // Changed to default since v2.0 https://github.com/risingwavelabs/risingwave/pull/17963
@@ -206,6 +213,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         "legacy s3 connector is fully deprecated since v2.4.0, please DROP and recreate the s3 source.\nexecutor: {:?}",
                         params
                     );
+                } else if is_full_reload_refresh && is_s3_connector {
+                    BatchOpendalFsListExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        params.executor_stats.clone(),
+                        barrier_receiver,
+                        system_params,
+                        source.rate_limit,
+                        params.local_barrier_manager.clone(),
+                        associated_table_id,
+                    )
+                    .boxed()
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),

@@ -215,6 +215,17 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             .unwrap_or(false)
     }
 
+    fn supports_full_reload_refresh(&self) -> bool {
+        self.get(UPSTREAM_SOURCE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(ICEBERG_CONNECTOR)
+                    || s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR)
+            })
+            .unwrap_or(false)
+    }
+
     fn requires_singleton(&self) -> bool {
         self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_batch_connector()
     }
