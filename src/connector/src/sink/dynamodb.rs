@@ -214,6 +214,10 @@ impl DynamoDbRequest {
     }
 
     fn has_same_pk(&self, other: &Self) -> bool {
+        if self.key_items.is_empty() {
+            return false;
+        }
+
         let Some(key) = self.extract_key() else {
             return false;
         };
@@ -539,17 +543,14 @@ mod write_chunk_future {
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_dynamodb::types::PutRequest;
+    use aws_sdk_dynamodb::types::{DeleteRequest, PutRequest};
 
     use super::*;
 
-    fn dynamodb_request(
+    fn dynamodb_put_request(
         items: impl IntoIterator<Item = (&'static str, &'static str)>,
     ) -> DynamoDbRequest {
-        let item = items
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), AttributeValue::S(v.to_owned())))
-            .collect();
+        let item = dynamodb_items(items);
         let put_req = PutRequest::builder().set_item(Some(item)).build().unwrap();
         DynamoDbRequest {
             inner: WriteRequest::builder().put_request(put_req).build(),
@@ -557,13 +558,55 @@ mod tests {
         }
     }
 
+    fn dynamodb_delete_request(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> DynamoDbRequest {
+        let key = dynamodb_items(items);
+        let delete_req = DeleteRequest::builder().set_key(Some(key)).build().unwrap();
+        DynamoDbRequest {
+            inner: WriteRequest::builder().delete_request(delete_req).build(),
+            key_items: vec!["pk".to_owned(), "sk".to_owned()],
+        }
+    }
+
+    fn dynamodb_items(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> HashMap<String, AttributeValue> {
+        items
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), AttributeValue::S(v.to_owned())))
+            .collect()
+    }
+
     #[test]
     fn dynamodb_request_compares_pk_by_key_attribute() {
-        let req = dynamodb_request([("pk", "a"), ("sk", "b")]);
-        let swapped_values = dynamodb_request([("pk", "b"), ("sk", "a")]);
-        let same_pk = dynamodb_request([("pk", "a"), ("sk", "b")]);
+        let req = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        let swapped_values = dynamodb_put_request([("pk", "b"), ("sk", "a")]);
+        let same_pk = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
 
         assert!(!req.has_same_pk(&swapped_values));
         assert!(req.has_same_pk(&same_pk));
+    }
+
+    #[test]
+    fn dynamodb_request_empty_key_items_never_match() {
+        let mut req = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        let same_pk = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        req.key_items.clear();
+
+        assert!(!req.has_same_pk(&same_pk));
+    }
+
+    #[test]
+    fn dynamodb_request_compares_put_and_delete_by_composite_pk() {
+        let put = dynamodb_put_request([("pk", "a"), ("sk", "b"), ("value", "1")]);
+        let same_pk_delete = dynamodb_delete_request([("pk", "a"), ("sk", "b")]);
+        let different_hash_key_delete = dynamodb_delete_request([("pk", "x"), ("sk", "b")]);
+        let different_range_key_delete = dynamodb_delete_request([("pk", "a"), ("sk", "x")]);
+
+        assert!(put.has_same_pk(&same_pk_delete));
+        assert!(same_pk_delete.has_same_pk(&put));
+        assert!(!put.has_same_pk(&different_hash_key_delete));
+        assert!(!put.has_same_pk(&different_range_key_delete));
     }
 }
