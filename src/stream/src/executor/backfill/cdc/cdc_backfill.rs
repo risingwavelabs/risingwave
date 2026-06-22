@@ -55,6 +55,50 @@ use crate::task::CreateMviewProgressReporter;
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
 
+pub(crate) fn get_cdc_json_parse_handling_from_properties(
+    properties: &BTreeMap<String, String>,
+) -> (
+    Option<TimestampHandling>,
+    Option<TimestamptzHandling>,
+    Option<TimeHandling>,
+    Option<BigintUnsignedHandlingMode>,
+) {
+    let use_connect_time_precision = properties
+        .get("debezium.time.precision.mode")
+        .is_some_and(|v| v == "connect");
+
+    let timestamp_handling = if use_connect_time_precision {
+        Some(TimestampHandling::Milli)
+    } else {
+        properties
+            .get(TimestampHandling::OPTION_KEY)
+            .map(|v| TimestampHandling::from_options(v))
+            .transpose()
+            .expect("timestamp.handling.mode should have been validated during source creation")
+    };
+    let timestamptz_handling = if use_connect_time_precision {
+        Some(TimestamptzHandling::Milli)
+    } else {
+        properties
+            .get(TimestamptzHandling::OPTION_KEY)
+            .map(|v| TimestamptzHandling::from_options(v))
+            .transpose()
+            .expect("timestamptz.handling.mode should have been validated during source creation")
+    };
+    let time_handling = use_connect_time_precision.then_some(TimeHandling::Milli);
+    let bigint_unsigned_handling = properties
+        .get("debezium.bigint.unsigned.handling.mode")
+        .is_some_and(|v| v == "precise")
+        .then_some(BigintUnsignedHandlingMode::Precise);
+
+    (
+        timestamp_handling,
+        timestamptz_handling,
+        time_handling,
+        bigint_unsigned_handling,
+    )
+}
+
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -209,30 +253,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
-        let timestamp_handling: Option<TimestampHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestampHandling::Milli);
-        let timestamptz_handling: Option<TimestamptzHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestamptzHandling::Milli);
-        let time_handling: Option<TimeHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimeHandling::Milli);
-        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
-            .properties
-            .get("debezium.bigint.unsigned.handling.mode")
-            .map(|v| v == "precise")
-            .unwrap_or(false)
-            .then_some(BigintUnsignedHandlingMode::Precise);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -955,10 +977,13 @@ mod tests {
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
     use risingwave_connector::source::cdc::CdcScanOptions;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
+    use crate::executor::backfill::cdc::cdc_backfill::{
+        get_cdc_json_parse_handling_from_properties, transform_upstream,
+    };
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
     use crate::executor::source::default_source_internal_table;
@@ -1112,5 +1137,45 @@ mod tests {
             chunk.columns()[2].as_int64().iter().collect::<Vec<_>>(),
             vec![Some(100)]
         );
+    }
+
+    #[test]
+    fn test_get_cdc_json_parse_handling_from_properties() {
+        let properties = BTreeMap::from([(
+            TimestamptzHandling::OPTION_KEY.to_owned(),
+            "nano".to_owned(),
+        )]);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&properties);
+        assert!(timestamp_handling.is_none());
+        assert!(matches!(
+            timestamptz_handling,
+            Some(TimestamptzHandling::Nano)
+        ));
+        assert!(time_handling.is_none());
+        assert!(bigint_unsigned_handling.is_none());
+    }
+
+    #[test]
+    fn test_debezium_time_precision_mode_overrides_timestamptz_handling() {
+        let properties = BTreeMap::from([
+            (
+                "debezium.time.precision.mode".to_owned(),
+                "connect".to_owned(),
+            ),
+            (
+                TimestamptzHandling::OPTION_KEY.to_owned(),
+                "nano".to_owned(),
+            ),
+        ]);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&properties);
+        assert!(matches!(timestamp_handling, Some(TimestampHandling::Milli)));
+        assert!(matches!(
+            timestamptz_handling,
+            Some(TimestamptzHandling::Milli)
+        ));
+        assert!(matches!(time_handling, Some(TimeHandling::Milli)));
+        assert!(bigint_unsigned_handling.is_none());
     }
 }

@@ -110,7 +110,10 @@ pub enum TimestamptzHandling {
     Milli,
     /// `1712800800123456`
     Micro,
-    /// Both `1712800800123` (ms) and `1712800800123456` (us) maps to `2024-04-11`.
+    /// `1712800800123456789`
+    Nano,
+    /// `1712800800` (s), `1712800800123` (ms), `1712800800123456` (us), and
+    /// `1712800800123456789` (ns) all map to the same UTC instant.
     ///
     /// Only works for `[1973-03-03 09:46:40, 5138-11-16 09:46:40)`.
     ///
@@ -127,6 +130,7 @@ impl TimestamptzHandling {
             "utc_without_suffix" => Self::UtcWithoutSuffix,
             "micro" => Self::Micro,
             "milli" => Self::Milli,
+            "nano" => Self::Nano,
             "guess_number_unit" => Self::GuessNumberUnit,
             v => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
         };
@@ -136,8 +140,25 @@ impl TimestamptzHandling {
 
 #[derive(Clone, Debug)]
 pub enum TimestampHandling {
+    Micro,
     Milli,
+    Nano,
     GuessNumberUnit,
+}
+
+impl TimestampHandling {
+    pub const OPTION_KEY: &'static str = "timestamp.handling.mode";
+
+    pub fn from_options(value: &str) -> Result<Self, InvalidOptionError> {
+        let mode = match value {
+            "micro" => Self::Micro,
+            "milli" => Self::Milli,
+            "nano" => Self::Nano,
+            "guess_number_unit" => Self::GuessNumberUnit,
+            v => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
+        };
+        Ok(mode)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -571,18 +592,24 @@ impl JsonParseOptions {
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => {
-                match self.timestamp_handling {
-                    // Only when user configures debezium.time.precision.mode = 'connect',
-                    // the Milli branch will be executed
-                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                }
-            }
+            ) => value
+                .as_i64()
+                .map(|num| match self.timestamp_handling {
+                    TimestampHandling::Micro => {
+                        Timestamp::with_micros(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::Milli => {
+                        Timestamp::with_millis(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::Nano => {
+                        Timestamp::with_micros(num / 1_000).map_err(|_| create_error())
+                    }
+                    TimestampHandling::GuessNumberUnit => {
+                        i64_to_timestamp(num).map_err(|_| create_error())
+                    }
+                })
+                .ok_or_else(create_error)??
+                .into(),
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
@@ -611,6 +638,7 @@ impl JsonParseOptions {
                     TimestamptzHandling::GuessNumberUnit => i64_to_timestamptz(num).ok(),
                     TimestamptzHandling::Micro => Some(Timestamptz::from_micros(num)),
                     TimestamptzHandling::Milli => Timestamptz::from_millis(num),
+                    TimestamptzHandling::Nano => Timestamptz::from_nanos(num),
                     // When explicitly requested string format, number without units are rejected.
                     TimestamptzHandling::UtcString | TimestamptzHandling::UtcWithoutSuffix => None,
                 })
@@ -891,4 +919,41 @@ fn json_object_get_case_insensitive<'b>(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::ScalarImpl;
+
+    use super::*;
+
+    fn parse_timestamptz_number(value: &str, handling: TimestamptzHandling) -> Timestamptz {
+        let mut bytes = value.as_bytes().to_vec();
+        let value = simd_json::to_borrowed_value(&mut bytes[..]).unwrap();
+        let options = JsonParseOptions {
+            timestamptz_handling: handling,
+            ..Default::default()
+        };
+        let datum = options.parse(&value, &DataType::Timestamptz).unwrap();
+        match datum.to_owned_datum().unwrap() {
+            ScalarImpl::Timestamptz(timestamptz) => timestamptz,
+            other => panic!("expected timestamptz, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_timestamptz_handling_accepts_nano_option() {
+        assert!(matches!(
+            TimestamptzHandling::from_options("nano").unwrap(),
+            TimestamptzHandling::Nano
+        ));
+    }
+
+    #[test]
+    fn test_parse_timestamptz_nano_number() {
+        assert_eq!(
+            parse_timestamptz_number("1712800800123456789", TimestamptzHandling::Nano),
+            Timestamptz::from_nanos(1_712_800_800_123_456_789).unwrap()
+        );
+    }
 }

@@ -239,12 +239,12 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             WEBHOOK_JSON_TIMESTAMPTZ_HANDLING_HEADER,
-            HeaderValue::from_static("milli"),
+            HeaderValue::from_static("nano"),
         );
         let config = json_properties_from_headers(&headers).unwrap();
         assert!(matches!(
             config.timestamptz_handling,
-            Some(TimestamptzHandling::Milli)
+            Some(TimestamptzHandling::Nano)
         ));
     }
 
