@@ -118,6 +118,16 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_project_expr_concurrency")]
     pub project_expr_concurrency: usize,
 
+    /// The maximum number of in-flight projection evaluation requests in `ProjectExecutor`.
+    ///
+    /// An in-flight request has started projection evaluation but has not finished yet. A finished
+    /// request no longer counts against this limit even if its result is still waiting to be emitted
+    /// in order.
+    ///
+    /// - `0` means unlimited in-flight requests.
+    #[serde(default = "default::developer::stream_project_expr_inflight_request_concurrency")]
+    pub project_expr_inflight_request_concurrency: usize,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]

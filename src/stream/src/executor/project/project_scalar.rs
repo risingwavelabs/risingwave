@@ -22,6 +22,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
+use tokio::sync::Semaphore;
 
 use crate::executor::prelude::*;
 
@@ -29,7 +30,10 @@ type ProjectMessageFuture = impl Future<Output = StreamExecutorResult<ProjectedM
 type PendingProjectMessages = FuturesOrdered<ProjectMessageFuture>;
 
 enum ProjectMessageInput {
-    Chunk(StreamChunk),
+    Chunk {
+        chunk: StreamChunk,
+        inflight_request_semaphore: Option<Arc<Semaphore>>,
+    },
     Watermark {
         watermark: Watermark,
         out_col_indices: Vec<usize>,
@@ -68,8 +72,12 @@ struct Inner {
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
     eliminate_noop_updates: bool,
 
-    /// Maximum number of chunks with in-flight projection evaluation.
+    /// Maximum number of chunks with pending projection evaluation.
     project_expr_concurrency: usize,
+
+    /// Limits the number of chunks whose projection evaluation has started but not finished.
+    /// `None` means unlimited in-flight requests.
+    project_expr_inflight_request_concurrency: Option<Arc<Semaphore>>,
 }
 
 impl ProjectExecutor {
@@ -88,6 +96,14 @@ impl ProjectExecutor {
             0 => usize::MAX,
             concurrency => concurrency,
         };
+        let project_expr_inflight_request_concurrency = match ctx
+            .config
+            .developer
+            .project_expr_inflight_request_concurrency
+        {
+            0 => None,
+            concurrency => Some(Arc::new(Semaphore::new(concurrency))),
+        };
         Self {
             input,
             inner: Inner {
@@ -98,6 +114,7 @@ impl ProjectExecutor {
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 eliminate_noop_updates,
                 project_expr_concurrency,
+                project_expr_inflight_request_concurrency,
             },
         }
     }
@@ -144,7 +161,17 @@ impl Inner {
     ) -> ProjectMessageFuture {
         async move {
             match input {
-                ProjectMessageInput::Chunk(chunk) => {
+                ProjectMessageInput::Chunk {
+                    chunk,
+                    inflight_request_semaphore,
+                } => {
+                    let _permit = if let Some(semaphore) = inflight_request_semaphore {
+                        Some(semaphore.acquire_owned().await.expect(
+                            "project expression in-flight request semaphore should not be closed",
+                        ))
+                    } else {
+                        None
+                    };
                     let mut new_chunk = apply_project_exprs(&exprs, chunk)
                         .instrument_await("project_eval_chunk")
                         .await?;
@@ -219,6 +246,7 @@ impl Inner {
             mut last_nondec_expr_values,
             eliminate_noop_updates,
             project_expr_concurrency,
+            project_expr_inflight_request_concurrency,
         } = self;
 
         let mut input = input.execute();
@@ -330,7 +358,11 @@ impl Inner {
                         pending_project_messages.push_back(Self::project_message(
                             exprs.clone(),
                             eliminate_noop_updates,
-                            ProjectMessageInput::Chunk(chunk),
+                            ProjectMessageInput::Chunk {
+                                chunk,
+                                inflight_request_semaphore:
+                                    project_expr_inflight_request_concurrency.clone(),
+                            },
                         ));
                         pending_project_chunks += 1;
                     }
@@ -371,8 +403,16 @@ mod tests {
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
 
     fn actor_context_with_project_expr_concurrency(concurrency: usize) -> ActorContextRef {
+        actor_context_with_project_expr_limits(concurrency, 0)
+    }
+
+    fn actor_context_with_project_expr_limits(
+        concurrency: usize,
+        inflight_request_concurrency: usize,
+    ) -> ActorContextRef {
         let mut config = StreamingConfig::default();
         config.developer.project_expr_concurrency = concurrency;
+        config.developer.project_expr_inflight_request_concurrency = inflight_request_concurrency;
         let mut ctx = ActorContext::for_test(123);
         Arc::get_mut(&mut ctx)
             .expect("test actor context should not be shared")
@@ -661,7 +701,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_projection_keeps_concurrency_across_barrier() {
+    async fn test_projection_reuses_finished_inflight_permit_across_barrier() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -677,7 +717,7 @@ mod tests {
         });
 
         let proj = ProjectExecutor::new(
-            actor_context_with_project_expr_concurrency(3),
+            actor_context_with_project_expr_limits(3, 2),
             source,
             vec![test_expr],
             MultiMap::new(),
@@ -758,7 +798,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_projection_keeps_concurrency_across_watermark() {
+    async fn test_projection_reuses_finished_inflight_permit_across_watermark() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -774,7 +814,7 @@ mod tests {
         });
 
         let proj = ProjectExecutor::new(
-            actor_context_with_project_expr_concurrency(3),
+            actor_context_with_project_expr_limits(3, 2),
             source,
             vec![test_expr],
             MultiMap::from_iter(vec![(0, 0)].into_iter()),
