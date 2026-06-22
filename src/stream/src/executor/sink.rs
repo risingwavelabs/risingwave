@@ -30,13 +30,14 @@ use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::dynamodb::DYNAMO_DB_SINK;
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
     LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
-    SinkWriterParam,
+    CONNECTOR_TYPE_KEY, GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl,
+    SinkParam, SinkWriterParam,
 };
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
@@ -269,7 +270,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 .properties
                 .get(SINK_USER_FORCE_COMPACTION)
                 .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
+                .unwrap_or(false)
+                || sink_param
+                    .properties
+                    .get(CONNECTOR_TYPE_KEY)
+                    .is_some_and(|connector| connector == DYNAMO_DB_SINK);
             Some(NonAppendOnlyBehavior {
                 pk_specified_and_matched,
                 force_compaction,

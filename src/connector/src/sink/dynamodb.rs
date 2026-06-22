@@ -15,12 +15,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
 use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
-use futures::prelude::TryFuture;
-use futures::prelude::future::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
@@ -29,16 +28,14 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
-use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
+use write_chunk_future::DynamoDbPayloadWriter;
 
-use super::log_store::DeliveryFutureManagerAddFuture;
-use super::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
-};
+use super::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::sink::SinkWriterMetrics;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
 
@@ -122,7 +119,7 @@ impl EnforceSecret for DynamoDbSink {
 }
 
 impl Sink for DynamoDbSink {
-    type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
+    type LogSinker = LogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
@@ -176,11 +173,11 @@ impl Sink for DynamoDbSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(
             DynamoDbSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
-                .into_log_sinker(self.config.max_future_send_nums),
+                .into_log_sinker(SinkWriterMetrics::new(&writer_param)),
         )
     }
 }
@@ -236,6 +233,7 @@ impl DynamoDbRequest {
 pub struct DynamoDbSinkWriter {
     payload_writer: DynamoDbPayloadWriter,
     formatter: DynamoDbFormatter,
+    max_future_send_nums: usize,
 }
 
 impl DynamoDbSinkWriter {
@@ -271,10 +269,11 @@ impl DynamoDbSinkWriter {
         Ok(Self {
             payload_writer,
             formatter: DynamoDbFormatter { schema },
+            max_future_send_nums: config.max_future_send_nums,
         })
     }
 
-    fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<WriteChunkFuture> {
+    async fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut request_items = Vec::new();
         for (op, row) in chunk.rows() {
             let items = self.formatter.format_row(row)?;
@@ -290,25 +289,23 @@ impl DynamoDbSinkWriter {
                 Op::UpdateDelete => {}
             }
         }
-        Ok(self.payload_writer.write_chunk(request_items))
+        self.payload_writer
+            .write_chunk(request_items, self.max_future_send_nums)
+            .await
     }
 }
 
-pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+#[async_trait]
+impl SinkWriter for DynamoDbSinkWriter {
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
 
-impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
-    type DeliveryFuture = DynamoDbSinkDeliveryFuture;
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.write_chunk_inner(chunk).await
+    }
 
-    #[define_opaque(DynamoDbSinkDeliveryFuture)]
-    async fn write_chunk<'a>(
-        &'a mut self,
-        chunk: StreamChunk,
-        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> Result<()> {
-        let futures = self.write_chunk_inner(chunk)?;
-        add_future
-            .add_future_may_await(futures.map_ok(|_: Vec<()>| ()))
-            .await?;
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
 }
@@ -392,9 +389,7 @@ mod write_chunk_future {
         AttributeValue, DeleteRequest, PutRequest, ReturnConsumedCapacity,
         ReturnItemCollectionMetrics, WriteRequest,
     };
-    use futures::future::TryJoinAll;
-    use futures::prelude::Future;
-    use futures::prelude::future::try_join_all;
+    use futures::{StreamExt, TryStreamExt, stream};
     use itertools::Itertools;
     use maplit::hashmap;
     use tokio::time::sleep;
@@ -404,8 +399,7 @@ mod write_chunk_future {
     const MAX_BATCH_WRITE_RETRY_TIMES: usize = 3;
     const MIN_BATCH_WRITE_RETRY_DELAY_MS: u64 = 100;
     const MAX_BATCH_WRITE_RETRY_DELAY_MS: u64 = 500;
-
-    pub type WriteChunkFuture = TryJoinAll<impl Future<Output = Result<()>>>;
+    const MAX_BATCH_WRITE_CONCURRENCY: usize = 256;
 
     pub struct DynamoDbPayloadWriter {
         pub client: Client,
@@ -452,17 +446,23 @@ mod write_chunk_future {
             request_items.push(r_req);
         }
 
-        #[define_opaque(WriteChunkFuture)]
-        pub fn write_chunk(&mut self, request_items: Vec<DynamoDbRequest>) -> WriteChunkFuture {
+        pub async fn write_chunk(
+            &mut self,
+            request_items: Vec<DynamoDbRequest>,
+            max_future_send_nums: usize,
+        ) -> Result<()> {
             let table = self.table.clone();
             let chunks = request_items
                 .into_iter()
                 .map(|r| r.inner)
-                .chunks(self.max_batch_item_nums);
-            let futures = chunks.into_iter().map(|chunk| {
+                .chunks(self.max_batch_item_nums)
+                .into_iter()
+                .map(|chunk| chunk.collect::<Vec<_>>())
+                .collect_vec();
+            let max_future_send_nums = max_future_send_nums.clamp(1, MAX_BATCH_WRITE_CONCURRENCY);
+            stream::iter(chunks.into_iter().map(|req_items| {
                 let client = self.client.clone();
                 let table = table.clone();
-                let req_items = chunk.collect::<Vec<_>>();
                 async move {
                     let mut req_items = req_items;
                     let mut retry_count = 0;
@@ -528,8 +528,11 @@ mod write_chunk_future {
                         sleep(Duration::from_millis(delay_ms)).await;
                     }
                 }
-            });
-            try_join_all(futures)
+            }))
+            .buffer_unordered(max_future_send_nums)
+            .try_collect::<Vec<_>>()
+            .await?;
+            Ok(())
         }
     }
 }
