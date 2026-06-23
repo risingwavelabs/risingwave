@@ -20,7 +20,7 @@ use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 static RABBITMQ_ACK_CONSUMER_ID: AtomicU64 = AtomicU64::new(1);
 
-pub fn next_ack_consumer_id() -> u64 {
+pub(super) fn next_ack_consumer_id() -> u64 {
     RABBITMQ_ACK_CONSUMER_ID.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -30,9 +30,9 @@ pub struct RabbitmqMeta {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RabbitmqAckData {
-    pub ack_consumer_id: u64,
-    pub delivery_tag: u64,
+pub(crate) struct RabbitmqAckData {
+    pub(crate) ack_consumer_id: u64,
+    pub(crate) delivery_tag: u64,
 }
 
 impl RabbitmqAckData {
@@ -66,23 +66,19 @@ impl RabbitmqAckData {
 }
 
 #[derive(Clone, Debug)]
-pub struct RabbitmqMessage {
-    pub split_id: SplitId,
-    pub queue: String,
-    pub delivery_tag: u64,
-    pub ack_consumer_id: u64,
-    pub ack_data: Vec<u8>,
-    pub payload: Vec<u8>,
-    pub redelivered: bool,
+pub(super) struct RabbitmqMessage {
+    split_id: SplitId,
+    queue: String,
+    delivery_tag: u64,
+    ack_consumer_id: u64,
+    ack_data: Vec<u8>,
+    payload: Vec<u8>,
 }
 
 impl RabbitmqMessage {
     pub fn new(split_id: SplitId, queue: String, ack_consumer_id: u64, delivery: Delivery) -> Self {
         let Delivery {
-            delivery_tag,
-            redelivered,
-            data,
-            ..
+            delivery_tag, data, ..
         } = delivery;
         let ack_data = RabbitmqAckData {
             ack_consumer_id,
@@ -96,7 +92,6 @@ impl RabbitmqMessage {
             ack_consumer_id,
             ack_data,
             payload: data,
-            redelivered,
         }
     }
 
