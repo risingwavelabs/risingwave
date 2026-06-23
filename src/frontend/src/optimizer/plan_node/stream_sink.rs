@@ -19,8 +19,7 @@ use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME,
+    ColumnCatalog, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -30,9 +29,9 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_RETRACT, SINK_TYPE_UPSERT,
-    SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_USER_IGNORE_DELETE_OPTION,
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
@@ -61,14 +60,6 @@ use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
-
-fn target_table_requires_row_level_conflict_handling(target_table: &TableCatalog) -> bool {
-    !target_table.version_column_indices.is_empty()
-        || matches!(
-            target_table.conflict_behavior(),
-            ConflictBehavior::DoUpdateIfNotNull | ConflictBehavior::IgnoreConflict
-        )
-}
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -478,15 +469,7 @@ impl StreamSink {
         } else {
             CreateType::Foreground
         };
-        let (mut properties, secret_refs) = properties.into_parts();
-        if let Some(target_table) = &target_table
-            && target_table_requires_row_level_conflict_handling(target_table)
-        {
-            properties.insert(
-                SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR.to_owned(),
-                "true".to_owned(),
-            );
-        }
+        let (properties, secret_refs) = properties.into_parts();
         let is_exactly_once = properties
             .get("is_exactly_once")
             .map(|v| v.to_lowercase() == "true");
