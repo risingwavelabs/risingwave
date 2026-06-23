@@ -580,7 +580,8 @@ mod tests {
 
     #[test]
     fn test_value_format() {
-        use {DataType as T, ScalarRefImpl as S};
+        use DataType as T;
+        use ScalarRefImpl as S;
         let static_session = StaticSessionData {
             timezone: "UTC".into(),
         };

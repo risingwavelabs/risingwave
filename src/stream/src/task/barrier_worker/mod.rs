@@ -479,7 +479,8 @@ impl LocalBarrierWorker {
             Request::InjectBarrier(req) => {
                 let partial_graph_id = req.partial_graph_id;
                 let result: StreamResult<()> = try {
-                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())
+                        .map_err(StreamError::from)?;
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (partial_graph_id, e))?;

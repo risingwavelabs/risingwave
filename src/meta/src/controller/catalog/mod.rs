@@ -642,7 +642,7 @@ impl CatalogController {
         let object_group = build_object_group_for_delete(
             to_notify_objs
                 .into_iter()
-                .chain(dirty_internal_table_objs.into_iter())
+                .chain(dirty_internal_table_objs)
                 .collect_vec(),
         );
 

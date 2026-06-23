@@ -277,19 +277,15 @@ macro_rules! impl_split_small_range {
                                     (
                                         Some(Some(ScalarImpl::$type_name(left))),
                                         Some(Some(ScalarImpl::$type_name(right))),
-                                    ) => {
-
-                                        if (right - left + 1) as u64 <= max_gap {
-                                            return Some(
-                                                (*left..=*right)
-                                                    .into_iter()
-                                                    .map(|i| ScanRange {
-                                                        eq_conds: vec![Some(ScalarImpl::$type_name(i))],
-                                                        range: full_range(),
-                                                    })
-                                                    .collect(),
-                                            );
-                                        }
+                                    ) if (right - left + 1) as u64 <= max_gap => {
+                                        return Some(
+                                            (*left..=*right)
+                                                .map(|i| ScanRange {
+                                                    eq_conds: vec![Some(ScalarImpl::$type_name(i))],
+                                                    range: full_range(),
+                                                })
+                                                .collect(),
+                                        );
                                     }
                                 )*
                                 _ => {}

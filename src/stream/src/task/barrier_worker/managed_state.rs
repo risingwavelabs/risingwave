@@ -1007,7 +1007,7 @@ impl PartialGraphState {
         first_failure
             .into_iter()
             .map(|(_, err)| err)
-            .chain(later_errs.into_iter())
+            .chain(later_errs)
             .map(|e| e.with_score())
             .max_by_key(|e| e.score)
     }

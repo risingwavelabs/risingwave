@@ -239,6 +239,9 @@ pub trait StateTableAccessor: Send + Sync {
 #[derive(Default)]
 pub struct FakeRemoteTableAccessor {}
 
+#[derive(Default)]
+struct PreloadedOnlyTableAccessor {}
+
 pub struct RemoteTableAccessor {
     meta_client: MetaClient,
 }
@@ -265,6 +268,13 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
     }
 }
 
+#[async_trait::async_trait]
+impl StateTableAccessor for PreloadedOnlyTableAccessor {
+    async fn get_tables(&self, _table_ids: &[TableId]) -> RpcResult<HashMap<TableId, Table>> {
+        Ok(HashMap::new())
+    }
+}
+
 /// `CompactionCatalogManager` is a manager to manage all `Table` which used in compaction
 pub struct CompactionCatalogManager {
     // `table_id_to_catalog` is a map to store all `Table` which used in compaction
@@ -284,6 +294,16 @@ impl CompactionCatalogManager {
         Self {
             table_id_to_catalog: Default::default(),
             table_accessor,
+        }
+    }
+
+    /// Creates a catalog manager backed only by the given table catalogs.
+    /// Missing tables are not fetched remotely and remain missing, so callers can reject
+    /// partial agents explicitly.
+    pub fn new_preloaded(table_id_to_catalog: HashMap<StateTableId, Table>) -> Self {
+        Self {
+            table_id_to_catalog: RwLock::new(table_id_to_catalog),
+            table_accessor: Box::<PreloadedOnlyTableAccessor>::default(),
         }
     }
 }
@@ -392,38 +412,6 @@ impl CompactionCatalogManager {
             table_id_to_watermark_serde,
             table_id_to_value_watermark_serde,
         )))
-    }
-
-    /// `build_compaction_catalog_agent` is used to build `CompactionCatalogAgent` by `table_catalogs`
-    pub fn build_compaction_catalog_agent(
-        table_catalogs: HashMap<StateTableId, Table>,
-    ) -> CompactionCatalogAgentRef {
-        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        let mut table_id_to_vnode = HashMap::new();
-        let mut table_id_to_watermark_serde = HashMap::new();
-        let mut value_table_id_to_watermark_serde = HashMap::new();
-        for (table_id, table_catalog) in table_catalogs {
-            // filter-key-extractor
-            multi_filter_key_extractor
-                .register(table_id, FilterKeyExtractorImpl::from_table(&table_catalog));
-
-            // vnode
-            table_id_to_vnode.insert(table_id, table_catalog.vnode_count());
-
-            // watermark
-            table_id_to_watermark_serde.insert(table_id, build_watermark_col_serde(&table_catalog));
-            value_table_id_to_watermark_serde.insert(
-                table_id,
-                build_value_watermark_col_serde(&table_catalog).map(Arc::new),
-            );
-        }
-
-        Arc::new(CompactionCatalogAgent::new(
-            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
-            table_id_to_vnode,
-            table_id_to_watermark_serde,
-            value_table_id_to_watermark_serde,
-        ))
     }
 }
 
@@ -718,7 +706,9 @@ impl ValueWatermarkColumnSerde {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
     use std::mem;
+    use std::sync::Arc;
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
@@ -734,6 +724,7 @@ mod tests {
     use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
+    use thiserror_ext::AsReport;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::compaction_catalog_manager::{
@@ -1007,5 +998,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_preloaded_compaction_catalog_manager() {
+        let mut table = build_table_with_prefix_column_num(1);
+        table.id = 1.into();
+        let compaction_catalog_manager = Arc::new(super::CompactionCatalogManager::new_preloaded(
+            HashMap::from([(1.into(), table)]),
+        ));
+
+        let agent = compaction_catalog_manager
+            .acquire(vec![1.into(), 2.into()])
+            .await
+            .unwrap();
+        let table_ids = agent.table_ids().collect::<HashSet<_>>();
+
+        assert_eq!(table_ids, HashSet::from([1.into()]));
+
+        let err = match crate::hummock::compactor::compactor_runner::acquire_complete_catalog_agent(
+            &compaction_catalog_manager,
+            vec![1.into(), 2.into()],
+        )
+        .await
+        {
+            Ok(_) => panic!("partial preloaded catalog should fail strict acquire"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_report_string()
+                .contains("some table ids are not acquired")
+        );
     }
 }

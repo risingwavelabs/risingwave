@@ -161,7 +161,7 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
 
-        table_info.extend(sink_info.into_iter());
+        table_info.extend(sink_info);
 
         Ok(table_info)
     }

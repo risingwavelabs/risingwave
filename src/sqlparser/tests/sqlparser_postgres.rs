@@ -634,7 +634,7 @@ fn parse_pg_bitwise_binary_ops() {
     ];
 
     for (str_op, op) in bitwise_ops {
-        let select = verified_only_select(&format!("SELECT a {} b", &str_op));
+        let select = verified_only_select(&format!("SELECT a {} b", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
@@ -656,7 +656,7 @@ fn parse_pg_unary_ops() {
     ];
 
     for (str_op, op) in pg_unary_ops {
-        let select = verified_only_select(&format!("SELECT {} a", &str_op));
+        let select = verified_only_select(&format!("SELECT {} a", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
@@ -677,7 +677,7 @@ fn parse_pg_regex_match_ops() {
     ];
 
     for (str_op, op) in pg_regex_match_ops {
-        let select = verified_only_select(&format!("SELECT 'abc' {} '^a'", &str_op));
+        let select = verified_only_select(&format!("SELECT 'abc' {} '^a'", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Value(Value::SingleQuotedString("abc".into()))),

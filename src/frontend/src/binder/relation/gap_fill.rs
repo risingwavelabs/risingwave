@@ -72,7 +72,7 @@ impl Binder {
 
         let interval_arg = args_iter.next().unwrap();
         let interval_exprs = self.bind_function_arg(interval_arg)?;
-        let interval = interval_exprs.into_iter().exactly_one().map_err(|_| {
+        let interval = Itertools::exactly_one(interval_exprs.into_iter()).map_err(|_| {
             ErrorCode::BindError("The 3rd arg of GAP_FILL should be a single expression".to_owned())
         })?;
         if interval.return_type() != DataType::Interval {
@@ -111,12 +111,13 @@ impl Binder {
                     }
                     for partition_arg in &func.arg_list.args {
                         let arg_exprs = self.bind_function_arg(partition_arg)?;
-                        let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
-                            ErrorCode::BindError(
-                                "PARTITION_BY argument should be a single column reference"
-                                    .to_owned(),
-                            )
-                        })?;
+                        let arg_expr =
+                            Itertools::exactly_one(arg_exprs.into_iter()).map_err(|_| {
+                                ErrorCode::BindError(
+                                    "PARTITION_BY argument should be a single column reference"
+                                        .to_owned(),
+                                )
+                            })?;
                         if let ExprImpl::InputRef(input_ref) = arg_expr {
                             if input_ref.index() == time_col.index() {
                                 return Err(ErrorCode::BindError(
@@ -162,7 +163,7 @@ impl Binder {
                 }
 
                 let arg_exprs = self.bind_function_arg(&func.arg_list.args[0])?;
-                let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
+                let arg_expr = Itertools::exactly_one(arg_exprs.into_iter()).map_err(|_| {
                     ErrorCode::BindError(
                         "Fill strategy argument should be a single expression".to_owned(),
                     )

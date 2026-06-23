@@ -104,9 +104,7 @@ struct EscapeChar(u8);
 
 impl EscapeChar {
     fn from_str(escape: &str) -> Result<Self> {
-        escape
-            .chars()
-            .exactly_one()
+        Itertools::exactly_one(escape.chars())
             .ok()
             .and_then(|c| c.as_ascii().map(|c| c.to_u8()))
             .ok_or_else(|| ExprError::InvalidParam {

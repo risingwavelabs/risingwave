@@ -44,9 +44,10 @@ impl FromStr for MetaAddressStrategy {
 
     fn from_str(meta_addr: &str) -> Result<Self, Self::Err> {
         if let Some(addr) = meta_addr.strip_prefix(META_ADDRESS_LOAD_BALANCE_MODE_PREFIX) {
-            let addr = addr
-                .split(',')
-                .exactly_one()
+            // UFCS pins this to `itertools::Itertools::exactly_one`; a future
+            // stabilization of `Iterator::exactly_one` (rust#48919) would otherwise
+            // make the bare method call ambiguous / silently rebind.
+            let addr = Itertools::exactly_one(addr.split(','))
                 .map_err(|_| MetaAddressStrategyParseError::MultipleLoadBalance)?;
 
             let uri = addr.parse().into_url_parse(addr)?;

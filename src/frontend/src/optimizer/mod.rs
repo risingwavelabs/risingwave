@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools as _;
+use itertools::Itertools;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
@@ -267,7 +267,7 @@ impl LogicalPlanRoot {
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
-        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+        let Ok(select_idx) = Itertools::exactly_one(self.out_fields.ones()) else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
@@ -858,7 +858,9 @@ impl LogicalPlanRoot {
 
         let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
-                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                Itertools::exactly_one(pk_column_indices.iter())
+                    .copied()
+                    .unwrap(),
                 row_id_index
             );
             if append_only {

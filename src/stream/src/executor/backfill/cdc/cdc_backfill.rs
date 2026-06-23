@@ -479,17 +479,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             Mutation::Update(UpdateMutation {
                                                 dropped_actors,
                                                 ..
-                                            }) => {
-                                                if dropped_actors.contains(&self.actor_ctx.id) {
-                                                    // the actor has been dropped, exit the backfill loop
-                                                    tracing::info!(
-                                                        %table_id,
-                                                        upstream_table_name,
-                                                        "CdcBackfill has been dropped due to config change"
-                                                    );
-                                                    yield Message::Barrier(barrier);
-                                                    break 'backfill_loop;
-                                                }
+                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                                // the actor has been dropped, exit the backfill loop
+                                                tracing::info!(
+                                                    %table_id,
+                                                    upstream_table_name,
+                                                    "CdcBackfill has been dropped due to config change"
+                                                );
+                                                yield Message::Barrier(barrier);
+                                                break 'backfill_loop;
                                             }
                                             _ => (),
                                         }
