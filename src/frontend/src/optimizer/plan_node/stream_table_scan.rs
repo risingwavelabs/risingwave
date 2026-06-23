@@ -92,14 +92,18 @@ impl StreamTableScan {
             }
         };
 
+        let stream_kind = if core.append_only() {
+            StreamKind::AppendOnly
+        } else if stream_scan_type == StreamScanType::UpstreamOnly {
+            StreamKind::Upsert
+        } else {
+            StreamKind::Retract
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            if core.append_only() {
-                StreamKind::AppendOnly
-            } else {
-                StreamKind::Retract
-            },
+            stream_kind,
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),
