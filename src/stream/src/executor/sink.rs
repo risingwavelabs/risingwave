@@ -34,8 +34,8 @@ use risingwave_connector::sink::log_store::{
     LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
-    SinkWriterParam,
+    GLOBAL_SINK_METRICS, LogSinker, SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR,
+    SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
@@ -339,7 +339,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.sink_param.downstream_pk.clone(),
             self.non_append_only_behavior,
             metrics.sink_chunk_buffer_size,
-            self.sink.is_sink_into_table(),
+            self.sink_param
+                .properties
+                .get(SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR)
+                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
 
@@ -551,7 +554,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         downstream_pk: Option<Vec<usize>>,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
-        sink_into_table: bool,
+        preserve_row_level_changes: bool,
         skip_compact: bool,
     ) {
         // To reorder records, we need to buffer chunks of the entire epoch.
@@ -600,12 +603,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         //    to eliminate any unnecessary updates to external systems. This also rewrites the
                         //    `DELETE` and `INSERT` operations on the same key into `UPDATE` operations, which
                         //    usually have more efficient implementation.
-                        //
-                        //    Skip this for sink-into-table. The target table's conflict handler must observe
-                        //    every row-level change in order to preserve semantics such as `DO UPDATE IF NOT NULL`
-                        //    and version-column based conflict resolution.
+                        //    Skip this when the target table has special conflict semantics. In that case, the
+                        //    target table must observe every row-level change instead of a pre-compacted final state.
                         if let Some(downstream_pk) = &downstream_pk
-                            && !sink_into_table
+                            && !preserve_row_level_changes
                         {
                             let chunks = dispatch_output_kind!(sink_type, KIND, {
                                 StreamChunkCompactor::new(downstream_pk.clone(), chunks)
@@ -658,9 +659,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if !sink_type.is_append_only()
                             && let Some(downstream_pk) = &downstream_pk
                         {
-                            if sink_into_table {
-                                // Preserve every row-level change for sink-into-table so the target
-                                // table can apply its own conflict semantics.
+                            if preserve_row_level_changes {
+                                // Preserve every row-level change so the target table can apply its
+                                // own conflict semantics.
                             } else if skip_compact {
                                 // We can only skip compaction if the keys are exactly the same, not just
                                 // matching by being a subset.
@@ -1187,8 +1188,7 @@ mod test {
         executor.next().await.unwrap().unwrap();
     }
 
-    #[tokio::test]
-    async fn test_sink_into_table_preserves_same_barrier_partial_updates_for_mismatched_pk() {
+    async fn test_sink_into_table_preserves_special_conflict_rows_for_mismatched_pk() {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::types::DataType;
@@ -1197,6 +1197,7 @@ mod test {
 
         let properties = maplit::btreemap! {
             "connector".into() => "table".into(),
+            SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR.into() => "true".into(),
         };
 
         let columns = vec![
@@ -1280,8 +1281,7 @@ mod test {
         executor.next().await.unwrap().unwrap();
     }
 
-    #[tokio::test]
-    async fn test_sink_into_table_preserves_same_key_rows_without_reorder() {
+    async fn test_sink_into_table_keeps_default_compaction_without_special_conflict_semantics() {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::types::DataType;
@@ -1358,7 +1358,6 @@ mod test {
             chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I  I
-                  + 1 10
                   + 1 20",
             )
         );
