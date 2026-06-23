@@ -185,9 +185,9 @@ pub struct SourceMetrics {
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
 
-    /// Total connector ack failures after checkpoint by bounded failure category.
+    /// Total connector ack failures after checkpoint commit by bounded failure category.
     connector_ack_failure_count: IntCounterVec,
-    /// Total successful acks after checkpoint for source connectors.
+    /// Total successful connector acks after checkpoint commit.
     connector_ack_success_count: IntCounterVec,
 }
 
@@ -344,14 +344,14 @@ impl SourceMetrics {
 
         let connector_ack_failure_count = register_int_counter_vec_with_registry!(
             "source_connector_ack_failure_count",
-            "Total number of connector ack failures after checkpoint by bounded failure category",
+            "Total number of connector ack failures after checkpoint commit by bounded failure category",
             &["source_name", "connector_type", "error_type"],
             registry
         )
         .unwrap();
         let connector_ack_success_count = register_int_counter_vec_with_registry!(
             "source_connector_ack_success_count",
-            "Total number of successful acks after checkpoint for source connectors",
+            "Total number of successful connector acks after checkpoint commit",
             &["source_name", "connector_type"],
             registry
         )
