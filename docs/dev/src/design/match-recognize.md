@@ -127,21 +127,25 @@ to keep the factorial bounded).
 - **Buffering.** Each input row is written through to the state table; nothing is held in memory
   between watermarks. Rows may arrive out of order.
 - **Matching on watermark.** When the watermark on the leading `ORDER BY` column advances to `w`,
-  the executor scans the state table for its owned vnodes and groups the rows by partition. Every
-  row with `order_key <= w` is final; each partition's rows are sorted by the `ORDER BY` columns and
-  the matcher runs over the safe prefix. A match is emitted once a later safe row follows it (so the
-  greedy match is known maximal); `AFTER MATCH SKIP` decides where the scan resumes. This
-  per-watermark working set is bounded by the live (unfinalized) window and is not retained between
-  watermarks.
+  the executor scans the state table for its owned vnodes in key order — `(partition, order_key,
+  seq)` — so rows arrive grouped by partition and already ordered within each partition. It processes
+  one partition at a time: the contiguous run for a partition is accumulated, matched (no in-memory
+  sort — the scan order already is the `ORDER BY` order), emitted, then dropped before the next
+  partition. Every row with `order_key <= w` is final; the matcher runs over the safe prefix, a match
+  is emitted once a later safe row follows it (so the greedy match is known maximal), and `AFTER MATCH
+  SKIP` decides where the scan resumes. The per-watermark working set is therefore bounded by the
+  largest single partition's live rows plus one output chunk — not by a whole vnode — and nothing is
+  retained between watermarks.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
   known only once the match and its per-row variable labels are found, so each measure's synthetic
   row is built from the matched rows and the expression evaluated then. `WITHIN` is enforced during
   matching, pruning candidates that would push the span past the bound.
-- **Eviction.** Rows before the earliest position that could still *begin* a match are deleted from
-  the state table. Because every watermark scans all live partitions, expired rows are released even
-  from partitions that receive no new input — an idle partition does not retain dead rows. Together
-  with the watermark this bounds state to the live (unfinalized) window (see
-  [State bound and `WITHIN`](#state-bound-and-within)).
+- **Eviction.** Rows before the earliest position that could still *begin* a match are collected
+  during the scan and deleted in a batch after the iterator is dropped (a state-table delete cannot
+  interleave with an open iterator over it). Because every watermark scans all live partitions,
+  expired rows are released even from partitions that receive no new input — an idle partition does
+  not retain dead rows. Together with the watermark this bounds state to the live (unfinalized)
+  window (see [State bound and `WITHIN`](#state-bound-and-within)).
 
 Matching is **not incremental**: each advancing watermark re-runs the matcher from the start of the
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
@@ -151,8 +155,11 @@ future work.
 ## State and fault tolerance
 
 The operator declares one internal state table, layout `[ seq (i64), <input columns…> ]`, keyed by
-`(partition columns, seq)` and distributed by the partition key. `seq` is a per-partition monotonic
-id. Only the raw buffered rows are persisted — the NFA is recompiled from the pattern at startup and
+`(partition columns, ORDER BY columns, seq)` and distributed by the partition key. Keying by the
+order columns keeps the buffer physically sorted by `(partition, order key)`, so the watermark pass
+scans it in key order and processes one partition at a time without an in-memory sort. `seq` is a
+per-actor monotonic id that breaks ties between rows with equal `ORDER BY` keys. Only the raw
+buffered rows are persisted — the NFA is recompiled from the pattern at startup and
 `DEFINE`/`MEASURES` are evaluated at match time, so neither is stored. (This is less state than
 Flink's CEP, which persists the partial-match SharedBuffer.)
 
