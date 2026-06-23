@@ -1188,6 +1188,7 @@ mod test {
         executor.next().await.unwrap().unwrap();
     }
 
+    #[tokio::test]
     async fn test_sink_into_table_preserves_special_conflict_rows_for_mismatched_pk() {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::array::stream_chunk::StreamChunk;
@@ -1281,6 +1282,7 @@ mod test {
         executor.next().await.unwrap().unwrap();
     }
 
+    #[tokio::test]
     async fn test_sink_into_table_keeps_default_compaction_without_special_conflict_semantics() {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::array::stream_chunk::StreamChunk;
