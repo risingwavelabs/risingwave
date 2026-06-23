@@ -246,10 +246,10 @@ pub const SINK_USER_IGNORE_DELETE_OPTION: &str = "ignore_delete";
 /// Alias for [`SINK_USER_IGNORE_DELETE_OPTION`], kept for backward compatibility.
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
-/// Internal flag for sink-into-table. When enabled, the sink executor must preserve row-level
-/// changes so the target table can apply its own conflict handling semantics.
-pub const SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR: &str =
-    "_rw_sink_into_table_preserve_special_conflict_behavior";
+/// When enabled, the sink executor preserves row-level changes instead of compacting them by the
+/// downstream primary key within one barrier. This is useful when the downstream system relies on
+/// row-by-row conflict semantics rather than final-state upsert semantics.
+pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {

@@ -30,9 +30,9 @@ use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_RETRACT, SINK_TYPE_UPSERT,
-    SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_USER_IGNORE_DELETE_OPTION, SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
@@ -66,7 +66,7 @@ fn target_table_requires_row_level_conflict_handling(target_table: &TableCatalog
     !target_table.version_column_indices.is_empty()
         || matches!(
             target_table.conflict_behavior(),
-            ConflictBehavior::DoUpdateIfNotNull | ConflictBehavior::IgnoreConflict
+            ConflictBehavior::DoUpdateIfNotNull
         )
 }
 
@@ -483,7 +483,7 @@ impl StreamSink {
             && target_table_requires_row_level_conflict_handling(target_table)
         {
             properties.insert(
-                SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR.to_owned(),
+                SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.to_owned(),
                 "true".to_owned(),
             );
         }

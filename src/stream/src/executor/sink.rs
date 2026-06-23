@@ -34,8 +34,8 @@ use risingwave_connector::sink::log_store::{
     LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR,
-    SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam, SinkWriterParam,
+    GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION,
+    SINK_USER_PRESERVE_ROW_LEVEL_CHANGES, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
@@ -341,7 +341,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics.sink_chunk_buffer_size,
             self.sink_param
                 .properties
-                .get(SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR)
+                .get(SINK_USER_PRESERVE_ROW_LEVEL_CHANGES)
                 .is_some_and(|v| v.eq_ignore_ascii_case("true")),
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
@@ -1197,7 +1197,7 @@ mod test {
 
         let properties = maplit::btreemap! {
             "connector".into() => "table".into(),
-            SINK_INTO_TABLE_PRESERVE_SPECIAL_CONFLICT_BEHAVIOR.into() => "true".into(),
+            SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.into() => "true".into(),
         };
 
         let columns = vec![
