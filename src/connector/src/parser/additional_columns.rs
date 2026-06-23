@@ -622,7 +622,7 @@ mod test {
         );
 
         let mut column_exist = vec![true, true];
-        let mut hidden_ack_columns = hidden_state_columns.clone();
+        let mut hidden_ack_columns = hidden_state_columns;
         derive_rabbitmq_ack_data_column(
             RABBITMQ_CONNECTOR,
             &mut column_exist,
