@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::fmt::Display;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, Weak};
 
 use lapin::message::Delivery;
-use lapin::options::BasicAckOptions;
-use moka::future::Cache as MokaCache;
 
-use crate::source::{SourceContextRef, SourceMessage, SourceMeta, SplitId};
-
-pub static RABBITMQ_ACK_CACHE: LazyLock<MokaCache<String, RabbitmqAckEntry>> =
-    LazyLock::new(|| moka::future::Cache::builder().build());
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 static RABBITMQ_ACK_CONSUMER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -32,69 +24,44 @@ pub fn next_ack_consumer_id() -> u64 {
     RABBITMQ_ACK_CONSUMER_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-#[derive(Debug, Default)]
-pub struct RabbitmqAckTracker {
-    tokens: Arc<Mutex<HashSet<String>>>,
-}
-
-impl RabbitmqAckTracker {
-    fn track(&self, ack_token: &str) -> Weak<Mutex<HashSet<String>>> {
-        lock_tracker_tokens(&self.tokens).insert(ack_token.to_owned());
-        Arc::downgrade(&self.tokens)
-    }
-}
-
-impl Drop for RabbitmqAckTracker {
-    fn drop(&mut self) {
-        let tokens = lock_tracker_tokens(&self.tokens)
-            .drain()
-            .collect::<Vec<_>>();
-        if tokens.is_empty() {
-            return;
-        }
-
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                for ack_token in tokens {
-                    RABBITMQ_ACK_CACHE.remove(&ack_token).await;
-                }
-            });
-        } else {
-            tracing::warn!(
-                token_count = tokens.len(),
-                "RabbitMQ ack tracker dropped outside a Tokio runtime; stale ack cache entries may remain until process exit",
-            );
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct RabbitmqAckEntry {
-    acker: lapin::acker::Acker,
-    tracker: Weak<Mutex<HashSet<String>>>,
+pub struct RabbitmqMeta {
+    pub ack_data: Option<Vec<u8>>,
 }
 
-impl RabbitmqAckEntry {
-    fn new(acker: lapin::acker::Acker, tracker: Weak<Mutex<HashSet<String>>>) -> Self {
-        Self { acker, tracker }
-    }
-
-    fn untrack(&self, ack_token: &str) {
-        if let Some(tracker) = self.tracker.upgrade() {
-            lock_tracker_tokens(&tracker).remove(ack_token);
-        }
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RabbitmqAckData {
+    pub ack_consumer_id: u64,
+    pub delivery_tag: u64,
 }
 
-fn lock_tracker_tokens(tokens: &Mutex<HashSet<String>>) -> MutexGuard<'_, HashSet<String>> {
-    match tokens.lock() {
-        Ok(tokens) => tokens,
-        Err(poisoned) => {
-            tracing::warn!(
-                "RabbitMQ ack tracker mutex was poisoned; recovering tracked ack tokens"
-            );
-            poisoned.into_inner()
+impl RabbitmqAckData {
+    pub const ENCODED_LEN: usize = 16;
+
+    pub fn encode(self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::ENCODED_LEN);
+        buf.extend_from_slice(&self.ack_consumer_id.to_be_bytes());
+        buf.extend_from_slice(&self.delivery_tag.to_be_bytes());
+        buf
+    }
+
+    pub fn decode(bytes: &[u8]) -> crate::error::ConnectorResult<Self> {
+        if bytes.len() != Self::ENCODED_LEN {
+            return Err(anyhow::anyhow!(
+                "invalid RabbitMQ ack data length: expected {}, got {}",
+                Self::ENCODED_LEN,
+                bytes.len()
+            )
+            .into());
         }
+        let mut ack_consumer_id = [0; 8];
+        ack_consumer_id.copy_from_slice(&bytes[..8]);
+        let mut delivery_tag = [0; 8];
+        delivery_tag.copy_from_slice(&bytes[8..]);
+        Ok(Self {
+            ack_consumer_id: u64::from_be_bytes(ack_consumer_id),
+            delivery_tag: u64::from_be_bytes(delivery_tag),
+        })
     }
 }
 
@@ -103,57 +70,41 @@ pub struct RabbitmqMessage {
     pub split_id: SplitId,
     pub queue: String,
     pub delivery_tag: u64,
-    pub ack_token: String,
+    pub ack_consumer_id: u64,
+    pub ack_data: Vec<u8>,
     pub payload: Vec<u8>,
     pub redelivered: bool,
 }
 
 impl RabbitmqMessage {
-    pub async fn new(
-        split_id: SplitId,
-        queue: String,
-        ack_consumer_id: u64,
-        ack_tracker: &RabbitmqAckTracker,
-        delivery: Delivery,
-        source_ctx: &SourceContextRef,
-    ) -> Self {
+    pub fn new(split_id: SplitId, queue: String, ack_consumer_id: u64, delivery: Delivery) -> Self {
         let Delivery {
             delivery_tag,
             redelivered,
             data,
-            acker,
             ..
         } = delivery;
-        let ack_token = ack_token(
-            source_ctx.source_id.as_raw_id(),
-            source_ctx.actor_id,
-            &split_id,
-            &queue,
+        let ack_data = RabbitmqAckData {
             ack_consumer_id,
             delivery_tag,
-        );
-        // RabbitMQ delivery tags are only valid on the channel that delivered the message.
-        // The token therefore scopes the tag to this reader-owned consumer and is used only
-        // for checkpoint-time acknowledgement while the channel is alive. If the reader or
-        // connection closes before the checkpoint ack, RabbitMQ requeues the unacked delivery.
-        RABBITMQ_ACK_CACHE
-            .insert(
-                ack_token.clone(),
-                RabbitmqAckEntry::new(acker, ack_tracker.track(&ack_token)),
-            )
-            .await;
+        }
+        .encode();
         Self {
             split_id,
             queue,
             delivery_tag,
-            ack_token,
+            ack_consumer_id,
+            ack_data,
             payload: data,
             redelivered,
         }
     }
 
     pub fn offset(&self) -> String {
-        self.ack_token.clone()
+        format!(
+            "{}:{}:{}",
+            self.queue, self.ack_consumer_id, self.delivery_tag
+        )
     }
 }
 
@@ -165,49 +116,38 @@ impl From<RabbitmqMessage> for SourceMessage {
             payload: Some(message.payload),
             offset,
             split_id: message.split_id,
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::Rabbitmq(RabbitmqMeta {
+                ack_data: Some(message.ack_data),
+            }),
         }
-    }
-}
-
-pub fn ack_token(
-    source_id: impl Display,
-    actor_id: impl Display,
-    split_id: &SplitId,
-    queue: &str,
-    ack_consumer_id: u64,
-    delivery_tag: u64,
-) -> String {
-    let queue = urlencoding::encode(queue);
-    format!("{source_id}:{actor_id}:{split_id}:{queue}:{ack_consumer_id}:{delivery_tag}")
-}
-
-pub async fn ack_delivery(ack_token: String) -> crate::error::ConnectorResult<bool> {
-    if let Some(entry) = RABBITMQ_ACK_CACHE.get(&ack_token).await {
-        entry.acker.ack(BasicAckOptions::default()).await?;
-        if let Some(entry) = RABBITMQ_ACK_CACHE.remove(&ack_token).await {
-            entry.untrack(&ack_token);
-        }
-        Ok(true)
-    } else {
-        Ok(false)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ack_token;
-    use crate::source::SplitId;
+    use super::RabbitmqAckData;
 
     #[test]
-    fn ack_token_is_scoped_beyond_delivery_tag() {
-        let split_id = SplitId::from("0");
-        let first = ack_token(1, 10, &split_id, "queue:orders", 100, 1);
-        let different_source = ack_token(2, 10, &split_id, "queue:orders", 100, 1);
-        let different_consumer = ack_token(1, 10, &split_id, "queue:orders", 101, 1);
+    fn rabbitmq_ack_data_roundtrip() {
+        let ack_data = RabbitmqAckData {
+            ack_consumer_id: 42,
+            delivery_tag: u64::MAX - 1,
+        };
 
-        assert_ne!(first, different_source);
-        assert_ne!(first, different_consumer);
-        assert!(first.contains("queue%3Aorders"));
+        let encoded = ack_data.encode();
+
+        assert_eq!(encoded.len(), RabbitmqAckData::ENCODED_LEN);
+        assert_eq!(RabbitmqAckData::decode(&encoded).unwrap(), ack_data);
+    }
+
+    #[test]
+    fn rabbitmq_ack_data_rejects_invalid_bytes() {
+        for bytes in [
+            vec![],
+            vec![0; RabbitmqAckData::ENCODED_LEN - 1],
+            vec![0; RabbitmqAckData::ENCODED_LEN + 1],
+        ] {
+            assert!(RabbitmqAckData::decode(&bytes).is_err());
+        }
     }
 }

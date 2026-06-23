@@ -12,24 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
-use lapin::options::{BasicConsumeOptions, BasicQosOptions};
+use lapin::options::{BasicAckOptions, BasicConsumeOptions, BasicQosOptions};
 use lapin::types::FieldTable;
-use lapin::{Connection, ConnectionStatus, Consumer};
+use lapin::{Channel, Connection, ConnectionStatus, Consumer};
+use moka::future::Cache as MokaCache;
 use risingwave_common::ensure;
 use rw_futures_util::select_all;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::{MissedTickBehavior, interval};
-use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 
-use super::message::{RabbitmqAckTracker, RabbitmqMessage, next_ack_consumer_id};
+use super::message::{RabbitmqMessage, next_ack_consumer_id};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
@@ -39,8 +43,59 @@ use crate::source::{
     SplitReader,
 };
 
+/// Pulsar-style live reader mailbox registry for checkpoint acknowledgements.
+///
+/// This registry only maps an active `ack_consumer_id` to its reader event-loop
+/// sender. It must not store `Acker`, deliveries, delivery tags, payloads,
+/// offsets, or retry state. Checkpoint ack state is carried exclusively by
+/// `SourceMeta::Rabbitmq` and hidden `rabbitmq_ack_data`.
+pub static RABBITMQ_ACK_SENDER_REGISTRY: LazyLock<
+    MokaCache<u64, UnboundedSender<RabbitmqAckRequest>>,
+> = LazyLock::new(|| moka::future::Cache::builder().build());
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RabbitmqAckRequest {
+    pub ack_consumer_id: u64,
+    pub delivery_tag: u64,
+}
+
+struct RabbitmqConsumerState {
+    queue: String,
+    ack_consumer_id: u64,
+    channel: Channel,
+    consumer: Consumer,
+    ack_tx: UnboundedSender<RabbitmqAckRequest>,
+    ack_rx: UnboundedReceiver<RabbitmqAckRequest>,
+}
+
+struct RabbitmqAckSenderGuard {
+    ack_consumer_ids: Vec<u64>,
+}
+
+impl Drop for RabbitmqAckSenderGuard {
+    fn drop(&mut self) {
+        let ack_consumer_ids = std::mem::take(&mut self.ack_consumer_ids);
+        if ack_consumer_ids.is_empty() {
+            return;
+        }
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                for ack_consumer_id in ack_consumer_ids {
+                    RABBITMQ_ACK_SENDER_REGISTRY.remove(&ack_consumer_id).await;
+                }
+            });
+        } else {
+            tracing::warn!(
+                ack_consumer_count = ack_consumer_ids.len(),
+                "RabbitMQ ack sender registry cleanup ran outside a Tokio runtime",
+            );
+        }
+    }
+}
+
 pub struct RabbitmqSplitReader {
-    consumers: Vec<(String, u64, Consumer)>,
+    consumers: Vec<RabbitmqConsumerState>,
     // Keep the AMQP connection alive for the consumers/channels owned by this reader.
     #[expect(dead_code)]
     connection: Option<Connection>,
@@ -49,7 +104,6 @@ pub struct RabbitmqSplitReader {
     split: RabbitmqSplit,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-    ack_tracker: RabbitmqAckTracker,
 }
 
 #[async_trait]
@@ -80,7 +134,6 @@ impl SplitReader for RabbitmqSplitReader {
                 split,
                 parser_config,
                 source_ctx,
-                ack_tracker: RabbitmqAckTracker::default(),
             });
         }
 
@@ -119,7 +172,15 @@ impl SplitReader for RabbitmqSplitReader {
                     FieldTable::default(),
                 )
                 .await?;
-            consumers.push((queue.clone(), ack_consumer_id, consumer));
+            let (ack_tx, ack_rx) = unbounded_channel();
+            consumers.push(RabbitmqConsumerState {
+                queue: queue.clone(),
+                ack_consumer_id,
+                channel,
+                consumer,
+                ack_tx,
+                ack_rx,
+            });
         }
 
         Ok(Self {
@@ -130,7 +191,6 @@ impl SplitReader for RabbitmqSplitReader {
             split,
             parser_config,
             source_ctx,
-            ack_tracker: RabbitmqAckTracker::default(),
         })
     }
 
@@ -150,23 +210,45 @@ impl RabbitmqSplitReader {
 
         let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
         let split_id = self.split.id();
-        let streams = std::mem::take(&mut self.consumers).into_iter().map(
-            |(queue, ack_consumer_id, consumer)| {
-                consumer.map(move |delivery| {
-                    delivery
-                        .map(|delivery| RabbitmqReaderEvent::Delivery {
-                            queue: queue.clone(),
-                            ack_consumer_id,
-                            delivery,
-                        })
-                        .map_err(Into::into)
-                })
-            },
-        );
-        let mut streams = streams
-            .map(|stream| stream.boxed())
-            .collect::<Vec<BoxStream<'static, crate::error::ConnectorResult<RabbitmqReaderEvent>>>>(
+        let mut channels = HashMap::with_capacity(self.consumers.len());
+        let mut ack_consumer_ids = Vec::with_capacity(self.consumers.len());
+        let mut streams =
+            Vec::<BoxStream<'static, crate::error::ConnectorResult<RabbitmqReaderEvent>>>::new();
+        for consumer_state in std::mem::take(&mut self.consumers) {
+            let RabbitmqConsumerState {
+                queue,
+                ack_consumer_id,
+                channel,
+                consumer,
+                ack_tx,
+                ack_rx,
+            } = consumer_state;
+            RABBITMQ_ACK_SENDER_REGISTRY
+                .entry(ack_consumer_id)
+                .and_upsert_with(|_| std::future::ready(ack_tx))
+                .await;
+            channels.insert(ack_consumer_id, channel);
+            ack_consumer_ids.push(ack_consumer_id);
+            streams.push(
+                consumer
+                    .map(move |delivery| {
+                        delivery
+                            .map(|delivery| RabbitmqReaderEvent::Delivery {
+                                queue: queue.clone(),
+                                ack_consumer_id,
+                                delivery,
+                            })
+                            .map_err(Into::into)
+                    })
+                    .boxed(),
             );
+            streams.push(
+                UnboundedReceiverStream::new(ack_rx)
+                    .map(|request| Ok(RabbitmqReaderEvent::Ack(request)))
+                    .boxed(),
+            );
+        }
+        let _ack_sender_guard = RabbitmqAckSenderGuard { ack_consumer_ids };
         if self.connection_status.is_some() {
             let mut blocked_ticker =
                 interval(blocked_check_interval(self.blocked_connection_timeout));
@@ -181,53 +263,49 @@ impl RabbitmqSplitReader {
         let mut blocked_since = None;
 
         while let Some(event) = events.next().await {
-            let Some((queue, ack_consumer_id, delivery)) = event?.into_delivery(
-                self.connection_status.as_ref(),
-                &mut blocked_since,
-                self.blocked_connection_timeout,
-                &split_id,
-                &self.source_ctx,
-            )?
+            let Some((queue, ack_consumer_id, delivery)) = event?
+                .handle(
+                    self.connection_status.as_ref(),
+                    &channels,
+                    &mut blocked_since,
+                    self.blocked_connection_timeout,
+                    &split_id,
+                    &self.source_ctx,
+                )
+                .await?
             else {
                 continue;
             };
             let mut batch = Vec::with_capacity(capacity);
-            batch.push(SourceMessage::from(
-                RabbitmqMessage::new(
-                    split_id.clone(),
-                    queue,
-                    ack_consumer_id,
-                    &self.ack_tracker,
-                    delivery,
-                    &self.source_ctx,
-                )
-                .await,
-            ));
+            batch.push(SourceMessage::from(RabbitmqMessage::new(
+                split_id.clone(),
+                queue,
+                ack_consumer_id,
+                delivery,
+            )));
 
             while batch.len() < capacity {
                 match events.next().now_or_never() {
                     Some(Some(event)) => {
-                        let Some((queue, ack_consumer_id, delivery)) = event?.into_delivery(
-                            self.connection_status.as_ref(),
-                            &mut blocked_since,
-                            self.blocked_connection_timeout,
-                            &split_id,
-                            &self.source_ctx,
-                        )?
+                        let Some((queue, ack_consumer_id, delivery)) = event?
+                            .handle(
+                                self.connection_status.as_ref(),
+                                &channels,
+                                &mut blocked_since,
+                                self.blocked_connection_timeout,
+                                &split_id,
+                                &self.source_ctx,
+                            )
+                            .await?
                         else {
                             continue;
                         };
-                        batch.push(SourceMessage::from(
-                            RabbitmqMessage::new(
-                                split_id.clone(),
-                                queue,
-                                ack_consumer_id,
-                                &self.ack_tracker,
-                                delivery,
-                                &self.source_ctx,
-                            )
-                            .await,
-                        ));
+                        batch.push(SourceMessage::from(RabbitmqMessage::new(
+                            split_id.clone(),
+                            queue,
+                            ack_consumer_id,
+                            delivery,
+                        )));
                     }
                     _ => break,
                 }
@@ -243,13 +321,15 @@ enum RabbitmqReaderEvent {
         ack_consumer_id: u64,
         delivery: lapin::message::Delivery,
     },
+    Ack(RabbitmqAckRequest),
     CheckBlockedConnection,
 }
 
 impl RabbitmqReaderEvent {
-    fn into_delivery(
+    async fn handle(
         self,
         status: Option<&ConnectionStatus>,
+        channels: &HashMap<u64, Channel>,
         blocked_since: &mut Option<Instant>,
         timeout: Duration,
         split_id: &SplitId,
@@ -261,6 +341,24 @@ impl RabbitmqReaderEvent {
                 ack_consumer_id,
                 delivery,
             } => Ok(Some((queue, ack_consumer_id, delivery))),
+            Self::Ack(request) => {
+                if let Some(channel) = channels.get(&request.ack_consumer_id) {
+                    // RabbitMQ delivery tags are scoped to the channel that delivered the
+                    // message. The checkpoint worker sends the max parser-progress frontier
+                    // per ack_consumer_id; cumulative ack is therefore only applied on this
+                    // exact reader-owned channel.
+                    channel
+                        .basic_ack(request.delivery_tag, BasicAckOptions { multiple: true })
+                        .await?;
+                } else {
+                    tracing::debug!(
+                        ack_consumer_id = request.ack_consumer_id,
+                        delivery_tag = request.delivery_tag,
+                        "RabbitMQ ack request skipped because the reader channel is gone",
+                    );
+                }
+                Ok(None)
+            }
             Self::CheckBlockedConnection => {
                 if let Some(status) = status
                     && let Some(reason) = check_blocked_connection(
