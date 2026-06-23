@@ -353,9 +353,7 @@ impl PulsarConsumeStream {
     fn inc_ack_success_count(&self) {
         self.source_ctx
             .metrics
-            .connector_ack_success_count
-            .with_label_values(&[self.source_ctx.source_name.as_str(), "pulsar"])
-            .inc();
+            .inc_connector_ack_success_count(self.source_ctx.source_name.as_str(), "pulsar");
     }
 
     fn do_ack(&mut self, message_id_bytes: Vec<u8>) {

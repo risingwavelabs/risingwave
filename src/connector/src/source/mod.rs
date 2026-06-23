@@ -248,9 +248,15 @@ impl WaitCheckpointTask {
                     source_id_label: &str,
                     source_name: &str,
                 ) {
+                    if ack_ids.is_empty() {
+                        return;
+                    }
                     tracing::trace!("acking pubsub messages {:?}", ack_ids);
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, subscription.ack(ack_ids)).await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            GLOBAL_SOURCE_METRICS
+                                .inc_connector_ack_success_count(source_name, "pubsub");
+                        }
                         Ok(Err(e)) => {
                             GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
                                 source_name,
@@ -320,7 +326,10 @@ impl WaitCheckpointTask {
                         Ok::<(), String>(())
                     };
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, fut).await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            GLOBAL_SOURCE_METRICS
+                                .inc_connector_ack_success_count(source_name, "nats_jetstream");
+                        }
                         Ok(Err(e)) => {
                             GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
                                 source_name,

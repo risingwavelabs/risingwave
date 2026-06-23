@@ -188,7 +188,7 @@ pub struct SourceMetrics {
     /// Total connector ack failures after checkpoint by bounded failure category.
     connector_ack_failure_count: IntCounterVec,
     /// Total successful acks after checkpoint for source connectors.
-    pub connector_ack_success_count: IntCounterVec,
+    connector_ack_success_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -203,6 +203,12 @@ impl SourceMetrics {
     ) {
         self.connector_ack_failure_count
             .with_label_values(&[source_name, connector_type, failure_type.as_str()])
+            .inc();
+    }
+
+    pub fn inc_connector_ack_success_count(&self, source_name: &str, connector_type: &'static str) {
+        self.connector_ack_success_count
+            .with_label_values(&[source_name, connector_type])
             .inc();
     }
 
