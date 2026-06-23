@@ -19,6 +19,7 @@ use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
 use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
+use futures::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
@@ -306,10 +307,9 @@ impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let future = self.write_chunk_inner(chunk)?;
-        add_future.add_future_may_await(future).await?;
+        self.write_chunk_inner(chunk)?.map_ok(|_| ()).await?;
         Ok(())
     }
 }
