@@ -406,8 +406,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
-        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_split_offset_col_idx(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
 

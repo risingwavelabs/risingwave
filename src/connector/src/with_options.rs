@@ -27,7 +27,7 @@ use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
     KAFKA_CONNECTOR, LEGACY_S3_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
-    PULSAR_CONNECTOR, UPSTREAM_SOURCE_KEY,
+    PULSAR_CONNECTOR, RABBITMQ_CONNECTOR, UPSTREAM_SOURCE_KEY,
 };
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
@@ -133,6 +133,14 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             return false;
         };
         connector == PULSAR_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn is_rabbitmq_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == RABBITMQ_CONNECTOR
     }
 
     #[inline(always)]

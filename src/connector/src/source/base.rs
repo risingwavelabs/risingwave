@@ -45,6 +45,7 @@ use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
+use super::rabbitmq::source::RabbitmqMeta;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -939,6 +940,7 @@ pub enum SourceMeta {
     Kafka(KafkaMeta),
     Kinesis(KinesisMeta),
     Pulsar(PulsarMeta),
+    Rabbitmq(RabbitmqMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),

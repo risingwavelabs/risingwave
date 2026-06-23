@@ -62,6 +62,7 @@ pub mod rabbitmq;
 pub mod utils;
 
 mod util;
+use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::time::Duration;
 
@@ -87,7 +88,6 @@ feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 
 use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
-use futures::{StreamExt, stream};
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
@@ -103,7 +103,9 @@ pub use crate::source::filesystem::opendal_source::{
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
 use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
-use crate::source::rabbitmq::source::ack_delivery as ack_rabbitmq_delivery;
+use crate::source::rabbitmq::source::{
+    RABBITMQ_ACK_SENDER_REGISTRY, RabbitmqAckData, RabbitmqAckRequest,
+};
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -349,72 +351,84 @@ impl WaitCheckpointTask {
                     }
                 }
             }
-            WaitCheckpointTask::AckRabbitmqMessage(ack_token_arrs) => {
-                const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-                const MAX_CONCURRENT_ACKS: usize = 32;
-
-                let ack_tokens = ack_token_arrs
-                    .iter()
-                    .flat_map(|arr| arr.as_utf8().iter().flatten().map(ToOwned::to_owned))
-                    .collect::<Vec<_>>();
-                let ack_count = ack_tokens.len();
-                let source_id = source_id_label.clone();
-                let source_name = source_name.to_owned();
-                let task_source_name = source_name.clone();
-                let mut ack_task = tokio::spawn(async move {
-                    stream::iter(ack_tokens)
-                        .for_each_concurrent(MAX_CONCURRENT_ACKS, |ack_token| {
-                            let source_id = source_id.clone();
-                            let source_name = task_source_name.clone();
-                            async move {
-                                match ack_rabbitmq_delivery(ack_token.clone()).await {
-                                    Ok(true) => {}
-                                    Ok(false) => {
-                                        tracing::debug!(
-                                            source_id,
-                                            source_name,
-                                            ack_token,
-                                            "RabbitMQ delivery was already acked or no longer tracked",
-                                        );
-                                    }
-                                    Err(e) => {
-                                        tracing::error!(
-                                            source_id,
-                                            source_name,
-                                            error = %e.as_report(),
-                                            ack_token,
-                                            "failed to ack RabbitMQ message; broker will requeue it if the reader channel closes before the ack succeeds",
-                                        );
-                                    }
-                                }
-                            }
-                        })
-                        .await;
-                });
-
-                match tokio::time::timeout(ACK_RPC_TIMEOUT, &mut ack_task).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        tracing::error!(
+            WaitCheckpointTask::AckRabbitmqMessage(ack_data_arrs) => {
+                let ack_requests = collect_rabbitmq_cumulative_ack_requests(
+                    &ack_data_arrs,
+                    &source_id_label,
+                    source_name,
+                );
+                for request in ack_requests {
+                    if let Some(ack_tx) = RABBITMQ_ACK_SENDER_REGISTRY
+                        .get(&request.ack_consumer_id)
+                        .await
+                    {
+                        if ack_tx.send(request).is_err() {
+                            tracing::debug!(
+                                source_id = source_id_label,
+                                source_name,
+                                ack_consumer_id = request.ack_consumer_id,
+                                delivery_tag = request.delivery_tag,
+                                "RabbitMQ reader ack mailbox is closed; reader shutdown will let RabbitMQ requeue unacked deliveries",
+                            );
+                        }
+                    } else {
+                        tracing::debug!(
                             source_id = source_id_label,
                             source_name,
-                            error = %e.as_report(),
-                            ack_count,
-                            "RabbitMQ checkpoint ack task failed",
-                        );
-                    }
-                    Err(_) => {
-                        tracing::error!(
-                            source_id = source_id_label,
-                            source_name,
-                            ack_count,
-                            "RabbitMQ checkpoint ack task did not finish after {ACK_RPC_TIMEOUT:?}; acking continues in the background so committed deliveries are not abandoned",
+                            ack_consumer_id = request.ack_consumer_id,
+                            delivery_tag = request.delivery_tag,
+                            "RabbitMQ reader ack sender is not registered; reader shutdown will let RabbitMQ requeue unacked deliveries",
                         );
                     }
                 }
             }
         }
     }
+}
+
+fn collect_rabbitmq_cumulative_ack_requests(
+    ack_data_arrs: &[ArrayRef],
+    source_id: &str,
+    source_name: &str,
+) -> Vec<RabbitmqAckRequest> {
+    // The max delivery tag per reader-owned channel is the parser-progress
+    // frontier for checkpoint ack. This matches RabbitMQ cumulative ack
+    // semantics and intentionally keeps parser-skipped messages behind that
+    // frontier acknowledged with the successfully parsed checkpoint batch.
+    let mut max_delivery_tag_by_consumer = HashMap::<u64, u64>::new();
+
+    for ack_data in ack_data_arrs
+        .iter()
+        .flat_map(|arr| arr.as_bytea().iter().flatten())
+    {
+        match RabbitmqAckData::decode(ack_data) {
+            Ok(ack_data) => {
+                max_delivery_tag_by_consumer
+                    .entry(ack_data.ack_consumer_id)
+                    .and_modify(|delivery_tag| {
+                        *delivery_tag = (*delivery_tag).max(ack_data.delivery_tag);
+                    })
+                    .or_insert(ack_data.delivery_tag);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    source_id,
+                    source_name,
+                    error = %e.as_report(),
+                    ack_data_len = ack_data.len(),
+                    "skipping malformed RabbitMQ checkpoint ack data",
+                );
+            }
+        }
+    }
+
+    max_delivery_tag_by_consumer
+        .into_iter()
+        .map(|(ack_consumer_id, delivery_tag)| RabbitmqAckRequest {
+            ack_consumer_id,
+            delivery_tag,
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -430,4 +444,47 @@ pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
 #[inline]
 pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
     format!("{}-{}", source_id, split_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::array::{ArrayImpl, BytesArray};
+
+    use super::collect_rabbitmq_cumulative_ack_requests;
+    use crate::source::rabbitmq::source::RabbitmqAckData;
+
+    fn ack_data(ack_consumer_id: u64, delivery_tag: u64) -> Vec<u8> {
+        RabbitmqAckData {
+            ack_consumer_id,
+            delivery_tag,
+        }
+        .encode()
+    }
+
+    #[test]
+    fn rabbitmq_checkpoint_ack_requests_are_cumulative_per_consumer() {
+        let c1_tag_3 = ack_data(1, 3);
+        let c1_tag_7 = ack_data(1, 7);
+        let c2_tag_4 = ack_data(2, 4);
+        let invalid = vec![0; RabbitmqAckData::ENCODED_LEN - 1];
+        let arrays = vec![Arc::new(ArrayImpl::from(BytesArray::from_iter([
+            Some(c1_tag_3.as_slice()),
+            Some(c1_tag_7.as_slice()),
+            None,
+            Some(c2_tag_4.as_slice()),
+            Some(invalid.as_slice()),
+        ])))];
+
+        let mut requests =
+            collect_rabbitmq_cumulative_ack_requests(&arrays, "source-1", "rabbitmq_source");
+        requests.sort_by_key(|request| request.ack_consumer_id);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].ack_consumer_id, 1);
+        assert_eq!(requests[0].delivery_tag, 7);
+        assert_eq!(requests[1].ack_consumer_id, 2);
+        assert_eq!(requests[1].delivery_tag, 4);
+    }
 }

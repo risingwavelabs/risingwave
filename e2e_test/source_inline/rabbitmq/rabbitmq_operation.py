@@ -21,9 +21,14 @@ def env(name: str, default: str) -> str:
 
 class RabbitmqAdmin:
     def __init__(self) -> None:
-        self.base_url = env("RISEDEV_RABBITMQ_MANAGEMENT_URL", env("RABBITMQ_MANAGEMENT_URL", DEFAULT_MANAGEMENT_URL)).rstrip("/")
+        self.base_url = env(
+            "RISEDEV_RABBITMQ_MANAGEMENT_URL",
+            env("RABBITMQ_MANAGEMENT_URL", DEFAULT_MANAGEMENT_URL),
+        ).rstrip("/")
         self.user = env("RISEDEV_RABBITMQ_USER", env("RABBITMQ_USER", DEFAULT_USER))
-        self.password = env("RISEDEV_RABBITMQ_PASSWORD", env("RABBITMQ_PASSWORD", DEFAULT_PASSWORD))
+        self.password = env(
+            "RISEDEV_RABBITMQ_PASSWORD", env("RABBITMQ_PASSWORD", DEFAULT_PASSWORD)
+        )
         self.vhost = env("RISEDEV_RABBITMQ_VHOST", env("RABBITMQ_VHOST", DEFAULT_VHOST))
         self.session = requests.Session()
         self.session.auth = (self.user, self.password)
@@ -35,7 +40,10 @@ class RabbitmqAdmin:
     def _request(self, method: str, path_parts: tuple[str, ...], **kwargs) -> requests.Response:
         response = self.session.request(method, self._url(*path_parts), timeout=10, **kwargs)
         if response.status_code >= 400:
-            raise RuntimeError(f"RabbitMQ API {method} {response.url} failed: {response.status_code} {response.text}")
+            raise RuntimeError(
+                f"RabbitMQ API {method} {response.url} failed: "
+                f"{response.status_code} {response.text}"
+            )
         return response
 
     def health(self) -> None:
@@ -57,20 +65,42 @@ class RabbitmqAdmin:
             url = f"{self.base_url}/api/{'/'.join(urllib.parse.quote(part, safe='') for part in path)}"
             response = self.session.delete(url, timeout=10)
             if response.status_code not in (204, 404):
-                raise RuntimeError(f"RabbitMQ API DELETE {url} failed: {response.status_code} {response.text}")
+                raise RuntimeError(
+                    f"RabbitMQ API DELETE {url} failed: "
+                    f"{response.status_code} {response.text}"
+                )
 
     def setup(self, exchange: str, queue: str, routing_key: str) -> None:
-        self._request("PUT", ("exchanges", self.vhost, exchange), json={"type": "direct", "durable": False, "auto_delete": False, "arguments": {}})
-        self._request("PUT", ("queues", self.vhost, queue), json={"durable": False, "auto_delete": False, "arguments": {}})
+        self._request(
+            "PUT",
+            ("exchanges", self.vhost, exchange),
+            json={"type": "direct", "durable": False, "auto_delete": False, "arguments": {}},
+        )
+        self._request(
+            "PUT",
+            ("queues", self.vhost, queue),
+            json={"durable": False, "auto_delete": False, "arguments": {}},
+        )
         self._request(
             "POST",
             ("bindings", self.vhost, "e", exchange, "q", queue),
             json={"routing_key": routing_key, "arguments": {}},
         )
 
-    def publish_json(self, exchange: str, routing_key: str, count: int) -> None:
-        for i in range(count):
-            payload = json.dumps({"id": i, "value": f"message_{i}"}, separators=(",", ":"))
+    def publish_json(
+        self,
+        exchange: str,
+        routing_key: str,
+        count: int,
+        start_id: int,
+        value_prefix: str,
+    ) -> None:
+        for seq in range(count):
+            message_id = start_id + seq
+            payload = json.dumps(
+                {"id": message_id, "value": f"{value_prefix}_{message_id}"},
+                separators=(",", ":"),
+            )
             response = self._request(
                 "POST",
                 ("exchanges", self.vhost, exchange, "publish"),
@@ -83,7 +113,44 @@ class RabbitmqAdmin:
             )
             routed = response.json().get("routed")
             if routed is not True:
-                raise RuntimeError(f"RabbitMQ publish did not route message {i}: {response.text}")
+                raise RuntimeError(
+                    f"RabbitMQ publish did not route message {message_id}: {response.text}"
+                )
+
+    def queue_stats(
+        self,
+        queue: str,
+        expect_ready: int,
+        expect_unacked: int,
+        timeout: float,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        while True:
+            response = self._request("GET", ("queues", self.vhost, queue))
+            stats = response.json()
+            missing_fields = [
+                field
+                for field in ("messages_ready", "messages_unacknowledged")
+                if field not in stats
+            ]
+            if missing_fields:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"queue {queue} stats response missed required fields "
+                        f"{missing_fields}: {stats}"
+                    )
+                time.sleep(1)
+                continue
+            ready = int(stats["messages_ready"])
+            unacked = int(stats["messages_unacknowledged"])
+            if ready == expect_ready and unacked == expect_unacked:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"queue {queue} stats mismatch: expected ready={expect_ready} "
+                    f"unacked={expect_unacked}, got ready={ready} unacked={unacked}"
+                )
+            time.sleep(1)
 
 
 def main() -> int:
@@ -102,6 +169,14 @@ def main() -> int:
     p.add_argument("--exchange", required=True)
     p.add_argument("--routing-key", required=True)
     p.add_argument("--count", type=int, default=100)
+    p.add_argument("--start-id", type=int, default=0)
+    p.add_argument("--value-prefix", default="message")
+
+    p = sub.add_parser("queue-stats")
+    p.add_argument("--queue", required=True)
+    p.add_argument("--expect-ready", type=int, required=True)
+    p.add_argument("--expect-unacked", type=int, required=True)
+    p.add_argument("--timeout", type=float, default=30)
 
     args = parser.parse_args()
     admin = RabbitmqAdmin()
@@ -116,7 +191,18 @@ def main() -> int:
         admin.setup(args.exchange, args.queue, args.routing_key)
     elif args.command == "publish-json":
         admin.health()
-        admin.publish_json(args.exchange, args.routing_key, args.count)
+        admin.publish_json(
+            args.exchange,
+            args.routing_key,
+            args.count,
+            args.start_id,
+            args.value_prefix,
+        )
+    elif args.command == "queue-stats":
+        admin.health()
+        admin.queue_stats(
+            args.queue, args.expect_ready, args.expect_unacked, args.timeout
+        )
     else:
         parser.error(f"unknown command: {args.command}")
     return 0
