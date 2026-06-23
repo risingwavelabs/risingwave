@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::{Context, anyhow};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
-use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
+use dynamodb::types::{AttributeValue, KeySchemaElement, TableStatus, WriteRequest};
 use futures::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -174,25 +174,9 @@ impl Sink for DynamoDbSink {
                 table_name
             )));
         }
-        let pk_set: HashSet<String> = self
-            .schema
-            .fields()
-            .iter()
-            .enumerate()
-            .filter(|(k, _)| self.pk_indices.contains(k))
-            .map(|(_, v)| v.name.clone())
-            .collect();
-        let key_schema = table.key_schema();
-
-        for key_element in key_schema.iter().map(|x| x.attribute_name()) {
-            if !pk_set.contains(key_element) {
-                return Err(SinkError::DynamoDb(anyhow!(
-                    "table {} key field {} not found in schema or not primary key",
-                    table_name,
-                    key_element
-                )));
-            }
-        }
+        let rw_pk_names = rw_pk_names(&self.schema, &self.pk_indices)?;
+        let dynamodb_keys = dynamodb_key_schema_names(table_name, table.key_schema())?;
+        validate_pk_matches_dynamodb_key_schema(table_name, &rw_pk_names, &dynamodb_keys)?;
 
         Ok(())
     }
@@ -280,12 +264,7 @@ impl DynamoDbSinkWriter {
                 table_name
             )));
         };
-        let dynamodb_keys = table
-            .key_schema
-            .unwrap_or_default()
-            .into_iter()
-            .map(|k| k.attribute_name)
-            .collect();
+        let dynamodb_keys = dynamodb_key_schema_names(table_name, table.key_schema())?;
 
         let payload_writer = DynamoDbPayloadWriter {
             client,
@@ -404,6 +383,60 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         }
     };
     Ok(attr)
+}
+
+fn rw_pk_names(schema: &Schema, pk_indices: &[usize]) -> Result<Vec<String>> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| {
+            schema
+                .fields()
+                .get(*pk_idx)
+                .map(|field| field.name.clone())
+                .ok_or_else(|| {
+                    SinkError::DynamoDb(anyhow!(
+                        "RisingWave primary key column index {} is out of range",
+                        pk_idx
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn dynamodb_key_schema_names(
+    table_name: &str,
+    key_schema: &[KeySchemaElement],
+) -> Result<Vec<String>> {
+    if key_schema.is_empty() {
+        return Err(SinkError::DynamoDb(anyhow!(
+            "table {} key schema is empty",
+            table_name
+        )));
+    }
+
+    Ok(key_schema
+        .iter()
+        .map(|key_element| key_element.attribute_name().to_owned())
+        .collect())
+}
+
+fn validate_pk_matches_dynamodb_key_schema(
+    table_name: &str,
+    rw_pk_names: &[String],
+    dynamodb_keys: &[String],
+) -> Result<()> {
+    let rw_pk_set = rw_pk_names.iter().collect::<BTreeSet<_>>();
+    let dynamodb_key_set = dynamodb_keys.iter().collect::<BTreeSet<_>>();
+    if rw_pk_names.len() != dynamodb_keys.len() || rw_pk_set != dynamodb_key_set {
+        return Err(SinkError::DynamoDb(anyhow!(
+            "DynamoDB table {} primary key {:?} must match RisingWave primary key {:?}",
+            table_name,
+            dynamodb_keys,
+            rw_pk_names
+        )));
+    }
+
+    Ok(())
 }
 
 mod write_chunk_future {
@@ -590,7 +623,7 @@ mod write_chunk_future {
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_dynamodb::types::{DeleteRequest, PutRequest};
+    use aws_sdk_dynamodb::types::{DeleteRequest, KeyType, PutRequest};
 
     use super::*;
 
@@ -655,5 +688,59 @@ mod tests {
         assert!(same_pk_delete.has_same_pk(&put));
         assert!(!put.has_same_pk(&different_hash_key_delete));
         assert!(!put.has_same_pk(&different_range_key_delete));
+    }
+
+    #[test]
+    fn dynamodb_key_schema_empty_errors() {
+        let err = dynamodb_key_schema_names("test_table", &[]).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("table test_table key schema is empty")
+        );
+    }
+
+    #[test]
+    fn dynamodb_key_schema_must_match_rw_pk() {
+        let dynamodb_keys = ["pk".to_owned(), "sk".to_owned()];
+        let same_rw_pk = ["sk".to_owned(), "pk".to_owned()];
+        let extra_rw_pk = ["pk".to_owned(), "sk".to_owned(), "extra".to_owned()];
+        let different_rw_pk = ["pk".to_owned(), "other".to_owned()];
+
+        validate_pk_matches_dynamodb_key_schema("test_table", &same_rw_pk, &dynamodb_keys).unwrap();
+
+        assert!(
+            validate_pk_matches_dynamodb_key_schema("test_table", &extra_rw_pk, &dynamodb_keys)
+                .unwrap_err()
+                .to_string()
+                .contains("must match RisingWave primary key")
+        );
+        assert!(
+            validate_pk_matches_dynamodb_key_schema("test_table", &different_rw_pk, &dynamodb_keys)
+                .unwrap_err()
+                .to_string()
+                .contains("must match RisingWave primary key")
+        );
+    }
+
+    #[test]
+    fn dynamodb_key_schema_names_uses_explicit_schema() {
+        let key_schema = vec![
+            KeySchemaElement::builder()
+                .attribute_name("pk")
+                .key_type(KeyType::Hash)
+                .build()
+                .unwrap(),
+            KeySchemaElement::builder()
+                .attribute_name("sk")
+                .key_type(KeyType::Range)
+                .build()
+                .unwrap(),
+        ];
+
+        assert_eq!(
+            dynamodb_key_schema_names("test_table", &key_schema).unwrap(),
+            vec!["pk".to_owned(), "sk".to_owned()]
+        );
     }
 }
