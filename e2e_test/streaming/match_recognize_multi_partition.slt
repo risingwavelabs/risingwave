@@ -1,0 +1,66 @@
+# Streaming MATCH_RECOGNIZE: many partitions processed in one vnode scan.
+#
+# The executor scans the buffered rows per vnode in state-table key order
+# (partition, order_key, seq) and processes one partition at a time, detecting the boundary when the
+# partition key changes mid-scan. With streaming_parallelism = 1 a single actor owns all vnodes, and
+# 100 distinct partition keys collide into shared vnodes, so a watermark's scan crosses partition
+# boundaries within a vnode — exercising the boundary detection and per-partition isolation of the
+# streaming scan (not just the single-partition-per-vnode case).
+#
+# Rows are also inserted globally out of order (the `b` rows, then the trailing rows, then the `a`
+# rows), so each partition's ORDER BY order is restored purely by the state-table key — this is what
+# lets the scan skip the in-memory sort.
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table t (id int, ts int, v int, watermark for ts as ts - 10) append only;
+
+statement ok
+create materialized view mv_mp as
+select * from t match_recognize (
+  partition by id
+  order by ts
+  measures b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0
+);
+
+# 100 partitions (ids 1..100). Each partition: up (ts=1, v=10) -> down (ts=2, v=-5) -> a trailing
+# safe row (ts=3, v=1). The (a b) match is ts1->ts2 (dip = -5); the ts=3 row makes that match final
+# (a match finalizes only once a later safe row follows). The ts=3 row begins an `a` with no `b`
+# after it, so it produces no second match.
+#
+# Inserted out of order on purpose: all `b` rows, then all trailing rows, then all `a` rows.
+statement ok
+insert into t select i, 2, -5 from generate_series(1, 100) g(i);
+
+statement ok
+insert into t select i, 3, 1 from generate_series(1, 100) g(i);
+
+statement ok
+insert into t select i, 1, 10 from generate_series(1, 100) g(i);
+
+# Sentinel in its own partition: a high ts pushes the watermark past every real row so all 100
+# partitions' matches finalize. v = 0 is neither `a` nor `b`, so it emits nothing.
+statement ok
+insert into t values (0, 1000, 0);
+
+# Every one of the 100 partitions finalizes independently with dip = -5, and exactly the ids 1..100
+# appear (the sentinel id=0 emits no match).
+query IIIIII
+select count(*), count(distinct partition_0), min(partition_0), max(partition_0), min(dip), max(dip) from mv_mp;
+----
+100 100 1 100 -5 -5
+
+statement ok
+drop materialized view mv_mp;
+
+statement ok
+drop table t;

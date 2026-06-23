@@ -60,12 +60,15 @@ impl StreamMatchRecognize {
 
     /// Per-partition buffered-row state table. Layout:
     ///   `[ seq (i64) , <input columns..> ]`
-    /// keyed by (partition columns, seq). The executor buffers the raw input row per live row and
-    /// restores the buffer from here on recovery. `seq` is a per-partition monotonic id; consumed
-    /// rows are deleted after each drain. DEFINE predicates and MEASURES are both evaluated at match
-    /// time from the stored input rows, so neither is persisted. The partition columns and the order
-    /// key are columns of the stored input row, so they are not stored separately; the partition
-    /// columns serve as the key prefix.
+    /// keyed by (partition columns, ORDER BY columns, seq). Keying by the order columns keeps the
+    /// state physically sorted by (partition, order key), so the watermark pass can scan it in PK
+    /// order — rows arrive grouped by partition and already ordered within each partition — and
+    /// process one partition at a time without an in-memory sort. The executor buffers the raw input
+    /// row per live row and restores the buffer from here on recovery. `seq` is a per-actor monotonic
+    /// id that breaks ties between rows with equal ORDER BY keys; consumed rows are deleted after the
+    /// scan. DEFINE predicates and MEASURES are both evaluated at match time from the stored input
+    /// rows, so neither is persisted. The partition and order-key columns are columns of the stored
+    /// input row, so they are not stored separately.
     ///
     /// The whole input row is stored for simplicity. A future optimization could project to only the
     /// columns actually referenced (partition / order keys plus the columns read by DEFINE and
@@ -86,10 +89,28 @@ impl StreamMatchRecognize {
             tbl_builder.add_column(f);
         }
 
-        // pk: partition columns (within the stored input row, offset 1) then seq.
+        // pk: partition columns, then the ORDER BY columns, then seq (the tiebreaker for equal
+        // order keys). Keying by the order columns makes the state physically sorted by
+        // (partition, order key): a PK-order scan yields each partition's rows already ordered, so
+        // the watermark pass needs no in-memory sort and can stream one partition at a time (holding
+        // only the current partition's rows resident) instead of loading a whole vnode at once.
         let partition_positions: Vec<usize> = partition_indices.iter().map(|i| 1 + i).collect();
+        let order_positions: Vec<usize> = self
+            .core
+            .order_key_indices()
+            .expect("order keys validated to be columns")
+            .iter()
+            .map(|i| 1 + i)
+            .collect();
         for &p in &partition_positions {
             tbl_builder.add_order_column(p, OrderType::ascending());
+        }
+        for &o in &order_positions {
+            // Skip an order column already in the partition prefix — it is already a key column, and
+            // adding it twice would be redundant.
+            if !partition_positions.contains(&o) {
+                tbl_builder.add_order_column(o, OrderType::ascending());
+            }
         }
         tbl_builder.add_order_column(0, OrderType::ascending());
         // Distribute the state by the partition columns so each actor owns its partitions' state.
