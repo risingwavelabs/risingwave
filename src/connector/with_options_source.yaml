@@ -1423,10 +1423,9 @@ RabbitmqProperties:
   - name: prefetch_count
     field_type: u16
     comments: |-
-      `RabbitMQ` prefetch count. Platform Science recommends 20-50. Valid range is
-      1-1000 because `RabbitMQ` treats 0 as unlimited.
+      `RabbitMQ` prefetch count. Valid range is 1-1000 because `RabbitMQ` treats 0
+      as unlimited.
     required: false
-    allow_alter_on_fly: true
   - name: prefetch_size
     field_type: u32
     comments: '`RabbitMQ` prefetch size. `RabbitMQ` does not support non-zero values.'

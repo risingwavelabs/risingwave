@@ -17,7 +17,6 @@ pub mod source;
 pub mod split;
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -31,7 +30,6 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::RabbitmqSplit;
-use thiserror::Error;
 use tokio_retry::Retry;
 use tokio_retry::strategy::FixedInterval;
 use url::Url;
@@ -47,6 +45,7 @@ const DEFAULT_PREFETCH_COUNT: u16 = 50;
 const MAX_PREFETCH_COUNT: u16 = 1000;
 const DEFAULT_PREFETCH_SIZE: u32 = 0;
 const DEFAULT_MAX_CONNECTIONS: usize = 5;
+const MAX_CONNECTIONS: usize = 5;
 const DEFAULT_CONNECTION_ATTEMPTS: usize = 5;
 const DEFAULT_RETRY_DELAY_SECONDS: u64 = 2;
 const DEFAULT_SOCKET_TIMEOUT_SECONDS: u64 = 10;
@@ -54,21 +53,6 @@ const DEFAULT_BLOCKED_CONNECTION_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_HEARTBEAT_INTERVAL_SECONDS: u16 = 600;
 const DEFAULT_FRAME_MAX: u32 = 131_072;
 const MAX_CONSUMER_TAG_PREFIX_BYTES: usize = 128;
-
-#[derive(Debug, Clone, Error)]
-pub struct RabbitmqError(String);
-
-impl Display for RabbitmqError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl RabbitmqError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -86,11 +70,10 @@ pub struct RabbitmqProperties {
     #[serde(rename = "queues")]
     pub queues: Option<String>,
 
-    /// `RabbitMQ` prefetch count. Platform Science recommends 20-50. Valid range is
-    /// 1-1000 because `RabbitMQ` treats 0 as unlimited.
+    /// `RabbitMQ` prefetch count. Valid range is 1-1000 because `RabbitMQ` treats 0
+    /// as unlimited.
     #[serde(rename = "prefetch_count")]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
     pub prefetch_count: Option<u16>,
 
     /// `RabbitMQ` prefetch size. `RabbitMQ` does not support non-zero values.
@@ -175,13 +158,27 @@ impl RabbitmqProperties {
             self.queue.is_some() ^ self.queues.is_some(),
             "exactly one of `queue` or `queues` must be specified for RabbitMQ source"
         );
-        let raw = self.queue.clone().or_else(|| self.queues.clone()).unwrap();
-        let queues = raw
-            .split(',')
-            .map(str::trim)
-            .filter(|queue| !queue.is_empty())
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
+        let queues = if let Some(queue) = &self.queue {
+            let queue = queue.trim();
+            ensure!(
+                !queue.is_empty(),
+                "RabbitMQ source requires at least one non-empty queue"
+            );
+            ensure!(
+                !queue.contains(','),
+                "RabbitMQ source `queue` accepts exactly one queue name; use `queues` for comma-separated queue names"
+            );
+            vec![queue.to_owned()]
+        } else {
+            self.queues
+                .as_ref()
+                .expect("checked above")
+                .split(',')
+                .map(str::trim)
+                .filter(|queue| !queue.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        };
         ensure!(
             !queues.is_empty(),
             "RabbitMQ source requires at least one non-empty queue"
@@ -264,8 +261,8 @@ impl RabbitmqProperties {
             "RabbitMQ source max_connections must be greater than 0"
         );
         ensure!(
-            self.max_connections() <= DEFAULT_MAX_CONNECTIONS,
-            "RabbitMQ source max_connections must be <= 5 to honor broker vhost connection limits"
+            self.max_connections() <= MAX_CONNECTIONS,
+            "RabbitMQ source max_connections must be <= {MAX_CONNECTIONS} to honor broker vhost connection limits"
         );
         ensure!(
             self.blocked_connection_timeout() > Duration::ZERO,
@@ -397,6 +394,18 @@ mod tests {
         let mut props = parse(&[("queues", " q1, q2 ,,q3 ")]);
         props.queue = None;
         assert_eq!(props.queue_names().unwrap(), vec!["q1", "q2", "q3"]);
+    }
+
+    #[test]
+    fn reject_comma_separated_single_queue() {
+        let props = parse(&[("queue", "q1,q2")]);
+        assert!(
+            props
+                .queue_names()
+                .unwrap_err()
+                .to_string()
+                .contains("use `queues`")
+        );
     }
 
     #[test]

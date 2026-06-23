@@ -189,13 +189,6 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "pulsar.operation.retry.delay".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
-    // RabbitmqProperties
-    map.try_insert(
-        std::any::type_name::<RabbitmqProperties>().to_owned(),
-        [
-            "prefetch_count".to_owned(),
-        ].into_iter().collect(),
-    ).unwrap();
     map
 });
 

@@ -15,5 +15,7 @@
 mod message;
 mod reader;
 
-pub use message::*;
-pub use reader::*;
+pub(crate) use message::RabbitmqAckData;
+pub use message::RabbitmqMeta;
+pub use reader::RabbitmqSplitReader;
+pub(crate) use reader::{RABBITMQ_ACK_SENDER_REGISTRY, RabbitmqAckRequest};

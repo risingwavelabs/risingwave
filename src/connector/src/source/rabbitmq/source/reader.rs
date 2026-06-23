@@ -49,14 +49,14 @@ use crate::source::{
 /// sender. It must not store `Acker`, deliveries, delivery tags, payloads,
 /// offsets, or retry state. Checkpoint ack state is carried exclusively by
 /// `SourceMeta::Rabbitmq` and hidden `rabbitmq_ack_data`.
-pub static RABBITMQ_ACK_SENDER_REGISTRY: LazyLock<
+pub(crate) static RABBITMQ_ACK_SENDER_REGISTRY: LazyLock<
     MokaCache<u64, UnboundedSender<RabbitmqAckRequest>>,
 > = LazyLock::new(|| moka::future::Cache::builder().build());
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RabbitmqAckRequest {
-    pub ack_consumer_id: u64,
-    pub delivery_tag: u64,
+pub(crate) struct RabbitmqAckRequest {
+    pub(crate) ack_consumer_id: u64,
+    pub(crate) delivery_tag: u64,
 }
 
 struct RabbitmqConsumerState {

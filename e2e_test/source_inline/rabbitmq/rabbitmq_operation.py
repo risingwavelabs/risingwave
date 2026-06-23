@@ -159,11 +159,14 @@ def main() -> int:
 
     sub.add_parser("health")
 
-    for name in ("reset", "setup"):
-        p = sub.add_parser(name)
-        p.add_argument("--exchange", required=True)
-        p.add_argument("--queue", required=True)
-        p.add_argument("--routing-key", required=True)
+    p = sub.add_parser("reset")
+    p.add_argument("--exchange", required=True)
+    p.add_argument("--queue", required=True)
+
+    p = sub.add_parser("setup")
+    p.add_argument("--exchange", required=True)
+    p.add_argument("--queue", required=True)
+    p.add_argument("--routing-key", required=True)
 
     p = sub.add_parser("publish-json")
     p.add_argument("--exchange", required=True)
