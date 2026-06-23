@@ -377,8 +377,10 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(watermark @ Watermark { col_idx, .. })
-                    if col_idx == this.time_column_index =>
+                // Drop the time watermark: a late anchor makes gap fill back-fill below it.
+                // PARTITION BY column watermarks (if any) pass through unchanged.
+                Message::Watermark(watermark)
+                    if this.partition_by_indices.contains(&watermark.col_idx) =>
                 {
                     yield Message::Watermark(watermark);
                 }
@@ -625,8 +627,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -655,7 +655,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -692,8 +691,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -722,7 +719,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -761,8 +757,6 @@ mod tests {
             chunk.to_pretty(),
             expected.to_pretty()
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_barrier(test_epoch(2), false);
         gap_fill_executor.expect_barrier().await;
 
@@ -792,7 +786,6 @@ mod tests {
             chunk.to_pretty(),
             expected.to_pretty()
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -839,7 +832,6 @@ mod tests {
             chunk.to_pretty(),
             expected.to_pretty()
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -876,8 +868,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -906,7 +896,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -943,8 +932,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -973,7 +960,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -1045,8 +1031,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        recovered_gap_fill_executor.expect_watermark().await;
-
         recovered_tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-08T10:00:00 80 500 8.0 500.0",

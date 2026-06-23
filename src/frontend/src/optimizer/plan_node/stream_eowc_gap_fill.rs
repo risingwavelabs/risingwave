@@ -26,7 +26,7 @@ use crate::binder::BoundFillStrategy;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -50,13 +50,29 @@ impl StreamEowcGapFill {
             Distribution::HashShard(partition_indices)
         };
 
-        // EOWC gap fill may synthesize rows whose time/fill values do not preserve the
-        // input monotonicity. Only `PARTITION BY` columns are copied unchanged into
-        // generated rows, so only their monotonicity can be propagated.
-        let mut columns_monotonicity = MonotonicityMap::new();
+        // A late anchor makes gap fill back-fill a partition below the already-forwarded time
+        // watermark, so the time watermark is never preserved. Only `PARTITION BY` columns are
+        // copied unchanged into generated rows, so only their watermark can be propagated.
+        let mut watermark_columns = WatermarkColumns::new();
         for partition_col in &core.partition_by_cols {
             let idx = partition_col.index();
+            if let Some(group) = input.watermark_columns().get_group(idx) {
+                watermark_columns.insert(idx, group);
+            }
+        }
+
+        // Without partitioning the output stays time-sorted, so the time column is monotonic.
+        // With partitioning, cross-partition interleaving breaks that; only the copied
+        // `PARTITION BY` columns keep their monotonicity.
+        let mut columns_monotonicity = MonotonicityMap::new();
+        if core.partition_by_cols.is_empty() {
+            let idx = core.time_col.index();
             columns_monotonicity.insert(idx, input.columns_monotonicity()[idx]);
+        } else {
+            for partition_col in &core.partition_by_cols {
+                let idx = partition_col.index();
+                columns_monotonicity.insert(idx, input.columns_monotonicity()[idx]);
+            }
         }
 
         let base = PlanBase::new_stream_with_core(
@@ -64,7 +80,7 @@ impl StreamEowcGapFill {
             dist,
             input.stream_kind(),
             true, // provides EOWC semantics
-            input.watermark_columns().clone(),
+            watermark_columns,
             columns_monotonicity,
         );
         Self { base, core }
