@@ -68,6 +68,20 @@ pub struct DynamoDbConfig {
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_future_send_nums: usize,
+
+    #[serde(
+        rename = "dynamodb.batch_write_retry_times",
+        default = "default_batch_write_retry_times"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub batch_write_retry_times: usize,
+
+    #[serde(
+        rename = "dynamodb.batch_write_retry_backoff_ms",
+        default = "default_batch_write_retry_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub batch_write_retry_backoff_ms: u64,
 }
 
 impl EnforceSecret for DynamoDbConfig {
@@ -82,6 +96,14 @@ fn default_max_batch_item_nums() -> usize {
 
 fn default_max_future_send_nums() -> usize {
     256
+}
+
+fn default_batch_write_retry_times() -> usize {
+    3
+}
+
+fn default_batch_write_retry_backoff_ms() -> u64 {
+    100
 }
 
 fn default_max_batch_rows() -> usize {
@@ -270,6 +292,8 @@ impl DynamoDbSinkWriter {
             table: config.table.clone(),
             dynamodb_keys,
             max_batch_item_nums: config.max_batch_item_nums,
+            batch_write_retry_times: config.batch_write_retry_times,
+            batch_write_retry_backoff_ms: config.batch_write_retry_backoff_ms,
         };
 
         Ok(Self {
@@ -397,12 +421,11 @@ mod write_chunk_future {
     use itertools::Itertools;
     use maplit::hashmap;
     use tokio::time::sleep;
+    use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
     use super::{DynamoDbRequest, SinkError};
 
-    const MAX_BATCH_WRITE_RETRY_TIMES: usize = 3;
-    const MIN_BATCH_WRITE_RETRY_DELAY_MS: u64 = 100;
-    const MAX_BATCH_WRITE_RETRY_DELAY_MS: u64 = 500;
+    const MAX_BATCH_WRITE_RETRY_DELAY_MS: u64 = 2000;
     const MAX_BATCH_WRITE_CONCURRENCY: usize = 256;
 
     pub struct DynamoDbPayloadWriter {
@@ -410,6 +433,8 @@ mod write_chunk_future {
         pub table: String,
         pub dynamodb_keys: Vec<String>,
         pub max_batch_item_nums: usize,
+        pub batch_write_retry_times: usize,
+        pub batch_write_retry_backoff_ms: u64,
     }
 
     pub type WriteChunkFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
@@ -461,6 +486,8 @@ mod write_chunk_future {
             let client = self.client.clone();
             let table = self.table.clone();
             let max_batch_item_nums = self.max_batch_item_nums;
+            let batch_write_retry_times = self.batch_write_retry_times;
+            let batch_write_retry_backoff_ms = self.batch_write_retry_backoff_ms;
             async move {
                 let chunks = request_items
                     .into_iter()
@@ -477,6 +504,13 @@ mod write_chunk_future {
                     async move {
                         let mut req_items = req_items;
                         let mut retry_count = 0;
+                        let mut retry_backoff = ExponentialBackoff::from_millis(
+                            batch_write_retry_backoff_ms,
+                        )
+                        .factor(2)
+                        .max_delay(Duration::from_millis(MAX_BATCH_WRITE_RETRY_DELAY_MS))
+                        .map(jitter)
+                        .take(batch_write_retry_times);
 
                         loop {
                             let return_consumed_capacity = if retry_count == 0 {
@@ -511,11 +545,11 @@ mod write_chunk_future {
                                     }
 
                                     req_items = unprocessed_items.into_values().flatten().collect();
-                                    if retry_count >= MAX_BATCH_WRITE_RETRY_TIMES {
+                                    if retry_count >= batch_write_retry_times {
                                         return Err(SinkError::DynamoDb(anyhow!(
                                             "failed to write {} unprocessed items to DynamoDB sink after {} retries",
                                             req_items.len(),
-                                            MAX_BATCH_WRITE_RETRY_TIMES,
+                                            batch_write_retry_times,
                                         )));
                                     }
                                 }
@@ -527,16 +561,20 @@ mod write_chunk_future {
                             }
 
                             retry_count += 1;
-                            let delay_ms = rand::random_range(
-                                MIN_BATCH_WRITE_RETRY_DELAY_MS..=MAX_BATCH_WRITE_RETRY_DELAY_MS,
-                            );
+                            let Some(delay) = retry_backoff.next() else {
+                                return Err(SinkError::DynamoDb(anyhow!(
+                                    "failed to write {} unprocessed items to DynamoDB sink after {} retries",
+                                    req_items.len(),
+                                    batch_write_retry_times,
+                                )));
+                            };
                             tracing::warn!(
                                 retry_count,
-                                delay_ms,
+                                delay_ms = delay.as_millis(),
                                 unprocessed_items_count = req_items.len(),
                                 "retrying DynamoDB batch write"
                             );
-                            sleep(Duration::from_millis(delay_ms)).await;
+                            sleep(delay).await;
                         }
                     }
                 }))
