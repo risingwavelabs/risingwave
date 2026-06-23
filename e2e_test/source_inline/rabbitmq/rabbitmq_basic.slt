@@ -70,7 +70,7 @@ create table t_rabbitmq_create_queue (
 ) format plain encode json;
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue
 
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
@@ -126,13 +126,13 @@ statement ok
 drop table t_rabbitmq_source;
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue --routing-key rw.slt.rabbitmq
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange --queue rw_slt_rabbitmq_queue
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2 --routing-key rw.slt.rabbitmq.multi.2
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2
 
 system ok
 python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
@@ -202,10 +202,10 @@ statement ok
 drop table t_rabbitmq_multi_queue_source;
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1 --routing-key rw.slt.rabbitmq.multi.1
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_1 --queue rw_slt_rabbitmq_queue_multi_1
 
 system ok
-python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2 --routing-key rw.slt.rabbitmq.multi.2
+python3 e2e_test/source_inline/rabbitmq/rabbitmq_operation.py reset --exchange rw_slt_rabbitmq_exchange_multi_2 --queue rw_slt_rabbitmq_queue_multi_2
 
 statement ok
 set streaming_use_shared_source to true;
