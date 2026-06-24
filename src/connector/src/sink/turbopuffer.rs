@@ -13,8 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::pending;
+use std::pin::Pin;
+use std::time::{Duration, Instant as StdInstant};
 
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use risingwave_common::array::{Op, StreamChunk};
@@ -25,17 +30,29 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
+use tokio::time::Sleep;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::log_store::DeliveryFutureManagerAddFuture;
-use crate::sink::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
+use crate::sink::{
+    LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam, SinkWriterMetrics,
+    SinkWriterParam,
 };
-use crate::sink::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
+
+const DEFAULT_WRITE_BATCH_SIZE: usize = 1000;
+const DEFAULT_MAX_LINGER_SECOND: u64 = 1;
 
 pub const TURBOPUFFER_SINK: &str = "turbopuffer";
+
+fn default_write_batch_size() -> usize {
+    DEFAULT_WRITE_BATCH_SIZE
+}
+
+fn default_max_linger_second() -> u64 {
+    DEFAULT_MAX_LINGER_SECOND
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -49,6 +66,14 @@ pub struct TurbopufferConfig {
     pub disable_backpressure: Option<bool>,
     pub full_text_search_columns: Option<String>,
     pub filterable_columns: Option<String>,
+    #[serde(default = "default_write_batch_size")]
+    #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
+    pub write_batch_size: usize,
+    #[serde(default = "default_max_linger_second")]
+    #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_linger_second: u64,
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
@@ -60,10 +85,21 @@ impl EnforceSecret for TurbopufferConfig {
 
 impl TurbopufferConfig {
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<TurbopufferConfig>(
+        let config = serde_json::from_value::<TurbopufferConfig>(
             serde_json::to_value(values).expect("serialize sink properties"),
         )
-        .map_err(|e| SinkError::Config(anyhow!(e)))
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.write_batch_size == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "`write_batch_size` must be greater than 0"
+            )));
+        }
+        if config.max_linger_second == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "`max_linger_second` must be greater than 0"
+            )));
+        }
+        Ok(config)
     }
 }
 
@@ -77,7 +113,6 @@ enum TurbopufferNamespace {
 pub struct TurbopufferSink {
     config: TurbopufferConfig,
     schema: Schema,
-    is_append_only: bool,
     pk_index: usize,
     namespace: TurbopufferNamespace,
     attribute_indices: Vec<usize>,
@@ -100,7 +135,6 @@ impl TryFrom<SinkParam> for TurbopufferSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let is_append_only = param.sink_type.is_append_only();
         let pk_indices = param.downstream_pk_or_empty();
         let [pk_index] = pk_indices.as_slice() else {
             return Err(SinkError::Config(anyhow!(
@@ -206,7 +240,6 @@ impl TryFrom<SinkParam> for TurbopufferSink {
         Ok(Self {
             config,
             schema,
-            is_append_only,
             pk_index,
             namespace,
             attribute_indices,
@@ -216,7 +249,7 @@ impl TryFrom<SinkParam> for TurbopufferSink {
 }
 
 impl Sink for TurbopufferSink {
-    type LogSinker = AsyncTruncateLogSinkerOf<TurbopufferSinkWriter>;
+    type LogSinker = TurbopufferLogSinker;
 
     const SINK_NAME: &'static str = TURBOPUFFER_SINK;
 
@@ -224,17 +257,137 @@ impl Sink for TurbopufferSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(TurbopufferSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let write_batch_size = self.config.write_batch_size;
+        let max_linger = Duration::from_secs(self.config.max_linger_second);
+        let writer = TurbopufferSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
-            self.is_append_only,
             self.pk_index,
             self.namespace.clone(),
             self.attribute_indices.clone(),
             self.generated_schema.clone(),
-        )?
-        .into_log_sinker(usize::MAX))
+            write_batch_size,
+            max_linger,
+        )?;
+        Ok(TurbopufferLogSinker::new(
+            writer,
+            SinkWriterMetrics::new(&writer_param),
+        ))
+    }
+}
+
+pub struct TurbopufferLogSinker {
+    writer: TurbopufferSinkWriter,
+    sink_writer_metrics: SinkWriterMetrics,
+}
+
+impl TurbopufferLogSinker {
+    fn new(writer: TurbopufferSinkWriter, sink_writer_metrics: SinkWriterMetrics) -> Self {
+        Self {
+            writer,
+            sink_writer_metrics,
+        }
+    }
+
+    fn ensure_linger_timer(&self, linger_timer: &mut Pin<&mut Option<Sleep>>) {
+        if linger_timer.as_ref().get_ref().is_none() {
+            linger_timer
+                .as_mut()
+                .set(Some(tokio::time::sleep(self.writer.max_linger)));
+        }
+    }
+
+    async fn flush_all_and_truncate(
+        &mut self,
+        log_reader: &mut impl SinkLogReader,
+        latest_truncate_offset: &mut Option<TruncateOffset>,
+        linger_timer: &mut Pin<&mut Option<Sleep>>,
+    ) -> Result<()> {
+        let start_time = StdInstant::now();
+        self.writer.flush_all().await?;
+        self.sink_writer_metrics
+            .sink_commit_duration
+            .observe(start_time.elapsed().as_secs_f64());
+        linger_timer.as_mut().set(None);
+        if let Some(offset) = latest_truncate_offset.take() {
+            log_reader.truncate(offset)?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl LogSinker for TurbopufferLogSinker {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
+        let mut latest_truncate_offset = None;
+        let linger_timer = None;
+        let mut linger_timer = std::pin::pin!(linger_timer);
+
+        loop {
+            let (epoch, item) = tokio::select! {
+                item = log_reader.next_item() => item?,
+                _ = async {
+                    match linger_timer.as_mut().as_pin_mut() {
+                        Some(timer) => timer.await,
+                        None => pending().await,
+                    }
+                } => {
+                    self.flush_all_and_truncate(
+                        &mut log_reader,
+                        &mut latest_truncate_offset,
+                        &mut linger_timer,
+                    )
+                    .await?;
+                    continue;
+                }
+            };
+            match item {
+                LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                    let offset = TruncateOffset::Chunk { epoch, chunk_id };
+                    let has_pending_update = self.writer.write_chunk(chunk)?;
+                    latest_truncate_offset = Some(offset);
+                    if self.writer.should_flush_by_size() {
+                        self.flush_all_and_truncate(
+                            &mut log_reader,
+                            &mut latest_truncate_offset,
+                            &mut linger_timer,
+                        )
+                        .await?;
+                    } else if has_pending_update {
+                        self.ensure_linger_timer(&mut linger_timer);
+                    }
+                }
+                LogStoreReadItem::Barrier {
+                    new_vnode_bitmap,
+                    is_stop,
+                    schema_change,
+                    ..
+                } => {
+                    let offset = TruncateOffset::Barrier { epoch };
+                    let should_flush =
+                        is_stop || new_vnode_bitmap.is_some() || schema_change.is_some();
+                    if self.writer.is_empty() {
+                        log_reader.truncate(offset)?;
+                    } else if should_flush {
+                        latest_truncate_offset = Some(offset);
+                        self.flush_all_and_truncate(
+                            &mut log_reader,
+                            &mut latest_truncate_offset,
+                            &mut linger_timer,
+                        )
+                        .await?;
+                    } else {
+                        latest_truncate_offset = Some(offset);
+                    }
+
+                    if is_stop {
+                        return pending().await;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -244,21 +397,24 @@ pub struct TurbopufferSinkWriter {
     distance_metric: Option<String>,
     disable_backpressure: Option<bool>,
     schema: Value,
-    is_append_only: bool,
     pk_index: usize,
     namespace: TurbopufferNamespace,
     row_encoder: JsonEncoder,
+    write_batch_size: usize,
+    max_linger: Duration,
+    pending_batches: BTreeMap<String, HashMap<DocumentId, CompactedOp>>,
 }
 
 impl TurbopufferSinkWriter {
     fn new(
         config: TurbopufferConfig,
         schema: Schema,
-        is_append_only: bool,
         pk_index: usize,
         namespace: TurbopufferNamespace,
         attribute_indices: Vec<usize>,
         generated_schema: Value,
+        write_batch_size: usize,
+        max_linger: Duration,
     ) -> Result<Self> {
         let mut header_map = HeaderMap::new();
         header_map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -290,10 +446,12 @@ impl TurbopufferSinkWriter {
             distance_metric: config.distance_metric,
             disable_backpressure: config.disable_backpressure,
             schema: generated_schema,
-            is_append_only,
             pk_index,
             namespace,
             row_encoder,
+            write_batch_size,
+            max_linger,
+            pending_batches: BTreeMap::new(),
         })
     }
 
@@ -396,148 +554,96 @@ impl TurbopufferSinkWriter {
         }
         Value::Object(body)
     }
-}
 
-impl AsyncTruncateSinkWriter for TurbopufferSinkWriter {
-    async fn write_chunk<'a>(
-        &'a mut self,
-        chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> Result<()> {
-        if self.is_append_only {
-            let mut batches = BTreeMap::<String, Vec<Map<String, Value>>>::new();
-            for (op, row) in chunk.rows() {
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        let id = match self.id_for_row(&row) {
-                            Ok(id) => id,
-                            Err(err) => {
-                                tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid document id");
-                                continue;
-                            }
-                        };
-                        let upsert_row = match self.upsert_row(&row, id) {
-                            Ok(row) => row,
-                            Err(err) => {
-                                tracing::warn!(error = %err.as_report(), "skip turbopuffer row failed to encode upsert payload");
-                                continue;
-                            }
-                        };
-                        let url = match self.url_for_row(&row) {
-                            Ok(url) => url,
-                            Err(err) => {
-                                tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid namespace");
-                                continue;
-                            }
-                        };
-                        batches.entry(url).or_default().push(upsert_row);
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        return Err(SinkError::Http(anyhow!(
-                            "`Delete` or `UpdateDelete` operation is not supported in append-only turbopuffer sink"
-                        )));
-                    }
-                }
-            }
-
-            for (url, upsert_rows) in batches {
-                if upsert_rows.is_empty() {
+    fn write_chunk(&mut self, chunk: StreamChunk) -> Result<bool> {
+        let mut has_pending_update = false;
+        for (op, row) in chunk.rows() {
+            let id = match self.id_for_row(&row) {
+                Ok(id) => id,
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid document id");
                     continue;
                 }
-                let resp = self
-                    .client
-                    .post(url)
-                    .json(&self.request_body(upsert_rows, Vec::new()))
-                    .send()
-                    .await
-                    .context("turbopuffer write request failed")
-                    .map_err(SinkError::Http)?;
-
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let body = resp.text().await.unwrap_or_default();
-                    return Err(SinkError::Http(anyhow!(
-                        "Turbopuffer sink received non-success response: {} {}",
-                        status,
-                        body
-                    )));
-                }
-            }
-        } else {
-            let mut batches = BTreeMap::<String, HashMap<DocumentId, CompactedOp>>::new();
-            for (op, row) in chunk.rows() {
-                let id = match self.id_for_row(&row) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid document id");
-                        continue;
-                    }
-                };
-                let url = match self.url_for_row(&row) {
-                    Ok(url) => url,
-                    Err(err) => {
-                        tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid namespace");
-                        continue;
-                    }
-                };
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        let upsert_row = match self.upsert_row(&row, id.clone()) {
-                            Ok(row) => row,
-                            Err(err) => {
-                                tracing::warn!(error = %err.as_report(), "skip turbopuffer row failed to encode upsert payload");
-                                continue;
-                            }
-                        };
-                        batches
-                            .entry(url)
-                            .or_default()
-                            .insert(id, CompactedOp::Upsert(upsert_row));
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        batches
-                            .entry(url)
-                            .or_default()
-                            .insert(id, CompactedOp::Delete);
-                    }
-                }
-            }
-
-            for (url, batch) in batches {
-                let mut upsert_rows = Vec::new();
-                let mut deletes = Vec::new();
-                for (id, op) in batch {
-                    match op {
-                        CompactedOp::Upsert(row) => upsert_rows.push(row),
-                        CompactedOp::Delete => deletes.push(id),
-                    }
-                }
-                if upsert_rows.is_empty() && deletes.is_empty() {
+            };
+            let url = match self.url_for_row(&row) {
+                Ok(url) => url,
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "skip turbopuffer row with invalid namespace");
                     continue;
                 }
-                let resp = self
-                    .client
-                    .post(url)
-                    .json(&self.request_body(upsert_rows, deletes))
-                    .send()
-                    .await
-                    .context("turbopuffer write request failed")
-                    .map_err(SinkError::Http)?;
-
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let body = resp.text().await.unwrap_or_default();
-                    return Err(SinkError::Http(anyhow!(
-                        "Turbopuffer sink received non-success response: {} {}",
-                        status,
-                        body
-                    )));
+            };
+            let compacted_op = match op {
+                Op::Insert | Op::UpdateInsert => {
+                    let upsert_row = match self.upsert_row(&row, id.clone()) {
+                        Ok(row) => row,
+                        Err(err) => {
+                            tracing::warn!(error = %err.as_report(), "skip turbopuffer row failed to encode upsert payload");
+                            continue;
+                        }
+                    };
+                    CompactedOp::Upsert(upsert_row)
                 }
-            }
+                Op::Delete | Op::UpdateDelete => CompactedOp::Delete,
+            };
+            self.pending_batches
+                .entry(url)
+                .or_default()
+                .insert(id, compacted_op);
+            has_pending_update = true;
         }
 
+        Ok(has_pending_update)
+    }
+
+    fn pending_row_count(&self) -> usize {
+        self.pending_batches.values().map(HashMap::len).sum()
+    }
+
+    fn should_flush_by_size(&self) -> bool {
+        self.pending_row_count() >= self.write_batch_size
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending_batches.is_empty()
+    }
+
+    async fn flush_all(&mut self) -> Result<()> {
+        let batches = std::mem::take(&mut self.pending_batches);
+        let client = self.client.clone();
+        try_join_all(batches.into_iter().filter_map(|(url, batch)| {
+            let (upsert_rows, deletes) = batch_into_request_parts(batch);
+            if upsert_rows.is_empty() && deletes.is_empty() {
+                return None;
+            }
+
+            let client = client.clone();
+            let body = self.request_body(upsert_rows, deletes);
+            Some(async move { send_turbopuffer_request(client, url, body).await })
+        }))
+        .await?;
         Ok(())
     }
+}
+
+async fn send_turbopuffer_request(client: reqwest::Client, url: String, body: Value) -> Result<()> {
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .context("turbopuffer write request failed")
+        .map_err(SinkError::Http)?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(SinkError::Http(anyhow!(
+            "Turbopuffer sink received non-success response: {} {}",
+            status,
+            body
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -551,6 +657,20 @@ enum DocumentId {
 enum CompactedOp {
     Upsert(Map<String, Value>),
     Delete,
+}
+
+fn batch_into_request_parts(
+    batch: HashMap<DocumentId, CompactedOp>,
+) -> (Vec<Map<String, Value>>, Vec<DocumentId>) {
+    let mut upsert_rows = Vec::new();
+    let mut deletes = Vec::new();
+    for (id, op) in batch {
+        match op {
+            CompactedOp::Upsert(row) => upsert_rows.push(row),
+            CompactedOp::Delete => deletes.push(id),
+        }
+    }
+    (upsert_rows, deletes)
 }
 
 fn document_id_from_i64(value: i64) -> DocumentId {
@@ -716,11 +836,13 @@ fn unsupported_type(data_type: &str) -> SinkError {
 #[cfg(test)]
 mod tests {
     #[cfg(not(madsim))]
+    use std::collections::VecDeque;
+    #[cfg(not(madsim))]
     use std::io::{Read, Write};
     #[cfg(not(madsim))]
     use std::net::TcpListener;
     #[cfg(not(madsim))]
-    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex, mpsc};
     #[cfg(not(madsim))]
     use std::thread;
 
@@ -729,6 +851,8 @@ mod tests {
     #[cfg(not(madsim))]
     use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     use risingwave_common::array::{ListValue, VectorVal};
+    #[cfg(not(madsim))]
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{ListType, ScalarImpl, Timestamp};
@@ -736,7 +860,7 @@ mod tests {
 
     use super::*;
     #[cfg(not(madsim))]
-    use crate::sink::log_store::DeliveryFutureManager;
+    use crate::sink::log_store::LogStoreResult;
 
     #[test]
     fn test_build_schema_flags() {
@@ -766,8 +890,8 @@ mod tests {
 
     #[cfg(not(madsim))]
     #[tokio::test]
-    async fn test_write_chunk_posts_batched_payload_and_headers() {
-        let (base_url, request_rx, server_thread) = spawn_mock_http_server();
+    async fn test_write_chunk_buffers_until_flush_and_posts_payload_and_headers() {
+        let (base_url, request_rx, server_thread) = spawn_mock_http_server(1);
         let schema = Schema::new(vec![
             Field::with_name(DataType::Varchar, "id"),
             Field::with_name(DataType::Varchar, "body"),
@@ -790,16 +914,19 @@ mod tests {
             disable_backpressure: Some(true),
             full_text_search_columns: Some("body".to_owned()),
             filterable_columns: Some("*".to_owned()),
+            write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
+            max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
         };
         let mut writer = TurbopufferSinkWriter::new(
             config,
             schema,
-            false,
             0,
             TurbopufferNamespace::Dynamic { index: 2 },
             payload_indices,
             generated_schema,
+            DEFAULT_WRITE_BATCH_SIZE,
+            Duration::from_secs(DEFAULT_MAX_LINGER_SECOND),
         )
         .unwrap();
         let chunk = StreamChunk::from_pretty(
@@ -807,12 +934,10 @@ mod tests {
             U- old-id   old_body ns_1
             U+ new-id   new_body ns_1",
         );
-        let mut future_manager = DeliveryFutureManager::new(0);
 
-        writer
-            .write_chunk(chunk, future_manager.start_write_chunk(0, 0))
-            .await
-            .unwrap();
+        writer.write_chunk(chunk).unwrap();
+        assert!(request_rx.try_recv().is_err());
+        writer.flush_all().await.unwrap();
         let request = request_rx.recv().unwrap();
         server_thread.join().unwrap();
 
@@ -831,6 +956,295 @@ mod tests {
         assert_eq!(body["upsert_rows"][0]["id"], json!("new-id"));
         assert_eq!(body["upsert_rows"][0]["body"], json!("new_body"));
         assert!(body.get("distance_metric").is_none());
+    }
+
+    #[test]
+    fn test_config_defaults_and_validation() {
+        let config = TurbopufferConfig::from_btreemap(BTreeMap::from([
+            ("base_url".to_owned(), "http://127.0.0.1:0".to_owned()),
+            ("namespace".to_owned(), "ns".to_owned()),
+            ("api_key".to_owned(), "key".to_owned()),
+            ("type".to_owned(), "upsert".to_owned()),
+        ]))
+        .unwrap();
+        assert_eq!(config.write_batch_size, DEFAULT_WRITE_BATCH_SIZE);
+        assert_eq!(config.max_linger_second, DEFAULT_MAX_LINGER_SECOND);
+
+        let err = TurbopufferConfig::from_btreemap(BTreeMap::from([
+            ("base_url".to_owned(), "http://127.0.0.1:0".to_owned()),
+            ("namespace".to_owned(), "ns".to_owned()),
+            ("api_key".to_owned(), "key".to_owned()),
+            ("type".to_owned(), "upsert".to_owned()),
+            ("write_batch_size".to_owned(), "0".to_owned()),
+        ]))
+        .unwrap_err();
+        assert!(err.to_string().contains("write_batch_size"));
+
+        let err = TurbopufferConfig::from_btreemap(BTreeMap::from([
+            ("base_url".to_owned(), "http://127.0.0.1:0".to_owned()),
+            ("namespace".to_owned(), "ns".to_owned()),
+            ("api_key".to_owned(), "key".to_owned()),
+            ("type".to_owned(), "upsert".to_owned()),
+            ("max_linger_second".to_owned(), "0".to_owned()),
+        ]))
+        .unwrap_err();
+        assert!(err.to_string().contains("max_linger_second"));
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_global_threshold_flushes_all_namespaces() {
+        let (base_url, request_rx, server_thread) = spawn_mock_http_server(2);
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Varchar, "id"),
+            Field::with_name(DataType::Varchar, "body"),
+            Field::with_name(DataType::Varchar, "workspace_id"),
+        ]);
+        let generated_schema =
+            build_turbopuffer_schema(&schema, &[1], &HashSet::new(), &HashSet::new()).unwrap();
+        let config = TurbopufferConfig {
+            base_url,
+            namespace: None,
+            namespace_column: Some("workspace_id".to_owned()),
+            api_key: "tpuf_test_key".to_owned(),
+            distance_metric: None,
+            disable_backpressure: None,
+            full_text_search_columns: None,
+            filterable_columns: None,
+            write_batch_size: 2,
+            max_linger_second: DEFAULT_MAX_LINGER_SECOND,
+            r#type: "upsert".to_owned(),
+        };
+        let mut writer = TurbopufferSinkWriter::new(
+            config,
+            schema,
+            0,
+            TurbopufferNamespace::Dynamic { index: 2 },
+            vec![1],
+            generated_schema,
+            2,
+            Duration::from_secs(DEFAULT_MAX_LINGER_SECOND),
+        )
+        .unwrap();
+
+        writer
+            .write_chunk(StreamChunk::from_pretty(
+                "  T  T    T
+                + a1 body ns_a
+                + b1 body ns_b",
+            ))
+            .unwrap();
+        assert!(writer.should_flush_by_size());
+        writer.flush_all().await.unwrap();
+
+        let requests = [request_rx.recv().unwrap(), request_rx.recv().unwrap()];
+        server_thread.join().unwrap();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.starts_with("post /v2/namespaces/ns_a http/1.1"))
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.starts_with("post /v2/namespaces/ns_b http/1.1"))
+        );
+        assert!(writer.pending_batches.is_empty());
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_upsert_compacts_across_chunks() {
+        let (base_url, request_rx, server_thread) = spawn_mock_http_server(1);
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Varchar, "id"),
+            Field::with_name(DataType::Varchar, "body"),
+        ]);
+        let generated_schema =
+            build_turbopuffer_schema(&schema, &[1], &HashSet::new(), &HashSet::new()).unwrap();
+        let config = TurbopufferConfig {
+            base_url,
+            namespace: Some("ns".to_owned()),
+            namespace_column: None,
+            api_key: "tpuf_test_key".to_owned(),
+            distance_metric: None,
+            disable_backpressure: None,
+            full_text_search_columns: None,
+            filterable_columns: None,
+            write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
+            max_linger_second: DEFAULT_MAX_LINGER_SECOND,
+            r#type: "upsert".to_owned(),
+        };
+        let mut writer = TurbopufferSinkWriter::new(
+            config,
+            schema,
+            0,
+            TurbopufferNamespace::Static("ns".to_owned()),
+            vec![1],
+            generated_schema,
+            DEFAULT_WRITE_BATCH_SIZE,
+            Duration::from_secs(DEFAULT_MAX_LINGER_SECOND),
+        )
+        .unwrap();
+
+        writer
+            .write_chunk(StreamChunk::from_pretty(
+                "  T  T
+                + id body1",
+            ))
+            .unwrap();
+        writer
+            .write_chunk(StreamChunk::from_pretty(
+                "  T  T
+                - id body1
+                + id body2",
+            ))
+            .unwrap();
+        writer.flush_all().await.unwrap();
+
+        let request = request_rx.recv().unwrap();
+        server_thread.join().unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert!(body.get("deletes").is_none());
+        assert_eq!(body["upsert_rows"].as_array().unwrap().len(), 1);
+        assert_eq!(body["upsert_rows"][0]["id"], json!("id"));
+        assert_eq!(body["upsert_rows"][0]["body"], json!("body2"));
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_log_sinker_flushes_after_linger() {
+        let (base_url, request_rx, server_thread) = spawn_mock_http_server(1);
+        let writer = new_test_static_writer_with_linger(
+            base_url,
+            DEFAULT_WRITE_BATCH_SIZE,
+            Duration::from_millis(1),
+        );
+        let truncates = Arc::new(Mutex::new(Vec::new()));
+        let reader = TestSinkLogReader::new(
+            vec![
+                (
+                    1,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: StreamChunk::from_pretty(
+                            "  T  T
+                            + id body",
+                        ),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    2,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: false,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
+                        schema_change: None,
+                    },
+                ),
+            ],
+            truncates.clone(),
+        )
+        .pending_on_empty();
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            TurbopufferLogSinker::new(writer, SinkWriterMetrics::for_test())
+                .consume_log_and_sink(reader),
+        )
+        .await
+        .unwrap_err();
+
+        let request = request_rx.recv().unwrap();
+        server_thread.join().unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["upsert_rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            *truncates.lock().unwrap(),
+            vec![TruncateOffset::Barrier { epoch: 2 }]
+        );
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_log_sinker_truncates_latest_chunk_after_threshold_flush() {
+        let (base_url, _request_rx, server_thread) = spawn_mock_http_server(1);
+        let writer = new_test_static_writer(base_url, 1);
+        let truncates = Arc::new(Mutex::new(Vec::new()));
+        let reader = TestSinkLogReader::new(
+            vec![(
+                1,
+                LogStoreReadItem::StreamChunk {
+                    chunk: StreamChunk::from_pretty(
+                        "  T  T
+                        + id body",
+                    ),
+                    chunk_id: 7,
+                },
+            )],
+            truncates.clone(),
+        );
+        let err = TurbopufferLogSinker::new(writer, SinkWriterMetrics::for_test())
+            .consume_log_and_sink(reader)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("done"));
+        server_thread.join().unwrap();
+        assert_eq!(
+            *truncates.lock().unwrap(),
+            vec![TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 7
+            }]
+        );
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_log_sinker_flushes_on_vnode_bitmap_change() {
+        let (base_url, request_rx, server_thread) = spawn_mock_http_server(1);
+        let writer = new_test_static_writer(base_url, DEFAULT_WRITE_BATCH_SIZE);
+        let truncates = Arc::new(Mutex::new(Vec::new()));
+        let reader = TestSinkLogReader::new(
+            vec![
+                (
+                    1,
+                    LogStoreReadItem::StreamChunk {
+                        chunk: StreamChunk::from_pretty(
+                            "  T  T
+                            + id body",
+                        ),
+                        chunk_id: 0,
+                    },
+                ),
+                (
+                    2,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint: false,
+                        new_vnode_bitmap: Some(Arc::new(Bitmap::ones(1))),
+                        is_stop: false,
+                        schema_change: None,
+                    },
+                ),
+            ],
+            truncates.clone(),
+        );
+        let err = TurbopufferLogSinker::new(writer, SinkWriterMetrics::for_test())
+            .consume_log_and_sink(reader)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("done"));
+
+        let request = request_rx.recv().unwrap();
+        server_thread.join().unwrap();
+        let body = request.split("\r\n\r\n").nth(1).unwrap();
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["upsert_rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            *truncates.lock().unwrap(),
+            vec![TruncateOffset::Barrier { epoch: 2 }]
+        );
     }
 
     #[test]
@@ -923,16 +1337,19 @@ mod tests {
             disable_backpressure: Some(true),
             full_text_search_columns: Some("body,noteContents,communityMemberHandle,communityMemberIdentifier,inboxFeedItemTitle".to_owned()),
             filterable_columns: Some("*".to_owned()),
+            write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
+            max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
         };
         let writer = TurbopufferSinkWriter::new(
             config,
             schema,
-            false,
             0,
             TurbopufferNamespace::Dynamic { index: 1 },
             attribute_indices,
             generated_schema.clone(),
+            DEFAULT_WRITE_BATCH_SIZE,
+            Duration::from_secs(DEFAULT_MAX_LINGER_SECOND),
         )
         .unwrap();
         let vector =
@@ -999,43 +1416,47 @@ mod tests {
     }
 
     #[cfg(not(madsim))]
-    fn spawn_mock_http_server() -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    fn spawn_mock_http_server(
+        expected_requests: usize,
+    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (request_tx, request_rx) = mpsc::channel();
         let server_thread = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buf = Vec::new();
-            let header_end = loop {
-                let mut tmp = [0; 1024];
-                let read = stream.read(&mut tmp).unwrap();
-                assert_ne!(read, 0);
-                buf.extend_from_slice(&tmp[..read]);
-                if let Some(header_end) = find_header_end(&buf) {
-                    break header_end;
+            for _ in 0..expected_requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = Vec::new();
+                let header_end = loop {
+                    let mut tmp = [0; 1024];
+                    let read = stream.read(&mut tmp).unwrap();
+                    assert_ne!(read, 0);
+                    buf.extend_from_slice(&tmp[..read]);
+                    if let Some(header_end) = find_header_end(&buf) {
+                        break header_end;
+                    }
+                };
+                let headers = String::from_utf8_lossy(&buf[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap();
+                while buf.len() < header_end + 4 + content_length {
+                    let mut tmp = [0; 1024];
+                    let read = stream.read(&mut tmp).unwrap();
+                    assert_ne!(read, 0);
+                    buf.extend_from_slice(&tmp[..read]);
                 }
-            };
-            let headers = String::from_utf8_lossy(&buf[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while buf.len() < header_end + 4 + content_length {
-                let mut tmp = [0; 1024];
-                let read = stream.read(&mut tmp).unwrap();
-                assert_ne!(read, 0);
-                buf.extend_from_slice(&tmp[..read]);
+                let request = String::from_utf8(buf[..header_end + 4 + content_length].to_vec())
+                    .expect("HTTP request should be utf8");
+                request_tx.send(request.to_lowercase()).unwrap();
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .unwrap();
             }
-            let request = String::from_utf8(buf[..header_end + 4 + content_length].to_vec())
-                .expect("HTTP request should be utf8");
-            request_tx.send(request.to_lowercase()).unwrap();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                .unwrap();
         });
         (format!("http://{}", addr), request_rx, server_thread)
     }
@@ -1043,5 +1464,98 @@ mod tests {
     #[cfg(not(madsim))]
     fn find_header_end(buf: &[u8]) -> Option<usize> {
         buf.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    #[cfg(not(madsim))]
+    fn new_test_static_writer(base_url: String, write_batch_size: usize) -> TurbopufferSinkWriter {
+        new_test_static_writer_with_linger(
+            base_url,
+            write_batch_size,
+            Duration::from_secs(DEFAULT_MAX_LINGER_SECOND),
+        )
+    }
+
+    #[cfg(not(madsim))]
+    fn new_test_static_writer_with_linger(
+        base_url: String,
+        write_batch_size: usize,
+        max_linger: Duration,
+    ) -> TurbopufferSinkWriter {
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Varchar, "id"),
+            Field::with_name(DataType::Varchar, "body"),
+        ]);
+        let generated_schema =
+            build_turbopuffer_schema(&schema, &[1], &HashSet::new(), &HashSet::new()).unwrap();
+        let config = TurbopufferConfig {
+            base_url,
+            namespace: Some("ns".to_owned()),
+            namespace_column: None,
+            api_key: "tpuf_test_key".to_owned(),
+            distance_metric: None,
+            disable_backpressure: None,
+            full_text_search_columns: None,
+            filterable_columns: None,
+            write_batch_size,
+            max_linger_second: DEFAULT_MAX_LINGER_SECOND,
+            r#type: "upsert".to_owned(),
+        };
+        TurbopufferSinkWriter::new(
+            config,
+            schema,
+            0,
+            TurbopufferNamespace::Static("ns".to_owned()),
+            vec![1],
+            generated_schema,
+            write_batch_size,
+            max_linger,
+        )
+        .unwrap()
+    }
+
+    #[cfg(not(madsim))]
+    struct TestSinkLogReader {
+        items: VecDeque<(u64, LogStoreReadItem)>,
+        truncates: Arc<Mutex<Vec<TruncateOffset>>>,
+        pending_on_empty: bool,
+    }
+
+    #[cfg(not(madsim))]
+    impl TestSinkLogReader {
+        fn new(
+            items: Vec<(u64, LogStoreReadItem)>,
+            truncates: Arc<Mutex<Vec<TruncateOffset>>>,
+        ) -> Self {
+            Self {
+                items: items.into(),
+                truncates,
+                pending_on_empty: false,
+            }
+        }
+
+        fn pending_on_empty(mut self) -> Self {
+            self.pending_on_empty = true;
+            self
+        }
+    }
+
+    #[cfg(not(madsim))]
+    impl SinkLogReader for TestSinkLogReader {
+        async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+            Ok(())
+        }
+
+        async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+            match self.items.pop_front() {
+                Some(item) => Ok(item),
+                None if self.pending_on_empty => pending().await,
+                None => Err(anyhow!("done")),
+            }
+        }
+
+        fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+            self.truncates.lock().unwrap().push(offset);
+            Ok(())
+        }
     }
 }
