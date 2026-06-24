@@ -335,7 +335,6 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
-    pub sink_log_store_flush: HashSet<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +342,7 @@ pub struct UpdateMutation {
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
+    pub dropped_actors: HashSet<ActorId>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: SplitAssignments,
     pub pause: bool,
@@ -352,6 +352,7 @@ pub struct AddMutation {
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
+    pub sink_log_store_flush: HashSet<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +516,7 @@ impl Barrier {
         match self.mutation.as_deref() {
             Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
             Some(Mutation::Update(UpdateMutation { dropped_actors, .. })) => Some(dropped_actors),
+            Some(Mutation::Add(AddMutation { dropped_actors, .. })) => Some(dropped_actors),
             _ => None,
         }
     }
@@ -693,7 +695,7 @@ impl Barrier {
         self.mutation
             .as_deref()
             .is_some_and(|mutation| match mutation {
-                Mutation::Update(UpdateMutation {
+                Mutation::Add(AddMutation {
                     sink_log_store_flush,
                     ..
                 }) => sink_log_store_flush.contains(&sink_id),
@@ -806,7 +808,6 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 sink_schema_change,
                 subscriptions_to_drop,
-                sink_log_store_flush,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -840,17 +841,18 @@ impl Mutation {
                     .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
-                sink_log_store_flush: sink_log_store_flush.iter().copied().collect(),
             }),
             Mutation::Add(AddMutation {
                 adds,
                 added_actors,
+                dropped_actors,
                 splits,
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
+                sink_log_store_flush,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -887,6 +889,8 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                dropped_actors: dropped_actors.iter().copied().collect(),
+                sink_log_store_flush: sink_log_store_flush.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => {
                 PbMutation::Splits(PbSourceChangeSplitMutation {
@@ -1030,7 +1034,6 @@ impl Mutation {
                     .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
                 subscriptions_to_drop: update.subscriptions_to_drop.clone(),
-                sink_log_store_flush: update.sink_log_store_flush.iter().copied().collect(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
@@ -1040,6 +1043,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
                 added_actors: add.added_actors.iter().copied().collect(),
+                dropped_actors: add.dropped_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add
@@ -1079,6 +1083,7 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                sink_log_store_flush: add.sink_log_store_flush.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {

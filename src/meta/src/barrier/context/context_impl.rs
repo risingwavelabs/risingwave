@@ -578,8 +578,10 @@ impl PostCollectCommand {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
+                    replace_sink,
                     ..
                 } = info;
+                let new_job_id = stream_job_fragments.stream_job_id();
                 let new_sink_downstream =
                     if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
                         let new_downstreams = ctx.new_sink_downstream.clone();
@@ -596,7 +598,7 @@ impl PostCollectCommand {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id(),
+                        new_job_id,
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
@@ -612,6 +614,37 @@ impl PostCollectCommand {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                if let Some(replace_sink) = replace_sink {
+                    let old_state_table_ids = barrier_manager_context
+                        .metadata_manager
+                        .get_job_fragments_by_id(replace_sink.old_sink_id.as_job_id())
+                        .await?
+                        .all_table_ids()
+                        .collect::<Vec<_>>();
+                    barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .finish_replace_sink(
+                            replace_sink.old_sink_id,
+                            new_job_id.as_sink_id(),
+                            replace_sink.final_sink_name,
+                        )
+                        .await?;
+                    barrier_manager_context
+                        .sink_manager
+                        .stop_sink_coordinator(vec![replace_sink.old_sink_id])
+                        .await;
+                    cleanup_dropped_streaming_jobs(
+                        &barrier_manager_context.refresh_manager,
+                        &barrier_manager_context.hummock_manager,
+                        &barrier_manager_context.metadata_manager,
+                        [replace_sink.old_sink_id.as_job_id()],
+                        old_state_table_ids,
+                        "replace_sink",
+                    )
+                    .await?;
+                }
             }
             PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
@@ -682,57 +715,6 @@ impl PostCollectCommand {
                     [],
                     to_drop_state_table_ids.clone(),
                     "replace_streaming_job",
-                )
-                .await?;
-            }
-
-            PostCollectCommand::ReplaceSink {
-                plan,
-                resolved_split_assignment,
-            } => {
-                let old_state_table_ids = plan.old_fragments.all_table_ids().collect::<Vec<_>>();
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .post_collect_job_fragments(
-                        plan.info.stream_job_fragments.stream_job_id(),
-                        &plan.info.upstream_fragment_downstreams,
-                        None,
-                        Some(&resolved_split_assignment),
-                    )
-                    .await?;
-
-                let source_change = SourceChange::CreateJob {
-                    added_source_fragments: plan
-                        .info
-                        .stream_job_fragments
-                        .stream_source_fragments(),
-                    added_backfill_fragments: plan
-                        .info
-                        .stream_job_fragments
-                        .source_backfill_fragments(),
-                };
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(source_change)
-                    .await;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .finish_replace_sink(plan.old_sink_id, plan.new_sink_id, plan.final_sink_name)
-                    .await?;
-                barrier_manager_context
-                    .sink_manager
-                    .stop_sink_coordinator(vec![plan.old_sink_id])
-                    .await;
-                cleanup_dropped_streaming_jobs(
-                    &barrier_manager_context.refresh_manager,
-                    &barrier_manager_context.hummock_manager,
-                    &barrier_manager_context.metadata_manager,
-                    [plan.old_sink_id.as_job_id()],
-                    old_state_table_ids,
-                    "replace_sink",
                 )
                 .await?;
             }

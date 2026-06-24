@@ -38,7 +38,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -50,6 +49,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
+use crate::executor::{AddMutation, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -479,6 +479,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             Mutation::Update(UpdateMutation {
                                                 dropped_actors,
                                                 ..
+                                            })
+                                            | Mutation::Add(AddMutation {
+                                                dropped_actors, ..
                                             }) if dropped_actors.contains(&self.actor_ctx.id) => {
                                                 // the actor has been dropped, exit the backfill loop
                                                 tracing::info!(

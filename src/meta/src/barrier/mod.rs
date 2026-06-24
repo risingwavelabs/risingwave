@@ -54,7 +54,7 @@ use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceSinkPlan, ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget,
+    ReplaceSinkCommandInfo, ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget,
     SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};

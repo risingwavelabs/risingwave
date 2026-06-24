@@ -318,13 +318,9 @@ pub struct ReplaceStreamJobPlan {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReplaceSinkPlan {
-    pub old_fragments: StreamJobFragments,
-    pub info: CreateStreamingJobCommandInfo,
+pub struct ReplaceSinkCommandInfo {
     pub old_sink_id: SinkId,
-    pub new_sink_id: SinkId,
     pub final_sink_name: String,
-    pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 }
 
 impl ReplaceStreamJobPlan {
@@ -369,6 +365,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+    /// If set, this create command replaces an existing sink while creating the new sink job.
+    pub replace_sink: Option<ReplaceSinkCommandInfo>,
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
 }
@@ -506,9 +504,6 @@ pub enum Command {
     /// of the Merge executors are changed additionally.
     ReplaceStreamJob(ReplaceStreamJobPlan),
 
-    /// `ReplaceSink` creates a new sink job and stops the old sink job in one update barrier.
-    ReplaceSink(ReplaceSinkPlan),
-
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
     SourceChangeSplit(SplitState),
@@ -619,13 +614,6 @@ impl std::fmt::Display for Command {
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
-            Command::ReplaceSink(plan) => {
-                write!(
-                    f,
-                    "ReplaceSink: {} -> {}",
-                    plan.old_sink_id, plan.new_sink_id
-                )
-            }
             Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
             Command::Throttle { .. } => write!(f, "Throttle"),
             Command::CreateSubscription {
@@ -721,10 +709,6 @@ pub enum PostCollectCommand {
         plan: ReplaceStreamJobPlan,
         resolved_split_assignment: SplitAssignment,
     },
-    ReplaceSink {
-        plan: ReplaceSinkPlan,
-        resolved_split_assignment: SplitAssignment,
-    },
     SourceChangeSplit {
         split_assignment: SplitAssignment,
     },
@@ -748,7 +732,6 @@ impl PostCollectCommand {
             | PostCollectCommand::CreateStreamingJob { .. }
             | PostCollectCommand::Reschedule { .. }
             | PostCollectCommand::ReplaceStreamJob { .. }
-            | PostCollectCommand::ReplaceSink { .. }
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
             | PostCollectCommand::ConnectorPropsChange(_)
@@ -764,7 +747,6 @@ impl PostCollectCommand {
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",
-            PostCollectCommand::ReplaceSink { .. } => "ReplaceSink",
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
@@ -879,15 +861,6 @@ impl Command {
                     table_ids.insert(mv_table_id);
                 }
 
-                vec![NewTableFragmentInfo { table_ids }]
-            }
-            PostCollectCommand::ReplaceSink { plan, .. } => {
-                let table_ids = plan
-                    .info
-                    .stream_job_fragments
-                    .internal_table_ids()
-                    .into_iter()
-                    .collect();
                 vec![NewTableFragmentInfo { table_ids }]
             }
             _ => vec![],
@@ -1042,6 +1015,7 @@ impl Command {
     pub(super) fn create_streaming_job_to_mutation(
         info: &CreateStreamingJobCommandInfo,
         job_type: &CreateStreamingJobType,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
         edges: &mut FragmentEdgeBuildResult,
         control_stream_manager: &ControlStreamManager,
@@ -1065,6 +1039,7 @@ impl Command {
                     .flatten()
                     .map(|actor| actor.actor_id)
                     .collect();
+                let dropped_actors = dropped_actors.into_iter().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
@@ -1153,6 +1128,12 @@ impl Command {
                     backfill_nodes_to_pause,
                     actor_cdc_table_snapshot_splits,
                     new_upstream_sinks,
+                    dropped_actors,
+                    sink_log_store_flush: info
+                        .replace_sink
+                        .as_ref()
+                        .map(|replace_sink| vec![replace_sink.old_sink_id])
+                        .unwrap_or_default(),
                 };
 
                 Ok(Mutation::Add(add_mutation))
@@ -1204,39 +1185,10 @@ impl Command {
                     dispatchers,
                     split_assignment,
                     actor_cdc_table_snapshot_splits,
-                    [],
                     auto_refresh_schema_sinks.as_ref(),
                 ))
             }
         }
-    }
-
-    pub(super) fn replace_sink_to_mutation(
-        ReplaceSinkPlan {
-            info, old_sink_id, ..
-        }: &ReplaceSinkPlan,
-        dropped_actors: impl IntoIterator<Item = ActorId>,
-        edges: &mut FragmentEdgeBuildResult,
-        split_assignment: &SplitAssignment,
-        actor_cdc_table_snapshot_splits: Option<PbCdcTableSnapshotSplitsWithGeneration>,
-    ) -> MetaResult<Mutation> {
-        let old_sink_id = *old_sink_id;
-        let dispatchers = edges
-            .dispatchers
-            .extract_if(|fragment_id, _| {
-                info.upstream_fragment_downstreams.contains_key(fragment_id)
-            })
-            .collect();
-        Self::generate_update_mutation_for_replace_table(
-            dropped_actors,
-            Default::default(),
-            dispatchers,
-            split_assignment,
-            actor_cdc_table_snapshot_splits,
-            [old_sink_id],
-            None,
-        )
-        .ok_or_else(|| MetaError::invalid_parameter("empty replace sink mutation"))
     }
 
     /// Build the `Update` mutation for `RescheduleIntent`.
@@ -1414,7 +1366,6 @@ impl Command {
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
-                    sink_log_store_flush: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Ok(Some(mutation))
@@ -1440,6 +1391,8 @@ impl Command {
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: None,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
     }
@@ -1699,7 +1652,6 @@ impl Command {
         dispatchers: FragmentActorDispatchers,
         split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
-        sink_log_store_flush: impl IntoIterator<Item = SinkId>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
@@ -1750,7 +1702,6 @@ impl Command {
                     })
                 })
                 .collect(),
-            sink_log_store_flush: sink_log_store_flush.into_iter().collect(),
             ..Default::default()
         }))
     }

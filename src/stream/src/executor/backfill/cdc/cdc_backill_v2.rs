@@ -36,7 +36,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, transform_upstream,
 };
@@ -48,6 +47,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
+use crate::executor::{AddMutation, UpdateMutation};
 use crate::task::cdc_progress::CdcProgressReporter;
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -444,6 +444,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             Mutation::Update(UpdateMutation {
                                                 dropped_actors,
                                                 ..
+                                            })
+                                            | Mutation::Add(AddMutation {
+                                                dropped_actors, ..
                                             }) if dropped_actors.contains(&self.actor_ctx.id) => {
                                                 tracing::info!(
                                                     %table_id,

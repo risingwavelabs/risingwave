@@ -48,6 +48,7 @@ use risingwave_pb::ddl_service::{streaming_job_resource_type, *};
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use thiserror_ext::AsReport;
@@ -60,7 +61,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
-    DdlCommand, DdlController, DropMode, ReplaceSinkInfo, ReplaceStreamJobInfo, StreamingJobId,
+    DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
@@ -145,7 +146,13 @@ impl DdlServiceImpl {
             fragment_graph,
             replace_job,
         }: ReplaceJobPlan,
-    ) -> ReplaceSinkInfo {
+    ) -> (
+        SinkId,
+        StreamingJob,
+        StreamFragmentGraph,
+        HashSet<ObjectId>,
+        streaming_job_resource_type::ResourceType,
+    ) {
         let replace_job_plan::ReplaceJob::ReplaceSink(ReplaceSink {
             sink,
             old_sink_id,
@@ -156,18 +163,18 @@ impl DdlServiceImpl {
             unreachable!("must be replace sink")
         };
 
-        ReplaceSinkInfo {
-            old_sink_id: SinkId::new(old_sink_id),
-            streaming_job: StreamingJob::Sink(sink.unwrap()),
-            fragment_graph: fragment_graph.unwrap(),
-            dependencies: dependencies
+        (
+            SinkId::new(old_sink_id),
+            StreamingJob::Sink(sink.unwrap()),
+            fragment_graph.unwrap(),
+            dependencies
                 .into_iter()
                 .map(ObjectId::new)
                 .collect::<HashSet<_>>(),
-            resource_type: resource_type
+            resource_type
                 .and_then(|resource_type| resource_type.resource_type)
                 .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
-        }
+        )
     }
 
     fn default_streaming_job_resource_type() -> streaming_job_resource_type::ResourceType {
@@ -418,6 +425,7 @@ impl DdlService for DdlServiceImpl {
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                         refresh_interval_sec: None,
+                        replace_sink: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -495,6 +503,7 @@ impl DdlService for DdlServiceImpl {
             resource_type,
             if_not_exists: req.if_not_exists,
             refresh_interval_sec: None,
+            replace_sink: None,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -591,6 +600,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: req.refresh_interval_sec,
+                replace_sink: None,
             })
             .await?;
 
@@ -648,6 +658,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type,
                 if_not_exists: req.if_not_exists,
+                replace_sink: None,
                 refresh_interval_sec: None,
             })
             .await?;
@@ -740,6 +751,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
             })
             .await?;
 
@@ -888,7 +900,17 @@ impl DdlService for DdlServiceImpl {
         );
 
         let command = if is_replace_sink {
-            DdlCommand::ReplaceSink(Self::extract_replace_sink_info(req))
+            let (old_sink_id, stream_job, fragment_graph, dependencies, resource_type) =
+                Self::extract_replace_sink_info(req);
+            DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph,
+                dependencies,
+                resource_type,
+                if_not_exists: false,
+                refresh_interval_sec: None,
+                replace_sink: Some(old_sink_id),
+            }
         } else {
             DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(req))
         };
@@ -1745,6 +1767,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
             })
             .await?;
 
@@ -1830,6 +1853,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
             })
             .await;
 

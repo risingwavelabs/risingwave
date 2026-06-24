@@ -163,33 +163,24 @@ pub(super) fn collect_independent_job_commit_epoch_info(
                 .try_insert(*table_id, epoch)
                 .expect("non duplicate");
         });
-    match &barrier_info.post_collect_command {
-        PostCollectCommand::CreateStreamingJob { info, .. } => {
+    if let PostCollectCommand::CreateStreamingJob { info, .. } = &barrier_info.post_collect_command
+    {
+        commit_info
+            .new_table_fragment_infos
+            .push(NewTableFragmentInfo {
+                table_ids: barrier_info.table_ids_to_commit.clone(),
+            });
+        if let Some(index_table) = collect_new_vector_index_info(info) {
             commit_info
-                .new_table_fragment_infos
-                .push(NewTableFragmentInfo {
-                    table_ids: barrier_info.table_ids_to_commit.clone(),
-                });
-            if let Some(index_table) = collect_new_vector_index_info(info) {
-                commit_info
-                    .vector_index_delta
-                    .try_insert(
-                        index_table.id,
-                        VectorIndexDelta::Init(PbVectorIndexInit {
-                            info: Some(index_table.vector_index_info.unwrap()),
-                        }),
-                    )
-                    .expect("non-duplicate");
-            }
+                .vector_index_delta
+                .try_insert(
+                    index_table.id,
+                    VectorIndexDelta::Init(PbVectorIndexInit {
+                        info: Some(index_table.vector_index_info.unwrap()),
+                    }),
+                )
+                .expect("non-duplicate");
         }
-        PostCollectCommand::ReplaceSink { .. } => {
-            commit_info
-                .new_table_fragment_infos
-                .push(NewTableFragmentInfo {
-                    table_ids: barrier_info.table_ids_to_commit.clone(),
-                });
-        }
-        _ => {}
     };
 }
 

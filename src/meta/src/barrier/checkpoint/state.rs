@@ -603,6 +603,7 @@ impl DatabaseCheckpointControl {
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
                         &CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                        [],
                         self.state.is_paused(),
                         &mut edges,
                         partial_graph_manager.control_stream_manager(),
@@ -726,6 +727,8 @@ impl DatabaseCheckpointControl {
                         backfill_nodes_to_pause: Default::default(),
                         actor_cdc_table_snapshot_splits: None,
                         new_upstream_sinks: Default::default(),
+                        dropped_actors: Default::default(),
+                        sink_log_store_flush: Default::default(),
                     });
 
                     let job = BatchRefreshJobCheckpointControl::new(
@@ -835,6 +838,31 @@ impl DatabaseCheckpointControl {
                     &self.database_info,
                 )?;
 
+                let dropped_actors = if let Some(replace_sink) = &info.replace_sink {
+                    if matches!(
+                        job_type,
+                        CreateStreamingJobType::SnapshotBackfill(_)
+                            | CreateStreamingJobType::BatchRefresh(_)
+                    ) {
+                        bail!("replace sink must not use snapshot backfill");
+                    }
+                    let old_sink_job_id = replace_sink.old_sink_id.as_job_id();
+                    let Some(old_job) = self.database_info.post_apply_remove_job(old_sink_job_id)
+                    else {
+                        bail!(
+                            "old sink job {} not found in barrier state",
+                            old_sink_job_id
+                        );
+                    };
+                    old_job
+                        .fragment_infos
+                        .values()
+                        .flat_map(|fragment| fragment.actors.keys().copied())
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![]
+                };
+
                 // Pre-apply: add new job and fragments
                 let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
                     let (fragment, _) =
@@ -860,6 +888,10 @@ impl DatabaseCheckpointControl {
                             (fragment_id, info.streaming_job.id(), fragment_infos)
                         }),
                 );
+                if info.replace_sink.is_some() {
+                    self.database_info
+                        .pre_apply_mark_job_created(info.streaming_job.id());
+                }
                 if let CreateStreamingJobType::SinkIntoTable(ref ctx) = job_type {
                     let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
                     self.database_info.pre_apply_add_node_upstream(
@@ -892,6 +924,7 @@ impl DatabaseCheckpointControl {
                 let mutation = Command::create_streaming_job_to_mutation(
                     &info,
                     &job_type,
+                    dropped_actors,
                     is_currently_paused,
                     &mut edges,
                     partial_graph_manager.control_stream_manager(),
@@ -910,127 +943,6 @@ impl DatabaseCheckpointControl {
                         info,
                         job_type,
                         cross_db_snapshot_backfill_info,
-                        resolved_split_assignment,
-                    },
-                )
-            }
-
-            Some(Command::ReplaceSink(mut plan)) => {
-                let info = &mut plan.info;
-                let ensembles = resolve_no_shuffle_ensembles(
-                    &info.stream_job_fragments,
-                    &info.upstream_fragment_downstreams,
-                )?;
-                let actors = render_actors(
-                    &info.stream_job_fragments,
-                    &self.database_info,
-                    &info.definition,
-                    &info.stream_job_fragments.inner.ctx,
-                    &info.streaming_job_model,
-                    partial_graph_manager
-                        .control_stream_manager()
-                        .env
-                        .actor_id_generator(),
-                    worker_nodes,
-                    &ensembles,
-                    &info.database_resource_group,
-                )?;
-                for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
-                    fill_snapshot_backfill_epoch(
-                        &mut fragment.nodes,
-                        None,
-                        &plan.cross_db_snapshot_backfill_info,
-                    )?;
-                }
-
-                let mut edges = self.database_info.build_edge(
-                    Some((info, false)),
-                    None,
-                    None,
-                    partial_graph_manager.control_stream_manager(),
-                    &actors.stream_actors,
-                    &actors.actor_location,
-                );
-                let resolved_split_assignment = resolve_source_splits(
-                    info,
-                    &actors,
-                    edges.actor_new_no_shuffle(),
-                    &self.database_info,
-                )?;
-
-                let Some(old_job) = self
-                    .database_info
-                    .post_apply_remove_job(plan.old_fragments.stream_job_id)
-                else {
-                    bail!(
-                        "old sink job {} not found in barrier state",
-                        plan.old_fragments.stream_job_id
-                    );
-                };
-                let dropped_actors = old_job
-                    .fragment_infos
-                    .values()
-                    .flat_map(|fragment| fragment.actors.keys().copied())
-                    .collect::<Vec<_>>();
-
-                let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
-                    let (fragment, _) =
-                        parallel_cdc_table_backfill_fragment(info.stream_job_fragments.fragments())
-                            .expect("should have parallel cdc fragment");
-                    Some(CdcTableBackfillTracker::new(
-                        fragment.fragment_id,
-                        splits.clone(),
-                    ))
-                } else {
-                    None
-                };
-                self.database_info
-                    .pre_apply_new_job(info.streaming_job.id(), cdc_tracker);
-                self.database_info.pre_apply_new_fragments(
-                    info.stream_job_fragments
-                        .new_fragment_info(
-                            &actors.stream_actors,
-                            &actors.actor_location,
-                            &resolved_split_assignment,
-                        )
-                        .map(|(fragment_id, fragment_infos)| {
-                            (fragment_id, info.streaming_job.id(), fragment_infos)
-                        }),
-                );
-                self.database_info
-                    .pre_apply_mark_job_created(info.streaming_job.id());
-
-                let (table_ids, node_actors) = self.collect_base_info();
-
-                let actors_to_create = Some(Command::create_streaming_job_actors_to_create(
-                    info,
-                    &mut edges,
-                    &actors.stream_actors,
-                    &actors.actor_location,
-                ));
-
-                let actor_cdc_table_snapshot_splits =
-                    self.database_info
-                        .assign_cdc_backfill_splits(info.stream_job_fragments.stream_job_id())?
-                        .map(|splits| {
-                            risingwave_pb::source::PbCdcTableSnapshotSplitsWithGeneration { splits }
-                        });
-
-                let mutation = Command::replace_sink_to_mutation(
-                    &plan,
-                    dropped_actors,
-                    &mut edges,
-                    &resolved_split_assignment,
-                    actor_cdc_table_snapshot_splits,
-                )?;
-
-                (
-                    Some(mutation),
-                    table_ids,
-                    actors_to_create,
-                    node_actors,
-                    PostCollectCommand::ReplaceSink {
-                        plan,
                         resolved_split_assignment,
                     },
                 )
@@ -1768,7 +1680,6 @@ impl DatabaseCheckpointControl {
                         actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
                         sink_schema_change: Default::default(), /* no sink auto schema change happened here */
                         subscriptions_to_drop,
-                        sink_log_store_flush: Default::default(),
                     }))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();

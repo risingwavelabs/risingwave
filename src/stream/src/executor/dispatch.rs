@@ -385,6 +385,13 @@ impl DispatchExecutorInner {
                     }
                 }
             }
+            Mutation::Add(AddMutation { dropped_actors, .. }) => {
+                if !dropped_actors.contains(&self.actor_id) {
+                    for dispatcher in &mut self.dispatchers {
+                        dispatcher.remove_outputs(dropped_actors);
+                    }
+                }
+            }
             Mutation::Update(UpdateMutation {
                 dispatchers,
                 dropped_actors,

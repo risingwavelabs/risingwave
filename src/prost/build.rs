@@ -777,8 +777,10 @@ for_all_wrapped_id_fields! (
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
             added_actors: ActorId,
+            dropped_actors: ActorId,
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
+            sink_log_store_flush: SinkId,
         }
         BackfillOrder {
             order: RelationId,
@@ -878,7 +880,6 @@ for_all_wrapped_id_fields! (
             actor_vnode_bitmap_update: ActorId,
             actor_new_dispatchers: ActorId,
             sink_add_columns: SinkId,
-            sink_log_store_flush: SinkId,
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
