@@ -483,6 +483,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
@@ -490,6 +491,9 @@ impl MetaClient {
             fragment_graph: Some(graph),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -741,18 +745,36 @@ impl MetaClient {
 
     pub async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterResourceGroupRequest {
-            table_id,
+            job_id,
             resource_group,
             deferred,
         };
 
         self.inner.alter_resource_group(request).await?;
         Ok(())
+    }
+
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<WaitVersion> {
+        let request = AlterDatabaseResourceGroupRequest {
+            database_id,
+            resource_group,
+            deferred,
+        };
+
+        let resp = self.inner.alter_database_resource_group(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_swap_rename(
@@ -838,6 +860,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
@@ -845,6 +868,9 @@ impl MetaClient {
             index_table: Some(table),
             fragment_graph: Some(graph),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
@@ -2370,7 +2396,8 @@ impl MetaMemberManagement {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
                                     .await
-                                    .context("failed to create client")?;
+                                    .context("failed to create client")
+                                    .map_err(RpcError::from)?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
@@ -2382,7 +2409,8 @@ impl MetaMemberManagement {
                         let resp = client
                             .members(MembersRequest {})
                             .await
-                            .context("failed to fetch members")?;
+                            .context("failed to fetch members")
+                            .map_err(RpcError::from)?;
 
                         resp.into_inner().members
                     };
@@ -2683,6 +2711,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_resource_group, AlterDatabaseResourceGroupRequest, AlterDatabaseResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }

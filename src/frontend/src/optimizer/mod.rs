@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools as _;
+use itertools::Itertools;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
@@ -267,7 +267,7 @@ impl LogicalPlanRoot {
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
-        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+        let Ok(select_idx) = Itertools::exactly_one(self.out_fields.ones()) else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
@@ -858,7 +858,9 @@ impl LogicalPlanRoot {
 
         let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
-                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                Itertools::exactly_one(pk_column_indices.iter())
+                    .copied()
+                    .unwrap(),
                 row_id_index
             );
             if append_only {
@@ -962,7 +964,7 @@ impl LogicalPlanRoot {
             .chain([dml_node, upstream_sink_union.into()])
             .collect_vec();
 
-        let mut stream_plan = StreamUnion::new_with_dist(
+        let mut stream_plan: StreamPlanRef = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
@@ -978,26 +980,28 @@ impl LogicalPlanRoot {
             .map(|d| d.watermark_idx as usize)
             .collect_vec();
 
+        let add_row_id_gen = |stream_plan: StreamPlanRef, row_id_index| match kind {
+            PrimaryKeyKind::UserDefinedPrimaryKey => {
+                unreachable!()
+            }
+            PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
+                StreamRowIdGen::new_with_dist(
+                    stream_plan,
+                    row_id_index,
+                    Distribution::HashShard(vec![row_id_index]),
+                )
+                .into()
+            }
+        };
+
+        // Add RowIDGen before WatermarkFilter, so filtering always sees a valid row-id key.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = add_row_id_gen(stream_plan, row_id_index);
+        }
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
-        // Add RowIDGen node if needed.
-        if let Some(row_id_index) = row_id_index {
-            match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey => {
-                    unreachable!()
-                }
-                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
-                    stream_plan = StreamRowIdGen::new_with_dist(
-                        stream_plan,
-                        row_id_index,
-                        Distribution::HashShard(vec![row_id_index]),
-                    )
-                    .into();
-                }
-            }
         }
 
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;

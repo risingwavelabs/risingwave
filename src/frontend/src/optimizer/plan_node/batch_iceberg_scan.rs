@@ -38,6 +38,7 @@ pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
     pub task: IcebergFileScanTask,
+    limit: Option<u64>,
 }
 
 impl Eq for BatchIcebergScan {}
@@ -47,6 +48,7 @@ impl Hash for BatchIcebergScan {
         self.base.hash(state);
         self.core.hash(state);
         self.iceberg_scan_type().hash(state);
+        self.limit.hash(state);
     }
 }
 
@@ -59,7 +61,25 @@ impl BatchIcebergScan {
             Order::any(),
         );
 
-        Self { base, core, task }
+        Self {
+            base,
+            core,
+            task,
+            limit: None,
+        }
+    }
+
+    pub fn clone_with_limit(&self, limit: Option<u64>) -> Self {
+        Self {
+            base: self.base.clone(),
+            core: self.core.clone(),
+            task: self.task.clone(),
+            limit,
+        }
+    }
+
+    pub fn limit(&self) -> Option<u64> {
+        self.limit
     }
 
     pub fn iceberg_scan_type(&self) -> IcebergScanType {
@@ -91,6 +111,7 @@ impl BatchIcebergScan {
             base,
             core: self.core.clone(),
             task: self.task.clone(),
+            limit: self.limit,
         }
     }
 
@@ -114,6 +135,9 @@ impl Distill for BatchIcebergScan {
         ];
         if let Some(predicate) = self.predicate() {
             fields.push(("predicate", Pretty::from(predicate)));
+        }
+        if let Some(limit) = self.limit {
+            fields.push(("limit", Pretty::debug(&limit)));
         }
         childless_record("BatchIcebergScan", fields)
     }

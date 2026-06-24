@@ -164,9 +164,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         if opts.in_memory {
             meta_opts.state_store = Some(HUMMOCK_IN_MEMORY.to_owned());
         } else {
-            let state_store_dir = format!("{}/state_store", &store_directory);
+            let state_store_dir = format!("{}/state_store", store_directory);
             std::fs::create_dir_all(&state_store_dir).unwrap();
-            let state_store_url = format!("hummock+fs://{}", &state_store_dir);
+            let state_store_url = format!("hummock+fs://{}", state_store_dir);
             meta_opts.state_store = Some(state_store_url);
         }
 
@@ -188,9 +188,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
             meta_opts.backend = Some(MetaBackend::Mem);
         } else {
             meta_opts.backend = Some(MetaBackend::Sqlite);
-            let meta_store_dir = format!("{}/meta_store", &store_directory);
+            let meta_store_dir = format!("{}/meta_store", store_directory);
             std::fs::create_dir_all(&meta_store_dir).unwrap();
-            let meta_store_endpoint = format!("{}/single_node.db", &meta_store_dir);
+            let meta_store_endpoint = format!("{}/single_node.db", meta_store_dir);
             meta_opts.sql_endpoint = Some(meta_store_endpoint.into());
         }
     }

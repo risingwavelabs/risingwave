@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
@@ -137,6 +138,13 @@ impl LocalFrontend {
     #[expect(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
+        Self { opts, env }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn with_frontend_config(opts: FrontendOpts, frontend_config: FrontendConfig) -> Self {
+        let mut env = FrontendEnv::mock();
+        env.set_frontend_config_for_test(frontend_config);
         Self { opts, env }
     }
 
@@ -396,6 +404,7 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
@@ -412,6 +421,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
@@ -770,11 +780,28 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: TableId,
+        _job_id: JobId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
+            database.to_prost()
+        };
+        pb_database.resource_group =
+            resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
     }
 
     async fn alter_database_param(

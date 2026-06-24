@@ -105,8 +105,8 @@ where
 
     let definitions: HashMap<JobId, String> = common_job_definitions
         .into_iter()
-        .chain(sink_definitions.into_iter())
-        .chain(source_definitions.into_iter())
+        .chain(sink_definitions)
+        .chain(source_definitions)
         .collect();
 
     Ok(definitions)
@@ -952,24 +952,26 @@ fn render_actors_with_allocator(
             .map(|fragment_id| fragment_lookup.get(fragment_id).unwrap())
             .collect_vec();
 
-        let entry_fragment_parallelism = entry_fragments
-            .iter()
-            .map(|fragment| fragment.parallelism.clone())
-            .dedup()
-            .exactly_one()
-            .map_err(|_| {
-                anyhow!(
-                    "entry fragments {:?} have inconsistent parallelism settings",
-                    entries.iter().copied().collect_vec()
-                )
-            })?;
+        let entry_fragment_parallelism = Itertools::exactly_one(
+            entry_fragments
+                .iter()
+                .map(|fragment| fragment.parallelism.clone())
+                .dedup(),
+        )
+        .map_err(|_| {
+            anyhow!(
+                "entry fragments {:?} have inconsistent parallelism settings",
+                entries.iter().copied().collect_vec()
+            )
+        })?;
 
-        let (job_id, distribution_type, vnode_count) = entry_fragments
-            .iter()
-            .map(|f| (f.job_id, f.distribution_type, f.vnode_count))
-            .dedup()
-            .exactly_one()
-            .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
+        let (job_id, distribution_type, vnode_count) = Itertools::exactly_one(
+            entry_fragments
+                .iter()
+                .map(|f| (f.job_id, f.distribution_type, f.vnode_count))
+                .dedup(),
+        )
+        .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
         let job = job_map
             .get(&job_id)

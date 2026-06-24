@@ -1,6 +1,15 @@
 from ..common import *
 from . import section
 
+cross_db_last_consumed_min_epoch = (
+    f"max({metric('crossdb_last_consumed_min_epoch', table_id_filter_enabled=True)} != 0) by (table_id, actor_id, fragment_id)"
+)
+cross_db_log_expiry_headroom = (
+    f"({epoch_to_unix_millis(cross_db_last_consumed_min_epoch)} / 1000"
+    f" + on(table_id) group_left max({metric('streaming_table_change_log_retention_seconds', node_filter_enabled=False, table_id_filter_enabled=True)} != 0) by (table_id)"
+    f" - time())"
+)
+
 @section
 def _(outer_panels: Panels):
     panels = outer_panels
@@ -22,6 +31,8 @@ def _(outer_panels: Panels):
   - `Streaming Operators by Operator`: Look at the alerts in the streaming operators by operator section, the following panels are more likely to be the bottleneck:
     - Merger Barrier Align: If the merger barrier align is high, it means the merger is not able to align the barriers in time.
     - Join Amplification: If the join amplification is high, it means the join is not able to process the data in time.
+- Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
+- PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
 """,
                     height=9,
                 ),
@@ -39,6 +50,21 @@ def _(outer_panels: Panels):
                         panels.target(
                             alert_threshold(metric("all_barrier_nums"), 200),
                             "Too Many Barriers {{database_id}}",
+                        ),
+                        panels.target(
+                            alert_threshold(
+                                cross_db_log_expiry_headroom,
+                                43200,
+                                "<",
+                            ),
+                            "Cross-DB Log Retention Expiring table {{table_id}} actor {{actor_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            alert_threshold(
+                                f"clamp_min({metric('pg_cdc_upstream_max_lsn')} - on(source_id) group_left(slot_name) {metric('stream_pg_cdc_state_table_lsn')}, 0)",
+                                20 * 1024 * 1024 * 1024,
+                            ),
+                            "PG CDC WAL Lag Too High slot {{slot_name}} source {{source_id}}",
                         ),
                     ],
                     ["last"],
@@ -70,7 +96,7 @@ def _(outer_panels: Panels):
                         ),
                         panels.target(
                             alert_threshold(
-                                'sum(rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval])) by (namespace, pod) / '
+                                'sum(topk by (namespace, pod) (1, rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval]))) by (namespace, pod) / '
                                 + 'sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod))',
                                 0.9,
                                 ">",
@@ -156,7 +182,7 @@ def _(outer_panels: Panels):
                             "Abnormal Delta Log Number",
                         ),
                         panels.target(
-                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by {NODE_LABEL}", 10000000),
+                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by ({NODE_LABEL})", 10000000),
                             "Abnormal Pending Event Number @ {{%s}}" % (NODE_LABEL),
                         ),
                         panels.target(

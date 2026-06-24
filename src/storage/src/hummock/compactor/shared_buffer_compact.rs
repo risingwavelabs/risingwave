@@ -28,7 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::PbSstableFilterType;
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 use thiserror_ext::AsReport;
 use tracing::error;
 
@@ -180,18 +180,22 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
-    // Shared buffer compaction always goes to L0. Use block_based_filter when kv_count is large.
+    // Shared buffer compaction always goes to L0. Use a blocked filter when kv_count is large.
     // Use None to apply the default threshold since shared buffer flush doesn't have a CompactTask.
     let estimated_output_key_count = estimate_output_key_count_by_size(
         total_key_count as u64,
         compact_data_size,
         sub_compaction_sstable_size as usize,
     );
-    let use_block_based_filter =
-        risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+    let sstable_filter_layout =
+        if risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
             estimated_output_key_count as u64,
             None,
-        );
+        ) {
+            PbSstableFilterLayout::Blocked
+        } else {
+            PbSstableFilterLayout::Plain
+        };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
@@ -201,7 +205,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             sub_compaction_sstable_size as usize,
             estimated_output_key_count,
             table_vnode_partition.clone(),
-            use_block_based_filter,
+            sstable_filter_layout,
             object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
@@ -422,7 +426,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         estimated_output_key_count: usize,
         table_vnode_partition: BTreeMap<TableId, u32>,
-        use_block_based_filter: bool,
+        sstable_filter_layout: PbSstableFilterLayout,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
@@ -438,9 +442,9 @@ impl SharedBufferCompactRunner {
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 table_vnode_partition,
-                use_block_based_filter,
-                // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
-                sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+                sstable_filter_layout,
+                // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
+                sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },

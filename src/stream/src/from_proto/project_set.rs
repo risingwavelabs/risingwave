@@ -21,6 +21,8 @@ use crate::executor::project::{ProjectSetExecutor, ProjectSetSelectItem};
 
 pub struct ProjectSetExecutorBuilder;
 
+impl_stream_node_body!(ProjectSet(ProjectSetNode) => ProjectSetExecutorBuilder);
+
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     type Node = ProjectSetNode;
 

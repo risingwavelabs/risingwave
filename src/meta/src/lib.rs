@@ -17,7 +17,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(map_try_insert)]
 #![feature(error_generic_member_access)]
-#![feature(assert_matches)]
 #![feature(try_blocks)]
 #![feature(stmt_expr_attributes)]
 #![feature(proc_macro_hygiene)]
@@ -27,8 +26,6 @@
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
-#![feature(iterator_try_collect)]
-#![feature(vec_deque_pop_if)]
 
 pub mod backup_restore;
 pub mod barrier;

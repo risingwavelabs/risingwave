@@ -196,6 +196,9 @@ for_all_wrapped_id_fields! (
         AlterDatabaseParamRequest {
             database_id: DatabaseId,
         }
+        AlterDatabaseResourceGroupRequest {
+            database_id: DatabaseId,
+        }
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
@@ -226,7 +229,7 @@ for_all_wrapped_id_fields! (
             table_id: JobId,
         }
         AlterResourceGroupRequest {
-            table_id: TableId,
+            job_id: JobId,
         }
         AlterSecretRequest {
             database_id: DatabaseId,
@@ -1116,6 +1119,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
         .type_attribute(
+            "stream_plan.StreamNode.node_body",
+            "#[derive(::prost_helpers::StreamNodeBodyVariants)]",
+        )
+        .type_attribute(
             "node_body",
             "#[strum_discriminants(derive(::strum::Display, Hash))]",
         )
@@ -1285,7 +1292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs_err::write(
             &out_file,
             format!(
-                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                "#![allow(clippy::useless_conversion)]\n#![allow(clippy::useless_borrows_in_formatting)]\nuse crate::{}::*;\n{}",
                 module_path_id, file_content
             ),
         )?;

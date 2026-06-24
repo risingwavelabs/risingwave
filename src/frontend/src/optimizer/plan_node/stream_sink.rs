@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::sync::Arc;
 
 use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    ColumnCatalog, ConflictBehavior, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID,
+    ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -31,7 +32,7 @@ use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_USER_IGNORE_DELETE_OPTION,
+    SINK_USER_IGNORE_DELETE_OPTION, SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
@@ -60,6 +61,14 @@ use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
+
+fn target_table_requires_row_level_conflict_handling(target_table: &TableCatalog) -> bool {
+    !target_table.version_column_indices.is_empty()
+        || matches!(
+            target_table.conflict_behavior(),
+            ConflictBehavior::DoUpdateIfNotNull | ConflictBehavior::IgnoreConflict
+        )
+}
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -469,7 +478,15 @@ impl StreamSink {
         } else {
             CreateType::Foreground
         };
-        let (properties, secret_refs) = properties.into_parts();
+        let (mut properties, secret_refs) = properties.into_parts();
+        if let Some(target_table) = &target_table
+            && target_table_requires_row_level_conflict_handling(target_table)
+        {
+            properties.insert(
+                SINK_USER_PRESERVE_ROW_LEVEL_CHANGES.to_owned(),
+                "true".to_owned(),
+            );
+        }
         let is_exactly_once = properties
             .get("is_exactly_once")
             .map(|v| v.to_lowercase() == "true");
@@ -853,13 +870,18 @@ impl ExprVisitable for StreamSink {}
 
 #[cfg(test)]
 mod test {
-    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use fixedbitset::FixedBitSet;
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field,
+    };
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::{IcebergPartitionInfo, *};
+    use crate::catalog::table_catalog::TableType;
     use crate::expr::{Expr, ExprImpl};
+    use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 
     fn create_column_catalog() -> Vec<ColumnCatalog> {
         vec![
@@ -876,6 +898,40 @@ mod test {
                 is_hidden: false,
             },
         ]
+    }
+
+    fn test_target_table(
+        conflict_behavior: ConflictBehavior,
+        version_column_indices: Vec<usize>,
+    ) -> TableCatalog {
+        let mut builder = TableCatalogBuilder::default();
+        let col_idx = builder.add_column(&Field::with_name(DataType::Int32, "v1"));
+        let mut table = builder.build(vec![], 0);
+        table.table_type = TableType::Table;
+        table.columns = vec![ColumnCatalog {
+            column_desc: ColumnDesc::named("v1", ColumnId::new(col_idx as i32), DataType::Int32),
+            is_hidden: false,
+        }];
+        table.conflict_behavior = conflict_behavior;
+        table.version_column_indices = version_column_indices;
+        table.watermark_columns = FixedBitSet::with_capacity(table.columns.len());
+        table
+    }
+
+    #[test]
+    fn test_target_table_requires_row_level_conflict_handling() {
+        assert!(target_table_requires_row_level_conflict_handling(
+            &test_target_table(ConflictBehavior::DoUpdateIfNotNull, vec![])
+        ));
+        assert!(target_table_requires_row_level_conflict_handling(
+            &test_target_table(ConflictBehavior::IgnoreConflict, vec![])
+        ));
+        assert!(target_table_requires_row_level_conflict_handling(
+            &test_target_table(ConflictBehavior::Overwrite, vec![0])
+        ));
+        assert!(!target_table_requires_row_level_conflict_handling(
+            &test_target_table(ConflictBehavior::Overwrite, vec![])
+        ));
     }
 
     #[test]

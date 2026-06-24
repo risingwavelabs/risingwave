@@ -311,7 +311,6 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::*;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_storage::memory::MemoryStateStore;
 

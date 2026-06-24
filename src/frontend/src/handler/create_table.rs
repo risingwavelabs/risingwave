@@ -2284,7 +2284,7 @@ pub async fn create_iceberg_engine_table(
             ErrorCode::InvalidInputSyntax(format!(
                 "invalid compaction_type: {}, must be one of {:?}",
                 compaction_type,
-                &[
+                [
                     CompactionType::Full,
                     CompactionType::SmallFiles,
                     CompactionType::FilesWithDelete

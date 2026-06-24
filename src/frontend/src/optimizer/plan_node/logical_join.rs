@@ -1420,7 +1420,9 @@ impl LogicalJoin {
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
-            *right.inputs().iter().exactly_one().unwrap().distribution(),
+            *Itertools::exactly_one(right.inputs().iter())
+                .unwrap()
+                .distribution(),
             Distribution::Single
         );
 

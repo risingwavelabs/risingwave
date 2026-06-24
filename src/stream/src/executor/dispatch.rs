@@ -1236,22 +1236,16 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         let chunk = self.output_mapping.apply(chunk);
         output.send(DispatcherMessageBatch::Chunk(chunk)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             output

@@ -19,6 +19,7 @@ use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use crate::MetaResult;
@@ -336,11 +337,20 @@ impl TrackingJob {
         job_id: JobId,
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Self {
-        let source_backfill_fragments = StreamJobFragments::source_backfill_fragments_impl(
+        Self::recovered_from_fragment_nodes(
+            job_id,
             fragment_infos
                 .iter()
                 .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
-        );
+        )
+    }
+
+    pub(crate) fn recovered_from_fragment_nodes<'a>(
+        job_id: JobId,
+        fragment_nodes: impl Iterator<Item = (FragmentId, &'a StreamNode)>,
+    ) -> Self {
+        let source_backfill_fragments =
+            StreamJobFragments::source_backfill_fragments_impl(fragment_nodes);
         let source_change = if source_backfill_fragments.is_empty() {
             None
         } else {

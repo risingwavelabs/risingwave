@@ -192,6 +192,7 @@ pub enum DdlCommand {
         definition: String,
     },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterDatabaseResourceGroup(DatabaseId, Option<String>, bool),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
@@ -231,6 +232,7 @@ impl DdlCommand {
                 subscription_id, ..
             } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseResourceGroup(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
@@ -259,6 +261,7 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterDatabaseResourceGroup(_, _, _)
             | DdlCommand::AlterStreamingJobConfig(_, _, _)
             | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
@@ -413,7 +416,6 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    #[expect(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -516,6 +518,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
+                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
+                        .await
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
@@ -779,6 +785,21 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_resource_group(database_id, resource_group)
+            .await?;
+
+        Ok(version)
+    }
+
     // The 'secret' part of the request we receive from the frontend is in plaintext;
     // here, we need to encrypt it before storing it in the catalog.
     fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
@@ -930,15 +951,12 @@ impl DdlController {
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
-        let stream_scan_fragment = table_fragments
-            .fragments
-            .values()
-            .filter(|f| {
+        let stream_scan_fragment =
+            Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
                     || f.fragment_type_mask
                         .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .exactly_one()
+            }))
             .ok()
             .with_context(|| {
                 format!(
@@ -1512,19 +1530,6 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
-                // TODO: Remove this guard when auto schema refresh sink fully supports drop column.
-                if !removed_columns.is_empty() {
-                    return Err(anyhow!(
-                        "new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}",
-                        table.columns,
-                        original_table_columns,
-                        removed_columns
-                            .iter()
-                            .map(|col| col.column_id())
-                            .collect_vec()
-                    )
-                    .into());
-                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self

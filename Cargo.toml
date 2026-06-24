@@ -71,11 +71,7 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = [
-    "e2e_test/source_inline/pubsub",
-    "e2e_test/udf/embedded_wasm",
-    "lints",
-]
+exclude = ["e2e_test/source_inline/pubsub", "e2e_test/udf/embedded_wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -109,7 +105,7 @@ libraries = [{ path = "./lints" }]
 apache-avro = { git = "https://github.com/risingwavelabs/avro-rs", rev = "1f2723802d4fb77b97fa084f7bb81e3b60b9e03f" }
 arc-swap = "1"
 arrow-udf-runtime = "0.9.0"
-async-openai = { version = "0.40.2", features = ["embedding"] }
+async-openai = { version = "0.41.0", features = ["embedding"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -156,7 +152,10 @@ hashbrown = { version = "0.17", features = [
     "inline-more",
 ] }
 hashbrown0_14 = { package = "hashbrown", version = "0.14" }
-hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
+# 0.16.1 removed the `RawTableClone for RawTable<T: Copy>` specialization that
+# rustc rejects under `min_specialization` ("cannot specialize on trait Copy"),
+# so the `nightly` feature compiles again on recent nightlies. (Was 0.15.)
+hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
     "nightly",
 ] }
 hytra = "0.1"

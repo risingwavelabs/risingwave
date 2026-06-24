@@ -1,0 +1,56 @@
+control substitution on
+
+# Regression test for implicit row-id tables with upsert watermark filtering.
+# A late Kafka insert used to be converted to a delete before RowIdGen filled `_row_id`,
+# causing Materialize conflict check to panic on a NULL row-id primary key.
+
+system ok
+rpk topic delete test_watermark_ttl_row_id || true
+
+system ok
+rpk topic create test_watermark_ttl_row_id -p 1
+
+statement ok
+CREATE TABLE ttl_row_id_kafka (
+    id INT,
+    ts TIMESTAMP,
+    WATERMARK FOR ts AS ts WITH TTL
+)
+INCLUDE KEY AS kafka_key
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_watermark_ttl_row_id',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+system ok
+cat <<EOF | rpk topic produce test_watermark_ttl_row_id -f "%k:%v\n"
+k1:{"id":1,"ts":"2026-01-01 10:00:00"}
+EOF
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM ttl_row_id_kafka;
+----
+1
+
+system ok
+cat <<EOF | rpk topic produce test_watermark_ttl_row_id -f "%k:%v\n"
+k2:{"id":2,"ts":"2026-01-01 09:00:00"}
+EOF
+
+sleep 2s
+
+statement ok
+flush;
+
+query I
+SELECT count(*) FROM ttl_row_id_kafka;
+----
+1
+
+statement ok
+DROP TABLE ttl_row_id_kafka;
+
+system ok
+rpk topic delete test_watermark_ttl_row_id || true
