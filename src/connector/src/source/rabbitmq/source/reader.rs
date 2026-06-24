@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use lapin::options::{BasicAckOptions, BasicConsumeOptions, BasicQosOptions};
 use lapin::types::FieldTable;
@@ -230,17 +230,7 @@ impl RabbitmqSplitReader {
             channels.insert(ack_consumer_id, channel);
             ack_consumer_ids.push(ack_consumer_id);
             streams.push(
-                consumer
-                    .map(move |delivery| {
-                        delivery
-                            .map(|delivery| RabbitmqReaderEvent::Delivery {
-                                queue: queue.clone(),
-                                ack_consumer_id,
-                                delivery,
-                            })
-                            .map_err(Into::into)
-                    })
-                    .boxed(),
+                rabbitmq_delivery_event_stream(queue.clone(), ack_consumer_id, consumer).boxed(),
             );
             streams.push(
                 UnboundedReceiverStream::new(ack_rx)
@@ -313,6 +303,25 @@ impl RabbitmqSplitReader {
             yield batch;
         }
     }
+}
+
+#[try_stream(ok = RabbitmqReaderEvent, error = crate::error::ConnectorError)]
+async fn rabbitmq_delivery_event_stream<S>(queue: String, ack_consumer_id: u64, deliveries: S)
+where
+    S: Stream<Item = lapin::Result<lapin::message::Delivery>> + Send + 'static,
+{
+    let mut deliveries = Box::pin(deliveries);
+    while let Some(delivery) = deliveries.next().await {
+        yield RabbitmqReaderEvent::Delivery {
+            queue: queue.clone(),
+            ack_consumer_id,
+            delivery: delivery?,
+        };
+    }
+
+    return Err(crate::error::ConnectorError::from(anyhow::anyhow!(
+        "RabbitMQ consumer for queue `{queue}` stopped; the queue may have been deleted or the broker canceled the consumer"
+    )));
 }
 
 enum RabbitmqReaderEvent {
@@ -434,7 +443,30 @@ fn check_blocked_connection(
 
 #[cfg(test)]
 mod tests {
-    use super::rabbitmq_consumer_tag;
+    use futures::StreamExt;
+
+    use super::{rabbitmq_consumer_tag, rabbitmq_delivery_event_stream};
+
+    #[tokio::test]
+    async fn delivery_stream_end_is_an_error() {
+        let mut events = Box::pin(rabbitmq_delivery_event_stream(
+            "deleted_queue".to_owned(),
+            42,
+            futures::stream::empty::<lapin::Result<lapin::message::Delivery>>(),
+        ));
+
+        let err = match events
+            .next()
+            .await
+            .expect("stream should emit an error when the consumer ends")
+        {
+            Ok(_) => panic!("consumer end should not produce a delivery event"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("deleted_queue"));
+        assert!(err.to_string().contains("stopped"));
+    }
 
     #[test]
     fn consumer_tag_hashes_long_queue_name() {
