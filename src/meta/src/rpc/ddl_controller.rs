@@ -1075,7 +1075,7 @@ impl DdlController {
         refresh_interval_sec: Option<u64>,
         replace_sink: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
-        let final_sink_name = if let Some(old_sink_id) = replace_sink {
+        let replace_sink_info = if let Some(old_sink_id) = replace_sink {
             let StreamingJob::Sink(sink) = &streaming_job else {
                 bail!("replace sink requires a sink job")
             };
@@ -1084,7 +1084,10 @@ impl DdlController {
             }
             validate_sink(sink).await?;
 
-            Some((old_sink_id, sink.name.clone()))
+            Some(ReplaceSinkCommandInfo {
+                old_sink_id,
+                final_sink_name: sink.name.clone(),
+            })
         } else {
             if let StreamingJob::Sink(sink) = &streaming_job
                 && let Some(target_table) = sink.target_table
@@ -1106,65 +1109,47 @@ impl DdlController {
             parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
                 .expect("backfill adaptive parallelism strategy should be validated in frontend")
         });
-        let streaming_job_model = if let Some((old_sink_id, _)) = final_sink_name.as_ref() {
-            self.metadata_manager
-                .catalog_controller
-                .create_replacement_sink_catalog(
-                    *old_sink_id,
-                    &mut streaming_job,
-                    &ctx,
-                    &fragment_graph.parallelism,
-                    fragment_graph.max_parallelism as _,
-                    dependencies,
-                    resource_type.clone(),
-                    &fragment_graph.backfill_parallelism,
-                    adaptive_parallelism_strategy,
-                    backfill_adaptive_parallelism_strategy,
-                )
-                .await?
-        } else {
-            match self
-                .metadata_manager
-                .catalog_controller
-                .create_job_catalog(
-                    &mut streaming_job,
-                    &ctx,
-                    &fragment_graph.parallelism,
-                    fragment_graph.max_parallelism as _,
-                    dependencies,
-                    resource_type.clone(),
-                    &fragment_graph.backfill_parallelism,
-                    adaptive_parallelism_strategy,
-                    backfill_adaptive_parallelism_strategy,
-                    refresh_interval_sec,
-                )
-                .await
-            {
-                Ok(model) => model,
-                Err(meta_err) => {
-                    if !if_not_exists {
-                        return Err(meta_err);
-                    }
-                    return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner()
-                    {
-                        if streaming_job.create_type() == CreateType::Foreground {
-                            let database_id = streaming_job.database_id();
-                            self.metadata_manager
-                                .wait_streaming_job_finished(database_id, *job_id)
-                                .await
-                        } else {
-                            Ok(IGNORED_NOTIFICATION_VERSION)
-                        }
-                    } else {
-                        Err(meta_err)
-                    };
+        let streaming_job_model = match self
+            .metadata_manager
+            .catalog_controller
+            .create_job_catalog(
+                &mut streaming_job,
+                &ctx,
+                &fragment_graph.parallelism,
+                fragment_graph.max_parallelism as _,
+                dependencies,
+                resource_type.clone(),
+                &fragment_graph.backfill_parallelism,
+                adaptive_parallelism_strategy,
+                backfill_adaptive_parallelism_strategy,
+                replace_sink_info.as_ref(),
+                refresh_interval_sec,
+            )
+            .await
+        {
+            Ok(model) => model,
+            Err(meta_err) => {
+                if !if_not_exists {
+                    return Err(meta_err);
                 }
+                return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+                    if streaming_job.create_type() == CreateType::Foreground {
+                        let database_id = streaming_job.database_id();
+                        self.metadata_manager
+                            .wait_streaming_job_finished(database_id, *job_id)
+                            .await
+                    } else {
+                        Ok(IGNORED_NOTIFICATION_VERSION)
+                    }
+                } else {
+                    Err(meta_err)
+                };
             }
         };
         let job_id = streaming_job.id();
-        if let Some((old_sink_id, _)) = final_sink_name.as_ref() {
+        if let Some(replace_sink) = replace_sink_info.as_ref() {
             tracing::debug!(
-                old_sink_id = %old_sink_id,
+                old_sink_id = %replace_sink.old_sink_id,
                 new_sink_id = %job_id,
                 definition = streaming_job.definition(),
                 create_type = streaming_job.create_type().as_str_name(),
@@ -1205,22 +1190,16 @@ impl DdlController {
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
-                final_sink_name.is_none(),
+                replace_sink_info.is_none(),
+                replace_sink_info.clone(),
             )
             .await
         {
-            Ok((stream_job_fragments, mut ctx)) => {
-                if let Some((old_sink_id, final_sink_name)) = final_sink_name.clone() {
-                    ctx.replace_sink = Some(ReplaceSinkCommandInfo {
-                        old_sink_id,
-                        final_sink_name,
-                    });
-                }
-                self.stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, permit)
-                    .await
-                    .map_err(|err| (err, true))
-            }
+            Ok((stream_job_fragments, ctx)) => self
+                .stream_manager
+                .create_streaming_job(stream_job_fragments, ctx, permit)
+                .await
+                .map_err(|err| (err, true)),
             Err(err) => Err((err, false)),
         };
 
@@ -1267,6 +1246,7 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
         notify_creating: bool,
+        replace_sink: Option<ReplaceSinkCommandInfo>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1286,7 +1266,7 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
-        let (ctx, stream_job_fragments) = self
+        let (mut ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
@@ -1295,6 +1275,7 @@ impl DdlController {
                 streaming_job_model,
             )
             .await?;
+        ctx.replace_sink = replace_sink;
 
         let streaming_job = &ctx.streaming_job;
 

@@ -79,7 +79,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::Command;
+use crate::barrier::{Command, ReplaceSinkCommandInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
@@ -235,6 +235,7 @@ impl CatalogController {
         backfill_parallelism: &Option<Parallelism>,
         adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        replace_sink: Option<&ReplaceSinkCommandInfo>,
         refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
@@ -258,13 +259,53 @@ impl CatalogController {
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
         ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
-        check_relation_name_duplicate(
-            &streaming_job.name(),
-            streaming_job.database_id(),
-            streaming_job.schema_id(),
-            &txn,
-        )
-        .await?;
+        if let Some(replace_sink) = replace_sink {
+            let StreamingJob::Sink(sink) = streaming_job else {
+                bail!("replacement sink catalog requires a sink job")
+            };
+            let (old_sink, old_object) = Sink::find_by_id(replace_sink.old_sink_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .and_then(|(sink, object)| object.map(|object| (sink, object)))
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", replace_sink.old_sink_id))?;
+            let old_streaming_job =
+                StreamingJobModel::find_by_id(replace_sink.old_sink_id.as_job_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::catalog_id_not_found("sink", replace_sink.old_sink_id)
+                    })?;
+            if old_object.obj_type != ObjectType::Sink
+                || old_object.database_id != Some(sink.database_id)
+                || old_object.schema_id != Some(sink.schema_id)
+                || old_sink.name != replace_sink.final_sink_name
+                || sink.name != replace_sink.final_sink_name
+            {
+                bail!(
+                    "old sink {} does not match replacement sink {}",
+                    replace_sink.old_sink_id,
+                    sink.name
+                );
+            }
+            if old_sink.target_table.is_some() || sink.target_table.is_some() {
+                bail!("replace sink into table is not supported");
+            }
+            if old_streaming_job.job_status != JobStatus::Created {
+                bail!(
+                    "sink {} is not ready to be replaced",
+                    replace_sink.old_sink_id
+                );
+            }
+        } else {
+            check_relation_name_duplicate(
+                &streaming_job.name(),
+                streaming_job.database_id(),
+                streaming_job.schema_id(),
+                &txn,
+            )
+            .await?;
+        }
 
         // check if any dependency is in altering status.
         if !dependencies.is_empty() {
@@ -368,6 +409,20 @@ impl CatalogController {
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
+                if let Some(replace_sink) = replace_sink {
+                    sink.name = format!(
+                        "__rw_replacing_sink_{}_{}",
+                        replace_sink.old_sink_id.as_raw_id(),
+                        sink.id.as_raw_id()
+                    );
+                    tracing::debug!(
+                        old_sink_id = %replace_sink.old_sink_id,
+                        new_sink_id = %sink.id,
+                        final_name = %replace_sink.final_sink_name,
+                        temp_name = %sink.name,
+                        "created replacement sink catalog with temporary name"
+                    );
+                }
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
                 streaming_job_model
@@ -521,150 +576,6 @@ impl CatalogController {
                 object_dependency::ActiveModel {
                     oid: Set(oid),
                     used_by: Set(streaming_job.id().as_object_id()),
-                    ..Default::default()
-                }
-            }))
-            .exec(&txn)
-            .await?;
-        }
-
-        txn.commit().await?;
-
-        Ok(streaming_job_model)
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    #[await_tree::instrument]
-    pub async fn create_replacement_sink_catalog(
-        &self,
-        old_sink_id: SinkId,
-        streaming_job: &mut StreamingJob,
-        ctx: &StreamContext,
-        parallelism: &Option<Parallelism>,
-        max_parallelism: usize,
-        mut dependencies: HashSet<ObjectId>,
-        resource_type: streaming_job_resource_type::ResourceType,
-        backfill_parallelism: &Option<Parallelism>,
-        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
-        backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
-    ) -> MetaResult<streaming_job::Model> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let create_type = streaming_job.create_type();
-
-        let StreamingJob::Sink(sink) = streaming_job else {
-            bail!("replacement sink catalog requires a sink job")
-        };
-
-        let streaming_parallelism = match (parallelism, self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => StreamingParallelism::Adaptive,
-            (None, DefaultParallelism::Default(n)) => StreamingParallelism::Fixed(n.get()),
-            (Some(n), _) => StreamingParallelism::Fixed(n.parallelism as _),
-        };
-        let backfill_parallelism = backfill_parallelism
-            .as_ref()
-            .map(|p| StreamingParallelism::Fixed(p.parallelism as _))
-            .or_else(|| {
-                backfill_adaptive_parallelism_strategy
-                    .as_ref()
-                    .map(|_| StreamingParallelism::Adaptive)
-            });
-
-        ensure_user_id(sink.owner as _, &txn).await?;
-        ensure_object_id(ObjectType::Database, sink.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, sink.schema_id, &txn).await?;
-
-        let (old_sink, old_object) = Sink::find_by_id(old_sink_id)
-            .find_also_related(Object)
-            .one(&txn)
-            .await?
-            .and_then(|(sink, object)| object.map(|object| (sink, object)))
-            .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
-        let old_streaming_job = StreamingJobModel::find_by_id(old_sink_id.as_job_id())
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
-        if old_object.obj_type != ObjectType::Sink
-            || old_object.database_id != Some(sink.database_id)
-            || old_object.schema_id != Some(sink.schema_id)
-            || old_sink.name != sink.name
-        {
-            bail!(
-                "old sink {} does not match replacement sink {}",
-                old_sink_id,
-                sink.name
-            );
-        }
-        if old_sink.target_table.is_some() || sink.target_table.is_some() {
-            bail!("replace sink into table is not supported");
-        }
-        if old_streaming_job.job_status != JobStatus::Created {
-            bail!("sink {} is not ready to be replaced", old_sink_id);
-        }
-
-        if let Some(target_table_id) = sink.target_table
-            && check_sink_into_table_cycle(
-                target_table_id.into(),
-                dependencies.iter().cloned().collect(),
-                &txn,
-            )
-            .await?
-        {
-            bail!("Creating such a sink will result in circular dependency.");
-        }
-
-        let streaming_job_model = Self::create_streaming_job_obj(
-            &txn,
-            ObjectType::Sink,
-            sink.owner as _,
-            Some(sink.database_id),
-            Some(sink.schema_id),
-            create_type,
-            ctx.clone(),
-            adaptive_parallelism_strategy,
-            streaming_parallelism,
-            max_parallelism,
-            resource_type,
-            backfill_parallelism,
-            backfill_adaptive_parallelism_strategy,
-            None,
-        )
-        .await?;
-        sink.id = streaming_job_model.job_id.as_sink_id();
-        let final_name = sink.name.clone();
-        sink.name = format!(
-            "__rw_replacing_sink_{}_{}",
-            old_sink_id.as_raw_id(),
-            sink.id.as_raw_id()
-        );
-        tracing::debug!(
-            old_sink_id = %old_sink_id,
-            new_sink_id = %sink.id,
-            final_name,
-            temp_name = sink.name,
-            "created replacement sink catalog with temporary name"
-        );
-        let sink_model: sink::ActiveModel = sink.clone().into();
-        Sink::insert(sink_model).exec(&txn).await?;
-
-        let replacement_job = StreamingJob::Sink(sink.clone());
-        dependencies.extend(
-            replacement_job
-                .dependent_secret_ids()?
-                .into_iter()
-                .map(|id| id.as_object_id()),
-        );
-        dependencies.extend(
-            replacement_job
-                .dependent_connection_ids()?
-                .into_iter()
-                .map(|id| id.as_object_id()),
-        );
-        if !dependencies.is_empty() {
-            ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
-                object_dependency::ActiveModel {
-                    oid: Set(oid),
-                    used_by: Set(sink.id.as_object_id()),
                     ..Default::default()
                 }
             }))
