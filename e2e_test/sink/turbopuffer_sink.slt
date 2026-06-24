@@ -31,8 +31,13 @@ CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
     distance_metric = 'cosine_distance',
     disable_backpressure = 'true',
     full_text_search_columns = 'body,note_contents',
-    filterable_columns = '*'
+    filterable_columns = '*',
+    write_batch_size = 2,
+    max_linger_second = 1
 );
+
+statement ok
+ALTER SINK tpuf_e2e_sink SET CONFIG (write_batch_size = 3, max_linger_second = 1);
 
 statement ok
 FLUSH;
