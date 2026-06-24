@@ -431,7 +431,6 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
 }
 
 /// A buffered input row, materialized from the state table while processing one partition.
-#[derive(Clone)]
 struct BufferedRow {
     /// Per-actor monotonic id; the state-table key tiebreaker (keeps rows with equal ORDER BY keys
     /// distinct and stably ordered).
@@ -571,159 +570,155 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                     let w = watermark.val;
 
-                    // Scan the buffered rows in PK order — (partition, order key, seq) — so they
-                    // arrive grouped by partition and already ordered within each partition. Hold
-                    // only the current partition's rows resident: process them at the partition
-                    // boundary, collect the consumed rows, then drop the buffer before the next
-                    // partition. This bounds resident memory to the largest single partition's live
-                    // buffer plus one output chunk, rather than a whole vnode's worth of rows.
+                    // Process one partition at a time. The buffer is PK-ordered — (partition, order
+                    // key, seq) — so a partition is a contiguous run. For each partition we read its
+                    // rows, DROP the iterator, then match / emit / delete with the iterator closed,
+                    // and re-open at the next partition's key to continue. Closing the iterator first
+                    // is what lets the deletes run in place (a delete cannot interleave with an open
+                    // iterator over the same table) and lets matches stream straight into the chunk
+                    // builder. So resident memory is bounded by one partition's live buffer plus one
+                    // output chunk — no vnode-level accumulation of output rows or pending deletes.
+                    // (A single very large partition is still loaded whole — the irreducible
+                    // per-partition floor; mid-partition streaming is future work.)
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
                     for vnode in vnodes {
-                        // Consumed rows are collected during the scan and deleted afterwards: a
-                        // state-table delete cannot interleave with an open iterator over it.
-                        let mut consumed: Vec<BufferedRow> = Vec::new();
-                        let mut out_rows: Vec<OwnedRow> = Vec::new();
-                        {
-                            let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) =
-                                (Bound::Unbounded, Bound::Unbounded);
-                            let iter = state_table
-                                .iter_with_vnode(vnode, &sub_range, PrefetchOptions::default())
-                                .await?;
-                            pin_mut!(iter);
-
-                            let mut cur_partition: Option<OwnedRow> = None;
+                        // The partition key to open the next scan from. It is a PK *prefix*, so
+                        // `Included` starts the scan at the first row of that partition. `None` opens
+                        // at the start of the vnode.
+                        let mut resume: Option<OwnedRow> = None;
+                        loop {
                             let mut rows: Vec<BufferedRow> = Vec::new();
-                            loop {
-                                let parsed = match iter.next().await {
-                                    Some(item) => {
-                                        let row = item?.into_owned_row();
-                                        let seq =
-                                            row.datum_at(0).expect("seq not null").into_int64();
-                                        let input_row = OwnedRow::new(
-                                            (1..1 + input_arity)
-                                                .map(|i| row.datum_at(i).to_owned_datum())
-                                                .collect(),
-                                        );
-                                        let order_key =
-                                            input_row.datum_at(time_col).to_owned_datum();
-                                        let partition_key = (&input_row)
-                                            .project(&partition_key_indices)
-                                            .to_owned_row();
-                                        Some((
-                                            partition_key,
-                                            BufferedRow { seq, order_key, row: input_row },
-                                        ))
-                                    }
-                                    None => None,
-                                };
-                                // Flush the completed partition when the partition key changes or the
-                                // scan ends. The buffer is already in ORDER BY order (it is the PK
-                                // order), so no in-memory sort is needed.
-                                let boundary = match (&cur_partition, &parsed) {
-                                    (Some(c), Some((pk, _))) => c != pk,
-                                    (Some(_), None) => true,
-                                    _ => false,
-                                };
-                                if boundary && !rows.is_empty() {
-                                    let partition_key = cur_partition.as_ref().unwrap();
-                                    // The prefix with leading order_key <= w is final.
-                                    let safe_len = rows
-                                        .iter()
-                                        .take_while(|r| {
-                                            matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le())
-                                        })
-                                        .count();
-                                    // Evaluate DEFINE predicates against the in-progress match while
-                                    // matching; the matcher borrows `rows`.
-                                    let matcher = DefineMatcher {
-                                        rows: &rows,
-                                        safe_len,
-                                        defines: &defines,
-                                        within: within.as_ref(),
-                                    };
-                                    let found =
-                                        nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
-                                    let mut cursor = 0usize;
-                                    for m in found {
-                                        if m.start < cursor {
-                                            continue;
-                                        }
-                                        // Final only if another safe row follows (greedy match is
-                                        // maximal).
-                                        if m.end >= safe_len {
+                            let mut next_resume: Option<OwnedRow> = None;
+                            // Read one partition's contiguous run, then drop the iterator.
+                            {
+                                let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+                                    match resume.take() {
+                                        Some(pk) => Bound::Included(pk),
+                                        None => Bound::Unbounded,
+                                    },
+                                    Bound::Unbounded,
+                                );
+                                let iter = state_table
+                                    .iter_with_vnode(vnode, &pk_range, PrefetchOptions::default())
+                                    .await?;
+                                pin_mut!(iter);
+                                let mut cur_partition: Option<OwnedRow> = None;
+                                while let Some(item) = iter.next().await {
+                                    let row = item?.into_owned_row();
+                                    let seq = row.datum_at(0).expect("seq not null").into_int64();
+                                    let input_row = OwnedRow::new(
+                                        (1..1 + input_arity)
+                                            .map(|i| row.datum_at(i).to_owned_datum())
+                                            .collect(),
+                                    );
+                                    let order_key = input_row.datum_at(time_col).to_owned_datum();
+                                    let partition_key =
+                                        (&input_row).project(&partition_key_indices).to_owned_row();
+                                    match &cur_partition {
+                                        Some(c) if c != &partition_key => {
+                                            // First row of the next partition: stop and resume from
+                                            // here (the re-open re-reads it as that partition's head).
+                                            next_resume = Some(partition_key);
                                             break;
                                         }
-                                        // WITHIN is enforced inside the matcher (it prunes
-                                        // overshooting candidates during traversal). Evaluate each
-                                        // measure over the synthetic row its slots produce from the
-                                        // matched rows and their per-row labels.
-                                        let mut measure_datums: Vec<Datum> =
-                                            Vec::with_capacity(measures.len());
-                                        for measure in &measures {
-                                            let mut synthetic =
-                                                Vec::with_capacity(measure.slots.len());
-                                            for slot in &measure.slots {
-                                                synthetic.push(
-                                                    slot.resolve(&rows, m.start, &m.labels).await?,
-                                                );
+                                        _ => {
+                                            if cur_partition.is_none() {
+                                                cur_partition = Some(partition_key);
                                             }
-                                            let synthetic = OwnedRow::new(synthetic);
-                                            let value =
-                                                measure.expr.eval_row_infallible(&synthetic).await;
-                                            measure_datums.push(value);
-                                        }
-                                        let match_id = row_id_gen.next();
-                                        out_rows.push(
-                                            partition_key
-                                                .clone()
-                                                .chain(OwnedRow::new(measure_datums))
-                                                .chain(OwnedRow::new(vec![Some(
-                                                    ScalarImpl::Int64(match_id),
-                                                )]))
-                                                .into_owned_row(),
-                                        );
-                                        cursor = skip.next_pos(m.start, m.end, &m.labels);
-                                    }
-
-                                    // Evict finalized rows that can no longer be part of any match. A
-                                    // match is contiguous from its start, so a row is dead once no
-                                    // match starting at it is still possible. It is *not* enough to
-                                    // ask whether a row can merely *begin* the pattern: for `(a b)`, a
-                                    // buffer `[a, x, x, ...]` whose `a` is followed only by
-                                    // non-matching safe rows can never complete, yet the `a` can still
-                                    // begin the pattern — keeping it would pin the dead prefix forever.
-                                    // Retain from the earliest row whose match is still live at the
-                                    // safe boundary, so a genuine partial match awaiting future rows is
-                                    // kept while a start already blocked by safe rows is dropped.
-                                    let mut retain_from = safe_len;
-                                    for p in cursor..safe_len {
-                                        if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
-                                            retain_from = p;
-                                            break;
+                                            rows.push(BufferedRow { seq, order_key, row: input_row });
                                         }
                                     }
-                                    for c in &rows[0..retain_from] {
-                                        consumed.push(c.clone());
-                                    }
-                                    rows.clear();
-                                }
-                                match parsed {
-                                    Some((pk, br)) => {
-                                        cur_partition = Some(pk);
-                                        rows.push(br);
-                                    }
-                                    None => break,
                                 }
                             }
-                        }
-                        // Batched deletes, after the iterator is dropped.
-                        for c in consumed {
-                            state_table.delete(Self::state_row(&c));
-                        }
-                        for row in out_rows {
-                            if let Some(c) = builder.append_row(Op::Insert, row) {
-                                yield Message::Chunk(c);
+                            if rows.is_empty() {
+                                break; // vnode exhausted
+                            }
+
+                            // Iterator dropped: match, emit, and delete this partition. The buffer is
+                            // already in ORDER BY order (PK order), so no in-memory sort is needed.
+                            let partition_key =
+                                (&rows[0].row).project(&partition_key_indices).to_owned_row();
+                            // The prefix with leading order_key <= w is final.
+                            let safe_len = rows
+                                .iter()
+                                .take_while(|r| {
+                                    matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le())
+                                })
+                                .count();
+                            // Evaluate DEFINE predicates against the in-progress match; the matcher
+                            // borrows `rows`.
+                            let matcher = DefineMatcher {
+                                rows: &rows,
+                                safe_len,
+                                defines: &defines,
+                                within: within.as_ref(),
+                            };
+                            let found = nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
+                            let mut cursor = 0usize;
+                            for m in found {
+                                if m.start < cursor {
+                                    continue;
+                                }
+                                // Final only if another safe row follows (greedy match is maximal).
+                                if m.end >= safe_len {
+                                    break;
+                                }
+                                // WITHIN is enforced inside the matcher. Evaluate each measure over
+                                // the synthetic row its slots produce from the matched rows + labels.
+                                let mut measure_datums: Vec<Datum> =
+                                    Vec::with_capacity(measures.len());
+                                for measure in &measures {
+                                    let mut synthetic = Vec::with_capacity(measure.slots.len());
+                                    for slot in &measure.slots {
+                                        synthetic
+                                            .push(slot.resolve(&rows, m.start, &m.labels).await?);
+                                    }
+                                    let synthetic = OwnedRow::new(synthetic);
+                                    let value = measure.expr.eval_row_infallible(&synthetic).await;
+                                    measure_datums.push(value);
+                                }
+                                let match_id = row_id_gen.next();
+                                // Stream the match into the chunk builder, flushing a full chunk the
+                                // moment it fills — output memory stays bounded by one chunk.
+                                if let Some(c) = builder.append_row(
+                                    Op::Insert,
+                                    partition_key
+                                        .clone()
+                                        .chain(OwnedRow::new(measure_datums))
+                                        .chain(OwnedRow::new(vec![Some(ScalarImpl::Int64(
+                                            match_id,
+                                        ))]))
+                                        .into_owned_row(),
+                                ) {
+                                    yield Message::Chunk(c);
+                                }
+                                cursor = skip.next_pos(m.start, m.end, &m.labels);
+                            }
+
+                            // Evict finalized rows that can no longer be part of any match. A match is
+                            // contiguous from its start, so a row is dead once no match starting at it
+                            // is still possible. It is *not* enough to ask whether a row can merely
+                            // *begin* the pattern: for `(a b)`, a buffer `[a, x, x, ...]` whose `a` is
+                            // followed only by non-matching safe rows can never complete, yet the `a`
+                            // can still begin the pattern — keeping it would pin the dead prefix
+                            // forever. Retain from the earliest row whose match is still live at the
+                            // safe boundary. The iterator is dropped, so we delete in place — no
+                            // per-vnode delete buffer.
+                            let mut retain_from = safe_len;
+                            for p in cursor..safe_len {
+                                if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
+                                    retain_from = p;
+                                    break;
+                                }
+                            }
+                            for c in &rows[0..retain_from] {
+                                state_table.delete(Self::state_row(c));
+                            }
+
+                            match next_resume {
+                                Some(pk) => resume = Some(pk),
+                                None => break, // no more partitions in this vnode
                             }
                         }
                     }

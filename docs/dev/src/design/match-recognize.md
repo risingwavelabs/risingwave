@@ -127,25 +127,26 @@ to keep the factorial bounded).
 - **Buffering.** Each input row is written through to the state table; nothing is held in memory
   between watermarks. Rows may arrive out of order.
 - **Matching on watermark.** When the watermark on the leading `ORDER BY` column advances to `w`,
-  the executor scans the state table for its owned vnodes in key order — `(partition, order_key,
-  seq)` — so rows arrive grouped by partition and already ordered within each partition. It processes
-  one partition at a time: the contiguous run for a partition is accumulated, matched (no in-memory
-  sort — the scan order already is the `ORDER BY` order), emitted, then dropped before the next
-  partition. Every row with `order_key <= w` is final; the matcher runs over the safe prefix, a match
-  is emitted once a later safe row follows it (so the greedy match is known maximal), and `AFTER MATCH
-  SKIP` decides where the scan resumes. The per-watermark working set is therefore bounded by the
-  largest single partition's live rows plus one output chunk — not by a whole vnode — and nothing is
-  retained between watermarks.
+  the executor walks its owned vnodes in key order — `(partition, order_key, seq)` — one partition at
+  a time: it reads a partition's contiguous run, *drops the iterator*, then matches / emits / evicts
+  that partition before re-opening the scan at the next partition's key. Because the buffer is
+  already in `ORDER BY` order (the PK order) there is no in-memory sort. Every row with
+  `order_key <= w` is final; the matcher runs over the safe prefix, a match is emitted once a later
+  safe row follows it (so the greedy match is known maximal), and `AFTER MATCH SKIP` decides where the
+  scan resumes. Matches stream straight into a `StreamChunkBuilder`, flushed a chunk at a time, so the
+  per-watermark working set is bounded by the largest single partition's live rows plus one output
+  chunk — not by a whole vnode — and nothing is retained between watermarks.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
   known only once the match and its per-row variable labels are found, so each measure's synthetic
   row is built from the matched rows and the expression evaluated then. `WITHIN` is enforced during
   matching, pruning candidates that would push the span past the bound.
-- **Eviction.** Rows before the earliest position that could still *begin* a match are collected
-  during the scan and deleted in a batch after the iterator is dropped (a state-table delete cannot
-  interleave with an open iterator over it). Because every watermark scans all live partitions,
-  expired rows are released even from partitions that receive no new input — an idle partition does
-  not retain dead rows. Together with the watermark this bounds state to the live (unfinalized)
-  window (see [State bound and `WITHIN`](#state-bound-and-within)).
+- **Eviction.** Rows before the earliest position that could still *begin* a match are deleted from
+  the state table. The per-partition scan drops its iterator before processing, so these deletes run
+  in place (a state-table delete cannot interleave with an open iterator over it) — there is no
+  vnode-level delete buffer. Because every watermark visits all live partitions, expired rows are
+  released even from partitions that receive no new input — an idle partition does not retain dead
+  rows. Together with the watermark this bounds state to the live (unfinalized) window (see
+  [State bound and `WITHIN`](#state-bound-and-within)).
 
 Matching is **not incremental**: each advancing watermark re-runs the matcher from the start of the
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
