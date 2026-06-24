@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::id::{JobId, SourceId};
+use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -317,6 +317,16 @@ pub struct ReplaceStreamJobPlan {
     pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplaceSinkPlan {
+    pub old_fragments: StreamJobFragments,
+    pub info: CreateStreamingJobCommandInfo,
+    pub old_sink_id: SinkId,
+    pub new_sink_id: SinkId,
+    pub final_sink_name: String,
+    pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+}
+
 impl ReplaceStreamJobPlan {
     /// `old_fragment_id` -> `new_fragment_id`
     pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
@@ -496,6 +506,9 @@ pub enum Command {
     /// of the Merge executors are changed additionally.
     ReplaceStreamJob(ReplaceStreamJobPlan),
 
+    /// `ReplaceSink` creates a new sink job and stops the old sink job in one update barrier.
+    ReplaceSink(ReplaceSinkPlan),
+
     /// `SourceChangeSplit` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
     SourceChangeSplit(SplitState),
@@ -606,6 +619,13 @@ impl std::fmt::Display for Command {
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
+            Command::ReplaceSink(plan) => {
+                write!(
+                    f,
+                    "ReplaceSink: {} -> {}",
+                    plan.old_sink_id, plan.new_sink_id
+                )
+            }
             Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
             Command::Throttle { .. } => write!(f, "Throttle"),
             Command::CreateSubscription {
@@ -701,6 +721,10 @@ pub enum PostCollectCommand {
         plan: ReplaceStreamJobPlan,
         resolved_split_assignment: SplitAssignment,
     },
+    ReplaceSink {
+        plan: ReplaceSinkPlan,
+        resolved_split_assignment: SplitAssignment,
+    },
     SourceChangeSplit {
         split_assignment: SplitAssignment,
     },
@@ -724,6 +748,7 @@ impl PostCollectCommand {
             | PostCollectCommand::CreateStreamingJob { .. }
             | PostCollectCommand::Reschedule { .. }
             | PostCollectCommand::ReplaceStreamJob { .. }
+            | PostCollectCommand::ReplaceSink { .. }
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
             | PostCollectCommand::ConnectorPropsChange(_)
@@ -739,6 +764,7 @@ impl PostCollectCommand {
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",
+            PostCollectCommand::ReplaceSink { .. } => "ReplaceSink",
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
@@ -839,10 +865,8 @@ impl Command {
             truncate_tables,
         ) = collect_resp_info(resps);
 
-        let new_table_fragment_infos =
-            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } =
-                &barrier_info.post_collect_command
-            {
+        let new_table_fragment_infos = match &barrier_info.post_collect_command {
+            PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
                 assert!(!matches!(
                     job_type,
                     CreateStreamingJobType::SnapshotBackfill(_)
@@ -856,9 +880,18 @@ impl Command {
                 }
 
                 vec![NewTableFragmentInfo { table_ids }]
-            } else {
-                vec![]
-            };
+            }
+            PostCollectCommand::ReplaceSink { plan, .. } => {
+                let table_ids = plan
+                    .info
+                    .stream_job_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .collect();
+                vec![NewTableFragmentInfo { table_ids }]
+            }
+            _ => vec![],
+        };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
         // TODO: may collect cross db snapshot backfill
@@ -1171,10 +1204,39 @@ impl Command {
                     dispatchers,
                     split_assignment,
                     actor_cdc_table_snapshot_splits,
+                    [],
                     auto_refresh_schema_sinks.as_ref(),
                 ))
             }
         }
+    }
+
+    pub(super) fn replace_sink_to_mutation(
+        ReplaceSinkPlan {
+            info, old_sink_id, ..
+        }: &ReplaceSinkPlan,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
+        edges: &mut FragmentEdgeBuildResult,
+        split_assignment: &SplitAssignment,
+        actor_cdc_table_snapshot_splits: Option<PbCdcTableSnapshotSplitsWithGeneration>,
+    ) -> MetaResult<Mutation> {
+        let old_sink_id = *old_sink_id;
+        let dispatchers = edges
+            .dispatchers
+            .extract_if(|fragment_id, _| {
+                info.upstream_fragment_downstreams.contains_key(fragment_id)
+            })
+            .collect();
+        Self::generate_update_mutation_for_replace_table(
+            dropped_actors,
+            Default::default(),
+            dispatchers,
+            split_assignment,
+            actor_cdc_table_snapshot_splits,
+            [old_sink_id],
+            None,
+        )
+        .ok_or_else(|| MetaError::invalid_parameter("empty replace sink mutation"))
     }
 
     /// Build the `Update` mutation for `RescheduleIntent`.
@@ -1352,6 +1414,7 @@ impl Command {
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
+                    sink_log_store_flush: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Ok(Some(mutation))
@@ -1636,6 +1699,7 @@ impl Command {
         dispatchers: FragmentActorDispatchers,
         split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
+        sink_log_store_flush: impl IntoIterator<Item = SinkId>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
@@ -1686,6 +1750,7 @@ impl Command {
                     })
                 })
                 .collect(),
+            sink_log_store_flush: sink_log_store_flush.into_iter().collect(),
             ..Default::default()
         }))
     }

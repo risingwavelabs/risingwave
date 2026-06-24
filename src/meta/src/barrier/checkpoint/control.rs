@@ -336,6 +336,7 @@ impl CheckpointControl {
                     }
                     Command::RescheduleIntent { .. }
                     | Command::ReplaceStreamJob(_)
+                    | Command::ReplaceSink(_)
                     | Command::SourceChangeSplit(_)
                     | Command::Throttle { .. }
                     | Command::CreateSubscription { .. }
@@ -1322,8 +1323,10 @@ impl DatabaseCheckpointControl {
             }
         }
 
-        if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
-            && self.database_info.is_empty()
+        if !matches!(
+            &command,
+            Some(Command::CreateStreamingJob { .. } | Command::ReplaceSink(_))
+        ) && self.database_info.is_empty()
         {
             assert!(
                 self.independent_checkpoint_job_controls.is_empty(),

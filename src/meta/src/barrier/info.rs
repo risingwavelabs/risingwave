@@ -947,6 +947,11 @@ impl InflightDatabaseInfo {
         }
     }
 
+    pub(crate) fn pre_apply_mark_job_created(&mut self, job_id: JobId) {
+        let job = self.jobs.get_mut(&job_id).expect("job should exist");
+        job.status = CreateStreamingJobStatus::Created;
+    }
+
     /// Add new fragment infos and update shared actor infos.
     pub(crate) fn pre_apply_new_fragments(
         &mut self,

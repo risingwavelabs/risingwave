@@ -506,10 +506,19 @@ message ReplaceJobPlan {
     catalog.Table table = 1;
   }
 
+  message ReplaceSink {
+    catalog.Sink sink = 1;
+    uint32 old_sink_id = 2;
+    // The list of object IDs that the new sink depends on.
+    repeated uint32 dependencies = 3;
+    StreamingJobResourceType resource_type = 4;
+  }
+
   oneof replace_job {
     ReplaceTable replace_table = 3;
     ReplaceSource replace_source = 4;
     ReplaceMaterializedView replace_materialized_view = 5;
+    ReplaceSink replace_sink = 6;
   }
 }
 

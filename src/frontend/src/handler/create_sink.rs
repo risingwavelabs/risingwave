@@ -60,6 +60,7 @@ use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
@@ -619,6 +620,10 @@ pub async fn handle_create_sink(
 
     session.check_cluster_limits().await?;
 
+    if stmt.or_replace {
+        return handle_replace_sink(handle_args, stmt, is_iceberg_engine_internal).await;
+    }
+
     let if_not_exists = stmt.if_not_exists;
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
@@ -696,6 +701,179 @@ pub async fn handle_create_sink(
         LongRunningNotificationAction::MonitorBackfillJob,
     )
     .await?;
+
+    Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+fn sink_replace_requires_exactly_once_state(sink: &SinkCatalog) -> bool {
+    match sink.properties.get("is_exactly_once") {
+        Some(value) => value.eq_ignore_ascii_case("true"),
+        None => sink
+            .properties
+            .get(CONNECTOR_TYPE_KEY)
+            .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK)),
+    }
+}
+
+async fn handle_replace_sink(
+    mut handle_args: HandlerArgs,
+    stmt: CreateSinkStatement,
+    is_iceberg_engine_internal: bool,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session.clone();
+    if stmt.if_not_exists {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "CREATE OR REPLACE SINK does not support IF NOT EXISTS".to_owned(),
+        )
+        .into());
+    }
+    if !matches!(&stmt.sink_from, CreateSink::From(_)) {
+        return Err(ErrorCode::NotSupported(
+            "CREATE OR REPLACE SINK currently only supports CREATE SINK ... FROM table_or_mv"
+                .to_owned(),
+            "use CREATE OR REPLACE SINK name FROM existing_relation ...".to_owned(),
+        )
+        .into());
+    }
+    if stmt.into_table_name.is_some() {
+        return Err(ErrorCode::NotSupported(
+            "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+            "replace ordinary sinks first".to_owned(),
+        )
+        .into());
+    }
+    if handle_args
+        .with_options
+        .get(AUTO_SCHEMA_CHANGE_KEY)
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    {
+        return Err(ErrorCode::NotSupported(
+            "CREATE OR REPLACE SINK with auto schema change is not supported yet".to_owned(),
+            "disable auto schema change for this replacement".to_owned(),
+        )
+        .into());
+    }
+    match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
+        Some(value) if !value.eq_ignore_ascii_case("false") => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "CREATE OR REPLACE SINK must not enable snapshot backfill".to_owned(),
+            )
+            .into());
+        }
+        Some(_) => {}
+        None => {
+            handle_args
+                .with_options
+                .insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
+        }
+    }
+
+    let resource_type =
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
+            .await?;
+
+    let db_name = session.database();
+    let (sink_schema_name, sink_table_name) =
+        Binder::resolve_schema_qualified_name(&db_name, &stmt.sink_name)?;
+    let original_sink = {
+        let search_path = session.config().search_path();
+        let user_name = session.user_name();
+        let schema_path = SchemaPath::new(sink_schema_name.as_deref(), &search_path, &user_name);
+        let reader = session.env().catalog_reader().read_guard();
+        let (sink, schema_name) =
+            reader.get_created_sink_by_name(&db_name, schema_path, &sink_table_name)?;
+        session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+        if sink.target_table.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                "replace ordinary sinks first".to_owned(),
+            )
+            .into());
+        }
+        if sink.auto_refresh_schema_from_table.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "CREATE OR REPLACE SINK with auto schema change is not supported yet".to_owned(),
+                "drop and recreate this auto schema change sink".to_owned(),
+            )
+            .into());
+        }
+        if sink_replace_requires_exactly_once_state(sink) {
+            return Err(ErrorCode::NotSupported(
+                "CREATE OR REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                "set is_exactly_once=false or recreate the sink manually".to_owned(),
+            )
+            .into());
+        }
+        sink.clone()
+    };
+
+    let original_sink_id = original_sink.id;
+    let (sink, graph, dependencies) = {
+        let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
+        let SinkPlanContext {
+            query,
+            sink_plan: plan,
+            sink_catalog: mut sink,
+            target_table_catalog,
+            dependencies,
+        } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
+        if target_table_catalog.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                "replace ordinary sinks first".to_owned(),
+            )
+            .into());
+        }
+        if sink_replace_requires_exactly_once_state(&sink) {
+            return Err(ErrorCode::NotSupported(
+                "CREATE OR REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                "set is_exactly_once=false or recreate the sink manually".to_owned(),
+            )
+            .into());
+        }
+
+        let has_order_by = !query.order_by.is_empty();
+        if has_order_by {
+            plan.ctx().warn_to_user(
+                r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
+                    .to_owned(),
+            );
+        }
+
+        sink.schema_id = original_sink.schema_id;
+        sink.database_id = original_sink.database_id;
+        sink.name = original_sink.name.clone();
+        sink.owner = original_sink.owner;
+
+        let backfill_order =
+            plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
+        let graph =
+            build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
+
+        (sink, graph, dependencies)
+    };
+    drop(original_sink);
+
+    let catalog_writer = session.catalog_writer()?;
+    execute_with_long_running_notification(
+        catalog_writer.replace_sink(
+            original_sink_id,
+            sink.to_proto(),
+            graph,
+            dependencies,
+            resource_type,
+        ),
+        &session,
+        "CREATE OR REPLACE SINK",
+        LongRunningNotificationAction::DiagnoseBarrierLatency,
+    )
+    .await?;
+
+    tracing::info!(
+        old_sink_id = %original_sink_id,
+        sink_name = sink.name,
+        "replace sink plan submitted"
+    );
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }

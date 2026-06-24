@@ -2170,9 +2170,9 @@ impl Parser<'_> {
     // FROM
     // <materialized_view: Ident>
     // [WITH (properties)]?
-    pub fn parse_create_sink(&mut self, _or_replace: bool) -> ModalResult<Statement> {
+    pub fn parse_create_sink(&mut self, or_replace: bool) -> ModalResult<Statement> {
         Ok(Statement::CreateSink {
-            stmt: CreateSinkStatement::parse_to(self)?,
+            stmt: CreateSinkStatement::parse_to_with_or_replace(self, or_replace)?,
         })
     }
 

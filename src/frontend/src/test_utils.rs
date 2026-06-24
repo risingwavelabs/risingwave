@@ -412,6 +412,22 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(old_sink_id.as_raw_id());
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, old_sink_id);
+        self.create_sink_inner(sink, graph)?;
+        Ok(())
+    }
+
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
         self.create_subscription_inner(subscription)
     }

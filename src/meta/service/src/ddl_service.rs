@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
-use replace_job_plan::{ReplaceSource, ReplaceTable};
+use replace_job_plan::{ReplaceSink, ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
@@ -60,7 +60,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
-    DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
+    DdlCommand, DdlController, DropMode, ReplaceSinkInfo, ReplaceStreamJobInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 
@@ -131,11 +131,42 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
                 table,
             }) => StreamingJob::MaterializedView(table.unwrap()),
+            replace_job_plan::ReplaceJob::ReplaceSink(_) => unreachable!("use replace sink path"),
         };
 
         ReplaceStreamJobInfo {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
+        }
+    }
+
+    fn extract_replace_sink_info(
+        ReplaceJobPlan {
+            fragment_graph,
+            replace_job,
+        }: ReplaceJobPlan,
+    ) -> ReplaceSinkInfo {
+        let replace_job_plan::ReplaceJob::ReplaceSink(ReplaceSink {
+            sink,
+            old_sink_id,
+            dependencies,
+            resource_type,
+        }) = replace_job.unwrap()
+        else {
+            unreachable!("must be replace sink")
+        };
+
+        ReplaceSinkInfo {
+            old_sink_id: SinkId::new(old_sink_id),
+            streaming_job: StreamingJob::Sink(sink.unwrap()),
+            fragment_graph: fragment_graph.unwrap(),
+            dependencies: dependencies
+                .into_iter()
+                .map(ObjectId::new)
+                .collect::<HashSet<_>>(),
+            resource_type: resource_type
+                .and_then(|resource_type| resource_type.resource_type)
+                .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
         }
     }
 
@@ -851,13 +882,18 @@ impl DdlService for DdlServiceImpl {
         request: Request<ReplaceJobPlanRequest>,
     ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
         let req = request.into_inner().get_plan().cloned()?;
+        let is_replace_sink = matches!(
+            req.replace_job,
+            Some(replace_job_plan::ReplaceJob::ReplaceSink(_))
+        );
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamJob(
-                Self::extract_replace_table_info(req),
-            ))
-            .await?;
+        let command = if is_replace_sink {
+            DdlCommand::ReplaceSink(Self::extract_replace_sink_info(req))
+        } else {
+            DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(req))
+        };
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(ReplaceJobPlanResponse {
             status: None,

@@ -878,6 +878,7 @@ for_all_wrapped_id_fields! (
             actor_vnode_bitmap_update: ActorId,
             actor_new_dispatchers: ActorId,
             sink_add_columns: SinkId,
+            sink_log_store_flush: SinkId,
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,

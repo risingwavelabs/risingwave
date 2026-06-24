@@ -39,7 +39,7 @@ use super::{
 };
 use crate::barrier::{
     BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    CreateStreamingJobType, ReplaceSinkPlan, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -627,6 +627,86 @@ impl GlobalStreamManager {
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
         Ok(streaming_job)
+    }
+
+    /// Send replace sink command to barrier scheduler.
+    pub async fn replace_sink(
+        &self,
+        new_fragments: StreamJobFragmentsToCreate,
+        CreateStreamingJobContext {
+            streaming_job,
+            upstream_fragment_downstreams,
+            database_resource_group,
+            definition,
+            create_type,
+            job_type,
+            snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
+            fragment_backfill_ordering,
+            locality_fragment_state_table_mapping,
+            cdc_table_snapshot_splits,
+            is_serverless_backfill,
+            streaming_job_model,
+            refresh_interval_sec,
+            ..
+        }: CreateStreamingJobContext,
+        old_fragments: StreamJobFragments,
+        old_sink_id: SinkId,
+        final_sink_name: String,
+    ) -> MetaResult<NotificationVersion> {
+        if snapshot_backfill_info.is_some() {
+            bail!("replace sink must not use snapshot backfill");
+        }
+        if refresh_interval_sec.is_some() {
+            bail!("replace sink does not support batch refresh");
+        }
+
+        let init_split_assignment = self.source_manager.discover_splits(&new_fragments).await?;
+        let fragment_backfill_ordering =
+            StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                fragment_backfill_ordering,
+                &new_fragments.downstreams,
+                || {
+                    new_fragments
+                        .fragments
+                        .iter()
+                        .map(|(fragment_id, fragment)| {
+                            (*fragment_id, fragment.fragment_type_mask, &fragment.nodes)
+                        })
+                },
+            );
+        let info = CreateStreamingJobCommandInfo {
+            stream_job_fragments: new_fragments,
+            upstream_fragment_downstreams,
+            init_split_assignment,
+            definition,
+            streaming_job: streaming_job.clone(),
+            job_type,
+            create_type,
+            database_resource_group,
+            fragment_backfill_ordering,
+            cdc_table_snapshot_splits,
+            locality_fragment_state_table_mapping,
+            is_serverless: is_serverless_backfill,
+            streaming_job_model,
+            refresh_interval_sec,
+        };
+        let new_sink_id = streaming_job.id().as_sink_id();
+        self.barrier_scheduler
+            .run_command(
+                streaming_job.database_id(),
+                Command::ReplaceSink(ReplaceSinkPlan {
+                    old_fragments,
+                    info,
+                    old_sink_id,
+                    new_sink_id,
+                    final_sink_name,
+                    cross_db_snapshot_backfill_info,
+                }),
+            )
+            .await?;
+
+        Ok(self.env.notification_manager_ref().current_version().await)
     }
 
     /// Send replace job command to barrier scheduler.

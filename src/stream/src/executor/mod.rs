@@ -335,6 +335,7 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
+    pub sink_log_store_flush: HashSet<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -688,6 +689,18 @@ impl Barrier {
             })
     }
 
+    pub fn should_flush_sink_log_store(&self, sink_id: SinkId) -> bool {
+        self.mutation
+            .as_deref()
+            .is_some_and(|mutation| match mutation {
+                Mutation::Update(UpdateMutation {
+                    sink_log_store_flush,
+                    ..
+                }) => sink_log_store_flush.contains(&sink_id),
+                _ => false,
+            })
+    }
+
     pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
         match self.mutation.as_deref() {
             Some(Mutation::DropSubscriptions {
@@ -793,6 +806,7 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 sink_schema_change,
                 subscriptions_to_drop,
+                sink_log_store_flush,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -826,6 +840,7 @@ impl Mutation {
                     .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
+                sink_log_store_flush: sink_log_store_flush.iter().copied().collect(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -1015,6 +1030,7 @@ impl Mutation {
                     .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
                 subscriptions_to_drop: update.subscriptions_to_drop.clone(),
+                sink_log_store_flush: update.sink_log_store_flush.iter().copied().collect(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
