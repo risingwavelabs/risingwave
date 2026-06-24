@@ -111,6 +111,11 @@ def main():
     rows = {row["id"]: row for row in upsert_request["upsert_rows"]}
     assert_equal(rows["upsert-me"]["body"], "inserted after delete", "upsert body")
     assert_equal(rows["upsert-me"]["note_contents"], ["new", "row"], "upsert note contents")
+    assert_equal(
+        rows["upsert-me"]["published_at"],
+        "2026-06-16T04:05:06.000000",
+        "upsert published_at",
+    )
     assert_float_list_close(rows["upsert-me"]["embedding"], [0.4, 0.5, 0.6], "upsert vector")
 
 
