@@ -1390,6 +1390,11 @@ impl SessionImpl {
         shutdown_rx
     }
 
+    pub fn set_cancel_query_flag(&self, shutdown_tx: ShutdownSender) {
+        let mut flag = self.current_query_cancel_flag.lock();
+        *flag = Some(shutdown_tx);
+    }
+
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock();
         if let Some(sender) = flag_guard.take() {
@@ -1397,10 +1402,9 @@ impl SessionImpl {
             // Current running query is in local mode
             sender.cancel();
             info!("Cancel query request sent.");
-        } else {
-            info!("Trying to cancel query in distributed mode.");
-            self.env.query_manager().cancel_queries_in_session(self.id)
         }
+        info!("Trying to cancel query in distributed mode.");
+        self.env.query_manager().cancel_queries_in_session(self.id)
     }
 
     pub fn cancel_current_creating_job(&self) {
