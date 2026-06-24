@@ -342,6 +342,11 @@ impl Client {
 
         Ok((origin_subject, subjects))
     }
+
+    /// List every subject registered in the schema registry (`GET /subjects`).
+    pub async fn list_subjects(&self) -> SrResult<Vec<String>> {
+        self.concurrent_req(Method::GET, &["subjects"]).await
+    }
 }
 
 #[cfg(test)]

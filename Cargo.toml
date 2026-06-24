@@ -59,6 +59,7 @@ members = [
     "src/tests/simulation",
     "src/tests/sqlsmith",
     "src/tests/state_cleaning_test",
+    "src/utils/avro-validator",
     "src/utils/delta_btree_map",
     "src/utils/futures_util",
     "src/utils/iter_util",
@@ -69,7 +70,6 @@ members = [
     "src/utils/sync-point",
     "src/utils/variables",
     "src/utils/workspace-config",
-    "src/utils/avro-validator",
     "src/workspace-hack",
 ]
 exclude = [
