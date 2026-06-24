@@ -18,6 +18,7 @@ use futures::future::{Either, pending, select};
 use futures::pin_mut;
 use futures::stream::FuturesOrdered;
 use multimap::MultiMap;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -78,6 +79,9 @@ struct Inner {
     /// Limits the number of chunks whose projection evaluation has started but not finished.
     /// `None` means unlimited in-flight requests.
     project_expr_inflight_request_concurrency: Option<Arc<Semaphore>>,
+
+    /// Number of messages waiting in the ordered projection window.
+    project_expr_inflight_window_size: Option<LabelGuardedIntGauge>,
 }
 
 impl ProjectExecutor {
@@ -104,6 +108,13 @@ impl ProjectExecutor {
             0 => None,
             concurrency => Some(Arc::new(Semaphore::new(concurrency))),
         };
+        let project_expr_inflight_window_size = (ctx.config.developer.project_expr_concurrency
+            != risingwave_common::config::default::developer::stream_project_expr_concurrency())
+        .then(|| {
+            ctx.streaming_metrics
+                .project_expr_inflight_window_size
+                .with_guarded_label_values(&[&ctx.id.to_string(), &ctx.fragment_id.to_string()])
+        });
         Self {
             input,
             inner: Inner {
@@ -115,6 +126,7 @@ impl ProjectExecutor {
                 eliminate_noop_updates,
                 project_expr_concurrency,
                 project_expr_inflight_request_concurrency,
+                project_expr_inflight_window_size,
             },
         }
     }
@@ -247,6 +259,7 @@ impl Inner {
             eliminate_noop_updates,
             project_expr_concurrency,
             project_expr_inflight_request_concurrency,
+            project_expr_inflight_window_size,
         } = self;
 
         let mut input = input.execute();
@@ -292,6 +305,9 @@ impl Inner {
                 Either::Left((projected_message, _)) => match projected_message? {
                     ProjectedMessage::Chunk(new_chunk) => {
                         pending_project_chunks -= 1;
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                         Self::update_last_nondec_expr_values(
                             &nondecreasing_expr_indices,
                             &mut last_nondec_expr_values,
@@ -300,11 +316,17 @@ impl Inner {
                         yield Message::Chunk(new_chunk);
                     }
                     ProjectedMessage::Watermark(watermarks) => {
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                         for watermark in watermarks {
                             yield Message::Watermark(watermark);
                         }
                     }
                     ProjectedMessage::Barrier(barrier) => {
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                         if !is_paused {
                             for (&expr_idx, value) in nondecreasing_expr_indices
                                 .iter()
@@ -353,6 +375,9 @@ impl Inner {
                                 out_col_indices: out_col_indices.clone(),
                             },
                         ));
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                     }
                     Message::Chunk(chunk) => {
                         pending_project_messages.push_back(Self::project_message(
@@ -365,6 +390,9 @@ impl Inner {
                             },
                         ));
                         pending_project_chunks += 1;
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                     }
                     Message::Barrier(barrier) => {
                         if barrier.is_stop(actor_id) {
@@ -375,6 +403,9 @@ impl Inner {
                             eliminate_noop_updates,
                             ProjectMessageInput::Barrier(barrier),
                         ));
+                        if let Some(metric) = &project_expr_inflight_window_size {
+                            metric.set(pending_project_messages.len() as _);
+                        }
                     }
                 },
             }
