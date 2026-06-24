@@ -779,7 +779,7 @@ fn supports_full_text_search(data_type: &DataType) -> bool {
 }
 
 // Mapping from RisingWave attribute types to generated turbopuffer schema types and
-// the JSON value shapes emitted by `JsonEncoder`:
+// the JSON value shapes sent to turbopuffer:
 //
 // | RisingWave type                  | turbopuffer type | JSON payload                  |
 // |----------------------------------|------------------|-------------------------------|
@@ -788,12 +788,13 @@ fn supports_full_text_search(data_type: &DataType) -> bool {
 // | float32, float64                 | float            | number                        |
 // | varchar                          | string           | string                        |
 // | date                             | datetime         | string: YYYY-MM-DD            |
-// | timestamp                        | datetime         | string: YYYY-MM-DD HH:MM:SS   |
+// | timestamp                        | datetime         | ISO 8601 string without zone  |
+// | timestamptz                      | datetime         | RFC3339 UTC string            |
 // | boolean[]                        | []bool           | array of booleans             |
 // | int16[], int32[], int64[]        | []int            | array of numbers              |
 // | float32[], float64[]             | []float          | array of numbers              |
 // | varchar[]                        | []string         | array of strings              |
-// | date[], timestamp[]              | []datetime       | array of datetime strings     |
+// | date[], timestamp[], timestamptz[] | []datetime      | array of datetime strings     |
 // | vector(N)                        | [N]f32           | array of numbers              |
 // | serial                           | int              | number                        |
 // | decimal                          | float            | number, converted through f64 |
@@ -810,7 +811,7 @@ fn turbopuffer_type(data_type: &DataType) -> Result<String> {
         }
         DataType::Float32 | DataType::Float64 | DataType::Decimal => Ok("float".to_owned()),
         DataType::Varchar => Ok("string".to_owned()),
-        DataType::Date | DataType::Timestamp => Ok("datetime".to_owned()),
+        DataType::Date | DataType::Timestamp | DataType::Timestamptz => Ok("datetime".to_owned()),
         DataType::List(list_type) => match list_type.elem() {
             DataType::Boolean => Ok("[]bool".to_owned()),
             DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Serial => {
@@ -818,7 +819,9 @@ fn turbopuffer_type(data_type: &DataType) -> Result<String> {
             }
             DataType::Float32 | DataType::Float64 | DataType::Decimal => Ok("[]float".to_owned()),
             DataType::Varchar => Ok("[]string".to_owned()),
-            DataType::Date | DataType::Timestamp => Ok("[]datetime".to_owned()),
+            DataType::Date | DataType::Timestamp | DataType::Timestamptz => {
+                Ok("[]datetime".to_owned())
+            }
             elem_type => Err(unsupported_type(&format!("list element {:?}", elem_type))),
         },
         DataType::Vector(dimension) => Ok(format!("[{}]f32", dimension)),
@@ -855,7 +858,7 @@ mod tests {
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{ListType, ScalarImpl, Timestamp};
+    use risingwave_common::types::{ListType, ScalarImpl, Timestamp, Timestamptz};
     use serde_json::json;
 
     use super::*;
@@ -1265,34 +1268,29 @@ mod tests {
     fn test_manual_http_sink_schema_and_payload_shape() {
         let schema = Schema::new(vec![
             Field::with_name(DataType::Varchar, "id"),
-            Field::with_name(DataType::Varchar, "workspaceId"),
-            Field::with_name(DataType::Varchar, "inboxFeedItemId"),
-            Field::with_name(DataType::Varchar, "body"),
+            Field::with_name(DataType::Varchar, "namespace_id"),
+            Field::with_name(DataType::Varchar, "record_id"),
+            Field::with_name(DataType::Varchar, "content"),
             Field::with_name(
                 DataType::List(ListType::new(DataType::Varchar)),
-                "noteContents",
+                "content_segments",
             ),
-            Field::with_name(DataType::Varchar, "communityMemberHandle"),
-            Field::with_name(DataType::Varchar, "communityMemberIdentifier"),
-            Field::with_name(DataType::Varchar, "inboxFeedItemTitle"),
-            Field::with_name(DataType::Boolean, "isInboxFeedItemStarred"),
-            Field::with_name(DataType::Boolean, "isInboxFeedItemAnswered"),
-            Field::with_name(DataType::Timestamp, "inboxFeedItemPreviewTimestamp"),
-            Field::with_name(DataType::Timestamp, "inboxFeedItemPublishTimestamp"),
-            Field::with_name(DataType::Int64, "inboxFeedItemAuthorInstagramFollowerCount"),
-            Field::with_name(DataType::Int64, "inboxFeedItemAuthorTikTokFollowerCount"),
-            Field::with_name(
-                DataType::List(ListType::new(DataType::Varchar)),
-                "attributes",
-            ),
-            Field::with_name(DataType::Varchar, "threadId"),
+            Field::with_name(DataType::Varchar, "user_name"),
+            Field::with_name(DataType::Varchar, "user_identifier"),
+            Field::with_name(DataType::Varchar, "title"),
+            Field::with_name(DataType::Boolean, "is_flagged"),
+            Field::with_name(DataType::Boolean, "is_resolved"),
+            Field::with_name(DataType::Timestamp, "local_event_time"),
+            Field::with_name(DataType::Timestamptz, "event_time"),
+            Field::with_name(DataType::Int64, "metric_a_count"),
+            Field::with_name(DataType::Int64, "metric_b_count"),
+            Field::with_name(DataType::List(ListType::new(DataType::Varchar)), "labels"),
+            Field::with_name(DataType::Varchar, "group_id"),
             Field::with_name(DataType::Vector(384), "vector"),
         ]);
         let attribute_indices = (2..schema.len()).collect_vec();
         let full_text_search_columns = parse_column_selection(
-            Some(
-                "body,noteContents,communityMemberHandle,communityMemberIdentifier,inboxFeedItemTitle",
-            ),
+            Some("content,content_segments,user_name,user_identifier,title"),
             &schema,
             &attribute_indices,
         )
@@ -1310,20 +1308,20 @@ mod tests {
         assert_eq!(
             generated_schema,
             json!({
-                "inboxFeedItemId": {"type": "string", "filterable": true},
-                "body": {"type": "string", "filterable": true, "full_text_search": true},
-                "noteContents": {"type": "[]string", "filterable": true, "full_text_search": true},
-                "communityMemberHandle": {"type": "string", "filterable": true, "full_text_search": true},
-                "communityMemberIdentifier": {"type": "string", "filterable": true, "full_text_search": true},
-                "inboxFeedItemTitle": {"type": "string", "filterable": true, "full_text_search": true},
-                "isInboxFeedItemStarred": {"type": "bool", "filterable": true},
-                "isInboxFeedItemAnswered": {"type": "bool", "filterable": true},
-                "inboxFeedItemPreviewTimestamp": {"type": "datetime", "filterable": true},
-                "inboxFeedItemPublishTimestamp": {"type": "datetime", "filterable": true},
-                "inboxFeedItemAuthorInstagramFollowerCount": {"type": "int", "filterable": true},
-                "inboxFeedItemAuthorTikTokFollowerCount": {"type": "int", "filterable": true},
-                "attributes": {"type": "[]string", "filterable": true},
-                "threadId": {"type": "string", "filterable": true},
+                "record_id": {"type": "string", "filterable": true},
+                "content": {"type": "string", "filterable": true, "full_text_search": true},
+                "content_segments": {"type": "[]string", "filterable": true, "full_text_search": true},
+                "user_name": {"type": "string", "filterable": true, "full_text_search": true},
+                "user_identifier": {"type": "string", "filterable": true, "full_text_search": true},
+                "title": {"type": "string", "filterable": true, "full_text_search": true},
+                "is_flagged": {"type": "bool", "filterable": true},
+                "is_resolved": {"type": "bool", "filterable": true},
+                "local_event_time": {"type": "datetime", "filterable": true},
+                "event_time": {"type": "datetime", "filterable": true},
+                "metric_a_count": {"type": "int", "filterable": true},
+                "metric_b_count": {"type": "int", "filterable": true},
+                "labels": {"type": "[]string", "filterable": true},
+                "group_id": {"type": "string", "filterable": true},
                 "vector": {"type": "[384]f32", "filterable": true, "ann": true}
             })
         );
@@ -1331,11 +1329,13 @@ mod tests {
         let config = TurbopufferConfig {
             base_url: "http://127.0.0.1:0".to_owned(),
             namespace: None,
-            namespace_column: Some("workspaceId".to_owned()),
+            namespace_column: Some("namespace_id".to_owned()),
             api_key: "tpuf_test_key".to_owned(),
             distance_metric: Some("cosine_distance".to_owned()),
             disable_backpressure: Some(true),
-            full_text_search_columns: Some("body,noteContents,communityMemberHandle,communityMemberIdentifier,inboxFeedItemTitle".to_owned()),
+            full_text_search_columns: Some(
+                "content,content_segments,user_name,user_identifier,title".to_owned(),
+            ),
             filterable_columns: Some("*".to_owned()),
             write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
@@ -1356,27 +1356,31 @@ mod tests {
             VectorVal::from_text(&format!("[{}]", vec!["0.25"; 384].join(",")), 384).unwrap();
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::Utf8("doc-1".into())),
-            Some(ScalarImpl::Utf8("workspace-1".into())),
-            Some(ScalarImpl::Utf8("item-1".into())),
-            Some(ScalarImpl::Utf8("body text".into())),
-            Some(ScalarImpl::List(ListValue::from_iter(["note a", "note b"]))),
-            Some(ScalarImpl::Utf8("@member".into())),
-            Some(ScalarImpl::Utf8("member-1".into())),
+            Some(ScalarImpl::Utf8("namespace-1".into())),
+            Some(ScalarImpl::Utf8("record-1".into())),
+            Some(ScalarImpl::Utf8("content text".into())),
+            Some(ScalarImpl::List(ListValue::from_iter([
+                "segment a",
+                "segment b",
+            ]))),
+            Some(ScalarImpl::Utf8("user-a".into())),
+            Some(ScalarImpl::Utf8("user-1".into())),
             Some(ScalarImpl::Utf8("title".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Bool(false)),
             Some(ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(
                 1_781_582_706,
-                0,
+                123_456_789,
             ))),
-            Some(ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(
-                1_781_598_707,
-                0,
+            Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(
+                1_781_598_707_000_000,
             ))),
             Some(ScalarImpl::Int64(12345)),
             Some(ScalarImpl::Int64(67890)),
-            Some(ScalarImpl::List(ListValue::from_iter(["important", "vip"]))),
-            Some(ScalarImpl::Utf8("thread-1".into())),
+            Some(ScalarImpl::List(ListValue::from_iter([
+                "label-a", "label-b",
+            ]))),
+            Some(ScalarImpl::Utf8("group-1".into())),
             Some(ScalarImpl::Vector(vector)),
         ]);
         let id = writer.id_for_row(&row).unwrap();
@@ -1387,26 +1391,21 @@ mod tests {
         assert_eq!(body["disable_backpressure"], json!(true));
         assert_eq!(body["schema"], generated_schema);
         assert_eq!(body["upsert_rows"][0]["id"], json!("doc-1"));
-        assert_eq!(body["upsert_rows"][0]["body"], json!("body text"));
+        assert_eq!(body["upsert_rows"][0]["content"], json!("content text"));
         assert_eq!(
-            body["upsert_rows"][0]["noteContents"],
-            json!(["note a", "note b"])
+            body["upsert_rows"][0]["content_segments"],
+            json!(["segment a", "segment b"])
+        );
+        assert_eq!(body["upsert_rows"][0]["is_flagged"], json!(true));
+        assert_eq!(body["upsert_rows"][0]["is_resolved"], json!(false));
+        assert_eq!(body["upsert_rows"][0]["metric_a_count"], json!(12345));
+        assert_eq!(
+            body["upsert_rows"][0]["local_event_time"],
+            json!("2026-06-16T04:05:06.123456")
         );
         assert_eq!(
-            body["upsert_rows"][0]["isInboxFeedItemStarred"],
-            json!(true)
-        );
-        assert_eq!(
-            body["upsert_rows"][0]["isInboxFeedItemAnswered"],
-            json!(false)
-        );
-        assert_eq!(
-            body["upsert_rows"][0]["inboxFeedItemAuthorInstagramFollowerCount"],
-            json!(12345)
-        );
-        assert_eq!(
-            body["upsert_rows"][0]["inboxFeedItemPreviewTimestamp"],
-            json!("2026-06-16 04:05:06.000000")
+            body["upsert_rows"][0]["event_time"],
+            json!("2026-06-16T08:31:47.000000Z")
         );
         assert_eq!(
             body["upsert_rows"][0]["vector"].as_array().unwrap().len(),
