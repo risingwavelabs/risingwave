@@ -42,7 +42,7 @@ use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::independent_job::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
 use crate::barrier::checkpoint::independent_job::creating_job::status::CreateMviewLogStoreProgressTracker;
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{PostCollectCommand, TableLogEpochs, UpstreamTableLogEpochs};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
@@ -88,12 +88,14 @@ pub(crate) struct CreatingStreamingJobControl {
 }
 
 impl CreatingStreamingJobControl {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new<'a>(
         entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
         create_info: CreateSnapshotBackfillJobCommandInfo,
         notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
+        since_timestamp_upstream_log_epochs: Option<(&TableLogEpochs, PartialGraphId, u64)>,
         version_stat: &HummockVersionStats,
         partial_graph_manager: &mut PartialGraphManager,
         edges: &mut FragmentEdgeBuildResult,
@@ -116,7 +118,7 @@ impl CreatingStreamingJobControl {
                 split_assignment,
             )
             .collect();
-        let snapshot_backfill_actors =
+        let snapshot_backfill_actors: HashSet<ActorId> =
             InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
         let backfill_nodes_to_pause =
             get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
@@ -144,11 +146,31 @@ impl CreatingStreamingJobControl {
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
 
-        let initial_barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
-            &mut prev_epoch_fake_physical_time,
-            &mut pending_non_checkpoint_barriers,
-            PbBarrierKind::Checkpoint,
-        );
+        let (initial_barrier_info, log_store_barriers_to_inject) = if let Some((
+            upstream_log_epochs,
+            upstream_partial_graph_id,
+            new_upstream_barrier_prev_epoch,
+        )) =
+            since_timestamp_upstream_log_epochs
+        {
+            let (initial_barrier, barriers_to_inject) =
+                Self::resolve_since_timestamp_upstream_log_epochs(
+                    upstream_log_epochs,
+                    partial_graph_manager.pending_barrier_infos(upstream_partial_graph_id),
+                    snapshot_epoch,
+                    new_upstream_barrier_prev_epoch,
+                )?;
+            (initial_barrier, Some(barriers_to_inject))
+        } else {
+            (
+                CreatingStreamingJobStatus::new_fake_barrier(
+                    &mut prev_epoch_fake_physical_time,
+                    &mut pending_non_checkpoint_barriers,
+                    PbBarrierKind::Checkpoint,
+                ),
+                None,
+            )
+        };
 
         let added_actors: Vec<ActorId> = actors
             .stream_actors
@@ -225,7 +247,6 @@ impl CreatingStreamingJobControl {
             Err(e)
         } else {
             graph_adder.added();
-            assert!(pending_non_checkpoint_barriers.is_empty());
             let job_info = CreatingJobInfo {
                 fragment_infos,
                 upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
@@ -238,15 +259,32 @@ impl CreatingStreamingJobControl {
                     .map(|actor| (actor.actor_id, actor.clone()))
                     .collect(),
             };
-            job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                pending_upstream_barriers: vec![],
-                version_stats: version_stat.clone(),
-                create_mview_tracker,
-                snapshot_backfill_actors,
-                snapshot_epoch,
-                info: job_info,
-                pending_non_checkpoint_barriers,
+            if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
+                let upstream_lag = log_store_barriers_to_inject
+                    .last()
+                    .map(|info| info.prev_epoch().saturating_sub(snapshot_epoch))
+                    .unwrap_or(0);
+                job.status = CreatingStreamingJobStatus::ConsumingLogStore {
+                    tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
+                    info: job_info,
+                    log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                        snapshot_backfill_actors.iter().cloned(),
+                        upstream_lag,
+                    ),
+                    barriers_to_inject: Some(log_store_barriers_to_inject),
+                };
+            } else {
+                assert!(pending_non_checkpoint_barriers.is_empty());
+                job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
+                    prev_epoch_fake_physical_time,
+                    pending_upstream_barriers: vec![],
+                    version_stats: version_stat.clone(),
+                    create_mview_tracker,
+                    snapshot_backfill_actors,
+                    snapshot_epoch,
+                    info: job_info,
+                    pending_non_checkpoint_barriers,
+                };
             };
             Ok(job)
         }
@@ -270,7 +308,7 @@ impl CreatingStreamingJobControl {
 
     fn resolve_upstream_log_epochs(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        upstream_table_log_epochs: &UpstreamTableLogEpochs,
         exclusive_start_log_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
     ) -> MetaResult<Vec<BarrierInfo>> {
@@ -331,9 +369,90 @@ impl CreatingStreamingJobControl {
         Ok(ret)
     }
 
+    fn resolve_since_timestamp_upstream_log_epochs(
+        upstream_log_epochs: &TableLogEpochs,
+        pending_upstream_barriers: impl Iterator<Item = &BarrierInfo>,
+        snapshot_epoch: u64,
+        new_upstream_barrier_prev_epoch: u64,
+    ) -> MetaResult<(BarrierInfo, Vec<BarrierInfo>)> {
+        let mut initial_barrier = None;
+        let mut barriers = vec![];
+        let mut emit_barrier = |barrier| {
+            if initial_barrier.is_none() {
+                initial_barrier = Some(barrier);
+            } else {
+                barriers.push(barrier);
+            }
+        };
+
+        let mut prev_epoch = snapshot_epoch;
+        let mut pending_non_checkpoint_barriers = vec![];
+        for (non_checkpoint_epochs, checkpoint_epoch) in upstream_log_epochs {
+            for (i, epoch) in non_checkpoint_epochs
+                .iter()
+                .chain([checkpoint_epoch])
+                .enumerate()
+            {
+                assert!(
+                    *epoch > prev_epoch,
+                    "changelog epochs should be strictly increasing"
+                );
+                pending_non_checkpoint_barriers.push(prev_epoch);
+                emit_barrier(BarrierInfo {
+                    prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                    curr_epoch: TracedEpoch::new(Epoch(*epoch)),
+                    kind: if i == 0 {
+                        BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers))
+                    } else {
+                        BarrierKind::Barrier
+                    },
+                });
+                prev_epoch = *epoch;
+            }
+        }
+        for pending_barrier in pending_upstream_barriers {
+            assert_eq!(
+                pending_barrier.prev_epoch(),
+                prev_epoch,
+                "pending upstream barriers should continue from resolved changelog epochs"
+            );
+            pending_non_checkpoint_barriers.push(prev_epoch);
+            emit_barrier(BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(pending_barrier.curr_epoch())),
+                kind: if pending_barrier.kind.is_checkpoint() {
+                    BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers))
+                } else {
+                    BarrierKind::Barrier
+                },
+            });
+            prev_epoch = pending_barrier.curr_epoch();
+        }
+        assert!(
+            new_upstream_barrier_prev_epoch >= prev_epoch,
+            "new upstream barrier prev epoch should not be earlier than the latest log-store epoch"
+        );
+        if new_upstream_barrier_prev_epoch > prev_epoch {
+            emit_barrier(BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(new_upstream_barrier_prev_epoch)),
+                kind: BarrierKind::Checkpoint(pending_non_checkpoint_barriers),
+            });
+        }
+        let Some(initial_barrier) = initial_barrier else {
+            return Err(anyhow::anyhow!(
+                "missing lagging barriers for direct log-store start from snapshot epoch {}",
+                snapshot_epoch
+            )
+            .into());
+        };
+        assert!(initial_barrier.kind.is_checkpoint());
+        Ok((initial_barrier, barriers))
+    }
+
     fn recover_consuming_snapshot(
         job_id: JobId,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        upstream_table_log_epochs: &UpstreamTableLogEpochs,
         snapshot_epoch: u64,
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
@@ -380,7 +499,7 @@ impl CreatingStreamingJobControl {
 
     fn recover_consuming_log_store(
         job_id: JobId,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        upstream_table_log_epochs: &UpstreamTableLogEpochs,
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
@@ -417,7 +536,7 @@ impl CreatingStreamingJobControl {
         database_id: DatabaseId,
         job_id: JobId,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
-        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        upstream_table_log_epochs: &UpstreamTableLogEpochs,
         snapshot_epoch: u64,
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
@@ -903,5 +1022,90 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_since_timestamp_upstream_log_epochs() {
+        let upstream_log_epochs = vec![(vec![45, 50], 55)];
+
+        let (initial_barrier, barriers) =
+            CreatingStreamingJobControl::resolve_since_timestamp_upstream_log_epochs(
+                &upstream_log_epochs,
+                [].iter(),
+                40,
+                60,
+            )
+            .unwrap();
+
+        assert_eq!(
+            (initial_barrier.prev_epoch(), initial_barrier.curr_epoch()),
+            (40, 45)
+        );
+        assert!(initial_barrier.kind.is_checkpoint());
+        assert_eq!(
+            barriers
+                .iter()
+                .map(|barrier| (barrier.prev_epoch(), barrier.curr_epoch()))
+                .collect::<Vec<_>>(),
+            vec![(45, 50), (50, 55), (55, 60)]
+        );
+        assert_eq!(
+            barriers
+                .iter()
+                .map(|barrier| barrier.kind.is_checkpoint())
+                .collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+    }
+
+    #[test]
+    fn test_resolve_since_timestamp_upstream_log_epochs_with_pending_barriers() {
+        let upstream_log_epochs = vec![(vec![45, 50], 55)];
+        let pending_upstream_barriers = [
+            BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(55)),
+                curr_epoch: TracedEpoch::new(Epoch(60)),
+                kind: BarrierKind::Barrier,
+            },
+            BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(60)),
+                curr_epoch: TracedEpoch::new(Epoch(70)),
+                kind: BarrierKind::Checkpoint(vec![55, 60]),
+            },
+        ];
+
+        let (initial_barrier, barriers) =
+            CreatingStreamingJobControl::resolve_since_timestamp_upstream_log_epochs(
+                &upstream_log_epochs,
+                pending_upstream_barriers.iter(),
+                40,
+                70,
+            )
+            .unwrap();
+
+        assert_eq!(
+            (initial_barrier.prev_epoch(), initial_barrier.curr_epoch()),
+            (40, 45)
+        );
+        assert!(initial_barrier.kind.is_checkpoint());
+        assert_eq!(
+            barriers
+                .iter()
+                .map(|barrier| (barrier.prev_epoch(), barrier.curr_epoch()))
+                .collect::<Vec<_>>(),
+            vec![(45, 50), (50, 55), (55, 60), (60, 70)]
+        );
+        assert_eq!(
+            barriers
+                .iter()
+                .map(|barrier| barrier.kind.is_checkpoint())
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true]
+        );
     }
 }

@@ -333,10 +333,10 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
     }
 
     pub(super) fn iter_infos(&self) -> impl Iterator<Item = &Info> + '_ {
-        self.inflight_barriers
-            .values()
+        self.collected_barriers
+            .iter()
             .map(|barrier| &barrier.info)
-            .chain(self.collected_barriers.iter().map(|barrier| &barrier.info))
+            .chain(self.inflight_barriers.values().map(|barrier| &barrier.info))
     }
 
     pub(super) fn into_infos(self) -> impl Iterator<Item = Info> {

@@ -1169,8 +1169,21 @@ impl LogicalPlanRoot {
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
         allow_snapshot_backfill: bool,
+        force_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let backfill_type = if without_backfill {
+        let backfill_type = if force_snapshot_backfill {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
+            if !allow_snapshot_backfill {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "snapshot backfill is not allowed for this sink".to_owned(),
+                )
+                .into());
+            }
+            BackfillType::SnapshotBackfill
+        } else if without_backfill {
             BackfillType::UpstreamOnlySink
         } else if allow_snapshot_backfill
             && self.should_use_snapshot_backfill()

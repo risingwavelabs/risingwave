@@ -390,6 +390,7 @@ impl DdlService for DdlServiceImpl {
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                         refresh_interval_sec: None,
+                        since_timestamp_epoch: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -457,6 +458,7 @@ impl DdlService for DdlServiceImpl {
             .resource_type
             .and_then(|resource_type| resource_type.resource_type)
             .unwrap_or_else(Self::default_streaming_job_resource_type);
+        let since_timestamp_epoch = req.since_timestamp_epoch;
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -467,6 +469,7 @@ impl DdlService for DdlServiceImpl {
             resource_type,
             if_not_exists: req.if_not_exists,
             refresh_interval_sec: None,
+            since_timestamp_epoch,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -563,6 +566,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: req.refresh_interval_sec,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -621,6 +625,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -712,6 +717,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -1712,6 +1718,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -1797,6 +1804,7 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await;
 

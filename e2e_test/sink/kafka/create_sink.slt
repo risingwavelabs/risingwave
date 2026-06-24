@@ -292,6 +292,38 @@ create sink si_kafka_without_snapshot from t_kafka with (
     snapshot = 'false',
 );
 
+statement ok
+create table t_kafka_since_timestamp (v int) append only;
+
+statement ok
+insert into t_kafka_since_timestamp values (0);
+
+statement ok
+insert into t_kafka_since_timestamp values (1);
+
+statement ok
+insert into t_kafka_since_timestamp values (2);
+
+system ok
+SINCE_TS=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -Atc "select _rw_timestamp from t_kafka_since_timestamp where v = 1") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "create sink s_kafka_since_timestamp from t_kafka_since_timestamp with (connector = 'kafka', properties.bootstrap.server = 'message_queue:29092', topic = 'test-rw-sink-since-timestamp', type = 'append-only', force_append_only = 'true', snapshot = 'false', since_timestamp = '$SINCE_TS') format plain encode json"
+
+statement ok
+create table t_kafka_since_timestamp_out (v int)
+with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-since-timestamp',
+) format plain encode json;
+
+statement ok
+insert into t_kafka_since_timestamp values (3);
+
+query I rowsort retry 8 backoff 1s
+select v from t_kafka_since_timestamp_out;
+----
+2
+3
+
 
 query T retry 4 backoff 1s
 select rw_key from t_sink_text_id order by rw_key

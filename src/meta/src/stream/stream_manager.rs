@@ -39,7 +39,7 @@ use super::{
 };
 use crate::barrier::{
     BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -140,6 +140,8 @@ pub struct CreateStreamingJobContext {
 
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
+
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -522,6 +524,7 @@ impl GlobalStreamManager {
             is_serverless_backfill,
             streaming_job_model,
             refresh_interval_sec,
+            since_timestamp_epoch,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -571,6 +574,9 @@ impl GlobalStreamManager {
         };
 
         let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+            if since_timestamp_epoch.is_some() {
+                bail!("since_timestamp should not be specified when no snapshot backfill");
+            }
             let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
                 anyhow::anyhow!(
                     "batch refresh materialized view must have snapshot backfill upstream"
@@ -604,8 +610,17 @@ impl GlobalStreamManager {
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+            CreateStreamingJobType::SnapshotBackfill {
+                snapshot_backfill_info,
+                since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                    provided_since_epoch,
+                    resolved: None,
+                }),
+            }
         } else {
+            if since_timestamp_epoch.is_some() {
+                bail!("since_timestamp should not be specified when no snapshot backfill");
+            }
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(new_upstream_sink) = new_upstream_sink {
                 CreateStreamingJobType::SinkIntoTable(new_upstream_sink)
