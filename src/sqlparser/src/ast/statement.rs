@@ -548,7 +548,11 @@ impl CreateSinkStatement {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)
         } else {
-            p.expected("FROM or AS after CREATE SINK sink_name")?
+            p.expected(if or_replace {
+                "FROM or AS after REPLACE SINK sink_name"
+            } else {
+                "FROM or AS after CREATE SINK sink_name"
+            })?
         };
 
         let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;

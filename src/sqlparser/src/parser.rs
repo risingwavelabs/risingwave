@@ -310,6 +310,7 @@ impl Parser<'_> {
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::REFRESH => Ok(self.parse_refresh()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
+                Keyword::REPLACE => Ok(self.parse_replace()?),
                 Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
                 Keyword::DELETE => Ok(self.parse_delete()?),
@@ -1968,6 +1969,9 @@ impl Parser<'_> {
         } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_create_source(or_replace, temporary)
         } else if self.parse_keyword(Keyword::SINK) {
+            if or_replace {
+                parser_err!("REPLACE SINK should be used instead of CREATE OR REPLACE SINK");
+            }
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
             self.parse_create_subscription(or_replace)
@@ -2163,8 +2167,16 @@ impl Parser<'_> {
         Ok(Statement::CreateSource { stmt })
     }
 
-    // CREATE [OR REPLACE]?
-    // SINK
+    /// Parse a SQL REPLACE statement.
+    pub fn parse_replace(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::SINK) {
+            self.parse_create_sink(true)
+        } else {
+            self.expected("SINK after REPLACE")
+        }
+    }
+
+    // CREATE SINK / REPLACE SINK
     // [IF NOT EXISTS]?
     // <sink_name: Ident>
     // FROM

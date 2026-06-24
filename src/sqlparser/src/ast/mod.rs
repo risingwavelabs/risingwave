@@ -2194,12 +2194,13 @@ impl Statement {
                 },
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
-            Statement::CreateSink { stmt } => write!(
-                f,
-                "CREATE {}SINK {}",
-                if stmt.or_replace { "OR REPLACE " } else { "" },
-                stmt,
-            ),
+            Statement::CreateSink { stmt } => {
+                if stmt.or_replace {
+                    write!(f, "REPLACE SINK {}", stmt)
+                } else {
+                    write!(f, "CREATE SINK {}", stmt)
+                }
+            }
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),

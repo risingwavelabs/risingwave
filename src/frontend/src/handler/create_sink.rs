@@ -723,21 +723,20 @@ async fn handle_replace_sink(
     let session = handle_args.session.clone();
     if stmt.if_not_exists {
         return Err(ErrorCode::InvalidInputSyntax(
-            "CREATE OR REPLACE SINK does not support IF NOT EXISTS".to_owned(),
+            "REPLACE SINK does not support IF NOT EXISTS".to_owned(),
         )
         .into());
     }
     if !matches!(&stmt.sink_from, CreateSink::From(_)) {
         return Err(ErrorCode::NotSupported(
-            "CREATE OR REPLACE SINK currently only supports CREATE SINK ... FROM table_or_mv"
-                .to_owned(),
-            "use CREATE OR REPLACE SINK name FROM existing_relation ...".to_owned(),
+            "REPLACE SINK currently only supports REPLACE SINK ... FROM table_or_mv".to_owned(),
+            "use REPLACE SINK name FROM existing_relation ...".to_owned(),
         )
         .into());
     }
     if stmt.into_table_name.is_some() {
         return Err(ErrorCode::NotSupported(
-            "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+            "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
             "replace ordinary sinks first".to_owned(),
         )
         .into());
@@ -748,7 +747,7 @@ async fn handle_replace_sink(
         .is_some_and(|value| value.eq_ignore_ascii_case("true"))
     {
         return Err(ErrorCode::NotSupported(
-            "CREATE OR REPLACE SINK with auto schema change is not supported yet".to_owned(),
+            "REPLACE SINK with auto schema change is not supported yet".to_owned(),
             "disable auto schema change for this replacement".to_owned(),
         )
         .into());
@@ -756,7 +755,7 @@ async fn handle_replace_sink(
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "CREATE OR REPLACE SINK must not enable snapshot backfill".to_owned(),
+                "REPLACE SINK must not enable snapshot backfill".to_owned(),
             )
             .into());
         }
@@ -785,21 +784,21 @@ async fn handle_replace_sink(
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
         if sink.target_table.is_some() {
             return Err(ErrorCode::NotSupported(
-                "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
                 "replace ordinary sinks first".to_owned(),
             )
             .into());
         }
         if sink.auto_refresh_schema_from_table.is_some() {
             return Err(ErrorCode::NotSupported(
-                "CREATE OR REPLACE SINK with auto schema change is not supported yet".to_owned(),
+                "REPLACE SINK with auto schema change is not supported yet".to_owned(),
                 "drop and recreate this auto schema change sink".to_owned(),
             )
             .into());
         }
         if sink_replace_requires_exactly_once_state(sink) {
             return Err(ErrorCode::NotSupported(
-                "CREATE OR REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
                 "set is_exactly_once=false or recreate the sink manually".to_owned(),
             )
             .into());
@@ -819,14 +818,14 @@ async fn handle_replace_sink(
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
         if target_table_catalog.is_some() {
             return Err(ErrorCode::NotSupported(
-                "CREATE OR REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
                 "replace ordinary sinks first".to_owned(),
             )
             .into());
         }
         if sink_replace_requires_exactly_once_state(&sink) {
             return Err(ErrorCode::NotSupported(
-                "CREATE OR REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
                 "set is_exactly_once=false or recreate the sink manually".to_owned(),
             )
             .into());
@@ -864,7 +863,7 @@ async fn handle_replace_sink(
             resource_type,
         ),
         &session,
-        "CREATE OR REPLACE SINK",
+        "REPLACE SINK",
         LongRunningNotificationAction::DiagnoseBarrierLatency,
     )
     .await?;
