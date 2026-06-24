@@ -322,7 +322,8 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::Array(_) => "array".to_owned(),
         Schema::Map(_) => "map".to_owned(),
         // Named Complex types
-        Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
+        Schema::Enum(inner) => inner.name.fullname(None),
+        Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
             // schema.name().unwrap().fullname(None)
             // See test_avro_lib_union_record_bug
             // https://github.com/risingwavelabs/risingwave/issues/17632
