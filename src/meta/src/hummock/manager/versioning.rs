@@ -315,6 +315,8 @@ impl HummockManager {
                 .is_some();
         #[expect(deprecated)]
         if version.table_change_log.is_empty() || is_nonempty_meta_store {
+            // Clear legacy in-mem state.
+            version.table_change_log = HashMap::default();
             // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
             return Ok(());
         }
@@ -322,9 +324,10 @@ impl HummockManager {
         // Remove table change log from version.
         #[expect(deprecated)]
         let table_change_logs = {
-            // Retain the in-memory state.
             let table_change_logs = version.table_change_log.clone();
             if table_change_logs.values().all(|t| t.is_empty()) {
+                // Clear legacy in-mem state.
+                version.table_change_log = HashMap::default();
                 return Ok(());
             }
             table_change_logs
@@ -358,7 +361,7 @@ impl HummockManager {
         txn.commit().await?;
         #[expect(deprecated)]
         {
-            // Initialize in-mem state.
+            // Initialize new in-mem state and clear legacy in-mem state.
             versioning.table_change_log = std::mem::take(&mut version.table_change_log);
         }
         Ok(())
