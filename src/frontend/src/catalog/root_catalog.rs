@@ -1313,4 +1313,52 @@ mod tests {
         let sink = schema.get_sink_by_id(sink_id.into()).unwrap();
         assert_eq!(sink.name, "replace_kafka_sink");
     }
+
+    #[test]
+    fn test_update_sink_set_schema_drops_old_catalog() {
+        let database_id = 1;
+        let old_schema_id = 2;
+        let new_schema_id = 3;
+        let sink_id = 4;
+        let mut catalog = Catalog::default();
+        catalog.create_database(&PbDatabase {
+            id: database_id.into(),
+            name: "dev".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_schema(&PbSchema {
+            id: old_schema_id.into(),
+            database_id: database_id.into(),
+            name: "public".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_schema(&PbSchema {
+            id: new_schema_id.into(),
+            database_id: database_id.into(),
+            name: "archive".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_sink(&test_sink(
+            sink_id,
+            "replace_kafka_sink",
+            database_id,
+            old_schema_id,
+        ));
+
+        catalog.update_sink(&test_sink(
+            sink_id,
+            "replace_kafka_sink",
+            database_id,
+            new_schema_id,
+        ));
+
+        let old_schema = catalog
+            .get_schema_by_id(database_id.into(), old_schema_id.into())
+            .unwrap();
+        assert!(old_schema.get_sink_by_id(sink_id.into()).is_none());
+        let new_schema = catalog
+            .get_schema_by_id(database_id.into(), new_schema_id.into())
+            .unwrap();
+        assert!(new_schema.get_sink_by_id(sink_id.into()).is_some());
+    }
 }
