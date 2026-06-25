@@ -393,10 +393,10 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        instance.may_fill_backward_table_change_logs().await?;
-
-        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
+        // may_fill_backward_table_change_logs MUST execute after load_meta_store_state
+        instance.may_fill_backward_table_change_logs().await?;
+        instance.start_worker(rx);
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
         instance.release_meta_context().await?;
@@ -507,6 +507,8 @@ impl HummockManager {
                 version_delta.prev_id, redo_state.id
             );
             redo_state.apply_version_delta(version_delta);
+            // backward compatibility: migrate table change log to meta store.
+            redo_state.apply_table_change_log_delta_backward_compatibility(version_delta);
             applied_delta_count += 1;
             if applied_delta_count % 1000 == 0 {
                 tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
