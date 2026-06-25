@@ -19,6 +19,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use risingwave_common::session_config::LocalityBackfillMode;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
@@ -70,10 +71,7 @@ pub struct OptimizerContext {
     /// Last assigned watermark group ID.
     last_watermark_group_id: Cell<u32>,
 
-    // TODO: remove this when locality backfill is enabled by default
-    /// Count of places where locality backfill could have been applied but was not,
-    /// because `enable_locality_backfill` is off.
-    missed_locality_providers: Cell<usize>,
+    locality_backfill_enabled: Cell<bool>,
 
     _phantom: PhantomUnsend,
 }
@@ -105,6 +103,10 @@ impl OptimizerContext {
         let session_timezone = RefCell::new(SessionTimezone::new(
             handler_args.session.config().timezone(),
         ));
+        let locality_backfill_enabled = matches!(
+            handler_args.session.config().enable_locality_backfill(),
+            LocalityBackfillMode::On
+        );
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {
             session_ctx: handler_args.session,
@@ -125,8 +127,7 @@ impl OptimizerContext {
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
             last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
 
-            // TODO: remove this when locality backfill is enabled by default
-            missed_locality_providers: Cell::new(0),
+            locality_backfill_enabled: Cell::new(locality_backfill_enabled),
 
             _phantom: Default::default(),
         }
@@ -153,7 +154,7 @@ impl OptimizerContext {
             last_expr_display_id: Cell::new(0),
             last_watermark_group_id: Cell::new(0),
 
-            missed_locality_providers: Cell::new(0),
+            locality_backfill_enabled: Cell::new(false),
 
             _phantom: Default::default(),
         }
@@ -241,18 +242,12 @@ impl OptimizerContext {
         self.session_ctx().notice_to_user(str);
     }
 
-    // TODO: remove this when locality backfill is enabled by default
-    /// Increment the counter for missed locality providers.
-    /// Called when locality backfill could have been applied but `enable_locality_backfill` is off.
-    pub fn inc_missed_locality_providers(&self) {
-        self.missed_locality_providers
-            .set(self.missed_locality_providers.get() + 1);
+    pub fn locality_backfill_enabled(&self) -> bool {
+        self.locality_backfill_enabled.get()
     }
 
-    // TODO: remove this when locality backfill is enabled by default
-    /// Get the number of missed locality providers.
-    pub fn missed_locality_providers(&self) -> usize {
-        self.missed_locality_providers.get()
+    pub fn set_locality_backfill_enabled(&self, enabled: bool) {
+        self.locality_backfill_enabled.set(enabled);
     }
 
     fn explain_plan_impl(&self, plan: &impl Explain) -> String {
