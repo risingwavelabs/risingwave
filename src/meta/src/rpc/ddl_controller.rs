@@ -1079,6 +1079,8 @@ impl DdlController {
             let StreamingJob::Sink(sink) = &mut streaming_job else {
                 bail!("replace sink requires a sink job")
             };
+            // Keep the replacement sink recoverable after the old sink is dropped in
+            // `post_collect_job_fragments`, even for non-frontend callers.
             sink.create_type = CreateType::Background as _;
             if sink.target_table.is_some() {
                 bail_not_implemented!("replace sink into table")

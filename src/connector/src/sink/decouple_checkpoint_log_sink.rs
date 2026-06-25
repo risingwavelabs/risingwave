@@ -60,17 +60,12 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
     }
 }
 
-fn should_commit_on_checkpoint_barrier(
-    current_checkpoint: u64,
-    commit_checkpoint_interval: NonZeroU64,
+pub(crate) fn should_force_commit_on_checkpoint_barrier(
     vnode_bitmap_updated: bool,
     is_stop: bool,
     has_schema_change: bool,
 ) -> bool {
-    current_checkpoint >= commit_checkpoint_interval.get()
-        || vnode_bitmap_updated
-        || is_stop
-        || has_schema_change
+    vnode_bitmap_updated || is_stop || has_schema_change
 }
 
 #[async_trait]
@@ -144,13 +139,13 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                     };
                     if is_checkpoint {
                         current_checkpoint += 1;
-                        if should_commit_on_checkpoint_barrier(
-                            current_checkpoint,
-                            commit_checkpoint_interval,
-                            new_vnode_bitmap.is_some(),
-                            is_stop,
-                            schema_change.is_some(),
-                        ) {
+                        if current_checkpoint >= commit_checkpoint_interval.get()
+                            || should_force_commit_on_checkpoint_barrier(
+                                new_vnode_bitmap.is_some(),
+                                is_stop,
+                                schema_change.is_some(),
+                            )
+                        {
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
                             sink_writer_metrics
@@ -175,50 +170,21 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU64;
-
-    use super::should_commit_on_checkpoint_barrier;
+    use super::should_force_commit_on_checkpoint_barrier;
 
     #[test]
-    fn test_should_commit_on_checkpoint_barrier_for_interval() {
-        assert!(should_commit_on_checkpoint_barrier(
-            10,
-            NonZeroU64::new(10).unwrap(),
-            false,
-            false,
-            false,
+    fn test_should_force_commit_on_checkpoint_barrier() {
+        assert!(!should_force_commit_on_checkpoint_barrier(
+            false, false, false
         ));
-        assert!(!should_commit_on_checkpoint_barrier(
-            9,
-            NonZeroU64::new(10).unwrap(),
-            false,
-            false,
-            false,
+        assert!(should_force_commit_on_checkpoint_barrier(
+            true, false, false
         ));
-    }
-
-    #[test]
-    fn test_should_commit_on_checkpoint_barrier_for_forced_events() {
-        assert!(should_commit_on_checkpoint_barrier(
-            1,
-            NonZeroU64::new(10).unwrap(),
-            true,
-            false,
-            false,
+        assert!(should_force_commit_on_checkpoint_barrier(
+            false, true, false
         ));
-        assert!(should_commit_on_checkpoint_barrier(
-            1,
-            NonZeroU64::new(10).unwrap(),
-            false,
-            true,
-            false,
-        ));
-        assert!(should_commit_on_checkpoint_barrier(
-            1,
-            NonZeroU64::new(10).unwrap(),
-            false,
-            false,
-            true,
+        assert!(should_force_commit_on_checkpoint_barrier(
+            false, false, true
         ));
     }
 }

@@ -843,6 +843,10 @@ async fn handle_replace_sink(
         sink.database_id = original_sink.database_id;
         sink.name = original_sink.name.clone();
         sink.owner = original_sink.owner;
+        // `post_collect_job_fragments` drops the old sink before the replacement sink may be
+        // marked `Created` by a later progress barrier. If meta recovers in that window, a
+        // foreground creating job would be aborted, leaving neither the old nor the new sink.
+        // Background jobs are recovered instead, so replacement sinks must be background.
         sink.create_type = CreateType::Background;
 
         let backfill_order =
