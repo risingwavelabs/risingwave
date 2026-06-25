@@ -518,8 +518,8 @@ impl CatalogWriter for CatalogWriterImpl {
                 graph,
                 ReplaceJob::ReplaceSink(ReplaceSink {
                     sink: Some(sink),
-                    old_sink_id: old_sink_id.as_raw_id(),
-                    dependencies: dependencies.into_iter().map(|id| id.as_raw_id()).collect(),
+                    old_sink_id,
+                    dependencies: dependencies.into_iter().collect(),
                     resource_type: Some(StreamingJobResourceType {
                         resource_type: Some(resource_type),
                     }),

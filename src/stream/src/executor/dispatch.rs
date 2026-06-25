@@ -43,8 +43,8 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
+use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
 mod dispatch_sync_log_store;
@@ -376,41 +376,22 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
-        match mutation {
-            Mutation::Stop(StopMutation { dropped_actors, .. }) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
+        if let Mutation::Update(UpdateMutation { dispatchers, .. }) = mutation
+            && let Some(updates) = dispatchers.get(&self.actor_id)
+        {
+            for update in updates {
+                self.post_update_dispatcher(update)?;
             }
-            Mutation::Add(AddMutation { dropped_actors, .. }) => {
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
-            }
-            Mutation::Update(UpdateMutation {
-                dispatchers,
-                dropped_actors,
-                ..
-            }) => {
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
-                    for update in updates {
-                        self.post_update_dispatcher(update)?;
-                    }
-                }
-
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
-            }
-            _ => {}
         };
+
+        if let Some(dropped_actors) = mutation.all_stop_actors()
+            // Remove outputs only if this actor itself is not to be stopped.
+            && !dropped_actors.contains(&self.actor_id)
+        {
+            for dispatcher in &mut self.dispatchers {
+                dispatcher.remove_outputs(dropped_actors);
+            }
+        }
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.

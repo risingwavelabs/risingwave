@@ -142,10 +142,8 @@ impl DdlServiceImpl {
     }
 
     fn extract_replace_sink_info(
-        ReplaceJobPlan {
-            fragment_graph,
-            replace_job,
-        }: ReplaceJobPlan,
+        fragment_graph: StreamFragmentGraph,
+        replace_sink: ReplaceSink,
     ) -> (
         SinkId,
         StreamingJob,
@@ -153,24 +151,18 @@ impl DdlServiceImpl {
         HashSet<ObjectId>,
         streaming_job_resource_type::ResourceType,
     ) {
-        let replace_job_plan::ReplaceJob::ReplaceSink(ReplaceSink {
+        let ReplaceSink {
             sink,
             old_sink_id,
             dependencies,
             resource_type,
-        }) = replace_job.unwrap()
-        else {
-            unreachable!("must be replace sink")
-        };
+        } = replace_sink;
 
         (
-            SinkId::new(old_sink_id),
+            old_sink_id,
             StreamingJob::Sink(sink.unwrap()),
-            fragment_graph.unwrap(),
-            dependencies
-                .into_iter()
-                .map(ObjectId::new)
-                .collect::<HashSet<_>>(),
+            fragment_graph,
+            dependencies.into_iter().collect::<HashSet<_>>(),
             resource_type
                 .and_then(|resource_type| resource_type.resource_type)
                 .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
@@ -893,26 +885,31 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceJobPlanRequest>,
     ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
-        let req = request.into_inner().get_plan().cloned()?;
-        let is_replace_sink = matches!(
-            req.replace_job,
-            Some(replace_job_plan::ReplaceJob::ReplaceSink(_))
-        );
+        let ReplaceJobPlan {
+            fragment_graph,
+            replace_job,
+        } = request.into_inner().get_plan().cloned()?;
 
-        let command = if is_replace_sink {
-            let (old_sink_id, stream_job, fragment_graph, dependencies, resource_type) =
-                Self::extract_replace_sink_info(req);
-            DdlCommand::CreateStreamingJob {
-                stream_job,
-                fragment_graph,
-                dependencies,
-                resource_type,
-                if_not_exists: false,
-                refresh_interval_sec: None,
-                replace_sink: Some(old_sink_id),
+        let command = match replace_job {
+            Some(replace_job_plan::ReplaceJob::ReplaceSink(replace_sink)) => {
+                let (old_sink_id, stream_job, fragment_graph, dependencies, resource_type) =
+                    Self::extract_replace_sink_info(fragment_graph.unwrap(), replace_sink);
+                DdlCommand::CreateStreamingJob {
+                    stream_job,
+                    fragment_graph,
+                    dependencies,
+                    resource_type,
+                    if_not_exists: false,
+                    refresh_interval_sec: None,
+                    replace_sink: Some(old_sink_id),
+                }
             }
-        } else {
-            DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(req))
+            replace_job => {
+                DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(ReplaceJobPlan {
+                    fragment_graph,
+                    replace_job,
+                }))
+            }
         };
 
         let version = self.ddl_controller.run_command(command).await?;

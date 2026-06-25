@@ -1079,9 +1079,11 @@ impl CatalogController {
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         new_sink_downstream: Option<FragmentDownstreamRelation>,
         split_assignment: Option<&SplitAssignment>,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        replace_sink: Option<&ReplaceSinkCommandInfo>,
+    ) -> MetaResult<Option<Vec<TableId>>> {
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let mut replace_sink_post_collect = None;
 
         insert_fragment_relations(&txn, upstream_fragment_new_downstreams).await?;
 
@@ -1112,9 +1114,155 @@ impl CatalogController {
             self.update_fragment_splits(&txn, &fragment_splits).await?;
         }
 
+        if let Some(replace_sink) = replace_sink {
+            let old_sink_id = replace_sink.old_sink_id;
+            let old_job_id = old_sink_id.as_job_id();
+
+            let old_sink_object = Object::find_by_id(old_job_id)
+                .into_partial_model::<PartialObject>()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
+            if old_sink_object.obj_type != ObjectType::Sink {
+                bail!("object {} is not a sink", old_sink_id);
+            }
+
+            let old_internal_table_objs: Vec<PartialObject> = Object::find()
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .filter(table::Column::BelongsToJobId.eq(old_job_id))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+            let old_state_table_ids = old_internal_table_objs
+                .iter()
+                .map(|obj| obj.oid.as_table_id())
+                .collect_vec();
+            let old_fragment_ids: Vec<FragmentId> = Fragment::find()
+                .select_only()
+                .column(fragment::Column::FragmentId)
+                .filter(fragment::Column::JobId.eq(old_job_id))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            let dropped_tables = Table::find()
+                .find_also_related(Object)
+                .filter(table::Column::TableId.is_in(old_state_table_ids.iter().copied()))
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)))
+                .collect_vec();
+
+            Sink::update(sink::ActiveModel {
+                sink_id: Set(job_id.as_sink_id()),
+                name: Set(replace_sink.final_sink_name.clone()),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+
+            let old_objects = std::iter::once(old_sink_object)
+                .chain(old_internal_table_objs)
+                .collect_vec();
+            let old_object_ids = old_objects.iter().map(|obj| obj.oid).collect_vec();
+            let updated_user_ids: Vec<UserId> = UserPrivilege::find()
+                .select_only()
+                .distinct()
+                .column(user_privilege::Column::UserId)
+                .filter(user_privilege::Column::Oid.is_in(old_object_ids.clone()))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+
+            let res = Object::delete_many()
+                .filter(object::Column::Oid.is_in(old_object_ids))
+                .exec(&txn)
+                .await?;
+            if res.rows_affected == 0 {
+                return Err(MetaError::catalog_id_not_found("sink", old_sink_id));
+            }
+
+            let (new_sink, new_obj) = Sink::find_by_id(job_id.as_sink_id())
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+            let streaming_job = StreamingJobModel::find_by_id(job_id).one(&txn).await?;
+            let new_objects = vec![PbObject {
+                object_info: Some(PbObjectInfo::Sink(
+                    ObjectModel(new_sink, new_obj.unwrap(), streaming_job).into(),
+                )),
+            }];
+            let dependencies =
+                list_object_dependencies_by_object_id(&txn, job_id.as_object_id()).await?;
+            let updated_user_info = list_user_info_by_ids(updated_user_ids, &txn).await?;
+
+            replace_sink_post_collect = Some((
+                old_state_table_ids,
+                old_fragment_ids,
+                old_objects,
+                dropped_tables,
+                new_objects,
+                dependencies,
+                updated_user_info,
+            ));
+        }
+
         txn.commit().await?;
 
-        Ok(())
+        let Some((
+            old_state_table_ids,
+            old_fragment_ids,
+            old_objects,
+            dropped_tables,
+            new_objects,
+            dependencies,
+            updated_user_info,
+        )) = replace_sink_post_collect
+        else {
+            return Ok(None);
+        };
+
+        inner
+            .dropped_tables
+            .extend(dropped_tables.into_iter().map(|table| (table.id, table)));
+        drop(inner);
+
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                old_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
+
+        let _ = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                build_object_group_for_delete(old_objects),
+            )
+            .await;
+
+        let _ = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: new_objects,
+                    dependencies,
+                }),
+            )
+            .await;
+
+        if !updated_user_info.is_empty() {
+            let _ = self.notify_users_update(updated_user_info).await;
+        }
+
+        Ok(Some(old_state_table_ids))
     }
 
     pub async fn create_job_catalog_for_replace(
@@ -1499,128 +1647,6 @@ impl CatalogController {
             list_object_dependencies_by_object_id(txn, job_id.as_object_id()).await?;
 
         Ok((notification_op, objects, updated_user_info, dependencies))
-    }
-
-    pub async fn finish_replace_sink(
-        &self,
-        old_sink_id: SinkId,
-        new_sink_id: SinkId,
-        final_sink_name: String,
-    ) -> MetaResult<NotificationVersion> {
-        let mut inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let old_job_id = old_sink_id.as_job_id();
-        let new_job_id = new_sink_id.as_job_id();
-
-        let old_sink_object = Object::find_by_id(old_job_id)
-            .into_partial_model::<PartialObject>()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
-        if old_sink_object.obj_type != ObjectType::Sink {
-            bail!("object {} is not a sink", old_sink_id);
-        }
-
-        let old_internal_table_objs: Vec<PartialObject> = Object::find()
-            .select_only()
-            .columns([
-                object::Column::Oid,
-                object::Column::ObjType,
-                object::Column::SchemaId,
-                object::Column::DatabaseId,
-            ])
-            .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.eq(old_job_id))
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-        let old_state_table_ids: Vec<_> = old_internal_table_objs
-            .iter()
-            .map(|obj| obj.oid.as_table_id())
-            .collect();
-        let old_fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.eq(old_job_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-        let dropped_tables = Table::find()
-            .find_also_related(Object)
-            .filter(table::Column::TableId.is_in(old_state_table_ids.iter().copied()))
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)))
-            .collect_vec();
-
-        Sink::update(sink::ActiveModel {
-            sink_id: Set(new_sink_id),
-            name: Set(final_sink_name),
-            ..Default::default()
-        })
-        .exec(&txn)
-        .await?;
-
-        let (_notification_op, new_objects, mut updated_user_info, dependencies) =
-            self.finish_streaming_job_inner(&txn, new_job_id).await?;
-
-        let old_objects = std::iter::once(old_sink_object)
-            .chain(old_internal_table_objs)
-            .collect_vec();
-        let old_object_ids = old_objects.iter().map(|obj| obj.oid).collect_vec();
-        let updated_user_ids: Vec<UserId> = UserPrivilege::find()
-            .select_only()
-            .distinct()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.is_in(old_object_ids.clone()))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let res = Object::delete_many()
-            .filter(object::Column::Oid.is_in(old_object_ids))
-            .exec(&txn)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("sink", old_sink_id));
-        }
-        updated_user_info.extend(list_user_info_by_ids(updated_user_ids, &txn).await?);
-
-        txn.commit().await?;
-
-        inner
-            .dropped_tables
-            .extend(dropped_tables.into_iter().map(|table| (table.id, table)));
-
-        self.env
-            .notification_manager()
-            .notify_serving_fragment_mapping_delete(
-                old_fragment_ids.iter().map(|id| *id as _).collect(),
-            );
-
-        let _ = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                build_object_group_for_delete(old_objects),
-            )
-            .await;
-
-        let mut version = self
-            .notify_frontend(
-                NotificationOperation::Add,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: new_objects,
-                    dependencies,
-                }),
-            )
-            .await;
-
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
-        }
-
-        Ok(version)
     }
 
     pub async fn finish_replace_streaming_job(

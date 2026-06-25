@@ -60,8 +60,6 @@ message StopMutation {
 }
 
 message UpdateMutation {
-  reserved 10;
-
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;

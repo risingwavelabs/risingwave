@@ -838,7 +838,11 @@ impl DatabaseCheckpointControl {
                     &self.database_info,
                 )?;
 
-                let dropped_actors = if let Some(replace_sink) = &info.replace_sink {
+                let old_sink_job_id = info
+                    .replace_sink
+                    .as_ref()
+                    .map(|replace_sink| replace_sink.old_sink_id.as_job_id());
+                let dropped_actors = if let Some(old_sink_job_id) = old_sink_job_id {
                     if matches!(
                         job_type,
                         CreateStreamingJobType::SnapshotBackfill(_)
@@ -846,19 +850,14 @@ impl DatabaseCheckpointControl {
                     ) {
                         bail!("replace sink must not use snapshot backfill");
                     }
-                    let old_sink_job_id = replace_sink.old_sink_id.as_job_id();
-                    let Some(old_job) = self.database_info.post_apply_remove_job(old_sink_job_id)
+                    let Some(actor_ids) = self.database_info.actor_ids_for_job(old_sink_job_id)
                     else {
                         bail!(
                             "old sink job {} not found in barrier state",
                             old_sink_job_id
                         );
                     };
-                    old_job
-                        .fragment_infos
-                        .values()
-                        .flat_map(|fragment| fragment.actors.keys().copied())
-                        .collect::<Vec<_>>()
+                    actor_ids
                 } else {
                     vec![]
                 };
@@ -888,10 +887,6 @@ impl DatabaseCheckpointControl {
                             (fragment_id, info.streaming_job.id(), fragment_infos)
                         }),
                 );
-                if info.replace_sink.is_some() {
-                    self.database_info
-                        .pre_apply_mark_job_created(info.streaming_job.id());
-                }
                 if let CreateStreamingJobType::SinkIntoTable(ref ctx) = job_type {
                     let downstream_fragment_id = ctx.new_sink_downstream.downstream_fragment_id;
                     self.database_info.pre_apply_add_node_upstream(
@@ -905,6 +900,11 @@ impl DatabaseCheckpointControl {
                 }
 
                 let (table_ids, node_actors) = self.collect_base_info();
+                if let Some(old_sink_job_id) = old_sink_job_id {
+                    self.database_info
+                        .post_apply_remove_job(old_sink_job_id)
+                        .expect("old sink job should exist");
+                }
 
                 // Actors to create
                 let actors_to_create = Some(Command::create_streaming_job_actors_to_create(

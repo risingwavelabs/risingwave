@@ -49,7 +49,6 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::executor::{AddMutation, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -476,13 +475,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     continue 'backfill_loop;
                                                 }
                                             }
-                                            Mutation::Update(UpdateMutation {
-                                                dropped_actors,
-                                                ..
-                                            })
-                                            | Mutation::Add(AddMutation {
-                                                dropped_actors, ..
-                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                            mutation
+                                                if mutation.all_stop_actors().is_some_and(
+                                                    |actors| actors.contains(&self.actor_ctx.id),
+                                                ) =>
+                                            {
                                                 // the actor has been dropped, exit the backfill loop
                                                 tracing::info!(
                                                     %table_id,

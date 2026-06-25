@@ -47,7 +47,6 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::executor::{AddMutation, UpdateMutation};
 use crate::task::cdc_progress::CdcProgressReporter;
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -441,13 +440,11 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     self.rate_limit_rps = entry.rate_limit;
                                                 }
                                             }
-                                            Mutation::Update(UpdateMutation {
-                                                dropped_actors,
-                                                ..
-                                            })
-                                            | Mutation::Add(AddMutation {
-                                                dropped_actors, ..
-                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                            mutation
+                                                if mutation.all_stop_actors().is_some_and(
+                                                    |actors| actors.contains(&self.actor_ctx.id),
+                                                ) =>
+                                            {
                                                 tracing::info!(
                                                     %table_id,
                                                     upstream_table_name,

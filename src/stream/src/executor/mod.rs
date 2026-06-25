@@ -513,12 +513,7 @@ impl Barrier {
 
     /// Get all actors that to be stopped (dropped) by this barrier.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
-        match self.mutation.as_deref() {
-            Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
-            Some(Mutation::Update(UpdateMutation { dropped_actors, .. })) => Some(dropped_actors),
-            Some(Mutation::Add(AddMutation { dropped_actors, .. })) => Some(dropped_actors),
-            _ => None,
-        }
+        self.mutation.as_deref()?.all_stop_actors()
     }
 
     /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
@@ -756,6 +751,16 @@ impl<M: PartialEq> PartialEq for BarrierInner<M> {
 }
 
 impl Mutation {
+    /// Get all actors to be stopped (dropped) by this mutation.
+    pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
+        match self {
+            Mutation::Stop(StopMutation { dropped_actors, .. })
+            | Mutation::Update(UpdateMutation { dropped_actors, .. })
+            | Mutation::Add(AddMutation { dropped_actors, .. }) => Some(dropped_actors),
+            _ => None,
+        }
+    }
+
     /// Return true if the mutation is stop.
     ///
     /// Note that this does not mean we will stop the current actor.

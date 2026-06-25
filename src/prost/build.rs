@@ -330,6 +330,10 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        ReplaceJobPlan.ReplaceSink {
+            old_sink_id: SinkId,
+            dependencies: ObjectId,
+        }
         ResetSourceRequest {
             source_id: SourceId,
         }

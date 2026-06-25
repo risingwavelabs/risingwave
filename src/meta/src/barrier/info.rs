@@ -503,6 +503,15 @@ impl InflightDatabaseInfo {
             .collect())
     }
 
+    pub(super) fn actor_ids_for_job(&self, job_id: JobId) -> Option<Vec<ActorId>> {
+        self.jobs.get(&job_id).map(|job| {
+            job.fragment_infos
+                .values()
+                .flat_map(|fragment| fragment.actors.keys().copied())
+                .collect()
+        })
+    }
+
     pub(super) fn is_backfill_fragment(&self, fragment_id: FragmentId) -> MetaResult<bool> {
         let job_id = self.fragment_location.get(&fragment_id).ok_or_else(|| {
             MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
@@ -945,11 +954,6 @@ impl InflightDatabaseInfo {
                 )
                 .expect("non-duplicate");
         }
-    }
-
-    pub(crate) fn pre_apply_mark_job_created(&mut self, job_id: JobId) {
-        let job = self.jobs.get_mut(&job_id).expect("job should exist");
-        job.status = CreateStreamingJobStatus::Created;
     }
 
     /// Add new fragment infos and update shared actor infos.
