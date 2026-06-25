@@ -186,7 +186,7 @@ impl Binder {
             }
         }
 
-        if func_name == "make_interval" {
+        if schema_name.is_none() && func_name == "make_interval" {
             if has_secret_ref_arg {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "secret reference is only allowed in user-defined function arguments"
@@ -374,22 +374,11 @@ impl Binder {
         }
 
         // now it's a scalar/table function call
-        reject_syntax!(
-            arg_list.distinct,
-            "`DISTINCT` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            !arg_list.order_by.is_empty(),
-            "`ORDER BY` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            within_group.is_some(),
-            "`WITHIN GROUP` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            filter.is_some(),
-            "`FILTER` is not allowed in scalar/table function call"
-        );
+        Self::reject_scalar_table_function_syntax(
+            arg_list,
+            within_group.as_deref(),
+            filter.as_deref(),
+        )?;
 
         // try to bind it as a table function call
         {
@@ -503,33 +492,18 @@ impl Binder {
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
     }
 
-    fn validate_and_bind_make_interval_params(
-        &mut self,
-        scalar_as_agg: bool,
+    fn reject_scalar_table_function_syntax(
         arg_list: &FunctionArgList,
         within_group: Option<&OrderByExpr>,
-        filter: Option<&risingwave_sqlparser::ast::Expr>,
-        over: Option<&Window>,
-    ) -> Result<ExprImpl> {
-        reject_syntax!(
-            scalar_as_agg,
-            "`AGGREGATE:` prefix is not allowed for `make_interval`"
-        );
+        filter: Option<&AstExpr>,
+    ) -> Result<()> {
         reject_syntax!(
             arg_list.distinct,
             "`DISTINCT` is not allowed in scalar/table function call"
         );
         reject_syntax!(
-            arg_list.variadic,
-            "`VARIADIC` is not allowed in scalar function call"
-        );
-        reject_syntax!(
             !arg_list.order_by.is_empty(),
             "`ORDER BY` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            arg_list.ignore_nulls,
-            "`IGNORE NULLS` is not allowed in aggregate/scalar/table function call"
         );
         reject_syntax!(
             within_group.is_some(),
@@ -539,10 +513,46 @@ impl Binder {
             filter.is_some(),
             "`FILTER` is not allowed in scalar/table function call"
         );
+
+        Ok(())
+    }
+
+    fn reject_scalar_function_syntax(
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&AstExpr>,
+        over: Option<&Window>,
+    ) -> Result<()> {
+        Self::reject_scalar_table_function_syntax(arg_list, within_group, filter)?;
+        reject_syntax!(
+            arg_list.variadic,
+            "`VARIADIC` is not allowed in scalar function call"
+        );
+        reject_syntax!(
+            arg_list.ignore_nulls,
+            "`IGNORE NULLS` is not allowed in aggregate/scalar/table function call"
+        );
         reject_syntax!(
             over.is_some(),
             "`OVER` is not allowed in scalar function call"
         );
+
+        Ok(())
+    }
+
+    fn validate_and_bind_make_interval_params(
+        &mut self,
+        scalar_as_agg: bool,
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&AstExpr>,
+        over: Option<&Window>,
+    ) -> Result<ExprImpl> {
+        reject_syntax!(
+            scalar_as_agg,
+            "`AGGREGATE:` prefix is not allowed for `make_interval`"
+        );
+        Self::reject_scalar_function_syntax(arg_list, within_group, filter, over)?;
 
         self.bind_make_interval(&arg_list.args)
     }

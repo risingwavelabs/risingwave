@@ -85,6 +85,8 @@ pub enum Token {
     Colon,
     /// DoubleColon `::` (used for casting in postgresql)
     DoubleColon,
+    /// ColonEquals `:=` (legacy named function argument syntax in postgresql)
+    ColonEq,
     /// SemiColon `;` used as separator for COPY and payload
     SemiColon,
     /// Backslash `\` used in terminating the COPY payload with `\.`
@@ -137,6 +139,7 @@ impl fmt::Display for Token {
             Token::Period => f.write_str("."),
             Token::Colon => f.write_str(":"),
             Token::DoubleColon => f.write_str("::"),
+            Token::ColonEq => f.write_str(":="),
             Token::SemiColon => f.write_str(";"),
             Token::Backslash => f.write_str("\\"),
             Token::LBracket => f.write_str("["),
@@ -561,6 +564,7 @@ impl<'a> Tokenizer<'a> {
                     self.next();
                     match self.peek() {
                         Some(':') => self.consume_and_return(Token::DoubleColon),
+                        Some('=') => self.consume_and_return(Token::ColonEq),
                         _ => Ok(Some(Token::Colon)),
                     }
                 }
@@ -1386,6 +1390,22 @@ mod tests {
             Token::LParen,
             Token::make_word("key", None),
             Token::RArrow,
+            Token::make_word("value", None),
+            Token::RParen,
+        ];
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_colon_equals() {
+        let sql = String::from("FUNCTION(key:=value)");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+        let expected = vec![
+            Token::make_word("FUNCTION", None),
+            Token::LParen,
+            Token::make_word("key", None),
+            Token::ColonEq,
             Token::make_word("value", None),
             Token::RParen,
         ];

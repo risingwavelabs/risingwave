@@ -2015,6 +2015,37 @@ fn parse_named_argument_function() {
         }),
         expr_from_projection(only(&select.projection))
     );
+
+    let sql = "SELECT FUN(a := '1', b := '2') FROM foo";
+    let select = match query(sql, "SELECT FUN(a => '1', b => '2') FROM foo").body {
+        SetExpr::Select(s) => *s,
+        _ => panic!("Expected SetExpr::Select"),
+    };
+
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("FUN")]),
+            arg_list: FunctionArgList::args_only(vec![
+                FunctionArg::Named {
+                    name: Ident::new_unchecked("a"),
+                    arg: FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(
+                        "1".to_owned()
+                    ))),
+                },
+                FunctionArg::Named {
+                    name: Ident::new_unchecked("b"),
+                    arg: FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(
+                        "2".to_owned()
+                    ))),
+                },
+            ]),
+            within_group: None,
+            filter: None,
+            over: None,
+        }),
+        expr_from_projection(only(&select.projection))
+    );
 }
 
 #[test]
