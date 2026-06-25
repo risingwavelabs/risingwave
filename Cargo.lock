@@ -11424,6 +11424,7 @@ dependencies = [
  "madsim-tokio",
  "risingwave_connector",
  "risingwave_connector_codec",
+ "serde_json",
 ]
 
 [[package]]
