@@ -1195,11 +1195,23 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
             let streaming_job = StreamingJobModel::find_by_id(job_id).one(&txn).await?;
-            let new_objects = vec![PbObject {
+            let mut new_objects = Table::find()
+                .find_also_related(Object)
+                .filter(table::Column::BelongsToJobId.eq(job_id))
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbObject {
+                    object_info: Some(PbObjectInfo::Table(
+                        ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
+                    )),
+                })
+                .collect_vec();
+            new_objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(
                     ObjectModel(new_sink, new_obj.unwrap(), streaming_job).into(),
                 )),
-            }];
+            });
             let dependencies =
                 list_object_dependencies_by_object_id(&txn, job_id.as_object_id()).await?;
             let updated_user_info = list_user_info_by_ids(updated_user_ids, &txn).await?;
