@@ -501,7 +501,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     }
 
     /// Used by migration of table change log to meta store.
-    /// The table_change_log will be consumed by the migration.
+    /// `Self::table_change_log` will be consumed by the migration process later.
     pub fn apply_table_change_log_delta_backward_compatibility(
         &mut self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
