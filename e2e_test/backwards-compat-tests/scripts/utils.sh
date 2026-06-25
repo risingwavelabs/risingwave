@@ -453,6 +453,9 @@ validate_cross_db_subscription_after_upgrade() {
 
   restart_meta_node
 
+  echo "--- ${test_name}: Validate row count growth meta restart"
+  assert_cross_db_counts_increasing
+
   echo "--- ${test_name}: Validate epoch window after meta restart"
   local epoch_count_after_meta_restart
   epoch_count_after_meta_restart=$(query_cross_db_epoch_count "$min_epoch" "$max_epoch")
