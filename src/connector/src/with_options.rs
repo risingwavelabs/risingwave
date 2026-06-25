@@ -219,6 +219,7 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         self.get(UPSTREAM_SOURCE_KEY)
             .map(|s| {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
                     || s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(ICEBERG_CONNECTOR)
                     || s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR)

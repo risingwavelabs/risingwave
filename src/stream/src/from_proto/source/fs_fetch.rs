@@ -94,13 +94,25 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
 
         let exec = match properties {
             risingwave_connector::source::ConnectorProperties::Gcs(_) => {
-                FsFetchExecutor::<_, OpendalGcs>::new(
-                    params.actor_context.clone(),
-                    stream_source_core,
-                    upstream,
-                    source.rate_limit,
-                )
-                .boxed()
+                if is_full_reload_refresh {
+                    BatchOpendalFsFetchExecutor::<_, OpendalGcs>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                        params.local_barrier_manager.clone(),
+                        source.associated_table_id,
+                    )
+                    .boxed()
+                } else {
+                    FsFetchExecutor::<_, OpendalGcs>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                    )
+                    .boxed()
+                }
             }
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
                 if is_full_reload_refresh {

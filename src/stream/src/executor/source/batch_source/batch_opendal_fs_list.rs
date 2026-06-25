@@ -20,7 +20,9 @@ use risingwave_common::array::Op;
 use risingwave_common::id::TableId;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::filesystem::opendal_source::{OpendalEnumerator, OpendalS3};
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalEnumerator, OpendalGcs, OpendalS3, OpendalSource,
+};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -30,7 +32,39 @@ use crate::executor::source::{StreamSourceCore, barrier_to_message_stream};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
-pub struct BatchOpendalFsListExecutor<S: StateStore> {
+pub(crate) trait BatchOpendalFsSource: OpendalSource {
+    fn expect_properties(config: ConnectorProperties) -> Self::Properties;
+
+    fn connector_name() -> &'static str;
+}
+
+impl BatchOpendalFsSource for OpendalS3 {
+    fn expect_properties(config: ConnectorProperties) -> Self::Properties {
+        let ConnectorProperties::OpendalS3(properties) = config else {
+            unreachable!("BatchOpendalFsListExecutor<OpendalS3> must be used with S3 connector")
+        };
+        *properties
+    }
+
+    fn connector_name() -> &'static str {
+        "S3"
+    }
+}
+
+impl BatchOpendalFsSource for OpendalGcs {
+    fn expect_properties(config: ConnectorProperties) -> Self::Properties {
+        let ConnectorProperties::Gcs(properties) = config else {
+            unreachable!("BatchOpendalFsListExecutor<OpendalGcs> must be used with GCS connector")
+        };
+        *properties
+    }
+
+    fn connector_name() -> &'static str {
+        "GCS"
+    }
+}
+
+pub(crate) struct BatchOpendalFsListExecutor<S: StateStore, Src: BatchOpendalFsSource> {
     actor_ctx: ActorContextRef,
 
     /// Streaming source for external
@@ -55,9 +89,11 @@ pub struct BatchOpendalFsListExecutor<S: StateStore> {
     barrier_manager: LocalBarrierManager,
 
     associated_table_id: TableId,
+
+    _marker: std::marker::PhantomData<Src>,
 }
 
-impl<S: StateStore> BatchOpendalFsListExecutor<S> {
+impl<S: StateStore, Src: BatchOpendalFsSource> BatchOpendalFsListExecutor<S, Src> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -79,6 +115,7 @@ impl<S: StateStore> BatchOpendalFsListExecutor<S> {
             rate_limit_rps,
             barrier_manager,
             associated_table_id: associated_table_id.unwrap(),
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -87,15 +124,9 @@ impl<S: StateStore> BatchOpendalFsListExecutor<S> {
         source_desc: SourceDesc,
         is_list_finished: Arc<RwLock<bool>>,
     ) {
-        let ConnectorProperties::OpendalS3(properties) = source_desc.source.config.clone() else {
-            unreachable!("BatchOpendalFsListExecutor must be used with S3 connector")
-        };
-        let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
-            &properties.s3_properties,
-            properties.assume_role,
-            properties.fs_common.compression_format,
-        )
-        .map_err(StreamExecutorError::connector_error)?;
+        let properties = Src::expect_properties(source_desc.source.config.clone());
+        let lister: OpendalEnumerator<Src> =
+            Src::new_enumerator(properties).map_err(StreamExecutorError::connector_error)?;
         let matcher = lister.get_matcher().clone();
         let mut object_metadata_iter = lister
             .list()
@@ -192,6 +223,7 @@ impl<S: StateStore> BatchOpendalFsListExecutor<S> {
                                             actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
                                             table_id = %self.associated_table_id,
+                                            connector = Src::connector_name(),
                                             "RefreshStart triggered OpenDAL file re-listing"
                                         );
                                         is_refreshing = true;
@@ -214,6 +246,7 @@ impl<S: StateStore> BatchOpendalFsListExecutor<S> {
                                     ?barrier.epoch,
                                     source_id = %self.stream_source_core.source_id,
                                     table_id = %self.associated_table_id,
+                                    connector = Src::connector_name(),
                                     "reporting batch OpenDAL list finished"
                                 );
                                 self.barrier_manager.report_source_list_finished(
@@ -238,13 +271,13 @@ impl<S: StateStore> BatchOpendalFsListExecutor<S> {
     }
 }
 
-impl<S: StateStore> Execute for BatchOpendalFsListExecutor<S> {
+impl<S: StateStore, Src: BatchOpendalFsSource> Execute for BatchOpendalFsListExecutor<S, Src> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-impl<S: StateStore> Debug for BatchOpendalFsListExecutor<S> {
+impl<S: StateStore, Src: BatchOpendalFsSource> Debug for BatchOpendalFsListExecutor<S, Src> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchOpendalFsListExecutor")
             .field("source_id", &self.stream_source_core.source_id)

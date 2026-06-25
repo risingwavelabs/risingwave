@@ -15,6 +15,7 @@
 use risingwave_common::catalog::{
     KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
+use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -206,6 +207,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         c.eq_ignore_ascii_case(risingwave_connector::source::OPENDAL_S3_CONNECTOR)
                     })
                     .unwrap_or(false);
+                let is_gcs_connector = source
+                    .with_properties
+                    .get_connector()
+                    .map(|c| c.eq_ignore_ascii_case(risingwave_connector::source::GCS_CONNECTOR))
+                    .unwrap_or(false);
 
                 if is_legacy_fs_connector {
                     // Changed to default since v2.0 https://github.com/risingwavelabs/risingwave/pull/17963
@@ -214,7 +220,19 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params
                     );
                 } else if is_full_reload_refresh && is_s3_connector {
-                    BatchOpendalFsListExecutor::new(
+                    BatchOpendalFsListExecutor::<_, OpendalS3>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        params.executor_stats.clone(),
+                        barrier_receiver,
+                        system_params,
+                        source.rate_limit,
+                        params.local_barrier_manager.clone(),
+                        associated_table_id,
+                    )
+                    .boxed()
+                } else if is_full_reload_refresh && is_gcs_connector {
+                    BatchOpendalFsListExecutor::<_, OpendalGcs>::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         params.executor_stats.clone(),
