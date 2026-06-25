@@ -466,15 +466,15 @@ impl Catalog {
         if schema.get_sink_by_id(proto.id).is_some() {
             schema.update_sink(proto);
         } else {
-            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...`, or when a
-            // replacement sink cutover updates the new sink that was not pre-notified to this
-            // frontend.
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
             schema.create_sink(proto);
-            if let Some(old_schema) = database.iter_schemas_mut().find(|schema| {
-                schema.id() != proto.schema_id && schema.get_sink_by_id(proto.id).is_some()
-            }) {
-                old_schema.drop_sink(proto.id);
-            }
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_sink_by_id(proto.id).is_some()
+                })
+                .unwrap()
+                .drop_sink(proto.id);
         }
     }
 
@@ -1280,38 +1280,6 @@ mod tests {
             create_type: PbCreateType::Background.into(),
             ..Default::default()
         }
-    }
-
-    #[test]
-    fn test_update_missing_replacement_sink_creates_catalog() {
-        let database_id = 1;
-        let schema_id = 2;
-        let sink_id = 3;
-        let mut catalog = Catalog::default();
-        catalog.create_database(&PbDatabase {
-            id: database_id.into(),
-            name: "dev".to_owned(),
-            ..Default::default()
-        });
-        catalog.create_schema(&PbSchema {
-            id: schema_id.into(),
-            database_id: database_id.into(),
-            name: "public".to_owned(),
-            ..Default::default()
-        });
-
-        catalog.update_sink(&test_sink(
-            sink_id,
-            "replace_kafka_sink",
-            database_id,
-            schema_id,
-        ));
-
-        let schema = catalog
-            .get_schema_by_id(database_id.into(), schema_id.into())
-            .unwrap();
-        let sink = schema.get_sink_by_id(sink_id.into()).unwrap();
-        assert_eq!(sink.name, "replace_kafka_sink");
     }
 
     #[test]

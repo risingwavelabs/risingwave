@@ -1250,7 +1250,9 @@ impl CatalogController {
 
         let _ = self
             .notify_frontend(
-                NotificationOperation::Update,
+                // The replacement sink is not pre-notified to frontend while creating, so the
+                // cutover should add the new finalized sink after deleting the old one.
+                NotificationOperation::Add,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: new_objects,
                     dependencies,
