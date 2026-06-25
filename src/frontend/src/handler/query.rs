@@ -447,6 +447,10 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
+    /// Relation IDs (typically table/MV ids) the query reads from. Forwarded from
+    /// [`RwBatchQueryPlanResult`] so the executor can attribute serving-latency metrics
+    /// to each contributing materialized view.
+    pub(crate) dependent_relations: Vec<ObjectId>,
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -458,6 +462,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
+        dependent_relations,
         ..
     } = plan_result;
 
@@ -482,6 +487,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
+        dependent_relations,
     })
 }
 
@@ -554,6 +560,31 @@ async fn execute_risingwave_plan(
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
     let query_mode = plan_fragmenter_result.query_mode;
     let stmt_type = plan_fragmenter_result.stmt_type;
+    // Take dependent relations before consuming `plan_fragmenter_result` so the post-query
+    // callback can attribute serving latency per MV. Skip for DML — issue #25914 scopes this
+    // metric to the read path only.
+    let mv_table_id_labels: Vec<String> = if stmt_type.is_dml() {
+        Vec::new()
+    } else {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        plan_fragmenter_result
+            .dependent_relations
+            .iter()
+            .filter_map(|object_id| {
+                let table = catalog_reader
+                    .get_any_table_by_id(object_id.as_table_id())
+                    .ok()?;
+                // Only user-facing tables / MVs / indexes. This excludes internal-state tables
+                // and never includes rw_catalog / pg_catalog (those live in the system catalog
+                // and are not reachable via `get_any_table_by_id`).
+                if table.is_user_table() || table.is_mview() || table.is_index() {
+                    Some(table.id.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
 
     let query_start_time = Instant::now();
     let (row_stream, pg_descs) =
@@ -568,35 +599,30 @@ async fn execute_risingwave_plan(
         }
 
         // update some metrics
+        let elapsed = query_start_time.elapsed().as_secs_f64();
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => {
-                session
-                    .env()
-                    .frontend_metrics
-                    .latency_local_execution
-                    .observe(query_start_time.elapsed().as_secs_f64());
-
-                session
-                    .env()
-                    .frontend_metrics
-                    .query_counter_local_execution
-                    .inc();
+                let metrics = &session.env().frontend_metrics;
+                metrics.latency_local_execution.observe(elapsed);
+                metrics.query_counter_local_execution.inc();
+                for table_id_label in &mv_table_id_labels {
+                    metrics
+                        .latency_local_execution_per_mv
+                        .with_guarded_label_values(&[table_id_label.as_str()])
+                        .observe(elapsed);
+                }
             }
             QueryMode::Distributed => {
-                session
-                    .env()
-                    .query_manager()
-                    .query_metrics
-                    .query_latency
-                    .observe(query_start_time.elapsed().as_secs_f64());
-
-                session
-                    .env()
-                    .query_manager()
-                    .query_metrics
-                    .completed_query_counter
-                    .inc();
+                let metrics = &session.env().query_manager().query_metrics;
+                metrics.query_latency.observe(elapsed);
+                metrics.completed_query_counter.inc();
+                for table_id_label in &mv_table_id_labels {
+                    metrics
+                        .query_latency_per_mv
+                        .with_guarded_label_values(&[table_id_label.as_str()])
+                        .observe(elapsed);
+                }
             }
         }
 
