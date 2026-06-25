@@ -330,49 +330,49 @@ impl HummockManager {
         // Remove table change log from version.
         #[expect(deprecated)]
         let table_change_logs = {
-            let table_change_logs = version.table_change_log.clone();
-            if table_change_logs.values().all(|t| t.is_empty()) {
-                // Clear legacy in-mem state.
-                version.table_change_log = HashMap::default();
+            // Clear legacy in-mem state.
+            let logs = std::mem::take(&mut version.table_change_log);
+            if logs.values().all(|t| t.is_empty()) {
                 return Ok(());
             }
-            table_change_logs
-                .into_iter()
-                .flat_map(|(table_id, change_logs)| {
-                    change_logs
-                        .into_iter()
-                        .map(move |change_log| (table_id, change_log))
-                })
+            logs
         };
-
         // Store table change log in meta store.
         let insert_batch_size = self.env.opts.table_change_log_insert_batch_size as usize;
-        use futures::stream::{self, StreamExt};
-        let mut stream = stream::iter(table_change_logs).chunks(insert_batch_size);
-        let mut count = 0;
-        let txn = self.env.meta_store_ref().conn.begin().await?;
-        while let Some(change_log_batch) = stream.next().await {
-            if change_log_batch.is_empty() {
-                break;
+        let count = {
+            let iter = table_change_logs
+                .iter()
+                .flat_map(|(table_id, change_logs)| {
+                    change_logs
+                        .iter()
+                        .map(move |change_log| (table_id, change_log))
+                });
+
+            use futures::stream::{self, StreamExt};
+            let mut stream = stream::iter(iter).chunks(insert_batch_size);
+            let mut count = 0;
+            let txn = self.env.meta_store_ref().conn.begin().await?;
+            while let Some(change_log_batch) = stream.next().await {
+                if change_log_batch.is_empty() {
+                    break;
+                }
+                count += change_log_batch.len();
+                let insert_many = change_log_batch
+                    .into_iter()
+                    .map(|(table_id, change_log)| {
+                        to_table_change_log_meta_store_model(*table_id, &change_log)
+                    })
+                    .collect::<Vec<_>>();
+                risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
+                    .exec(&txn)
+                    .await?;
             }
-            count += change_log_batch.len();
-            let insert_many = change_log_batch
-                .into_iter()
-                .map(|(table_id, change_log)| {
-                    to_table_change_log_meta_store_model(table_id, &change_log)
-                })
-                .collect::<Vec<_>>();
-            risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
-                .exec(&txn)
-                .await?;
-        }
-        txn.commit().await?;
+            txn.commit().await?;
+            count
+        };
         tracing::info!("Migrated {count} table change log to meta store.");
-        #[expect(deprecated)]
-        {
-            // Initialize new in-mem state and clear legacy in-mem state.
-            versioning.table_change_log = std::mem::take(&mut version.table_change_log);
-        }
+        // Initialize new in-mem state.
+        versioning.table_change_log = table_change_logs;
         Ok(())
     }
 
