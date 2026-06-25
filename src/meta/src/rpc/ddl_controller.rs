@@ -1076,9 +1076,10 @@ impl DdlController {
         replace_sink: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let replace_sink_info = if let Some(old_sink_id) = replace_sink {
-            let StreamingJob::Sink(sink) = &streaming_job else {
+            let StreamingJob::Sink(sink) = &mut streaming_job else {
                 bail!("replace sink requires a sink job")
             };
+            sink.create_type = CreateType::Background as _;
             if sink.target_table.is_some() {
                 bail_not_implemented!("replace sink into table")
             }

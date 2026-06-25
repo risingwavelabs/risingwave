@@ -26,8 +26,8 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    Schema,
+    ColumnCatalog, CreateType, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID,
+    ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -843,6 +843,7 @@ async fn handle_replace_sink(
         sink.database_id = original_sink.database_id;
         sink.name = original_sink.name.clone();
         sink.owner = original_sink.owner;
+        sink.create_type = CreateType::Background;
 
         let backfill_order =
             plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
@@ -1151,7 +1152,7 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{CreateType, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::config::FrontendConfig;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1193,12 +1194,35 @@ pub mod tests {
             .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
+        let schema_name = schema_name.to_owned();
 
         // Check sink exists.
         let (sink, _) = catalog_reader
-            .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
+            .get_created_sink_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(&schema_name),
+                "snk1",
+            )
             .unwrap();
         assert_eq!(sink.name, "snk1");
+        drop(catalog_reader);
+
+        let sql = r#"REPLACE SINK snk1 FROM mv1
+                    WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                        '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_owned();
+        frontend.run_sql(sql).await.unwrap();
+
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (sink, _) = catalog_reader
+            .get_created_sink_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(&schema_name),
+                "snk1",
+            )
+            .unwrap();
+        assert_eq!(sink.name, "snk1");
+        assert_eq!(sink.create_type, CreateType::Background);
     }
 
     #[tokio::test]
