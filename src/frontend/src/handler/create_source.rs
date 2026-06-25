@@ -90,7 +90,7 @@ use crate::catalog::CatalogError;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::{
     ColumnIdGenerator, bind_pk_and_row_id_on_relation, bind_sql_column_constraints,
@@ -683,6 +683,8 @@ pub(super) fn bind_source_watermark(
     let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(name.clone(), column_catalogs)?;
 
+    let mut session_tz = SessionTimezone::new(session.config().timezone());
+
     let watermark_descs = source_watermarks
         .into_iter()
         .map(|source_watermark| {
@@ -690,6 +692,10 @@ pub(super) fn bind_source_watermark(
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
             let expr = binder.bind_expr(&source_watermark.expr)?;
+            // Apply session timezone rewrite so that timestamptz +/- interval operations
+            // are transformed into the timezone-aware variant (e.g. `subtract_with_time_zone`).
+            // Without this, intervals containing days/months would fail at runtime.
+            let expr = session_tz.rewrite_expr(expr);
             let watermark_col_type = column_catalogs[watermark_idx].data_type();
             let watermark_expr_type = &expr.return_type();
             if watermark_col_type != watermark_expr_type {
