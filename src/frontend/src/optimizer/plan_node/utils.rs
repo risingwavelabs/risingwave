@@ -508,8 +508,15 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
     let timestamp = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of proctime".to_owned(),
+                "do not support AS OF PROCTIME in batch query".to_owned(),
                 "please use as of timestamp".to_owned(),
+            )
+            .into());
+        }
+        AsOf::EventTime(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support event-time AS OF in batch query".to_owned(),
+                "event-time AS OF is only supported in temporal joins".to_owned(),
             )
             .into());
         }
@@ -608,7 +615,9 @@ pub fn to_iceberg_time_travel_as_of(
                 timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
             ))
         }
-        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+        Some(AsOf::ProcessTime)
+        | Some(AsOf::EventTime(_))
+        | Some(AsOf::ProcessTimeWithInterval(_)) => {
             unreachable!()
         }
         None => None,

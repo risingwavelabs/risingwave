@@ -325,3 +325,53 @@
         │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.v1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }
           └─StreamTableScan { table: version, columns: [version.id2], stream_scan_type: UpstreamOnly, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }
+- name: event-time temporal join
+  sql: |
+    create table orders (
+      order_id int primary key,
+      currency varchar,
+      amount int,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table exchange_rates (
+      currency varchar,
+      rate_time timestamp,
+      cents_per_unit int,
+      watermark for rate_time as rate_time - interval '1' second with ttl,
+      primary key (currency, rate_time)
+    );
+    select order_id, orders.currency, amount, cents_per_unit, order_time
+    from orders
+    join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+    on orders.currency = exchange_rates.currency;
+  stream_plan: |-
+    StreamMaterialize { columns: [order_id, currency, amount, cents_per_unit, order_time, exchange_rates.currency(hidden), exchange_rates.rate_time(hidden)], stream_key: [order_id, order_time, exchange_rates.rate_time, currency], pk_columns: [order_id, order_time, exchange_rates.rate_time, currency], pk_conflict: NoCheck, watermark_columns: [order_time] }
+    └─StreamExchange { dist: HashShard(orders.order_id, orders.currency, orders.order_time, exchange_rates.rate_time) }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: orders.currency = exchange_rates.currency, nested_loop: false, output_watermarks: [[orders.order_time]], output: [orders.order_id, orders.currency, orders.amount, exchange_rates.cents_per_unit, orders.order_time, exchange_rates.currency, exchange_rates.rate_time] }
+        ├─StreamExchange { dist: HashShard(orders.currency) }
+        │ └─StreamTableScan { table: orders, columns: [orders.order_id, orders.currency, orders.amount, orders.order_time], stream_scan_type: Backfill, stream_key: [orders.order_id, orders.order_time], pk: [order_id], dist: UpstreamHashShard(orders.order_id) }
+        └─StreamExchange { dist: HashShard(exchange_rates.currency) }
+          └─StreamTableScan { table: exchange_rates, columns: [exchange_rates.currency, exchange_rates.cents_per_unit, exchange_rates.rate_time], stream_scan_type: Backfill, stream_key: [exchange_rates.currency, exchange_rates.rate_time], pk: [currency, rate_time], dist: UpstreamHashShard(exchange_rates.currency, exchange_rates.rate_time) }
+- name: event-time temporal join requires unique right version per join key and time
+  sql: |
+    create table orders (
+      order_id int primary key,
+      currency varchar,
+      amount int,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table exchange_rates (
+      currency varchar,
+      rate_time timestamp,
+      source varchar,
+      cents_per_unit int,
+      watermark for rate_time as rate_time - interval '1' second with ttl,
+      primary key (currency, rate_time, source)
+    );
+    select order_id, orders.currency, amount, cents_per_unit, order_time
+    from orders
+    join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+    on orders.currency = exchange_rates.currency;
+  stream_error: event-time temporal join requires the right join key and right version time column to cover the primary key of the right versioned table

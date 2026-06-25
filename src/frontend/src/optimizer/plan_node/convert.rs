@@ -193,6 +193,10 @@ impl ToStreamContext {
         self.backfill_type
     }
 
+    pub fn set_backfill_type(&mut self, backfill_type: BackfillType) -> BackfillType {
+        std::mem::replace(&mut self.backfill_type, backfill_type)
+    }
+
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: StreamPlanRef) {
         self.share_to_stream_map
             .try_insert(plan_node_id, plan_ref)

@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::TableCatalog;
-use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata as _;
@@ -119,6 +119,8 @@ pub struct Join<PlanRef> {
     pub on: JoinOn,
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
+    /// Bound left-side event-time expression for `FOR SYSTEM_TIME AS OF <expr>`.
+    pub temporal_event_time_as_of: Option<ExprImpl>,
 }
 
 pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
@@ -137,15 +139,22 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             on: self.on.clone(),
             join_type: self.join_type,
             output_indices: self.output_indices.clone(),
+            temporal_event_time_as_of: self.temporal_event_time_as_of.clone(),
         }
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on.rewrite_exprs(r);
+        if let Some(as_of) = self.temporal_event_time_as_of.take() {
+            self.temporal_event_time_as_of = Some(r.rewrite_expr(as_of));
+        }
     }
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.on.visit_exprs(v);
+        if let Some(as_of) = &self.temporal_event_time_as_of {
+            v.visit_expr(as_of);
+        }
     }
 
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
@@ -174,6 +183,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             on: JoinOn::Condition(on),
             join_type,
             output_indices,
+            temporal_event_time_as_of: None,
         }
     }
 
@@ -191,6 +201,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             on: JoinOn::EqPredicate(eq_join_predicate),
             join_type,
             output_indices,
+            temporal_event_time_as_of: None,
         }
     }
 }
@@ -474,6 +485,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             join_type,
             on: JoinOn::Condition(on),
             output_indices: (0..out_column_num).collect(),
+            temporal_event_time_as_of: None,
         }
     }
 
@@ -491,6 +503,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             join_type,
             on: JoinOn::EqPredicate(eq_join_predicate),
             output_indices: (0..out_column_num).collect(),
+            temporal_event_time_as_of: None,
         }
     }
 

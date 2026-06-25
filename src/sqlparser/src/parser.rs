@@ -4509,8 +4509,14 @@ impl Parser<'_> {
                             .value(AsOf::ProcessTime),
                         literal_i64.map(AsOf::TimestampNum),
                         single_quoted_string.map(AsOf::TimestampString),
+                        Self::parse_object_name
+                            .map(|object_name| match object_name.0.as_slice() {
+                                [ident] => Expr::Identifier(ident.clone()),
+                                _ => Expr::CompoundIdentifier(object_name.0),
+                            })
+                            .map(AsOf::EventTime),
                     ))
-                    .expect("proctime(), now(), number or string"),
+                    .expect("proctime(), now(), number, string or event-time column"),
                 ),
             ),
             preceded(

@@ -698,6 +698,17 @@ message TemporalJoinNode {
   optional catalog.Table memo_table = 9;
   // If it is a nested lool temporal join
   bool is_nested_loop = 10;
+  // Event-time temporal join left AS OF column.
+  optional uint32 left_event_time_key = 11;
+  // Event-time temporal join right version-time column.
+  optional uint32 right_event_time_key = 12;
+  reserved 13;
+  // Event-time temporal join left pending due index keyed by (left_event_time, join_key, left_pk).
+  optional catalog.Table event_time_left_time_table = 14;
+  // Event-time temporal join right versions keyed by (join_key, right_event_time).
+  optional catalog.Table event_time_right_key_table = 15;
+  // Event-time temporal join right cleanup due index keyed by (right_event_time, join_key).
+  optional catalog.Table event_time_right_time_table = 16;
 }
 
 message DynamicFilterNode {
