@@ -934,8 +934,7 @@ impl IcebergSinkCommitter {
         count
     }
 
-    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
-    /// Returns the number of snapshots since the last rewrite/overwrite
+    /// Returns the number of snapshots in the current commit branch since the last rewrite.
     fn count_snapshots_since_rewrite(&self) -> usize {
         let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
         Self::count_snapshots_since_rewrite_in_metadata(self.table.metadata(), branch.as_str())
@@ -943,10 +942,6 @@ impl IcebergSinkCommitter {
 
     /// Wait until snapshot count since last rewrite is below the limit
     async fn wait_for_snapshot_limit(&mut self) -> Result<()> {
-        if !self.config.enable_compaction {
-            return Ok(());
-        }
-
         if let Some(max_snapshots) = self.config.max_snapshots_num_before_compaction {
             loop {
                 let current_count = self.count_snapshots_since_rewrite();
@@ -986,6 +981,7 @@ fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
 }
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
