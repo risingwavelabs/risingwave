@@ -360,7 +360,7 @@ impl HummockManager {
                 let insert_many = change_log_batch
                     .into_iter()
                     .map(|(table_id, change_log)| {
-                        to_table_change_log_meta_store_model(*table_id, &change_log)
+                        to_table_change_log_meta_store_model(*table_id, change_log)
                     })
                     .collect::<Vec<_>>();
                 risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
