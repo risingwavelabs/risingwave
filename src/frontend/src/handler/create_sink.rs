@@ -620,37 +620,63 @@ pub async fn handle_create_sink(
 
     session.check_cluster_limits().await?;
 
-    if stmt.or_replace {
-        return handle_replace_sink(handle_args, stmt, is_iceberg_engine_internal).await;
-    }
+    let mode = if stmt.or_replace {
+        prepare_replace_sink(&mut handle_args, &stmt)?
+    } else {
+        let if_not_exists = stmt.if_not_exists;
+        if let Either::Right(resp) = session.check_relation_name_duplicated(
+            stmt.sink_name.clone(),
+            StatementType::CREATE_SINK,
+            if_not_exists,
+        )? {
+            return Ok(resp);
+        }
 
-    let if_not_exists = stmt.if_not_exists;
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
-        stmt.sink_name.clone(),
-        StatementType::CREATE_SINK,
-        if_not_exists,
-    )? {
-        return Ok(resp);
-    }
+        if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "Sink name cannot start with reserved prefix '{}'",
+                ICEBERG_SINK_PREFIX
+            ))));
+        }
 
-    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
-        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
-            "Sink name cannot start with reserved prefix '{}'",
-            ICEBERG_SINK_PREFIX
-        ))));
+        SinkCreateMode::Create { if_not_exists }
+    };
+
+    create_sink_or_replace(handle_args, stmt, is_iceberg_engine_internal, mode).await
+}
+
+enum SinkCreateMode {
+    Create { if_not_exists: bool },
+    Replace { original_sink: Arc<SinkCatalog> },
+}
+
+impl SinkCreateMode {
+    fn statement_name(&self) -> &'static str {
+        match self {
+            SinkCreateMode::Create { .. } => "CREATE SINK",
+            SinkCreateMode::Replace { .. } => "REPLACE SINK",
+        }
     }
+}
+
+async fn create_sink_or_replace(
+    mut handle_args: HandlerArgs,
+    stmt: CreateSinkStatement,
+    is_iceberg_engine_internal: bool,
+    mode: SinkCreateMode,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session.clone();
 
     let resource_type =
         resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
             .await?;
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let (sink, graph, dependencies) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
-
         let SinkPlanContext {
             query,
             sink_plan: plan,
-            sink_catalog: sink,
+            sink_catalog: mut sink,
             target_table_catalog,
             dependencies,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
@@ -663,44 +689,99 @@ pub async fn handle_create_sink(
             );
         }
 
+        match &mode {
+            SinkCreateMode::Create { .. } => {
+                if let Some(table_catalog) = &target_table_catalog {
+                    sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
+                }
+            }
+            SinkCreateMode::Replace { original_sink } => {
+                if target_table_catalog.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                        "replace ordinary sinks first".to_owned(),
+                    )
+                    .into());
+                }
+                if sink_replace_requires_exactly_once_state(&sink) {
+                    return Err(ErrorCode::NotSupported(
+                        "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                        "set is_exactly_once=false or recreate the sink manually".to_owned(),
+                    )
+                    .into());
+                }
+
+                sink.schema_id = original_sink.schema_id;
+                sink.database_id = original_sink.database_id;
+                sink.name = original_sink.name.clone();
+                sink.owner = original_sink.owner;
+                // `post_collect_job_fragments` drops the old sink before the replacement sink may
+                // be marked `Created` by a later progress barrier. If meta recovers in that window,
+                // a foreground creating job would be aborted, leaving neither the old nor the new
+                // sink. Background jobs are recovered instead, so replacement sinks must be
+                // background.
+                sink.create_type = CreateType::Background;
+            }
+        }
+
         let backfill_order =
             plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
-
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (sink, graph, dependencies)
     };
 
-    if let Some(table_catalog) = target_table_catalog {
-        sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
-    }
-
-    let _job_guard =
-        session
-            .env()
-            .creating_streaming_job_tracker()
-            .guard(CreatingStreamingJobInfo::new(
-                session.session_id(),
-                sink.database_id,
-                sink.schema_id,
-                sink.name.clone(),
-            ));
-
+    let statement_name = mode.statement_name();
     let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(
-        catalog_writer.create_sink(
-            sink.to_proto(),
-            graph,
-            dependencies,
-            resource_type,
-            if_not_exists,
-        ),
-        &session,
-        "CREATE SINK",
-        LongRunningNotificationAction::MonitorBackfillJob,
-    )
-    .await?;
+    match mode {
+        SinkCreateMode::Create { if_not_exists } => {
+            let _job_guard = session.env().creating_streaming_job_tracker().guard(
+                CreatingStreamingJobInfo::new(
+                    session.session_id(),
+                    sink.database_id,
+                    sink.schema_id,
+                    sink.name.clone(),
+                ),
+            );
+
+            execute_with_long_running_notification(
+                catalog_writer.create_sink(
+                    sink.to_proto(),
+                    graph,
+                    dependencies,
+                    resource_type,
+                    if_not_exists,
+                ),
+                &session,
+                statement_name,
+                LongRunningNotificationAction::MonitorBackfillJob,
+            )
+            .await?;
+        }
+        SinkCreateMode::Replace { original_sink } => {
+            let original_sink_id = original_sink.id;
+            execute_with_long_running_notification(
+                catalog_writer.replace_sink(
+                    original_sink_id,
+                    sink.to_proto(),
+                    graph,
+                    dependencies,
+                    resource_type,
+                ),
+                &session,
+                statement_name,
+                LongRunningNotificationAction::DiagnoseBarrierLatency,
+            )
+            .await?;
+
+            tracing::info!(
+                old_sink_id = %original_sink_id,
+                sink_name = %sink.name,
+                "replace sink plan submitted"
+            );
+        }
+    }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
@@ -715,11 +796,10 @@ fn sink_replace_requires_exactly_once_state(sink: &SinkCatalog) -> bool {
     }
 }
 
-async fn handle_replace_sink(
-    mut handle_args: HandlerArgs,
-    stmt: CreateSinkStatement,
-    is_iceberg_engine_internal: bool,
-) -> Result<RwPgResponse> {
+fn prepare_replace_sink(
+    handle_args: &mut HandlerArgs,
+    stmt: &CreateSinkStatement,
+) -> Result<SinkCreateMode> {
     let session = handle_args.session.clone();
     if stmt.if_not_exists {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -767,10 +847,6 @@ async fn handle_replace_sink(
         }
     }
 
-    let resource_type =
-        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
-            .await?;
-
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(&db_name, &stmt.sink_name)?;
@@ -806,80 +882,7 @@ async fn handle_replace_sink(
         sink.clone()
     };
 
-    let original_sink_id = original_sink.id;
-    let (sink, graph, dependencies) = {
-        let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
-        let SinkPlanContext {
-            query,
-            sink_plan: plan,
-            sink_catalog: mut sink,
-            target_table_catalog,
-            dependencies,
-        } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
-        if target_table_catalog.is_some() {
-            return Err(ErrorCode::NotSupported(
-                "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
-                "replace ordinary sinks first".to_owned(),
-            )
-            .into());
-        }
-        if sink_replace_requires_exactly_once_state(&sink) {
-            return Err(ErrorCode::NotSupported(
-                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
-                "set is_exactly_once=false or recreate the sink manually".to_owned(),
-            )
-            .into());
-        }
-
-        let has_order_by = !query.order_by.is_empty();
-        if has_order_by {
-            plan.ctx().warn_to_user(
-                r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
-                    .to_owned(),
-            );
-        }
-
-        sink.schema_id = original_sink.schema_id;
-        sink.database_id = original_sink.database_id;
-        sink.name = original_sink.name.clone();
-        sink.owner = original_sink.owner;
-        // `post_collect_job_fragments` drops the old sink before the replacement sink may be
-        // marked `Created` by a later progress barrier. If meta recovers in that window, a
-        // foreground creating job would be aborted, leaving neither the old nor the new sink.
-        // Background jobs are recovered instead, so replacement sinks must be background.
-        sink.create_type = CreateType::Background;
-
-        let backfill_order =
-            plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
-        let graph =
-            build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
-
-        (sink, graph, dependencies)
-    };
-    drop(original_sink);
-
-    let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(
-        catalog_writer.replace_sink(
-            original_sink_id,
-            sink.to_proto(),
-            graph,
-            dependencies,
-            resource_type,
-        ),
-        &session,
-        "REPLACE SINK",
-        LongRunningNotificationAction::DiagnoseBarrierLatency,
-    )
-    .await?;
-
-    tracing::info!(
-        old_sink_id = %original_sink_id,
-        sink_name = sink.name,
-        "replace sink plan submitted"
-    );
-
-    Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+    Ok(SinkCreateMode::Replace { original_sink })
 }
 
 pub fn fetch_incoming_sinks(
