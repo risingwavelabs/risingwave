@@ -1267,6 +1267,7 @@ mod test {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
         )
+        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1353,6 +1354,7 @@ mod test {
             vec![DataType::Int64, DataType::Int64],
             None,
         )
+        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
