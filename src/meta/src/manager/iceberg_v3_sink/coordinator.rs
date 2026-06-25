@@ -267,6 +267,9 @@ async fn recovery(
     db: &DatabaseConnection,
     sink_id: SinkId,
 ) -> Result<(Option<u64>, Vec<EpochCommit>)> {
+    fail::fail_point!("iceberg_v3_recovery_fail", |_| Err(anyhow::anyhow!(
+        "injected: iceberg_v3_recovery_fail"
+    )));
     let rows = list_sink_states_ordered_by_epoch(db, sink_id)
         .await
         .context("list pending sink states for v3 recovery")?;
