@@ -3894,22 +3894,21 @@ mod test {
         )
         .unwrap();
 
-        let make_snapshot = |snapshot_id: i64,
-                             parent_snapshot_id: Option<i64>,
-                             operation: Operation| {
-            Snapshot::builder()
-                .with_snapshot_id(snapshot_id)
-                .with_parent_snapshot_id(parent_snapshot_id)
-                .with_sequence_number(snapshot_id)
-                .with_timestamp_ms(snapshot_id)
-                .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
-                .with_summary(Summary {
-                    operation,
-                    additional_properties: HashMap::new(),
-                })
-                .with_schema_id(0)
-                .build()
-        };
+        let make_snapshot =
+            |snapshot_id: i64, parent_snapshot_id: Option<i64>, operation: Operation| {
+                Snapshot::builder()
+                    .with_snapshot_id(snapshot_id)
+                    .with_parent_snapshot_id(parent_snapshot_id)
+                    .with_sequence_number(snapshot_id)
+                    .with_timestamp_ms(snapshot_id)
+                    .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
+                    .with_summary(Summary {
+                        operation,
+                        additional_properties: HashMap::new(),
+                    })
+                    .with_schema_id(0)
+                    .build()
+            };
 
         for (snapshot_id, parent_snapshot_id, operation) in [
             (1, None, Operation::Append),
