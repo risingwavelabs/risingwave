@@ -315,6 +315,12 @@ impl HummockManager {
                 .is_some();
         #[expect(deprecated)]
         if version.table_change_log.is_empty() || is_nonempty_meta_store {
+            if version.table_change_log.is_empty() {
+                tracing::info!("No legacy table change log to migrate.");
+            }
+            if is_nonempty_meta_store {
+                tracing::info!("meta store table change log is non-empty.");
+            }
             // Clear legacy in-mem state.
             version.table_change_log = HashMap::default();
             // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
@@ -343,11 +349,13 @@ impl HummockManager {
         let insert_batch_size = self.env.opts.table_change_log_insert_batch_size as usize;
         use futures::stream::{self, StreamExt};
         let mut stream = stream::iter(table_change_logs).chunks(insert_batch_size);
+        let mut count = 0;
         let txn = self.env.meta_store_ref().conn.begin().await?;
         while let Some(change_log_batch) = stream.next().await {
             if change_log_batch.is_empty() {
                 break;
             }
+            count += change_log_batch.len();
             let insert_many = change_log_batch
                 .into_iter()
                 .map(|(table_id, change_log)| {
@@ -359,6 +367,7 @@ impl HummockManager {
                 .await?;
         }
         txn.commit().await?;
+        tracing::info!("Migrated {count} table change log to meta store.");
         #[expect(deprecated)]
         {
             // Initialize new in-mem state and clear legacy in-mem state.
