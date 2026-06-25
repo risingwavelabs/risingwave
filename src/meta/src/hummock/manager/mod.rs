@@ -392,10 +392,10 @@ impl HummockManager {
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        instance.may_fill_backward_table_change_logs().await?;
-
-        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
+        // may_fill_backward_table_change_logs MUST execute after load_meta_store_state
+        instance.may_fill_backward_table_change_logs().await?;
+        instance.start_worker(rx);
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
         instance.release_meta_context().await?;
