@@ -57,6 +57,7 @@ use tonic::{Request, Response, Status};
 
 use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
@@ -87,6 +88,7 @@ impl DdlServiceImpl {
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
         barrier_scheduler: BarrierScheduler,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -96,6 +98,7 @@ impl DdlServiceImpl {
             barrier_manager,
             sink_manager.clone(),
             iceberg_compaction_manager.clone(),
+            iceberg_v3_sink_manager,
         )
         .await;
         Self {

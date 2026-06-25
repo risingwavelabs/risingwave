@@ -16,18 +16,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
+use thiserror_ext::AsReport;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
@@ -252,6 +255,108 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.load_batch_refresh_trigger_context_impl(job_id, database_id, last_committed_epoch)
             .await
     }
+
+    #[await_tree::instrument]
+    async fn pre_commit_iceberg_v3_sink_metadata(
+        &self,
+        reports: Vec<PbIcebergV3SinkMetadata>,
+    ) -> MetaResult<Vec<SinkId>> {
+        let grouped = group_v3_reports_by_sink(reports)?;
+        let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
+        let futs = FuturesUnordered::new();
+        for (sink_id, (prev_epoch, reports)) in grouped {
+            if reports.is_empty() {
+                continue;
+            }
+            let manager = &self.iceberg_v3_sink_manager;
+            futs.push(async move {
+                (
+                    sink_id,
+                    manager
+                        .pre_commit_v3_epoch(sink_id, prev_epoch, reports)
+                        .await,
+                )
+            });
+        }
+
+        // Drain all futures regardless of individual failures, so that no coordinator is left with
+        // state inconsistent vs. the caller's view.
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(success_ids)
+        } else {
+            Err(aggregate_v3_sink_errors("pre-commit", errs).into())
+        }
+    }
+
+    #[await_tree::instrument]
+    async fn commit_iceberg_v3_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+        let futs = FuturesUnordered::new();
+        for sink_id in sink_ids {
+            let manager = &self.iceberg_v3_sink_manager;
+            futs.push(async move { (sink_id, manager.commit_v3_epoch(sink_id).await) });
+        }
+
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(aggregate_v3_sink_errors("commit", errs).into())
+        }
+    }
+}
+
+/// Combine per-sink errors from a fan-out into a single `anyhow::Error`. The first failing
+/// sink's error is used as the source so the original chain is preserved; the message lists
+/// every failing `sink_id` and its error stringified.
+fn aggregate_v3_sink_errors(
+    phase: &'static str,
+    mut errs: Vec<(SinkId, anyhow::Error)>,
+) -> anyhow::Error {
+    debug_assert!(!errs.is_empty());
+    let sink_ids: Vec<String> = errs.iter().map(|(id, _)| id.to_string()).collect();
+    let details: Vec<String> = errs
+        .iter()
+        .map(|(id, e)| format!("sink {}: {}", id, e.as_report()))
+        .collect();
+    // Preserve the first error's chain as the cause.
+    let (_, first_err) = errs.remove(0);
+    first_err.context(format!(
+        "iceberg v3 sink {} failed for sink_id(s) [{}]: {}",
+        phase,
+        sink_ids.join(", "),
+        details.join("; ")
+    ))
+}
+
+fn group_v3_reports_by_sink(
+    reports: Vec<PbIcebergV3SinkMetadata>,
+) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)>> {
+    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)> = HashMap::new();
+    for r in reports {
+        let sink_id = r.sink_id;
+        let prev_epoch = r.prev_epoch;
+        let entry = grouped.entry(sink_id).or_insert((prev_epoch, Vec::new()));
+        if entry.0 != prev_epoch {
+            return Err(anyhow::anyhow!(
+                "iceberg v3 sink {} reports disagree on prev_epoch: {} vs {}",
+                sink_id,
+                entry.0,
+                prev_epoch
+            )
+            .into());
+        }
+        entry.1.push(r);
+    }
+    Ok(grouped)
 }
 
 impl GlobalBarrierWorkerContextImpl {
