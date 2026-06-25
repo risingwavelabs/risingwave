@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -124,6 +125,8 @@ pub struct HummockStorage {
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 
     table_change_log_manager: Arc<TableChangeLogManager>,
+
+    state_store_metrics: Arc<HummockStateStoreMetrics>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -253,6 +256,7 @@ impl HummockStorage {
                 options.time_travel_version_cache_capacity,
             )),
             table_change_log_manager,
+            state_store_metrics,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -881,10 +885,12 @@ impl HummockStorage {
             wait_epoch,
             table_id
         );
+        let start = Instant::now();
         match wait_epoch {
             HummockReadEpoch::Committed(wait_epoch) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
                 wait_for_epoch(&self.version_update_notifier_tx, wait_epoch, table_id).await?;
+                self.observe_try_wait_epoch(table_id, "committed", "wait", start.elapsed());
             }
             HummockReadEpoch::BatchQueryCommitted(wait_epoch, wait_version_id) => {
                 assert!(!is_max_epoch(wait_epoch), "epoch should not be MAX EPOCH");
@@ -897,6 +903,12 @@ impl HummockStorage {
                             latest_version.table_committed_epoch(table_id)
                         && committed_epoch >= wait_epoch
                     {
+                        self.observe_try_wait_epoch(
+                            table_id,
+                            "batch_query_committed",
+                            "fast",
+                            start.elapsed(),
+                        );
                         return Ok(());
                     }
                 }
@@ -926,10 +938,38 @@ impl HummockStorage {
                     },
                 )
                 .await?;
+                self.observe_try_wait_epoch(
+                    table_id,
+                    "batch_query_committed",
+                    "slow",
+                    start.elapsed(),
+                );
             }
-            _ => {}
+            HummockReadEpoch::NoWait(_) => {
+                self.observe_try_wait_epoch(table_id, "no_wait", "noop", start.elapsed());
+            }
+            HummockReadEpoch::Backup(_) => {
+                self.observe_try_wait_epoch(table_id, "backup", "noop", start.elapsed());
+            }
+            HummockReadEpoch::TimeTravel(_) => {
+                self.observe_try_wait_epoch(table_id, "time_travel", "noop", start.elapsed());
+            }
         };
         Ok(())
+    }
+
+    fn observe_try_wait_epoch(
+        &self,
+        table_id: TableId,
+        epoch_type: &'static str,
+        path: &'static str,
+        duration: Duration,
+    ) {
+        let table_id_label = table_id.to_string();
+        self.state_store_metrics
+            .try_wait_epoch_duration
+            .with_guarded_label_values(&[table_id_label.as_str(), epoch_type, path])
+            .observe(duration.as_secs_f64());
     }
 }
 

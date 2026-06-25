@@ -25,7 +25,8 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
+    Histogram, HistogramVec, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::license::Feature;
@@ -54,6 +55,11 @@ pub struct CacheRefillMetrics {
 
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
+    pub version_update_to_apply_duration: Histogram,
+    pub version_update_sst_delta_count: Histogram,
+    pub version_update_inserted_sstable_count: Histogram,
+    pub delta_refill_duration: HistogramVec,
+    pub meta_refill_sstable_duration: Histogram,
 
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
@@ -152,6 +158,57 @@ impl CacheRefillMetrics {
         )
         .unwrap();
 
+        let duration_buckets = exponential_buckets(0.001, 5.0, 8).unwrap(); // 1ms - 78s
+        let count_buckets = vec![
+            0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0,
+        ];
+        let version_update_to_apply_duration = register_histogram_with_registry!(
+            histogram_opts!(
+                "hummock_cache_refill_version_update_to_apply_duration",
+                "Time from receiving a Hummock version update to making it visible locally after cache refill",
+                duration_buckets.clone(),
+            ),
+            registry
+        )
+        .unwrap();
+        let version_update_sst_delta_count = register_histogram_with_registry!(
+            histogram_opts!(
+                "hummock_cache_refill_version_update_sst_delta_count",
+                "Number of SST delta groups in one Hummock version update cache refill",
+                count_buckets.clone(),
+            ),
+            registry
+        )
+        .unwrap();
+        let version_update_inserted_sstable_count = register_histogram_with_registry!(
+            histogram_opts!(
+                "hummock_cache_refill_version_update_inserted_sstable_count",
+                "Number of inserted SSTs in one Hummock version update cache refill",
+                count_buckets,
+            ),
+            registry
+        )
+        .unwrap();
+        let delta_refill_duration = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "hummock_cache_refill_delta_duration",
+                "Time spent refilling cache for one SST delta group",
+                duration_buckets.clone(),
+            ),
+            &["type"],
+            registry
+        )
+        .unwrap();
+        let meta_refill_sstable_duration = register_histogram_with_registry!(
+            histogram_opts!(
+                "hummock_cache_refill_meta_sstable_duration",
+                "Time spent loading one inserted SSTable meta during cache refill",
+                duration_buckets,
+            ),
+            registry
+        )
+        .unwrap();
+
         Self {
             refill_duration,
             refill_total,
@@ -159,6 +216,11 @@ impl CacheRefillMetrics {
 
             data_refill_success_duration,
             meta_refill_success_duration,
+            version_update_to_apply_duration,
+            version_update_sst_delta_count,
+            version_update_inserted_sstable_count,
+            delta_refill_duration,
+            meta_refill_sstable_duration,
             data_refill_filtered_total,
             data_refill_attempts_total,
             data_refill_started_total,
@@ -293,6 +355,12 @@ impl CacheRefiller {
         pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
+        let started_at = Instant::now();
+        let sst_delta_count = deltas.len();
+        let inserted_sstable_count = deltas
+            .iter()
+            .map(|delta| delta.insert_sst_infos.len())
+            .sum();
         let handle = (self.spawn_refill_task)(
             deltas,
             self.context.clone(),
@@ -302,6 +370,9 @@ impl CacheRefiller {
         let event = CacheRefillerEvent {
             pinned_version,
             new_pinned_version,
+            started_at,
+            sst_delta_count,
+            inserted_sstable_count,
         };
         let item = Item { handle, event };
         self.queue.push_back(item);
@@ -342,6 +413,9 @@ impl CacheRefiller {
 pub struct CacheRefillerEvent {
     pub pinned_version: PinnedVersion,
     pub new_pinned_version: PinnedVersion,
+    pub started_at: Instant,
+    pub sst_delta_count: usize,
+    pub inserted_sstable_count: usize,
 }
 
 #[derive(Clone)]
@@ -365,14 +439,28 @@ impl CacheRefillTask {
             .map(|delta| {
                 let context = self.context.clone();
                 async move {
+                    let meta_started_at = Instant::now();
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .delta_refill_duration
+                                .with_label_values(&["meta"])
+                                .observe(meta_started_at.elapsed().as_secs_f64());
                             tracing::warn!(error = %e.as_report(), "meta cache refill error");
                             return;
                         }
                     };
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .delta_refill_duration
+                        .with_label_values(&["meta"])
+                        .observe(meta_started_at.elapsed().as_secs_f64());
+                    let data_started_at = Instant::now();
                     Self::data_cache_refill(&context, delta, holders).await;
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .delta_refill_duration
+                        .with_label_values(&["data"])
+                        .observe(data_started_at.elapsed().as_secs_f64());
                 }
             })
             .collect_vec();
@@ -401,6 +489,9 @@ impl CacheRefillTask {
                 let now = Instant::now();
                 let res = context.sstable_store.sstable(info, &mut stats).await;
                 stats.discard();
+                GLOBAL_CACHE_REFILL_METRICS
+                    .meta_refill_sstable_duration
+                    .observe(now.elapsed().as_secs_f64());
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());
