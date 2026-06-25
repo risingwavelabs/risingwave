@@ -446,6 +446,13 @@ seed_old_cluster() {
   echo "--- CDC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_original.slt"
 
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Seeding old cluster with a dropped Iceberg sink"
+    ./risedev mc mb -p hummock-minio/icebergdata || true
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/seed.slt"
+  fi
+
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
   sleep 60
@@ -513,6 +520,12 @@ validate_new_cluster() {
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
+
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/validate_restart.slt"
+  fi
 
   validate_hummock_stale_table_ids
 
