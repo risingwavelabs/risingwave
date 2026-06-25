@@ -397,10 +397,23 @@ assert_cross_db_counts_increasing() {
   fi
 }
 
+log_cross_db_epoch_count() {
+  local min_epoch="$1"
+  local max_epoch="$2"
+  local epoch_count="$3"
+  local phase="$4"
+
+  echo "CROSS DATABASE SUBSCRIPTION TEST: epoch window ${phase}, min_epoch=${min_epoch}, max_epoch=${max_epoch}, epoch_count=${epoch_count}"
+}
+
 assert_cross_db_epoch_count_matches() {
   local expected_count="$1"
   local actual_count="$2"
-  local phase="$3"
+  local min_epoch="$3"
+  local max_epoch="$4"
+  local phase="$5"
+
+  log_cross_db_epoch_count "$min_epoch" "$max_epoch" "$actual_count" "$phase"
 
   if [[ "$actual_count" != "$expected_count" ]]; then
     echo "CROSS DATABASE SUBSCRIPTION TEST: epoch count mismatch ${phase}, expected ${expected_count}, got ${actual_count}"
@@ -449,7 +462,7 @@ validate_cross_db_subscription_after_upgrade() {
   echo "--- ${test_name}: Validate epoch window after upgrade"
   local epoch_count_after_upgrade
   epoch_count_after_upgrade=$(query_cross_db_epoch_count "$min_epoch" "$max_epoch")
-  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_upgrade" "after upgrade"
+  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_upgrade" "$min_epoch" "$max_epoch" "after upgrade"
 
   restart_meta_node
 
@@ -459,7 +472,7 @@ validate_cross_db_subscription_after_upgrade() {
   echo "--- ${test_name}: Validate epoch window after meta restart"
   local epoch_count_after_meta_restart
   epoch_count_after_meta_restart=$(query_cross_db_epoch_count "$min_epoch" "$max_epoch")
-  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_meta_restart" "after meta restart"
+  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_meta_restart" "$min_epoch" "$max_epoch" "after meta restart"
 }
 
 ################################### Entry Points
