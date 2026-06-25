@@ -893,15 +893,9 @@ impl HummockStorage {
                     start.elapsed(),
                 );
             }
-            HummockReadEpoch::NoWait(_) => {
-                self.observe_try_wait_epoch(table_id, "no_wait", "noop", start.elapsed());
-            }
-            HummockReadEpoch::Backup(_) => {
-                self.observe_try_wait_epoch(table_id, "backup", "noop", start.elapsed());
-            }
-            HummockReadEpoch::TimeTravel(_) => {
-                self.observe_try_wait_epoch(table_id, "time_travel", "noop", start.elapsed());
-            }
+            HummockReadEpoch::NoWait(_)
+            | HummockReadEpoch::Backup(_)
+            | HummockReadEpoch::TimeTravel(_) => {}
         };
         Ok(())
     }
