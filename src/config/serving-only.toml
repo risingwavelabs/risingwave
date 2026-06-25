@@ -12,3 +12,8 @@ meta_cache_capacity_mb = 1600
 # If one batch query is resource-intensive and its runtime memory consumption exceeds 6.4GB, it will kill itself automatically before triggering out-of-memory error. The reserved memory is allocated for all types of temporary memory usage and slackness.
 # Although we don't recommend users to execute OLAP-style batch queries that take a huge amount of input data, e.g. more than dozens of GB, users can adjust the configuration if such batch query is needed and the default configuration above leaves too few "compute memory".
 # Feel free to allocate less memory for "block cache" and "meta cache" to increase "compute memory".
+
+[storage.cache_refill]
+# Diagnostic knob: keep empty for normal behavior. Set to serving table ids to
+# avoid refilling meta cache for unrelated SSTables on serving-only compute nodes.
+meta_refill_table_ids = []

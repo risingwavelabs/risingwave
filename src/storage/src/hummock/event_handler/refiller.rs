@@ -28,6 +28,7 @@ use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::catalog::TableId;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -191,6 +192,9 @@ pub struct CacheRefillConfig {
     /// Meta file cache refill concurrency.
     pub meta_refill_concurrency: usize,
 
+    /// If non-empty, only refill meta cache for SSTables that contain any of these table ids.
+    pub meta_refill_table_ids: HashSet<TableId>,
+
     /// Data file cache refill concurrency.
     pub concurrency: usize,
 
@@ -225,6 +229,12 @@ impl CacheRefillConfig {
             data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             meta_refill_concurrency: options.cache_refill_meta_refill_concurrency,
+            meta_refill_table_ids: options
+                .cache_refill_meta_refill_table_ids
+                .iter()
+                .copied()
+                .map(TableId::new)
+                .collect(),
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
@@ -388,6 +398,13 @@ impl CacheRefillTask {
         let tasks = delta
             .insert_sst_infos
             .iter()
+            .filter(|info| {
+                context.config.meta_refill_table_ids.is_empty()
+                    || info
+                        .table_ids
+                        .iter()
+                        .any(|table_id| context.config.meta_refill_table_ids.contains(table_id))
+            })
             .map(|info| async {
                 let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
@@ -505,7 +522,7 @@ impl CacheRefillTask {
         }
 
         // Return if no data to refill.
-        if delta.insert_sst_infos.is_empty() || delta.delete_sst_object_ids.is_empty() {
+        if holders.is_empty() || delta.delete_sst_object_ids.is_empty() {
             return;
         }
 
