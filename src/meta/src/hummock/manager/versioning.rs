@@ -356,6 +356,11 @@ impl HummockManager {
                 .await?;
         }
         txn.commit().await?;
+        #[expect(deprecated)]
+        {
+            // Initialize in-mem state.
+            versioning.table_change_log = std::mem::take(&mut version.table_change_log);
+        }
         Ok(())
     }
 

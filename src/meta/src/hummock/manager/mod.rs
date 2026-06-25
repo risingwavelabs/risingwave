@@ -506,6 +506,8 @@ impl HummockManager {
                 version_delta.prev_id, redo_state.id
             );
             redo_state.apply_version_delta(version_delta);
+            // backward compatibility: migrate table change log to meta store.
+            redo_state.apply_table_change_log_delta_backward_compatibility(version_delta);
             applied_delta_count += 1;
             if applied_delta_count % 1000 == 0 {
                 tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
