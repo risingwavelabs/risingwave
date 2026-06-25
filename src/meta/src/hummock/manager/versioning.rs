@@ -322,7 +322,8 @@ impl HummockManager {
         // Remove table change log from version.
         #[expect(deprecated)]
         let table_change_logs = {
-            let table_change_logs = std::mem::take(&mut version.table_change_log);
+            // Retain the in-memory state.
+            let table_change_logs = version.table_change_log.clone();
             if table_change_logs.values().all(|t| t.is_empty()) {
                 return Ok(());
             }
