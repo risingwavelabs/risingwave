@@ -1,5 +1,5 @@
 statement ok
-set sink_decouple = false;
+set sink_decouple = true;
 
 statement ok
 CREATE SECRET tpuf_api_key WITH (backend = 'meta') AS 'tpuf_test';
@@ -37,7 +37,10 @@ CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
 );
 
 statement ok
-ALTER SINK tpuf_e2e_sink SET CONFIG (write_batch_size = 3, max_linger_second = 1);
+ALTER SINK tpuf_e2e_sink CONNECTOR WITH (
+    write_batch_size = 3,
+    max_linger_second = 1
+);
 
 statement ok
 FLUSH;
@@ -68,6 +71,24 @@ CREATE TABLE tpuf_items (
     published_at timestamp,
     vector vector(3)
 );
+
+# ---- Validation: Turbopuffer requires decoupled sink ----
+statement ok
+set sink_decouple = false;
+
+statement error Turbopuffer sink can only be created with sink_decouple enabled
+CREATE SINK tpuf_no_decouple FROM tpuf_items WITH (
+    connector = 'turbopuffer',
+    base_url = 'https://aws-us-east-2.turbopuffer.com',
+    namespace = 'IFI-no-decouple',
+    api_key = secret tpuf_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    distance_metric = 'cosine_distance'
+);
+
+statement ok
+set sink_decouple = true;
 
 # ---- Validation: static namespace success path ----
 statement ok

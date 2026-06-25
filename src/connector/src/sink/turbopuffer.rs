@@ -25,6 +25,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -255,6 +256,15 @@ impl Sink for TurbopufferSink {
 
     async fn validate(&self) -> Result<()> {
         Ok(())
+    }
+
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default | SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Err(SinkError::Config(anyhow!(
+                "Turbopuffer sink can only be created with sink_decouple enabled"
+            ))),
+        }
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -992,6 +1002,17 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.to_string().contains("max_linger_second"));
+    }
+
+    #[test]
+    fn test_requires_sink_decouple() {
+        assert!(TurbopufferSink::is_sink_decouple(&SinkDecouple::Default).unwrap());
+        assert!(TurbopufferSink::is_sink_decouple(&SinkDecouple::Enable).unwrap());
+        let err = TurbopufferSink::is_sink_decouple(&SinkDecouple::Disable).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Turbopuffer sink can only be created with sink_decouple enabled")
+        );
     }
 
     #[cfg(not(madsim))]
