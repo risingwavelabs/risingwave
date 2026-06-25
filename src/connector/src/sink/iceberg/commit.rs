@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::spec::{DataFile, Operation, SerializedDataFile};
+use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use iceberg::{Catalog, TableIdent};
@@ -849,39 +849,43 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
-    /// Returns the number of snapshots since the last rewrite/overwrite
-    fn count_snapshots_since_rewrite(&self) -> usize {
-        let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
-        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
-
-        // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
+    /// Check the number of snapshots on the given branch lineage since the last rewrite operation.
+    /// Returns the number of snapshots since the last rewrite.
+    fn count_snapshots_since_rewrite_in_metadata(metadata: &TableMetadata, branch: &str) -> usize {
+        // Start from the latest snapshot of the commit branch.
+        let mut snapshot_id = metadata
+            .snapshot_for_ref(branch)
+            .map(|snapshot| snapshot.snapshot_id());
         let mut count = 0;
-        for snapshot in snapshots {
-            // Check if this snapshot represents a rewrite or overwrite operation
-            let summary = snapshot.summary();
-            match &summary.operation {
-                Operation::Replace => {
-                    // Found a rewrite/overwrite operation, stop counting
-                    break;
-                }
 
-                _ => {
-                    // Increment count for each snapshot that is not a rewrite/overwrite
-                    count += 1;
-                }
+        // Iterate through snapshots by parent lineage to find the last rewrite.
+        while let Some(current_snapshot_id) = snapshot_id {
+            let Some(snapshot) = metadata.snapshot_by_id(current_snapshot_id) else {
+                break;
+            };
+
+            // Check if this snapshot represents a rewrite operation.
+            if snapshot.summary().operation == Operation::Replace {
+                // Found a rewrite operation, stop counting.
+                break;
             }
+
+            // Increment count for each snapshot that is not a rewrite.
+            count += 1;
+            snapshot_id = snapshot.parent_snapshot_id();
         }
 
         count
     }
 
+    /// Returns the number of snapshots in the current commit branch since the last rewrite.
+    fn count_snapshots_since_rewrite(&self) -> usize {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        Self::count_snapshots_since_rewrite_in_metadata(self.table.metadata(), branch.as_str())
+    }
+
     /// Wait until snapshot count since last rewrite is below the limit
     async fn wait_for_snapshot_limit(&mut self) -> Result<()> {
-        if !self.config.enable_compaction {
-            return Ok(());
-        }
-
         if let Some(max_snapshots) = self.config.max_snapshots_num_before_compaction {
             loop {
                 let current_count = self.count_snapshots_since_rewrite();
@@ -920,4 +924,88 @@ fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 
 fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use iceberg::spec::{
+        FormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema, Snapshot,
+        SnapshotReference, SnapshotRetention, SortOrder, Summary, TableMetadataBuilder, Type,
+        UnboundPartitionSpec,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {
+        let mut builder = TableMetadataBuilder::new(
+            Schema::builder()
+                .with_fields(vec![
+                    NestedField::new(1, "id", Type::Primitive(PrimitiveType::Long), false).into(),
+                ])
+                .build()
+                .unwrap(),
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "s3://warehouse/db/table".to_owned(),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap();
+
+        for (snapshot_id, parent_snapshot_id, operation) in [
+            (1, None, Operation::Append),
+            (2, Some(1), Operation::Append),
+            (3, Some(2), Operation::Replace),
+            (4, Some(3), Operation::Append),
+            // Simulate the COW publish snapshot on main. It should not affect
+            // the ingestion branch backlog count.
+            (5, None, Operation::Overwrite),
+        ] {
+            builder = builder
+                .add_snapshot(snapshot(snapshot_id, parent_snapshot_id, operation))
+                .unwrap();
+        }
+
+        let metadata = builder
+            .set_ref(super::super::ICEBERG_COW_BRANCH, snapshot_ref(4))
+            .unwrap()
+            .set_ref(MAIN_BRANCH, snapshot_ref(5))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+
+        let count = IcebergSinkCommitter::count_snapshots_since_rewrite_in_metadata(
+            &metadata,
+            super::super::ICEBERG_COW_BRANCH,
+        );
+
+        assert_eq!(count, 1);
+    }
+
+    fn snapshot(
+        snapshot_id: i64,
+        parent_snapshot_id: Option<i64>,
+        operation: Operation,
+    ) -> Snapshot {
+        Snapshot::builder()
+            .with_snapshot_id(snapshot_id)
+            .with_parent_snapshot_id(parent_snapshot_id)
+            .with_sequence_number(snapshot_id)
+            .with_timestamp_ms(snapshot_id)
+            .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
+            .with_summary(Summary {
+                operation,
+                additional_properties: HashMap::new(),
+            })
+            .with_schema_id(0)
+            .build()
+    }
+
+    fn snapshot_ref(snapshot_id: i64) -> SnapshotReference {
+        SnapshotReference::new(snapshot_id, SnapshotRetention::branch(None, None, None))
+    }
 }
