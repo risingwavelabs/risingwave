@@ -24,7 +24,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_common_service::{AwaitTreeMiddlewareLayer, MetricsManager, TracingExtractLayer};
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -770,6 +770,7 @@ pub async fn start_service_as_election_leader(
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
+        .layer(AwaitTreeMiddlewareLayer::new(env.await_tree_reg().clone()))
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
