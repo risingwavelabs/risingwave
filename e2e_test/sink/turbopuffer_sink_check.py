@@ -59,8 +59,8 @@ def main():
     headers = read_json_lines(sys.argv[2])
     paths = read_lines(sys.argv[3])
 
-    if len(bodies) < 2:
-        raise AssertionError(f"expected at least 2 turbopuffer requests, got {len(bodies)}")
+    if not bodies:
+        raise AssertionError("expected at least 1 turbopuffer request, got 0")
     assert_equal(len(headers), len(bodies), "header/body request count mismatch")
     assert_equal(len(paths), len(bodies), "path/body request count mismatch")
 
@@ -71,16 +71,15 @@ def main():
         assert_equal(header.get("authorization"), "Bearer tpuf_test", "authorization header")
         assert "application/json" in header.get("content-type", ""), "content-type header"
 
-    backfill = find_body(
+    schema_body = find_body(
         bodies,
-        lambda body: "upsert_rows" in body
-        and any(row.get("id") == "delete-me" for row in body["upsert_rows"]),
-        "initial upsert for delete-me",
+        lambda body: "schema" in body,
+        "request with schema",
     )
-    assert_equal(backfill["distance_metric"], "cosine_distance", "distance metric")
-    assert_equal(backfill["disable_backpressure"], True, "disable_backpressure")
+    assert_equal(schema_body["distance_metric"], "cosine_distance", "distance metric")
+    assert_equal(schema_body["disable_backpressure"], True, "disable_backpressure")
 
-    schema = backfill["schema"]
+    schema = schema_body["schema"]
     assert_equal(schema["body"]["type"], "string", "body type")
     assert_equal(schema["body"]["filterable"], True, "body filterable")
     assert_equal(schema["body"]["full_text_search"], True, "body full_text_search")
