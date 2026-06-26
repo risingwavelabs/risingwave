@@ -1137,7 +1137,7 @@ impl LogicalPlanRoot {
         allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
-            BackfillType::UpstreamOnly
+            BackfillType::UpstreamOnlySink
         } else if allow_snapshot_backfill
             && self.should_use_snapshot_backfill()
             && {

@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
@@ -1229,7 +1228,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_backfill_type(new_scan, BackfillType::Replicated);
         Ok((
             new_stream_table_scan,
             new_predicate,

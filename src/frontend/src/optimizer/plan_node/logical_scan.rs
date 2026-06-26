@@ -618,7 +618,12 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            if self.core.cross_database() && ctx.backfill_type() == BackfillType::UpstreamOnly {
+            if self.core.cross_database()
+                && matches!(
+                    ctx.backfill_type(),
+                    BackfillType::Replicated | BackfillType::UpstreamOnlySink
+                )
+            {
                 return Err(ErrorCode::NotSupported(
                     "We currently do not support cross database scan in upstream only mode."
                         .to_owned(),
@@ -627,11 +632,10 @@ impl ToStream for LogicalScan {
                 .into());
             }
 
-            Ok(StreamTableScan::new_with_stream_scan_type(
-                self.core.clone(),
-                ctx.backfill_type().to_stream_scan_type(),
+            Ok(
+                StreamTableScan::new_with_backfill_type(self.core.clone(), ctx.backfill_type())
+                    .into(),
             )
-            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

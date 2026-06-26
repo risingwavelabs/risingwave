@@ -328,3 +328,13 @@
           │ └─StreamTableScan { table: t, columns: [v1, _row_id] }
           └─StreamExchange { dist: HashShard(t.v1) }
             └─StreamTableScan { table: t, columns: [v1, v2, _row_id] }
+- id: create_snapshot_free_sink_query_with_project_filter
+  sql: |
+    create table t (id int primary key, v1 int, v2 int);
+    explain (verbose) create sink s as select id, v1 + 1 as v1 from t where v2 > 10
+    with (connector = 'blackhole', snapshot = 'false');
+  explain_output: |
+    StreamSink { type: upsert, columns: [id, v1] }
+    └─StreamProject { exprs: [t.id, (t.v1 + 1:Int32) as $expr1] }
+      └─StreamFilter [upsert] { predicate: (t.v2 > 10:Int32) }
+        └─StreamTableScan { table: t, columns: [t.id, t.v1, t.v2], stream_scan_type: UpstreamOnly, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }

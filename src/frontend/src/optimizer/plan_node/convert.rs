@@ -135,18 +135,27 @@ impl RewriteStreamContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum BackfillType {
-    UpstreamOnly,
+    Replicated,
+    /// Frontend-only variant for snapshot-free sinks. It is serialized as
+    /// `StreamScanType::UpstreamOnly`, but derives an upsert stream kind.
+    UpstreamOnlySink,
     Backfill,
     ArrangementBackfill,
     SnapshotBackfill,
 }
 
 impl BackfillType {
-    pub fn to_stream_scan_type(self) -> StreamScanType {
+    pub fn to_stream_scan_type(self, is_cross_db: bool) -> StreamScanType {
+        if is_cross_db {
+            return StreamScanType::CrossDbSnapshotBackfill;
+        }
+
         match self {
-            BackfillType::UpstreamOnly => StreamScanType::UpstreamOnly,
+            BackfillType::Replicated | BackfillType::UpstreamOnlySink => {
+                StreamScanType::UpstreamOnly
+            }
             BackfillType::Backfill => StreamScanType::Backfill,
             BackfillType::ArrangementBackfill => StreamScanType::ArrangementBackfill,
             BackfillType::SnapshotBackfill => StreamScanType::SnapshotBackfill,
