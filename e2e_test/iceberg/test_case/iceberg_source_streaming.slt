@@ -231,6 +231,7 @@ DROP SOURCE iceberg_t1_source CASCADE;
 
 statement ok
 DROP TABLE s1 cascade;
+
 # Test that an Iceberg streaming source keeps consuming snapshots after the
 # upstream Iceberg auto-schema sink drops a column.
 statement ok
