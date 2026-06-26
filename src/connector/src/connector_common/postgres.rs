@@ -73,6 +73,22 @@ const DISCOVER_PGVECTOR_COLUMNS_QUERY: &str = r#"
     ORDER BY a.attnum
 "#;
 
+const CHECK_TABLE_PRIVILEGE_QUERY: &str = r#"
+    SELECT
+      current_user::text AS user_name,
+      n.oid IS NOT NULL AS schema_exists,
+      c.oid IS NOT NULL AS table_exists,
+      COALESCE(has_schema_privilege(current_user, n.oid, 'USAGE'), false) AS has_schema_usage,
+      COALESCE(has_table_privilege(current_user, c.oid, $3), false) AS has_table_privilege,
+      COALESCE(has_any_column_privilege(current_user, c.oid, $3), false) AS has_any_column_privilege
+    FROM (SELECT 1) AS one
+    LEFT JOIN pg_namespace n ON n.nspname = $1
+    LEFT JOIN pg_class c ON c.relnamespace = n.oid
+      AND c.relname = $2
+      AND c.relkind IN ('r', 'p')
+    LIMIT 1
+"#;
+
 pub struct PgConnectionConfig {
     pub host: String,
     pub port: String,
@@ -178,6 +194,15 @@ pub struct PostgresExternalTable {
     pk_names: Vec<String>,
 }
 
+struct PostgresTablePrivilege {
+    user_name: String,
+    schema_exists: bool,
+    table_exists: bool,
+    has_schema_usage: bool,
+    has_table_privilege: bool,
+    has_any_column_privilege: bool,
+}
+
 impl PostgresExternalTable {
     /// Discover primary key columns directly from PostgreSQL system tables.
     /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
@@ -214,6 +239,7 @@ impl PostgresExternalTable {
         table: &str,
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
+        required_table_privilege: Option<&str>,
     ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
         let mut options = PgConnectOptions::new()
             .username(username)
@@ -237,7 +263,7 @@ impl PostgresExternalTable {
 
         let connection = PgPool::connect_with(options).await?;
 
-        // Use sea-schema only for column discovery (no permission issues)
+        // Keep using sea-schema for column discovery, then run targeted access diagnostics below.
         let schema_discovery = SchemaDiscovery::new(connection.clone(), schema);
         let empty_map: HashMap<String, Vec<String>> = HashMap::new();
         let columns = schema_discovery
@@ -267,6 +293,10 @@ impl PostgresExternalTable {
         // sea-schema reports pgvector as `Unknown("vector")` and drops the dimension.
         // Patch it with PostgreSQL's formatted type text so we can derive vector(n).
         let mut columns = columns;
+        if let Some(privilege) = required_table_privilege {
+            Self::ensure_table_privilege(&connection, schema, table, privilege).await?;
+        }
+
         for col in &mut columns {
             if let SeaType::Unknown(name) = &col.col_type
                 && name.eq_ignore_ascii_case("vector")
@@ -280,6 +310,68 @@ impl PostgresExternalTable {
         let pk_columns = Self::discover_primary_key(&connection, schema, table).await?;
 
         Ok((columns, pk_columns))
+    }
+
+    async fn ensure_table_privilege(
+        connection: &PgPool,
+        schema: &str,
+        table: &str,
+        required_privilege: &str,
+    ) -> ConnectorResult<()> {
+        let row = sqlx::query(CHECK_TABLE_PRIVILEGE_QUERY)
+            .bind(schema)
+            .bind(table)
+            .bind(required_privilege)
+            .fetch_one(connection)
+            .await
+            .context("Failed to check PostgreSQL table privileges")?;
+
+        let privilege_status = PostgresTablePrivilege {
+            user_name: row.get("user_name"),
+            schema_exists: row.get("schema_exists"),
+            table_exists: row.get("table_exists"),
+            has_schema_usage: row.get("has_schema_usage"),
+            has_table_privilege: row.get("has_table_privilege"),
+            has_any_column_privilege: row.get("has_any_column_privilege"),
+        };
+
+        if !privilege_status.schema_exists {
+            return Err(anyhow!("PostgreSQL schema `{schema}` does not exist").into());
+        }
+
+        if !privilege_status.table_exists {
+            return Err(anyhow!("PostgreSQL table `{schema}`.`{table}` does not exist").into());
+        }
+
+        if !privilege_status.has_schema_usage {
+            return Err(anyhow!(
+                "PostgreSQL table {} exists, but the connection user `{}` does not have USAGE privilege on schema `{}`. Grant privileges on the upstream PostgreSQL database: {}",
+                format_pg_table_name(schema, table),
+                privilege_status.user_name,
+                schema,
+                format_grant_usage(schema, &privilege_status.user_name),
+            )
+            .into());
+        }
+
+        if !privilege_status.has_table_privilege {
+            let column_privilege_msg = if privilege_status.has_any_column_privilege {
+                " The user has column-level privilege on at least one column, but RisingWave requires table-level privilege for CDC schema discovery and snapshot reads."
+            } else {
+                ""
+            };
+            return Err(anyhow!(
+                "PostgreSQL table {} exists, but the connection user `{}` does not have {} privilege on it.{} Grant privileges on the upstream PostgreSQL database: {}",
+                format_pg_table_name(schema, table),
+                privilege_status.user_name,
+                required_privilege,
+                column_privilege_msg,
+                format_grant_table_privilege(schema, table, &privilege_status.user_name, required_privilege),
+            )
+            .into());
+        }
+
+        Ok(())
     }
 
     async fn discover_schema(
@@ -340,6 +432,7 @@ impl PostgresExternalTable {
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
         is_append_only: bool,
+        required_table_privilege: Option<&str>,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
 
@@ -353,6 +446,7 @@ impl PostgresExternalTable {
             table,
             ssl_mode,
             ssl_root_cert,
+            required_table_privilege,
         )
         .await?;
 
@@ -448,6 +542,40 @@ impl PostgresExternalTable {
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
+}
+
+fn format_pg_table_name(schema: &str, table: &str) -> String {
+    format!(
+        "{}.{}",
+        quote_pg_identifier(schema),
+        quote_pg_identifier(table)
+    )
+}
+
+fn format_grant_usage(schema: &str, user_name: &str) -> String {
+    format!(
+        "GRANT USAGE ON SCHEMA {} TO {};",
+        quote_pg_identifier(schema),
+        quote_pg_identifier(user_name)
+    )
+}
+
+fn format_grant_table_privilege(
+    schema: &str,
+    table: &str,
+    user_name: &str,
+    privilege: &str,
+) -> String {
+    format!(
+        "GRANT {} ON TABLE {} TO {};",
+        privilege,
+        format_pg_table_name(schema, table),
+        quote_pg_identifier(user_name)
+    )
+}
+
+fn quote_pg_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
 impl fmt::Display for SslMode {
@@ -766,7 +894,10 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pgvector_dimension;
+    use super::{
+        format_grant_table_privilege, format_grant_usage, format_pg_table_name,
+        parse_pgvector_dimension,
+    };
 
     #[test]
     fn test_parse_pgvector_dimension() {
@@ -779,5 +910,21 @@ mod tests {
     fn test_parse_pgvector_dimension_requires_size() {
         let err = parse_pgvector_dimension("vector").unwrap_err();
         assert!(err.to_string().contains("missing dimension"));
+    }
+
+    #[test]
+    fn test_format_postgres_privilege_grants_quote_identifiers() {
+        assert_eq!(
+            format_pg_table_name("public", "GlobalBrandContentAnalysis"),
+            r#""public"."GlobalBrandContentAnalysis""#
+        );
+        assert_eq!(
+            format_grant_usage("tenant schema", r#"cdc"user"#),
+            r#"GRANT USAGE ON SCHEMA "tenant schema" TO "cdc""user";"#
+        );
+        assert_eq!(
+            format_grant_table_privilege("tenant schema", "Orders", r#"cdc"user"#, "SELECT"),
+            r#"GRANT SELECT ON TABLE "tenant schema"."Orders" TO "cdc""user";"#
+        );
     }
 }

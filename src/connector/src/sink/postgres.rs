@@ -195,6 +195,7 @@ impl Sink for PostgresSink {
                 &self.config.ssl_mode,
                 &self.config.ssl_root_cert,
                 self.is_append_only,
+                None,
             )
             .await
             .context(format!(

@@ -999,6 +999,7 @@ mod tests {
             &config.ssl_mode,
             &config.ssl_root_cert,
             false,
+            Some("SELECT"),
         )
         .await
         .unwrap();
