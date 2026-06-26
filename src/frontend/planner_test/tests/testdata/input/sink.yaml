@@ -251,3 +251,10 @@
     with (type = 'append-only', force_append_only = 'true');
   expected_outputs:
     - explain_output
+- id: create_snapshot_free_sink_query_with_project_filter
+  sql: |
+    create table t (id int primary key, v1 int, v2 int);
+    explain (verbose) create sink s as select id, v1 + 1 as v1 from t where v2 > 10
+    with (connector = 'blackhole', snapshot = 'false');
+  expected_outputs:
+    - explain_output
