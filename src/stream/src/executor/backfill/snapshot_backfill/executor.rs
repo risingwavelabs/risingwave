@@ -14,7 +14,7 @@
 
 use std::cmp::min;
 use std::collections::VecDeque;
-use std::future::{Future, pending, ready};
+use std::future::{Future, ready};
 use std::mem::take;
 use std::sync::Arc;
 use std::time::Duration;
@@ -404,11 +404,20 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 pending_non_checkpoint_barrier.push(barrier.epoch);
                             }
 
+                            // `is_finished` was computed before the log-store reads above; the
+                            // concurrent upstream drain during those reads can pull in a straggler
+                            // barrier, so re-check that we are actually caught up (lag == 0).
+                            let caught_up = is_finished
+                                && match &upstream_buffer {
+                                    SnapshotBackfillUpstream::Buffer(b) => {
+                                        b.pending_epoch_lag() == 0
+                                    }
+                                    SnapshotBackfillUpstream::Empty => true,
+                                };
                             if let SnapshotBackfillUpstream::Buffer(upstream_buffer) =
                                 &upstream_buffer
                             {
-                                if is_finished {
-                                    assert_eq!(upstream_buffer.pending_epoch_lag(), 0);
+                                if caught_up {
                                     assert!(pending_non_checkpoint_barrier.is_empty());
                                     self.progress.finish_consuming_log_store(barrier.epoch);
                                 } else {
@@ -431,7 +440,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 .into());
                             }
 
-                            if is_finished {
+                            if caught_up {
                                 assert!(
                                     pending_non_checkpoint_barrier.is_empty(),
                                     "{pending_non_checkpoint_barrier:?}"
@@ -723,6 +732,10 @@ struct UpstreamBuffer<S> {
     /// must be read from log store
     is_polling_epoch_data: bool,
     consume_upstream_row_count: LabelGuardedIntCounter,
+    /// Measured upstream checkpoint cadence (physical ms between consecutive checkpoints),
+    /// used to pace back-pressure. Stable across the catch-up, including at lag == 0.
+    cadence_ms: u64,
+    last_checkpoint_physical_ms: u64,
     _phase: S,
 }
 
@@ -740,6 +753,8 @@ impl UpstreamBuffer<ConsumingSnapshot> {
             // no limit on the number of pending barrier in the beginning
             max_pending_epoch_lag: u64::MAX,
             consumed_epoch: 0,
+            cadence_ms: 1000,
+            last_checkpoint_physical_ms: 0,
             _phase: ConsumingSnapshot {},
         }
     }
@@ -770,6 +785,8 @@ impl UpstreamBuffer<ConsumingSnapshot> {
             is_polling_epoch_data: self.is_polling_epoch_data,
             consume_upstream_row_count: self.consume_upstream_row_count,
             consumed_epoch,
+            cadence_ms: self.cadence_ms,
+            last_checkpoint_physical_ms: self.last_checkpoint_physical_ms,
             _phase: ConsumingLogStore {},
         };
         if buffer.is_finished() {
@@ -790,10 +807,13 @@ impl<S> UpstreamBuffer<S> {
             loop {
                 if let Err(e) = try {
                     if !self.can_consume_upstream() {
-                        // pause the future to block consuming upstream
-                        sleep(Duration::from_secs(30)).await;
-                        warn!(pending_barrier = ?self.upstream_pending_barriers, "not polling upstream but timeout");
-                        return pending().await;
+                        // Back-pressure by SLOWING the drain to ~one checkpoint cadence, never
+                        // fully stopping. Fully stopping (the old `return pending()`) blocks the
+                        // upstream from collecting the next checkpoint barrier that this
+                        // backfill's own `Committed(end_epoch)` read needs committed -> deadlock.
+                        // Sleeping then draining keeps the upstream committing; sleeping at
+                        // lag == 0 too lets the main loop observe the finish.
+                        sleep(Duration::from_millis(self.cadence_ms)).await;
                     }
                     self.consume_until_next_checkpoint_barrier().await?;
                 } {
@@ -819,6 +839,15 @@ impl<S> UpstreamBuffer<S> {
                 }
                 DispatcherMessage::Barrier(barrier) => {
                     let is_checkpoint = barrier.kind.is_checkpoint();
+                    if is_checkpoint {
+                        let phys = Epoch(barrier.epoch.prev).physical_time();
+                        if self.last_checkpoint_physical_ms != 0
+                            && phys > self.last_checkpoint_physical_ms
+                        {
+                            self.cadence_ms = phys - self.last_checkpoint_physical_ms;
+                        }
+                        self.last_checkpoint_physical_ms = phys;
+                    }
                     self.upstream_pending_barriers.add(barrier);
                     if is_checkpoint {
                         self.is_polling_epoch_data = false;
