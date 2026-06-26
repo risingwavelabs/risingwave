@@ -374,7 +374,8 @@ macro_rules! derive_btreemap_from_blob {
     };
 }
 
-pub(crate) use {derive_array_from_blob, derive_from_blob};
+pub(crate) use derive_array_from_blob;
+pub(crate) use derive_from_blob;
 
 derive_from_json_struct!(TableIdArray, Vec<TableId>);
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(impl_trait_in_assoc_type)]
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use risingwave_meta::*;
 

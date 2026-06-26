@@ -221,7 +221,7 @@ impl Schema {
     pub fn formatted_col_names(&self) -> String {
         self.fields
             .iter()
-            .map(|f| format!("\"{}\"", &f.name))
+            .map(|f| format!("\"{}\"", f.name))
             .collect::<Vec<_>>()
             .join(", ")
     }

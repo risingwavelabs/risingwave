@@ -16,8 +16,11 @@
 mod test;
 
 mod commit;
+pub mod commit_retry;
 mod config;
 mod create_table;
+#[cfg(any(test, madsim))]
+pub mod mock_v3_catalog_registry;
 mod prometheus;
 mod writer;
 

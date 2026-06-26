@@ -108,11 +108,9 @@ impl ColumnSelfEqualRewriter {
                     Self::extract_column(sub_expr.clone(), columns);
                 }
             }
-            ExprImpl::InputRef(_) => {
-                if !columns.contains(&expr) {
-                    // only add the column if not exists
-                    columns.push(expr);
-                }
+            ExprImpl::InputRef(_) if !columns.contains(&expr) => {
+                // only add the column if not exists
+                columns.push(expr);
             }
             _ => (),
         }

@@ -403,6 +403,19 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <!--
+                    Pin a modern maven-jar-plugin instead of the 2.4 (2013) inherited from
+                    the Maven super-POM. The old version's bundled plexus-archiver throws
+                    "Error assembling JAR: invalid entry size" when packaging the large
+                    native JNI cdylib (librisingwave_java_binding) that the bumped toolchain
+                    produces. 3.x ships a fixed archiver.
+                -->
+                <version>3.4.1</version>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>3.6.0</version>
                 <dependencies>

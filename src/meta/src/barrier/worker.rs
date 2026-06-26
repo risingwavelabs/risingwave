@@ -56,6 +56,7 @@ use crate::barrier::{
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -299,6 +300,7 @@ fn build_reschedule_from_context(
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -306,6 +308,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -324,6 +327,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_v3_sink_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await
@@ -681,7 +685,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                             panic!("database {database_id} failure reported from {worker_id} but recovery not enabled")
                                         }
                                         if !self.enable_per_database_isolation() {
-                                                Err(anyhow!("database {database_id} report failure from {worker_id}"))?;
+                                                Err(MetaError::from(anyhow!("database {database_id} report failure from {worker_id}")))?;
                                             }
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                             warn!(%database_id, "database entering recovery");
@@ -754,7 +758,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         let result: MetaResult<_> = try {
                             if !self.enable_per_database_isolation() {
                                 let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
-                                Err(err)?;
+                                Err(MetaError::from(err))?;
                             } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                 warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
                                 self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));

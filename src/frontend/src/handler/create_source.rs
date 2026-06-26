@@ -245,7 +245,6 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -1544,6 +1543,45 @@ pub mod tests {
             ]
         "#]]
         .assert_debug_eq(&columns);
+        drop(catalog_reader);
+
+        let sql =
+            "CREATE SOURCE s_pulsar (v1 int) include header 'tenant' as pulsar_header with (connector = 'pulsar') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_pulsar",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_pulsar");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "pulsar_header",
+                    Bytea,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
+        drop(catalog_reader);
 
         let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json".to_owned();

@@ -16,18 +16,21 @@ use std::collections::{HashMap as StdHashMap, HashSet};
 
 use anyhow::Context;
 use hashbrown::HashMap;
+use hashbrown::hash_map::Entry;
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
 use iceberg::puffin::{CompressionCodec, PuffinReader, PuffinWriter};
 use iceberg::spec::{
-    DataContentType, DataFile, DataFileBuilder, DataFileFormat, ManifestContentType, PartitionKey,
-    SerializedDataFile,
+    DataContentType, DataFile, DataFileBuilder, DataFileFormat, ManifestContentType, ManifestList,
+    PartitionKey, SerializedDataFile,
 };
 use iceberg::table::Table;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
-use risingwave_connector::sink::iceberg::{IcebergCommitResult, IcebergConfig, truncate_datafile};
+use risingwave_connector::sink::iceberg::{
+    IcebergConfig, IcebergDvMergerCommitResult, truncate_datafile,
+};
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::{ActorId, SinkId};
 use uuid::Uuid;
@@ -44,6 +47,7 @@ const DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE: &str = "referenced-data-fil
 struct LoadedDeleteVectorEntry {
     delete_vector: Option<DeleteVector>,
     partition_key: Option<PartitionKey>,
+    overwrite_file: Option<DataFile>,
 }
 
 /// Real implementation of [`DvHandler`] using the iceberg-rust crate.
@@ -81,6 +85,88 @@ impl DvHandlerImpl {
             sink_id,
         })
     }
+
+    /// Merges `delete_vector` with any existing DV from `loaded`, writes the result
+    /// as a Puffin blob, and returns the resulting [`DataFile`] metadata.
+    async fn write_dv_puffin_file(
+        &mut self,
+        table: &Table,
+        data_file_path: String,
+        mut delete_vector: DeleteVector,
+        loaded: LoadedDeleteVectorEntry,
+    ) -> StreamExecutorResult<DataFile> {
+        let LoadedDeleteVectorEntry {
+            delete_vector: existing_delete_vector,
+            partition_key,
+            ..
+        } = loaded;
+
+        if let Some(existing) = existing_delete_vector {
+            delete_vector |= existing;
+        }
+
+        let file_name = self.file_name_generator.generate_file_name();
+        let location = self
+            .location_generator
+            .generate_location(partition_key.as_ref(), &file_name);
+        let output_file = table
+            .file_io()
+            .new_output(&location)
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+        let mut writer = PuffinWriter::new(&output_file, StdHashMap::new(), false)
+            .await
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+
+        let cardinality = delete_vector.len();
+        let properties = StdHashMap::from([
+            (
+                DELETION_VECTOR_PROPERTY_CARDINALITY.to_owned(),
+                cardinality.to_string(),
+            ),
+            (
+                DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE.to_owned(),
+                data_file_path.clone(),
+            ),
+        ]);
+        let blob = delete_vector
+            .to_puffin_blob(properties)
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+        writer
+            .add(blob, CompressionCodec::None)
+            .await
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+
+        let result = writer
+            .close_with_metadata()
+            .await
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+        let blob_metadata = result
+            .blobs_metadata
+            .first()
+            .context("blob metadata should be present")?;
+
+        let mut builder = DataFileBuilder::default();
+        builder
+            .content(DataContentType::PositionDeletes)
+            .file_path(location)
+            .file_format(DataFileFormat::Puffin)
+            .record_count(cardinality)
+            .file_size_in_bytes(result.file_size_in_bytes)
+            .referenced_data_file(Some(data_file_path))
+            .content_offset(Some(blob_metadata.offset() as i64))
+            .content_size_in_bytes(Some(blob_metadata.length() as i64));
+        if let Some(partition_key) = partition_key {
+            builder
+                .partition(partition_key.data().clone())
+                .partition_spec_id(partition_key.spec().spec_id());
+        }
+        builder.build().map_err(|err| {
+            StreamExecutorError::sink_error(
+                anyhow::anyhow!(err).context("Failed to build deletion vector file metadata"),
+                self.sink_id,
+            )
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -108,126 +194,122 @@ impl DvHandler for DvHandlerImpl {
         )
         .await?;
 
-        let mut data_files = Vec::with_capacity(self.delete_vectors.len());
-        for (data_file_path, mut delete_vector) in self.delete_vectors.drain() {
-            let LoadedDeleteVectorEntry {
-                delete_vector: existing_delete_vector,
-                partition_key,
-            } = loaded_delete_vectors
+        let overwrite_files = loaded_delete_vectors
+            .values()
+            .filter_map(|entry| entry.overwrite_file.clone())
+            .collect::<Vec<_>>();
+
+        let pending = std::mem::take(&mut self.delete_vectors);
+        let mut delete_files = Vec::with_capacity(pending.len());
+        for (data_file_path, delete_vector) in pending {
+            let loaded = loaded_delete_vectors
                 .remove(&data_file_path)
                 .unwrap_or_default();
-
-            if let Some(existing) = existing_delete_vector {
-                delete_vector |= existing;
-            }
-
-            let file_name = self.file_name_generator.generate_file_name();
-            let location = self
-                .location_generator
-                .generate_location(partition_key.as_ref(), &file_name);
-            let output_file = table
-                .file_io()
-                .new_output(&location)
-                .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-            let mut writer = PuffinWriter::new(&output_file, StdHashMap::new(), false)
-                .await
-                .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-
-            let cardinality = delete_vector.len();
-            let properties = StdHashMap::from([
-                (
-                    DELETION_VECTOR_PROPERTY_CARDINALITY.to_owned(),
-                    cardinality.to_string(),
-                ),
-                (
-                    DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE.to_owned(),
-                    data_file_path.clone(),
-                ),
-            ]);
-            let blob = delete_vector
-                .to_puffin_blob(properties)
-                .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-            writer
-                .add(blob, CompressionCodec::None)
-                .await
-                .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-
-            let result = writer
-                .close_with_metadata()
-                .await
-                .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-            let blob_metadata = result
-                .blobs_metadata
-                .first()
-                .context("blob metadata should be present")?;
-
-            let mut builder = DataFileBuilder::default();
-            builder
-                .content(DataContentType::PositionDeletes)
-                .file_path(location)
-                .file_format(DataFileFormat::Puffin)
-                .record_count(cardinality)
-                .file_size_in_bytes(result.file_size_in_bytes)
-                .referenced_data_file(Some(data_file_path))
-                .content_offset(Some(blob_metadata.offset() as i64))
-                .content_size_in_bytes(Some(blob_metadata.length() as i64));
-            if let Some(partition_key) = partition_key {
-                builder
-                    .partition(partition_key.data().clone())
-                    .partition_spec_id(partition_key.spec().spec_id());
-            }
-            let data_file = builder.build().map_err(|err| {
-                StreamExecutorError::sink_error(
-                    anyhow::anyhow!(err).context("Failed to build deletion vector file metadata"),
-                    self.sink_id,
-                )
-            })?;
-
-            data_files.push(data_file);
+            let file = self
+                .write_dv_puffin_file(&table, data_file_path, delete_vector, loaded)
+                .await?;
+            delete_files.push(file);
         }
 
-        if data_files.is_empty() {
+        if delete_files.is_empty() {
             return Ok(None);
         }
 
-        let format_version = table.metadata().format_version();
-        let partition_type = table.metadata().default_partition_type();
-        let data_files = data_files
-            .into_iter()
-            .map(|f| {
-                // Truncate large column statistics BEFORE serialization
-                let truncated = truncate_datafile(f);
-                SerializedDataFile::try_from(truncated, partition_type, format_version)
-                    .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))
-            })
-            .collect::<StreamExecutorResult<Vec<_>>>()?;
-        let sink_metadata = SinkMetadata::try_from(&IcebergCommitResult {
-            data_files,
+        let delete_files = serialize_delete_files(&table, self.sink_id, delete_files)?;
+        let overwrite_files = serialize_overwrite_files(&table, self.sink_id, overwrite_files)?;
+
+        let sink_metadata = SinkMetadata::try_from(&IcebergDvMergerCommitResult {
             schema_id: table.metadata().current_schema_id(),
             partition_spec_id: table.metadata().default_partition_spec_id(),
+            delete_files,
+            overwrite_files,
         })
         .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
         Ok(Some(sink_metadata))
     }
 }
 
+/// Serializes newly written deletion vector files against the current default
+/// partition spec, after truncating oversized column statistics.
+fn serialize_delete_files(
+    table: &Table,
+    sink_id: SinkId,
+    delete_files: Vec<DataFile>,
+) -> StreamExecutorResult<Vec<SerializedDataFile>> {
+    let format_version = table.metadata().format_version();
+    let partition_type = table.metadata().default_partition_type();
+    delete_files
+        .into_iter()
+        .map(|f| {
+            // Truncate large column statistics BEFORE serialization
+            let truncated = truncate_datafile(f);
+            SerializedDataFile::try_from(truncated, partition_type, format_version)
+                .map_err(|e| StreamExecutorError::sink_error(e, sink_id))
+        })
+        .collect()
+}
+
+/// Serializes the original DV puffin files that are being overwritten. Each
+/// existing DV puffin file was written under its own partition spec (potentially
+/// older than the current default), so we resolve its partition type via the
+/// file's `partition_spec_id` so the serialized form round-trips correctly,
+/// instead of forcing the current default partition type.
+fn serialize_overwrite_files(
+    table: &Table,
+    sink_id: SinkId,
+    overwrite_files: Vec<DataFile>,
+) -> StreamExecutorResult<Vec<SerializedDataFile>> {
+    let format_version = table.metadata().format_version();
+    let schema = table.metadata().current_schema();
+    let mut partition_type_cache: HashMap<i32, iceberg::spec::StructType> = HashMap::new();
+    overwrite_files
+        .into_iter()
+        .map(|f| {
+            let spec_id = f.partition_spec_id();
+            let pt = match partition_type_cache.entry(spec_id) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let spec = table
+                        .metadata()
+                        .partition_spec_by_id(spec_id)
+                        .with_context(|| {
+                            format!(
+                                "failed to find partition spec {} for file {}",
+                                spec_id,
+                                f.file_path()
+                            )
+                        })
+                        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
+                    let pt = spec.partition_type(schema).map_err(|e| {
+                        StreamExecutorError::sink_error(anyhow::anyhow!(e), sink_id)
+                    })?;
+                    entry.insert(pt)
+                }
+            };
+
+            SerializedDataFile::try_from(f, pt, format_version)
+                .map_err(|e| StreamExecutorError::sink_error(e, sink_id))
+        })
+        .collect()
+}
+
 /// Loads existing delete vectors for the given data file paths by scanning the
 /// table's current snapshot. Returns a map from data file path to the loaded
-/// delete vector and partition key (if partitioned).
+/// delete vector, partition key (if partitioned), and original data file (for overwrite).
 ///
 /// The lookup proceeds in two passes:
 /// 1. Scan delete manifests for entries matching the given data file paths. If found,
-///    load the DV (and partition key, when partitioned) from the delete entry. This
-///    reflects the latest DV state for the data file as of the current snapshot.
-/// 2. For partitioned tables, scan data manifests for any data files still missing a
-///    partition key after pass 1 (data files that have not yet accumulated any DV).
+///    load the DV, partition key (when partitioned), and the existing DV file (as the
+///    overwrite target) from the delete entry. This reflects the latest DV state for
+///    the data file as of the current snapshot.
+/// 2. For partitioned tables, scan data manifests for any data files still missing an
+///    entry after pass 1 (data files that have not yet accumulated any DV). Records
+///    the data file as the overwrite target and its partition key.
 async fn load_delete_vectors(
     table: &Table,
     sink_id: SinkId,
     mut paths: HashSet<String>,
 ) -> StreamExecutorResult<HashMap<String, LoadedDeleteVectorEntry>> {
-    let mut result: HashMap<String, LoadedDeleteVectorEntry> = HashMap::with_capacity(paths.len());
-
     let Some(snapshot) = table.metadata().current_snapshot() else {
         return Ok(HashMap::new());
     };
@@ -239,7 +321,39 @@ async fn load_delete_vectors(
         .await
         .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
 
-    'deletes_outer: for manifest_file in manifest_list.entries() {
+    let mut result: HashMap<String, LoadedDeleteVectorEntry> = HashMap::with_capacity(paths.len());
+
+    scan_existing_dvs(
+        table,
+        sink_id,
+        partitioned,
+        &manifest_list,
+        &mut paths,
+        &mut result,
+    )
+    .await?;
+
+    if !paths.is_empty() && partitioned {
+        scan_data_files_for_partition_keys(table, sink_id, &manifest_list, &mut paths, &mut result)
+            .await?;
+    }
+
+    Ok(result)
+}
+
+/// Pass 1: scan delete manifests for DV puffin files referencing any path in
+/// `paths`. On hit, removes the path from `paths`, loads the DV, captures the
+/// partition key (for partitioned tables), and records the existing DV file as
+/// the overwrite target.
+async fn scan_existing_dvs(
+    table: &Table,
+    sink_id: SinkId,
+    partitioned: bool,
+    manifest_list: &ManifestList,
+    paths: &mut HashSet<String>,
+    result: &mut HashMap<String, LoadedDeleteVectorEntry>,
+) -> StreamExecutorResult<()> {
+    for manifest_file in manifest_list.entries() {
         if manifest_file.content != ManifestContentType::Deletes {
             continue;
         }
@@ -279,20 +393,30 @@ async fn load_delete_vectors(
                 LoadedDeleteVectorEntry {
                     delete_vector: Some(delete_vector),
                     partition_key,
+                    overwrite_file: Some(data_file.clone()),
                 },
             );
 
             if paths.is_empty() {
-                break 'deletes_outer;
+                return Ok(());
             }
         }
     }
+    Ok(())
+}
 
-    if paths.is_empty() || !partitioned {
-        return Ok(result);
-    }
-
-    'data_outer: for manifest_file in manifest_list.entries() {
+/// Pass 2 (partitioned tables only): scan data manifests for data files whose
+/// path is still in `paths` (i.e. no existing DV was found in pass 1). Records
+/// the data file as the overwrite target along with its partition key, with no
+/// pre-existing delete vector.
+async fn scan_data_files_for_partition_keys(
+    table: &Table,
+    sink_id: SinkId,
+    manifest_list: &ManifestList,
+    paths: &mut HashSet<String>,
+    result: &mut HashMap<String, LoadedDeleteVectorEntry>,
+) -> StreamExecutorResult<()> {
+    for manifest_file in manifest_list.entries() {
         if manifest_file.content != ManifestContentType::Data {
             continue;
         }
@@ -318,16 +442,16 @@ async fn load_delete_vectors(
                 LoadedDeleteVectorEntry {
                     delete_vector: None,
                     partition_key: Some(partition_key),
+                    overwrite_file: None,
                 },
             );
 
             if paths.is_empty() {
-                break 'data_outer;
+                return Ok(());
             }
         }
     }
-
-    Ok(result)
+    Ok(())
 }
 
 async fn read_dv_positions_from_data_file(

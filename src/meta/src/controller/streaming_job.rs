@@ -2551,7 +2551,7 @@ impl CatalogController {
             source_id.as_share_source_job_id()
         }]
         .into_iter()
-        .chain(dep_source_job_ids.into_iter())
+        .chain(dep_source_job_ids)
         .collect_vec();
 
         // update fragments
@@ -3047,7 +3047,7 @@ impl CatalogController {
                     };
                 let job_ids = vec![base_job_id]
                     .into_iter()
-                    .chain(dep_source_job_ids.into_iter())
+                    .chain(dep_source_job_ids)
                     .collect_vec();
 
                 fragment_updates.push(DependentSourceFragmentUpdate {

@@ -317,9 +317,11 @@ impl Bitmap {
             let bitmask = std::simd::Mask::<i8, BITS>::from_array(chunk).to_bitmask() as usize;
             bits.push(bitmask);
         }
-        if let Some(remainder_iter) = iter.into_remainder()
-            && !remainder_iter.is_empty()
-        {
+        // `ArrayChunks::into_remainder` now returns the remainder iterator directly
+        // (previously `Option<_>`); the full chunks above are already drained via
+        // `by_ref`, so the remainder is simply empty when the length divides evenly.
+        let remainder_iter = iter.into_remainder();
+        if !remainder_iter.is_empty() {
             let mut bitmask = 0;
             for (i, b) in remainder_iter.enumerate() {
                 bitmask |= (b as usize) << i;

@@ -651,7 +651,7 @@ impl BigQuerySinkWriter {
             .ok_or_else(|| {
                 SinkError::BigQuery(anyhow::anyhow!(
                     "Can't find message proto {}",
-                    &config.common.table
+                    config.common.table
                 ))
             })?;
         let proto_field = if !is_append_only {
@@ -981,7 +981,7 @@ fn build_protobuf_field(
 #[cfg(test)]
 mod test {
 
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};

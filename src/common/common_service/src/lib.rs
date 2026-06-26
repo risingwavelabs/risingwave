@@ -17,10 +17,14 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 
+mod await_tree_middleware;
 mod metrics_manager;
 mod observer_manager;
 mod tracing;
 
+pub use await_tree_middleware::{
+    AwaitTreeMiddleware, AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, GrpcCall,
+};
 pub use metrics_manager::MetricsManager;
 pub use observer_manager::{
     Channel, NotificationClient, ObserverError, ObserverManager, ObserverState,

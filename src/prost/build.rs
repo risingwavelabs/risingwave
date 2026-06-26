@@ -913,6 +913,10 @@ for_all_wrapped_id_fields! (
             load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
         }
+        BarrierCompleteResponse.CdcSourceOffsetUpdated {
+            reporter_actor_id: ActorId,
+            source_id: SourceId,
+        }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
             actor_id: ActorId,
@@ -920,6 +924,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
+        }
+        BarrierCompleteResponse.IcebergV3SinkMetadata {
+            reporter_actor_id: ActorId,
+            sink_id: SinkId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
@@ -1292,7 +1300,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs_err::write(
             &out_file,
             format!(
-                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                "#![allow(clippy::useless_conversion)]\n#![allow(clippy::useless_borrows_in_formatting)]\nuse crate::{}::*;\n{}",
                 module_path_id, file_content
             ),
         )?;

@@ -74,7 +74,6 @@ enum ManagerRequest {
 pub struct SinkCoordinatorManager {
     request_tx: mpsc::Sender<ManagerRequest>,
 }
-
 fn new_committed_epoch_subscriber(
     hummock_manager: HummockManagerRef,
     metadata_manager: MetadataManager,
@@ -1905,7 +1904,8 @@ mod tests {
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
-                                            metadata_list.into_iter().exactly_one().unwrap();
+                                            Itertools::exactly_one(metadata_list.into_iter())
+                                                .unwrap();
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
@@ -2058,7 +2058,8 @@ mod tests {
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
-                                            metadata_list.into_iter().exactly_one().unwrap();
+                                            Itertools::exactly_one(metadata_list.into_iter())
+                                                .unwrap();
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
@@ -2207,7 +2208,8 @@ mod tests {
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
-                                            metadata_list.into_iter().exactly_one().unwrap();
+                                            Itertools::exactly_one(metadata_list.into_iter())
+                                                .unwrap();
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
@@ -2380,7 +2382,8 @@ mod tests {
                                             Some(schema_change_for_pre_commit.clone())
                                         );
                                         let metadata =
-                                            metadata_list.into_iter().exactly_one().unwrap();
+                                            Itertools::exactly_one(metadata_list.into_iter())
+                                                .unwrap();
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
