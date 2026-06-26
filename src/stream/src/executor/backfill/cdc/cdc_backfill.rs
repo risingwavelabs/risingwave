@@ -578,12 +578,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         }
                                     }
 
-                                    Self::report_metrics(
-                                        &self.metrics,
-                                        cur_barrier_snapshot_processed_rows,
-                                        cur_barrier_upstream_processed_rows,
-                                    );
-
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
                                     if can_start_new_snapshot {
@@ -598,6 +592,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // Break the loop for consuming snapshot and prepare to start a new snapshot
                                         break;
                                     } else {
+                                        // Drain the in-memory buffer to ensure no data is lost during the recovery process.
                                         let (
                                             emitted_upstream_chunks,
                                             consumed_upstream_row_count,
