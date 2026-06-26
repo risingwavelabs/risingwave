@@ -35,7 +35,7 @@ FROM rw_catalog.rw_refresh_table_state s
 JOIN rw_catalog.rw_tables t ON s.table_id = t.id
 WHERE t.name = 's3_full_reload_issue26012';
 ----
-IDLE true
+IDLE t
 
 system ok
 python3 e2e_test/s3/refresh_full_reload_helper.py setup-updated
@@ -55,7 +55,7 @@ FROM rw_catalog.rw_refresh_table_state s
 JOIN rw_catalog.rw_tables t ON s.table_id = t.id
 WHERE t.name = 's3_full_reload_issue26012';
 ----
-IDLE true
+IDLE t
 
 statement ok
 DROP TABLE s3_full_reload_issue26012;
