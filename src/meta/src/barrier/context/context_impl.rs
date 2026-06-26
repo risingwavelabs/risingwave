@@ -82,7 +82,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        command.post_collect(self).await
+        Box::pin(command.post_collect(self)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
