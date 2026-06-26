@@ -18,7 +18,8 @@ CREATE TABLE tpuf_e2e_items (
 
 statement ok
 INSERT INTO tpuf_e2e_items VALUES
-    ('delete-me', 'IFI-ns-1', 'to be deleted', ARRAY['old', 'row'], true, '2026-06-16 01:02:03+00:00', '[0.1,0.2,0.3]');
+    ('delete-me', 'IFI-ns-1', 'to be deleted', ARRAY['old', 'row'], true, '2026-06-16 01:02:03+00:00', '[0.1,0.2,0.3]'),
+    ('keep-me', 'IFI-ns-1', 'threshold row', ARRAY['old', 'row'], false, '2026-06-16 02:03:04', '[0.2,0.3,0.4]');
 
 statement ok
 CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
@@ -37,12 +38,6 @@ CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
 );
 
 statement ok
-ALTER SINK tpuf_e2e_sink CONNECTOR WITH (
-    write_batch_size = 3,
-    max_linger_second = 1
-);
-
-statement ok
 FLUSH;
 
 statement ok
@@ -54,6 +49,12 @@ INSERT INTO tpuf_e2e_items VALUES
 
 statement ok
 FLUSH;
+
+statement ok
+ALTER SINK tpuf_e2e_sink CONNECTOR WITH (
+    write_batch_size = 3,
+    max_linger_second = 1
+);
 
 statement ok
 DROP SINK tpuf_e2e_sink;
