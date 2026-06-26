@@ -14,17 +14,46 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{Registry, exponential_buckets, histogram_opts};
+use prometheus::{IntCounterVec, Registry, exponential_buckets, histogram_opts};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry, register_int_counter_vec_with_registry,
 };
 
 use crate::source::kafka::stats::RdKafkaStats;
+
+/// Low-cardinality connector ack failure categories.
+///
+/// Keep this list bounded. Do not add raw connector error messages, topics,
+/// partitions, or split identifiers as metric label values.
+#[derive(Debug, Clone, Copy)]
+pub enum ConnectorAckFailureType {
+    Error,
+    Timeout,
+    EmptyMessageId,
+    ChannelMissing,
+    ChannelSendError,
+    DecodeError,
+    BrokerError,
+}
+
+impl ConnectorAckFailureType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Timeout => "timeout",
+            Self::EmptyMessageId => "empty_message_id",
+            Self::ChannelMissing => "channel_missing",
+            Self::ChannelSendError => "channel_send_error",
+            Self::DecodeError => "decode_error",
+            Self::BrokerError => "broker_error",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
@@ -137,12 +166,34 @@ pub struct SourceMetrics {
     pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
+
+    /// Total connector ack failures after checkpoint commit by bounded failure category.
+    connector_ack_failure_count: IntCounterVec,
+    /// Total successful connector acks after checkpoint commit.
+    connector_ack_success_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
     LazyLock::new(|| SourceMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl SourceMetrics {
+    pub fn inc_connector_ack_failure_count(
+        &self,
+        source_name: &str,
+        connector_type: &'static str,
+        failure_type: ConnectorAckFailureType,
+    ) {
+        self.connector_ack_failure_count
+            .with_label_values(&[source_name, connector_type, failure_type.as_str()])
+            .inc();
+    }
+
+    pub fn inc_connector_ack_success_count(&self, source_name: &str, connector_type: &'static str) {
+        self.connector_ack_success_count
+            .with_label_values(&[source_name, connector_type])
+            .inc();
+    }
+
     fn new(registry: &Registry) -> Self {
         let partition_input_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_input_count",
@@ -245,6 +296,21 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let connector_ack_failure_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_failure_count",
+            "Total number of connector ack failures after checkpoint commit by bounded failure category",
+            &["source_name", "connector_type", "error_type"],
+            registry
+        )
+        .unwrap();
+        let connector_ack_success_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_success_count",
+            "Total number of successful connector acks after checkpoint commit",
+            &["source_name", "connector_type"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
@@ -259,6 +325,9 @@ impl SourceMetrics {
             kinesis_rebuild_shard_iter_count,
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
+
+            connector_ack_failure_count,
+            connector_ack_success_count,
         }
     }
 }
