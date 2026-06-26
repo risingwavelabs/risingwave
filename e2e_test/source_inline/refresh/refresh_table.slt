@@ -60,19 +60,6 @@ CREATE TABLE unsupported_full_reload_t (id int PRIMARY KEY) WITH (
     refresh_mode = 'FULL_RELOAD'
 );
 
-# GCS shares the same finite OpenDAL FULL_RELOAD list/fetch path as S3. This
-# DDL-level coverage prevents accidentally dropping it from the whitelist.
-statement ok
-CREATE TABLE gcs_full_reload_validation_t (id int PRIMARY KEY, name varchar) WITH (
-    connector = 'gcs',
-    gcs.bucket_name = 'dummy-bucket',
-    match_pattern = 'refresh_table/*.csv',
-    refresh_mode = 'FULL_RELOAD'
-) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
-
-statement ok
-DROP TABLE gcs_full_reload_validation_t;
-
 # ----
 # refreshable table without PRIMARY KEY
 statement error

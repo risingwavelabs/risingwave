@@ -369,3 +369,38 @@ impl GetKeyIter for WithOptionsSecResolved {
         self.inner.keys().map(|s| s.as_str())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source_options(connector: &str) -> WithOptionsSecResolved {
+        WithOptionsSecResolved::without_secrets(BTreeMap::from([(
+            UPSTREAM_SOURCE_KEY.to_owned(),
+            connector.to_owned(),
+        )]))
+    }
+
+    #[test]
+    fn test_full_reload_refresh_connector_whitelist() {
+        for connector in [
+            OPENDAL_S3_CONNECTOR,
+            GCS_CONNECTOR,
+            BATCH_POSIX_FS_CONNECTOR,
+            ICEBERG_CONNECTOR,
+            ADBC_SNOWFLAKE_CONNECTOR,
+        ] {
+            assert!(
+                source_options(connector).supports_full_reload_refresh(),
+                "{connector} should support FULL_RELOAD refresh"
+            );
+        }
+
+        for connector in [KAFKA_CONNECTOR, POSIX_FS_CONNECTOR, AZBLOB_CONNECTOR] {
+            assert!(
+                !source_options(connector).supports_full_reload_refresh(),
+                "{connector} should not support FULL_RELOAD refresh"
+            );
+        }
+    }
+}
