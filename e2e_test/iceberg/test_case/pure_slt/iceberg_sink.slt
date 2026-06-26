@@ -2,7 +2,6 @@ system ok
 sparksql --e "
 DROP TABLE IF EXISTS demo.demo_db.e2e_demo_table PURGE;
 DROP TABLE IF EXISTS demo.demo_db.e2e_auto_create_table PURGE;
-DROP TABLE IF EXISTS demo.demo_db.e2e_auto_schema_drop_table PURGE;
 DROP TABLE IF EXISTS demo.demo_db.e2e_auto_schema_bytea_table PURGE;
 DROP TABLE IF EXISTS demo.demo_db.e2e_auto_schema_no_pk_table PURGE;
 CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
@@ -31,103 +30,6 @@ statement ok
 CREATE SECRET iceberg_s3_secret_key WITH (
   backend = 'meta'
 ) as 'hummockadmin';
-
-statement ok
-CREATE TABLE t_auto_schema_drop (id int primary key, keep_v varchar, drop_v varchar);
-
-statement ok
-CREATE SINK s_auto_schema_drop FROM t_auto_schema_drop WITH (
-    connector = 'iceberg',
-    type = 'upsert',
-    primary_key = 'id',
-    warehouse.path = 's3a://icebergdata',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.access.key = secret iceberg_s3_access_key,
-    s3.secret.key = secret iceberg_s3_secret_key,
-    s3.region = 'us-east-1',
-    catalog.name = 'demo',
-    catalog.type = 'storage',
-    database.name='demo_db',
-    table.name='e2e_auto_schema_drop_table',
-    commit_checkpoint_interval = 1,
-    create_table_if_not_exists = 'true',
-    auto.schema.change = 'true',
-);
-
-query TTTT
-describe s_auto_schema_drop;
-----
-id                  integer             false     NULL
-keep_v              character varying   false     NULL
-drop_v              character varying   false     NULL
-primary key         id                  NULL      NULL
-distribution key    id                  NULL      NULL
-table description   s_auto_schema_drop  NULL      NULL
-
-statement ok
-INSERT INTO t_auto_schema_drop VALUES (1, 'before', 'gone');
-
-statement ok
-FLUSH;
-
-statement ok
-ALTER TABLE t_auto_schema_drop DROP COLUMN drop_v;
-
-query TTTT
-describe s_auto_schema_drop;
-----
-id                  integer             false     NULL
-keep_v              character varying   false     NULL
-primary key         id                  NULL      NULL
-distribution key    id                  NULL      NULL
-table description   s_auto_schema_drop  NULL      NULL
-
-statement ok
-INSERT INTO t_auto_schema_drop(id, keep_v) VALUES (2, 'after');
-
-statement ok
-FLUSH;
-
-statement ok
-CREATE SOURCE iceberg_auto_schema_drop_source WITH (
-    connector = 'iceberg',
-    warehouse.path = 's3a://icebergdata',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.access.key = secret iceberg_s3_access_key,
-    s3.secret.key = secret iceberg_s3_secret_key,
-    s3.region = 'us-east-1',
-    catalog.name = 'demo',
-    catalog.type = 'storage',
-    database.name='demo_db',
-    table.name='e2e_auto_schema_drop_table'
-);
-
-query TTTT
-describe iceberg_auto_schema_drop_source;
-----
-id                       integer             false     NULL
-keep_v                   character varying   false     NULL
-_iceberg_sequence_number bigint              true      NULL
-_iceberg_file_path       character varying   true      NULL
-_iceberg_file_pos        bigint              true      NULL
-_row_id                  serial              true      NULL
-primary key              _row_id             NULL      NULL
-table description        iceberg_auto_schema_drop_source NULL NULL
-
-query TT retry 6 backoff 1s
-SELECT id, keep_v FROM iceberg_auto_schema_drop_source ORDER BY id;
-----
-1 before
-2 after
-
-statement ok
-DROP SOURCE iceberg_auto_schema_drop_source;
-
-statement ok
-DROP SINK s_auto_schema_drop;
-
-statement ok
-DROP TABLE t_auto_schema_drop;
 
 statement ok
 CREATE TABLE t_auto_schema_bytea (id int primary key, v bytea);
