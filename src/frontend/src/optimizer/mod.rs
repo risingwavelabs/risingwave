@@ -1163,27 +1163,28 @@ impl LogicalPlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        without_backfill: bool,
+        without_snapshot: bool,
+        since_timestamp: bool,
+        is_iceberg_engine_internal: bool,
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
-        allow_snapshot_backfill: bool,
-        force_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let backfill_type = if force_snapshot_backfill {
+        let allow_snapshot_backfill = target_table.is_none() && !is_iceberg_engine_internal;
+        let backfill_type = if since_timestamp {
             assert!(
                 target_table.is_none(),
-                "should not allow snapshot backfill for sink-into-table"
+                "should not allow since_timestamp for sink-into-table"
             );
             if !allow_snapshot_backfill {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "snapshot backfill is not allowed for this sink".to_owned(),
+                    "since_timestamp is not allowed for this sink".to_owned(),
                 )
                 .into());
             }
-            BackfillType::SnapshotBackfill
-        } else if without_backfill {
+            BackfillType::SnapshotBackfillSinceTimestamp
+        } else if without_snapshot {
             BackfillType::UpstreamOnlySink
         } else if allow_snapshot_backfill
             && self.should_use_snapshot_backfill()

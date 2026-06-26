@@ -883,12 +883,12 @@ impl TestCase {
                     "test_table".into(),
                     format_desc,
                     false,
+                    false,
+                    false,
                     None,
                     None,
                     false,
                     None,
-                    true,
-                    false,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

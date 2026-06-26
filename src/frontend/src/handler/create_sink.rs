@@ -428,12 +428,12 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = matches!(
+    let without_snapshot = matches!(
         resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
         Some(flag) if flag.eq_ignore_ascii_case("false")
     );
 
-    if since_timestamp_epoch.is_some() && !without_backfill {
+    if since_timestamp_epoch.is_some() && !without_snapshot {
         return Err(ErrorCode::BindError(format!(
             "`{SINK_SINCE_TIMESTAMP_OPTION}` requires `snapshot = false`"
         ))
@@ -475,8 +475,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -485,13 +483,13 @@ pub async fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
-        without_backfill,
+        without_snapshot,
+        since_timestamp_epoch.is_some(),
+        is_iceberg_engine_internal,
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
-        allow_snapshot_backfill,
-        since_timestamp_epoch.is_some(),
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();

@@ -623,7 +623,9 @@ impl ToStream for LogicalScan {
             if self.core.cross_database()
                 && matches!(
                     ctx.backfill_type(),
-                    BackfillType::Replicated | BackfillType::UpstreamOnlySink
+                    BackfillType::Replicated
+                        | BackfillType::UpstreamOnlySink
+                        | BackfillType::SnapshotBackfillSinceTimestamp
                 )
             {
                 return Err(ErrorCode::NotSupported(
@@ -639,7 +641,7 @@ impl ToStream for LogicalScan {
                     .into(),
             )
         } else {
-            if ctx.backfill_type() == BackfillType::SnapshotBackfill {
+            if ctx.backfill_type().is_snapshot_backfill() {
                 let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
                     self.table(),
                     self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
@@ -682,7 +684,7 @@ impl ToStream for LogicalScan {
         // 2. IN expansion (splits IN predicates into LogicalUnion of LogicalScans)
         // This must happen here (not in to_stream) so that upper operators see the
         // correct stream key from the rewritten plan.
-        if ctx.backfill_type() == BackfillType::SnapshotBackfill
+        if ctx.backfill_type().is_snapshot_backfill()
             && !self.predicate().always_true()
             && self
                 .base
@@ -721,9 +723,7 @@ impl ToStream for LogicalScan {
             )
         };
 
-        if matches!(ctx.backfill_type(), BackfillType::SnapshotBackfill)
-            || self.core.cross_database()
-        {
+        if ctx.backfill_type().is_snapshot_backfill() || self.core.cross_database() {
             // Snapshot and cross-database backfill must use the upstream table primary key while
             // planning operators above the scan, before `StreamTableScan` is built. Other scan
             // types keep the logical stream key here so they preserve the original

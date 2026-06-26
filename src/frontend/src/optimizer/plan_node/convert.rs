@@ -159,9 +159,27 @@ pub enum BackfillType {
     Backfill,
     ArrangementBackfill,
     SnapshotBackfill,
+    /// Frontend-only variant for sinks created with `since_timestamp`.
+    /// It is serialized as `StreamScanType::SnapshotBackfill`, but derives
+    /// the same upsert stream kind as upstream-only sinks.
+    SnapshotBackfillSinceTimestamp,
 }
 
 impl BackfillType {
+    pub fn derives_upsert_stream_kind(self) -> bool {
+        matches!(
+            self,
+            BackfillType::UpstreamOnlySink | BackfillType::SnapshotBackfillSinceTimestamp
+        )
+    }
+
+    pub fn is_snapshot_backfill(self) -> bool {
+        matches!(
+            self,
+            BackfillType::SnapshotBackfill | BackfillType::SnapshotBackfillSinceTimestamp
+        )
+    }
+
     pub fn to_stream_scan_type(self, is_cross_db: bool) -> StreamScanType {
         if is_cross_db {
             return StreamScanType::CrossDbSnapshotBackfill;
@@ -173,7 +191,9 @@ impl BackfillType {
             }
             BackfillType::Backfill => StreamScanType::Backfill,
             BackfillType::ArrangementBackfill => StreamScanType::ArrangementBackfill,
-            BackfillType::SnapshotBackfill => StreamScanType::SnapshotBackfill,
+            BackfillType::SnapshotBackfill | BackfillType::SnapshotBackfillSinceTimestamp => {
+                StreamScanType::SnapshotBackfill
+            }
         }
     }
 }
