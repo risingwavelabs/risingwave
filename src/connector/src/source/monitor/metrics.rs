@@ -14,14 +14,17 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{IntCounterVec, Registry, exponential_buckets, histogram_opts};
+use prometheus::{
+    IntCounterVec, Registry, exponential_buckets, histogram_opts,
+    register_int_counter_vec_with_registry,
+};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry, register_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 
 use crate::source::kafka::stats::RdKafkaStats;

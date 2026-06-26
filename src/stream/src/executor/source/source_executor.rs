@@ -135,6 +135,8 @@ impl<S: StateStore> SourceExecutor<S> {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
             table_id: core.split_state_store.state_table().table_id(),
+            source_id: core.source_id,
+            source_name: core.source_name.clone(),
             metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
@@ -1257,6 +1259,8 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    source_id: SourceId,
+    source_name: String,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -1289,7 +1293,10 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
                             // Run task with callback to record LSN after successful commit
-                            task.run_with_on_commit_success(|source_id: u64, offset| {
+                            task.run_with_on_commit_success(
+                                self.source_id,
+                                &self.source_name,
+                                |source_id: u64, offset| {
                                 if let Some(lsn_value) =
                                     extract_postgres_lsn_from_offset_str(offset)
                                 {
@@ -1306,7 +1313,8 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                                         .with_guarded_label_values(&[&source_id.to_string()])
                                         .set(lsn_u128_to_i64(lsn_value));
                                 }
-                            })
+                            },
+                            )
                             .await;
                         }
                         Err(e) => {
