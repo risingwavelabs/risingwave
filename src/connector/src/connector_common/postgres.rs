@@ -366,7 +366,12 @@ impl PostgresExternalTable {
                 privilege_status.user_name,
                 required_privilege,
                 column_privilege_msg,
-                format_grant_table_privilege(schema, table, &privilege_status.user_name, required_privilege),
+                format_required_table_grants(
+                    schema,
+                    table,
+                    &privilege_status.user_name,
+                    required_privilege
+                ),
             )
             .into());
         }
@@ -571,6 +576,19 @@ fn format_grant_table_privilege(
         privilege,
         format_pg_table_name(schema, table),
         quote_pg_identifier(user_name)
+    )
+}
+
+fn format_required_table_grants(
+    schema: &str,
+    table: &str,
+    user_name: &str,
+    privilege: &str,
+) -> String {
+    format!(
+        "{} {}",
+        format_grant_usage(schema, user_name),
+        format_grant_table_privilege(schema, table, user_name, privilege)
     )
 }
 
@@ -896,7 +914,7 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
 mod tests {
     use super::{
         format_grant_table_privilege, format_grant_usage, format_pg_table_name,
-        parse_pgvector_dimension,
+        format_required_table_grants, parse_pgvector_dimension,
     };
 
     #[test]
@@ -925,6 +943,10 @@ mod tests {
         assert_eq!(
             format_grant_table_privilege("tenant schema", "Orders", r#"cdc"user"#, "SELECT"),
             r#"GRANT SELECT ON TABLE "tenant schema"."Orders" TO "cdc""user";"#
+        );
+        assert_eq!(
+            format_required_table_grants("tenant schema", "Orders", r#"cdc"user"#, "SELECT"),
+            r#"GRANT USAGE ON SCHEMA "tenant schema" TO "cdc""user"; GRANT SELECT ON TABLE "tenant schema"."Orders" TO "cdc""user";"#
         );
     }
 }
