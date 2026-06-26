@@ -246,7 +246,7 @@ impl Sink for IcebergSink {
             && max_snapshots < 1
         {
             bail!(
-                "`compaction.max-snapshots-num` must be greater than 0, got: {}",
+                "`compaction.max_snapshots_num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }
