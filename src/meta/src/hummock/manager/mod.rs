@@ -20,6 +20,7 @@ use std::sync::atomic::AtomicBool;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::FutureExt;
+use itertools::Itertools;
 use parking_lot::lock_api::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;

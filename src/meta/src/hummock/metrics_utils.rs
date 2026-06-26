@@ -564,9 +564,8 @@ pub fn trigger_gc_stat(
         stale_object_size,
         stale_object_count,
     } = stale_object_stats;
-    let current_version_object_size_map = object_size_map(checkpoint_version);
     let mut current_version_object_size_map: HashMap<_, _> =
-        version_object_size_map(&checkpoint.version);
+        version_object_size_map(checkpoint_version);
     // Note: Because table change logs do not support MVCC, their objects are tracked
     // exclusively in current_version_object, rather than in old_version_object or stale_object.
     current_version_object_size_map.extend(current_table_change_log.values().flat_map(

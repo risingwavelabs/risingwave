@@ -75,7 +75,8 @@ impl HummockVersionCheckpoint {
     /// moving data instead of cloning for better performance on large checkpoints.
     pub fn from_protobuf_owned(checkpoint: PbHummockVersionCheckpoint) -> Self {
         Self {
-            version: HummockVersion::from_persisted_protobuf_owned(checkpoint.version.unwrap()),
+            version: HummockVersion::from_persisted_protobuf_owned(checkpoint.version.unwrap())
+                .into(),
             stale_objects: checkpoint.stale_objects,
         }
     }
@@ -397,6 +398,7 @@ impl HummockManager {
             old_checkpoint_version,
             mut stale_objects,
             version_deltas,
+            current_table_change_log,
             new_checkpoint_id,
             old_checkpoint_id,
         ) = {
@@ -437,6 +439,7 @@ impl HummockManager {
                 old_checkpoint_version,
                 old_checkpoint.stale_objects.clone(),
                 version_deltas,
+                versioning.table_change_log.clone(),
                 new_checkpoint_id,
                 old_checkpoint_id,
             )
@@ -475,8 +478,7 @@ impl HummockManager {
         let current_version_object_ids = current_version
             .get_object_ids()
             .chain(
-                versioning
-                    .table_change_log
+                current_table_change_log
                     .values()
                     .flat_map(|l| l.get_object_ids()),
             )
@@ -567,7 +569,7 @@ impl HummockManager {
         trigger_gc_stat(
             &self.metrics,
             current_version.as_ref(),
-            &versioning.table_change_log,
+            &current_table_change_log,
             stale_object_stats,
         );
         trigger_split_stat(&self.metrics, current_version_for_metrics.as_ref());

@@ -302,7 +302,6 @@ impl HummockManager {
 
     pub async fn may_fill_backward_table_change_logs(&self) -> Result<()> {
         let mut versioning = self.versioning.write().await;
-        let version = &mut versioning.current_version;
 
         let is_nonempty_meta_store =
             risingwave_meta_model::hummock_table_change_log::Entity::find()
@@ -316,15 +315,18 @@ impl HummockManager {
                 .await?
                 .is_some();
         #[expect(deprecated)]
-        if version.table_change_log.is_empty() || is_nonempty_meta_store {
-            if version.table_change_log.is_empty() {
-                tracing::info!("No legacy table change log to migrate.");
-            }
-            if is_nonempty_meta_store {
-                tracing::info!("meta store table change log is non-empty.");
-            }
+        if versioning.current_version.table_change_log.is_empty() {
+            tracing::info!("No legacy table change log to migrate.");
+            return Ok(());
+        }
+        let version = Arc::make_mut(&mut versioning.current_version);
+        if is_nonempty_meta_store {
+            tracing::info!("meta store table change log is non-empty.");
             // Clear legacy in-mem state.
-            version.table_change_log = HashMap::default();
+            #[expect(deprecated)]
+            {
+                version.table_change_log = HashMap::default();
+            }
             // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
             return Ok(());
         }
