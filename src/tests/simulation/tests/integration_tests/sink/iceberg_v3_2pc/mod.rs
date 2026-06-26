@@ -333,9 +333,12 @@ mod failpoint_limited {
         tokio::time::sleep(Duration::from_secs(10)).await;
         handle.mock.set_err_rate_txn_commit(0.0);
 
-        // Sink resumes committing once the fault clears.
+        // Sink resumes committing once the fault clears. The commit retry helper uses
+        // exponential backoff capped at 60s, and the probabilistic fault window above
+        // may already have pushed the next retry to that cap. Wait beyond the max
+        // backoff so this assertion checks recovery instead of retry sleep timing.
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(90),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await
