@@ -506,8 +506,14 @@ impl ExternalTableImpl {
             CdcSourceType::Postgres => {
                 let pg_conn = config.pg_connection_config()?;
                 Ok(ExternalTableImpl::Postgres(
-                    PostgresExternalTable::connect(&pg_conn, &config.schema, &config.table, false)
-                        .await?,
+                    PostgresExternalTable::connect(
+                        &pg_conn,
+                        &config.schema,
+                        &config.table,
+                        false,
+                        Some("SELECT"),
+                    )
+                    .await?,
                 ))
             }
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
