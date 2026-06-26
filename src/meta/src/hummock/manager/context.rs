@@ -397,7 +397,10 @@ impl HummockManager {
         context_id: HummockContextId,
         unpin_before: HummockVersionId,
     ) -> Result<()> {
-        let mut context_info = self.context_info.write().await;
+        let mut context_info = self
+            .context_info
+            .write_with_process_name("unpin_version_before")
+            .await;
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
