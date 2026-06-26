@@ -2,6 +2,8 @@ system ok
 sparksql --e "
 DROP TABLE IF EXISTS demo.demo_db.e2e_demo_table PURGE;
 DROP TABLE IF EXISTS demo.demo_db.e2e_auto_create_table PURGE;
+DROP TABLE IF EXISTS demo.demo_db.e2e_auto_schema_bytea_table PURGE;
+DROP TABLE IF EXISTS demo.demo_db.e2e_auto_schema_no_pk_table PURGE;
 CREATE TABLE demo.demo_db.e2e_demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');
 "
 
@@ -28,6 +30,138 @@ statement ok
 CREATE SECRET iceberg_s3_secret_key WITH (
   backend = 'meta'
 ) as 'hummockadmin';
+
+statement ok
+CREATE TABLE t_auto_schema_bytea (id int primary key, v bytea);
+
+statement ok
+CREATE SINK s_auto_schema_bytea FROM t_auto_schema_bytea WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_schema_bytea_table',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true',
+    auto.schema.change = 'true',
+);
+
+statement ok
+INSERT INTO t_auto_schema_bytea VALUES (1, '\x6b31');
+
+statement ok
+FLUSH;
+
+statement ok
+ALTER TABLE t_auto_schema_bytea ADD COLUMN email varchar;
+
+statement ok
+INSERT INTO t_auto_schema_bytea(id, v, email) VALUES (2, '\x6b32', 'bytea@example.com');
+
+statement ok
+FLUSH;
+
+statement ok retry 6 backoff 1s
+CREATE SOURCE iceberg_auto_schema_bytea_source WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_schema_bytea_table'
+);
+
+query TT retry 6 backoff 1s
+SELECT id, email FROM iceberg_auto_schema_bytea_source ORDER BY id;
+----
+1 NULL
+2 bytea@example.com
+
+statement ok
+DROP SOURCE iceberg_auto_schema_bytea_source;
+
+statement ok
+DROP SINK s_auto_schema_bytea;
+
+statement ok
+DROP TABLE t_auto_schema_bytea;
+
+statement ok
+CREATE TABLE t_auto_schema_no_pk (id int, name varchar);
+
+statement ok
+CREATE SINK s_auto_schema_no_pk FROM t_auto_schema_no_pk WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_schema_no_pk_table',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true',
+    auto.schema.change = 'true',
+);
+
+statement ok
+INSERT INTO t_auto_schema_no_pk VALUES (1, 'alice');
+
+statement ok
+FLUSH;
+
+statement ok
+ALTER TABLE t_auto_schema_no_pk ADD COLUMN email varchar;
+
+statement ok
+INSERT INTO t_auto_schema_no_pk(id, name, email) VALUES (2, 'bob', 'bob@example.com');
+
+statement ok
+FLUSH;
+
+statement ok retry 6 backoff 1s
+CREATE SOURCE iceberg_auto_schema_no_pk_source WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_auto_schema_no_pk_table'
+);
+
+query TTT retry 6 backoff 1s
+SELECT id, name, email FROM iceberg_auto_schema_no_pk_source ORDER BY id;
+----
+1 alice NULL
+2 bob bob@example.com
+
+statement ok
+DROP SOURCE iceberg_auto_schema_no_pk_source;
+
+statement ok
+DROP SINK s_auto_schema_no_pk;
+
+statement ok
+DROP TABLE t_auto_schema_no_pk;
 
 statement ok
 CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
