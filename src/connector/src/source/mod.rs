@@ -144,8 +144,7 @@ impl WaitCheckpointTask {
         source_id: SourceId,
         source_name: &str,
         mut on_commit_success: F,
-    )
-    where
+    ) where
         F: FnMut(u64, &str),
     {
         use std::str::FromStr;
@@ -366,7 +365,13 @@ impl WaitCheckpointTask {
                     }
                     JetStreamAckPolicy::All => {
                         if let Some(reply_subject) = reply_subjects.last() {
-                            ack(context, reply_subject.clone(), &source_id_label, source_name).await;
+                            ack(
+                                context,
+                                reply_subject.clone(),
+                                &source_id_label,
+                                source_name,
+                            )
+                            .await;
                         }
                     }
                 }

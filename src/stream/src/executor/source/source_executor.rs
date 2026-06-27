@@ -1297,23 +1297,23 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                                 self.source_id,
                                 &self.source_name,
                                 |source_id: u64, offset| {
-                                if let Some(lsn_value) =
-                                    extract_postgres_lsn_from_offset_str(offset)
-                                {
-                                    self.metrics
-                                        .pg_cdc_jni_commit_offset_lsn
-                                        .with_guarded_label_values(&[&source_id.to_string()])
-                                        .set(lsn_value as i64);
-                                }
-                                if let Some(lsn_value) =
-                                    extract_sql_server_commit_lsn_from_offset_str(offset)
-                                {
-                                    self.metrics
-                                        .sqlserver_cdc_jni_commit_offset_lsn
-                                        .with_guarded_label_values(&[&source_id.to_string()])
-                                        .set(lsn_u128_to_i64(lsn_value));
-                                }
-                            },
+                                    if let Some(lsn_value) =
+                                        extract_postgres_lsn_from_offset_str(offset)
+                                    {
+                                        self.metrics
+                                            .pg_cdc_jni_commit_offset_lsn
+                                            .with_guarded_label_values(&[&source_id.to_string()])
+                                            .set(lsn_value as i64);
+                                    }
+                                    if let Some(lsn_value) =
+                                        extract_sql_server_commit_lsn_from_offset_str(offset)
+                                    {
+                                        self.metrics
+                                            .sqlserver_cdc_jni_commit_offset_lsn
+                                            .with_guarded_label_values(&[&source_id.to_string()])
+                                            .set(lsn_u128_to_i64(lsn_value));
+                                    }
+                                },
                             )
                             .await;
                         }
