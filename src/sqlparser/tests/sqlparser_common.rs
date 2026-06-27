@@ -2297,6 +2297,27 @@ fn parse_literal_date() {
 }
 
 #[test]
+fn parse_literal_string_with_dollar_quoted_string() {
+    let stmts = parse_sql_statements("SELECT DATE $$1999-01-01$$").unwrap();
+
+    let projection = match &stmts[0] {
+        Statement::Query(query) => match &query.body {
+            SetExpr::Select(select) => &select.projection,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+
+    assert_eq!(
+        &Expr::TypedString {
+            data_type: DataType::Date,
+            value: "1999-01-01".into()
+        },
+        expr_from_projection(only(projection)),
+    );
+}
+
+#[test]
 fn parse_literal_time() {
     let sql = "SELECT TIME '01:23:34'";
     let select = verified_only_select(sql);
