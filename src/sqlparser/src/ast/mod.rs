@@ -161,9 +161,11 @@ impl Ident {
         })
     }
 
-    /// Value after considering quote style
-    /// In certain places, double quotes can force case-sensitive, but not always
-    /// e.g. session variables.
+    /// Returns the identifier value used for name lookup and comparison.
+    ///
+    /// Unquoted identifiers are folded to lowercase, while double-quoted identifiers preserve
+    /// their case and unescaped contents. For example, `Foo` becomes `foo`, while `"Foo"` remains
+    /// `Foo` and `"a""b"` becomes `a"b`.
     pub fn real_value(&self) -> String {
         match self.quote_style {
             Some('"') => self.value.clone(),
@@ -171,8 +173,11 @@ impl Ident {
         }
     }
 
-    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
-    /// [`QuoteIdent`] wrapper.
+    /// Creates an identifier from a name used internally by the database.
+    ///
+    /// The input is stored as its unescaped value. Double quotes are selected when needed to
+    /// preserve the name in SQL; escaping embedded quotes is left to the [`Display`] implementation.
+    /// This behaves like the SQL `quote_ident` function and the [`QuoteIdent`] wrapper.
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = QuoteIdent::needs_quotes(value);
 
