@@ -11666,6 +11666,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot 0.12.5",
+ "parquet-variant",
+ "parquet-variant-json",
  "parse-display",
  "paste",
  "pin-project-lite",

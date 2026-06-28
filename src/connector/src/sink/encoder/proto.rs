@@ -413,6 +413,10 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(), /* Value, NullValue, Struct (map), ListValue
                                          * Group C: experimental */
         },
+        DataType::Variant => match proto_field.kind() {
+            Kind::String => maybe.on_base(|s| Ok(Value::String(s.into_variant().to_string())))?,
+            _ => return no_match_err(),
+        },
         DataType::Int16 => match proto_field.kind() {
             Kind::Int64 => maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?,
             _ => return no_match_err(),

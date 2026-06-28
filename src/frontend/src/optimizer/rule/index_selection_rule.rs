@@ -791,6 +791,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Varchar => 20,
             DataType::Bytea => 20,
             DataType::Jsonb => 20,
+            DataType::Variant => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,

@@ -423,6 +423,13 @@ impl Binder {
                 ("jsonb_set", raw_call(ExprType::JsonbSet)),
                 ("jsonb_populate_map", raw_call(ExprType::JsonbPopulateMap)),
                 ("jsonb_to_array", raw_call(ExprType::JsonbToArray)),
+                // variant
+                ("parse_variant", raw_call(ExprType::ParseVariant)),
+                ("to_variant", raw_call(ExprType::ToVariant)),
+                ("variant_get", raw_call(ExprType::VariantGet)),
+                ("try_variant_get", raw_call(ExprType::TryVariantGet)),
+                ("variant_typeof", raw_call(ExprType::VariantTypeof)),
+                ("variant_to_jsonb", raw_call(ExprType::VariantToJsonb)),
                 // map
                 ("map_from_entries", raw_call(ExprType::MapFromEntries)),
                 ("map_access", raw_call(ExprType::MapAccess)),

@@ -111,6 +111,7 @@ pub fn postgres_cell_to_scalar_impl(
         | DataType::Timestamp
         | DataType::Timestamptz
         | DataType::Jsonb
+        | DataType::Variant
         | DataType::Interval
         | DataType::Bytea => {
             // ScalarAdapter is also fine. But ScalarImpl is more efficient
