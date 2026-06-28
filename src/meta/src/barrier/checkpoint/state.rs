@@ -841,26 +841,16 @@ impl DatabaseCheckpointControl {
                 let old_sink_job_id = info
                     .replace_sink
                     .as_ref()
-                    .map(|replace_sink| replace_sink.old_sink_id.as_job_id());
-                let dropped_actors = if let Some(old_sink_job_id) = old_sink_job_id {
-                    if matches!(
+                    .map(|old_sink_id| old_sink_id.as_job_id());
+                if old_sink_job_id.is_some()
+                    && matches!(
                         job_type,
                         CreateStreamingJobType::SnapshotBackfill(_)
                             | CreateStreamingJobType::BatchRefresh(_)
-                    ) {
-                        bail!("replace sink must not use snapshot backfill");
-                    }
-                    let Some(actor_ids) = self.database_info.actor_ids_for_job(old_sink_job_id)
-                    else {
-                        bail!(
-                            "old sink job {} not found in barrier state",
-                            old_sink_job_id
-                        );
-                    };
-                    actor_ids
-                } else {
-                    vec![]
-                };
+                    )
+                {
+                    bail!("replace sink must not use snapshot backfill");
+                }
 
                 // Pre-apply: add new job and fragments
                 let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
@@ -900,11 +890,21 @@ impl DatabaseCheckpointControl {
                 }
 
                 let (table_ids, node_actors) = self.collect_base_info();
-                if let Some(old_sink_job_id) = old_sink_job_id {
-                    self.database_info
-                        .post_apply_remove_job(old_sink_job_id)
-                        .expect("old sink job should exist");
-                }
+                let dropped_actors = if let Some(old_sink_job_id) = old_sink_job_id {
+                    let Some(job) = self.database_info.post_apply_remove_job(old_sink_job_id)
+                    else {
+                        bail!(
+                            "old sink job {} not found in barrier state",
+                            old_sink_job_id
+                        );
+                    };
+                    job.fragment_infos
+                        .values()
+                        .flat_map(|fragment| fragment.actors.keys().copied())
+                        .collect()
+                } else {
+                    vec![]
+                };
 
                 // Actors to create
                 let actors_to_create = Some(Command::create_streaming_job_actors_to_create(

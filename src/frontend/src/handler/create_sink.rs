@@ -382,19 +382,10 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
-        Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink_from_name.is_some() || is_iceberg_engine_internal {
-                true
-            } else {
-                return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
-                )
-                .into());
-            }
-        }
-        _ => false,
-    };
+    let without_backfill = matches!(
+        resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
+        Some(flag) if flag.eq_ignore_ascii_case("false")
+    );
 
     let target_table_catalog = stmt
         .into_table_name

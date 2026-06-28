@@ -440,11 +440,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     self.rate_limit_rps = entry.rate_limit;
                                                 }
                                             }
-                                            mutation
-                                                if mutation.all_stop_actors().is_some_and(
-                                                    |actors| actors.contains(&self.actor_ctx.id),
-                                                ) =>
-                                            {
+                                            mutation if mutation.is_stop(self.actor_ctx.id) => {
                                                 tracing::info!(
                                                     %table_id,
                                                     upstream_table_name,

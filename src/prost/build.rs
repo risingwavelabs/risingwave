@@ -919,6 +919,10 @@ for_all_wrapped_id_fields! (
             load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
         }
+        BarrierCompleteResponse.CdcSourceOffsetUpdated {
+            reporter_actor_id: ActorId,
+            source_id: SourceId,
+        }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
             actor_id: ActorId,
@@ -926,6 +930,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
+        }
+        BarrierCompleteResponse.IcebergV3SinkMetadata {
+            reporter_actor_id: ActorId,
+            sink_id: SinkId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,

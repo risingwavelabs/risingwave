@@ -39,7 +39,7 @@ use super::{
 };
 use crate::barrier::{
     BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceSinkCommandInfo, ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -139,7 +139,7 @@ pub struct CreateStreamingJobContext {
     pub streaming_job_model: streaming_job::Model,
 
     /// If set, this create command replaces an existing sink while creating the new sink job.
-    pub replace_sink: Option<ReplaceSinkCommandInfo>,
+    pub replace_sink: Option<SinkId>,
 
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,

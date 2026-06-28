@@ -636,6 +636,7 @@ impl ClusterControllerInner {
             .unwrap_or_default()
     }
 
+    #[await_tree::instrument]
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,

@@ -90,7 +90,7 @@ mod filter;
 mod gap_fill;
 pub mod hash_join;
 mod hop_window;
-mod iceberg_with_pk_index;
+pub(crate) mod iceberg_with_pk_index;
 mod join;
 pub mod locality_provider;
 mod lookup;
@@ -761,11 +761,17 @@ impl Mutation {
         }
     }
 
+    /// Return true if the mutation stops the given actor.
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
+        self.all_stop_actors()
+            .is_some_and(|actors| actors.contains(&actor_id))
+    }
+
     /// Return true if the mutation is stop.
     ///
     /// Note that this does not mean we will stop the current actor.
     #[cfg(test)]
-    pub fn is_stop(&self) -> bool {
+    pub fn is_stop_mutation(&self) -> bool {
         matches!(self, Mutation::Stop(_))
     }
 
@@ -1381,7 +1387,7 @@ impl Message {
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_ref().unwrap().is_stop()
+            }) if mutation.as_ref().unwrap().is_stop_mutation()
         )
     }
 }

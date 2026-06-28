@@ -614,6 +614,24 @@ impl IcebergConfig {
     }
 
     pub async fn load_table(&self) -> Result<Table> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            let catalog =
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "mock_v3 catalog_type set but no mock catalog registered"
+                    ))
+                })?;
+            let table_id = self
+                .table
+                .to_table_ident()
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Unable to parse table name")))?;
+            let table = catalog
+                .load_table(&table_id)
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Failed to load mock table")))?;
+            return Ok(table);
+        }
         self.common
             .load_table(&self.table, &self.java_catalog_props)
             .await
@@ -621,6 +639,14 @@ impl IcebergConfig {
     }
 
     pub async fn create_catalog(&self) -> Result<Arc<dyn Catalog>> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            return Ok(
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    anyhow::anyhow!("mock_v3 catalog_type set but no mock catalog registered")
+                })?,
+            );
+        }
         self.common
             .create_catalog(&self.java_catalog_props)
             .await

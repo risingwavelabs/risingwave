@@ -114,6 +114,8 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             writer,
             params.config.developer.chunk_size,
             pk_matched,
+            sink_id,
+            params.local_barrier_manager.clone(),
         );
         Ok((params.info, exec).into())
     }

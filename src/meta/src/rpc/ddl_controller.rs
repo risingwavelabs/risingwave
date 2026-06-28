@@ -70,12 +70,13 @@ use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::{BarrierManagerRef, Command, ReplaceSinkCommandInfo};
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -285,6 +286,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
+    iceberg_v3_sink_manager: IcebergV3SinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -390,6 +392,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -400,6 +403,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
+            iceberg_v3_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -1079,18 +1083,18 @@ impl DdlController {
             let StreamingJob::Sink(sink) = &mut streaming_job else {
                 bail!("replace sink requires a sink job")
             };
-            // Keep the replacement sink recoverable after the old sink is dropped in
-            // `post_collect_job_fragments`, even for non-frontend callers.
+            // Keep the replacement sink in background mode from the beginning: it skips the
+            // creating notification below because the temporary catalog name is not visible to
+            // frontend until cutover, so the foreground wait path has no creating notification to
+            // wait on. `post_collect_job_fragments` will still mark it as creating and atomically
+            // drop the old sink.
             sink.create_type = CreateType::Background as _;
             if sink.target_table.is_some() {
                 bail_not_implemented!("replace sink into table")
             }
             validate_sink(sink).await?;
 
-            Some(ReplaceSinkCommandInfo {
-                old_sink_id,
-                final_sink_name: sink.name.clone(),
-            })
+            Some(old_sink_id)
         } else {
             if let StreamingJob::Sink(sink) = &streaming_job
                 && let Some(target_table) = sink.target_table
@@ -1150,9 +1154,9 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
-        if let Some(replace_sink) = replace_sink_info.as_ref() {
+        if let Some(old_sink_id) = replace_sink_info.as_ref() {
             tracing::debug!(
-                old_sink_id = %replace_sink.old_sink_id,
+                old_sink_id = %old_sink_id,
                 new_sink_id = %job_id,
                 definition = streaming_job.definition(),
                 create_type = streaming_job.create_type().as_str_name(),
@@ -1186,6 +1190,10 @@ impl DdlController {
         };
         // Generate streaming job metadata and issue the create command in two steps, so that the
         // error phase is classified at the barrier command boundary.
+        // Replacement sinks are created with a temporary catalog name and are not visible to
+        // frontend until the cutover transaction renames them to the old sink name. Therefore the
+        // creating notification is skipped for replacement sinks.
+        let notify_creating = replace_sink_info.is_none();
         let create_result = match self
             .generate_streaming_job(
                 ctx,
@@ -1193,7 +1201,7 @@ impl DdlController {
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
-                replace_sink_info.is_none(),
+                notify_creating,
                 replace_sink_info.clone(),
             )
             .await
@@ -1249,7 +1257,7 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
         notify_creating: bool,
-        replace_sink: Option<ReplaceSinkCommandInfo>,
+        replace_sink: Option<SinkId>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1314,6 +1322,18 @@ impl DdlController {
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
+                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // so it's ready to receive epoch reports from the very first
+                // barrier instead of relying on lazy registration on every
+                // commit.
+                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                    let iceberg_config =
+                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
+                    self.iceberg_v3_sink_manager
+                        .register_v3_sink(sink.id, iceberg_config)
+                        .await
+                        .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
+                }
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1414,6 +1434,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_v3_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1497,6 +1518,14 @@ impl DdlController {
                 self.iceberg_compaction_manager
                     .clear_iceberg_maintenance_by_sink_id(sink_id);
             }
+        }
+
+        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // including user-created sinks with arbitrary names (not just the
+        // `__iceberg_sink_%` auto-created ones above).
+        if !removed_iceberg_v3_sink_ids.is_empty() {
+            self.iceberg_v3_sink_manager
+                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
         }
 
         // remove secrets.

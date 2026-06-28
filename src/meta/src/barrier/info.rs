@@ -503,15 +503,6 @@ impl InflightDatabaseInfo {
             .collect())
     }
 
-    pub(super) fn actor_ids_for_job(&self, job_id: JobId) -> Option<Vec<ActorId>> {
-        self.jobs.get(&job_id).map(|job| {
-            job.fragment_infos
-                .values()
-                .flat_map(|fragment| fragment.actors.keys().copied())
-                .collect()
-        })
-    }
-
     pub(super) fn is_backfill_fragment(&self, fragment_id: FragmentId) -> MetaResult<bool> {
         let job_id = self.fragment_location.get(&fragment_id).ok_or_else(|| {
             MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
@@ -712,8 +703,7 @@ impl InflightDatabaseInfo {
             .values()
             .flat_map(|resp| &resp.cdc_source_offset_updated)
         {
-            use risingwave_common::id::SourceId;
-            let source_id = SourceId::new(cdc_offset_updated.source_id);
+            let source_id = cdc_offset_updated.source_id;
             let job_id = source_id.as_share_source_job_id();
             if let Some(job) = self.jobs.get_mut(&job_id) {
                 if let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status {

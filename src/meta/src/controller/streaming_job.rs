@@ -79,7 +79,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::{Command, ReplaceSinkCommandInfo};
+use crate::barrier::Command;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
@@ -235,7 +235,7 @@ impl CatalogController {
         backfill_parallelism: &Option<Parallelism>,
         adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
-        replace_sink: Option<&ReplaceSinkCommandInfo>,
+        replace_sink: Option<&SinkId>,
         refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
@@ -259,32 +259,28 @@ impl CatalogController {
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
         ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
-        if let Some(replace_sink) = replace_sink {
+        if let Some(old_sink_id) = replace_sink {
             let StreamingJob::Sink(sink) = streaming_job else {
                 bail!("replacement sink catalog requires a sink job")
             };
-            let (old_sink, old_object) = Sink::find_by_id(replace_sink.old_sink_id)
+            let (old_sink, old_object) = Sink::find_by_id(*old_sink_id)
                 .find_also_related(Object)
                 .one(&txn)
                 .await?
                 .and_then(|(sink, object)| object.map(|object| (sink, object)))
-                .ok_or_else(|| MetaError::catalog_id_not_found("sink", replace_sink.old_sink_id))?;
-            let old_streaming_job =
-                StreamingJobModel::find_by_id(replace_sink.old_sink_id.as_job_id())
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| {
-                        MetaError::catalog_id_not_found("sink", replace_sink.old_sink_id)
-                    })?;
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", *old_sink_id))?;
+            let old_streaming_job = StreamingJobModel::find_by_id(old_sink_id.as_job_id())
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", *old_sink_id))?;
             if old_object.obj_type != ObjectType::Sink
                 || old_object.database_id != Some(sink.database_id)
                 || old_object.schema_id != Some(sink.schema_id)
-                || old_sink.name != replace_sink.final_sink_name
-                || sink.name != replace_sink.final_sink_name
+                || old_sink.name != sink.name
             {
                 bail!(
                     "old sink {} does not match replacement sink {}",
-                    replace_sink.old_sink_id,
+                    old_sink_id,
                     sink.name
                 );
             }
@@ -292,10 +288,7 @@ impl CatalogController {
                 bail!("replace sink into table is not supported");
             }
             if old_streaming_job.job_status != JobStatus::Created {
-                bail!(
-                    "sink {} is not ready to be replaced",
-                    replace_sink.old_sink_id
-                );
+                bail!("sink {} is not ready to be replaced", old_sink_id);
             }
         } else {
             check_relation_name_duplicate(
@@ -409,16 +402,16 @@ impl CatalogController {
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
-                if let Some(replace_sink) = replace_sink {
-                    sink.name = format!(
-                        "__rw_replacing_sink_{}_{}",
-                        replace_sink.old_sink_id.as_raw_id(),
-                        sink.id.as_raw_id()
-                    );
+                if let Some(old_sink_id) = replace_sink {
+                    let final_sink_name = sink.name.clone();
+                    // The replacement sink cannot reuse the old catalog name until the
+                    // cutover transaction deletes the old sink. Use a deterministic temporary
+                    // name and rename it back in `post_collect_job_fragments`.
+                    sink.name = format!("__rw_replacing_sink_{}_{}", old_sink_id, sink.id);
                     tracing::debug!(
-                        old_sink_id = %replace_sink.old_sink_id,
+                        old_sink_id = %old_sink_id,
                         new_sink_id = %sink.id,
-                        final_name = %replace_sink.final_sink_name,
+                        final_name = %final_sink_name,
                         temp_name = %sink.name,
                         "created replacement sink catalog with temporary name"
                     );
@@ -1079,7 +1072,7 @@ impl CatalogController {
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         new_sink_downstream: Option<FragmentDownstreamRelation>,
         split_assignment: Option<&SplitAssignment>,
-        replace_sink: Option<&ReplaceSinkCommandInfo>,
+        replace_sink: Option<&SinkId>,
     ) -> MetaResult<Option<Vec<TableId>>> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1114,18 +1107,26 @@ impl CatalogController {
             self.update_fragment_splits(&txn, &fragment_splits).await?;
         }
 
-        if let Some(replace_sink) = replace_sink {
-            let old_sink_id = replace_sink.old_sink_id;
+        if let Some(old_sink_id) = replace_sink {
+            let old_sink_id = *old_sink_id;
             let old_job_id = old_sink_id.as_job_id();
 
-            let old_sink_object = Object::find_by_id(old_job_id)
-                .into_partial_model::<PartialObject>()
+            let (old_sink, old_sink_object) = Sink::find_by_id(old_sink_id)
+                .find_also_related(Object)
                 .one(&txn)
                 .await?
+                .and_then(|(sink, object)| object.map(|object| (sink, object)))
                 .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
+            let old_sink_object = PartialObject {
+                oid: old_sink_object.oid,
+                obj_type: old_sink_object.obj_type,
+                schema_id: old_sink_object.schema_id,
+                database_id: old_sink_object.database_id,
+            };
             if old_sink_object.obj_type != ObjectType::Sink {
                 bail!("object {} is not a sink", old_sink_id);
             }
+            let final_sink_name = old_sink.name.clone();
 
             let old_internal_table_objs: Vec<PartialObject> = Object::find()
                 .select_only()
@@ -1162,7 +1163,7 @@ impl CatalogController {
 
             Sink::update(sink::ActiveModel {
                 sink_id: Set(job_id.as_sink_id()),
-                name: Set(replace_sink.final_sink_name.clone()),
+                name: Set(final_sink_name),
                 ..Default::default()
             })
             .exec(&txn)

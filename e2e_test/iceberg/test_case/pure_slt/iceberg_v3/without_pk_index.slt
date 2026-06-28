@@ -1,5 +1,3 @@
-control substitution on
-
 statement ok
 create secret hosted_catalog_secret with (
   backend = 'meta'

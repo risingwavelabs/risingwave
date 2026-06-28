@@ -55,6 +55,7 @@ use tracing::warn;
 
 use super::info::InflightDatabaseInfo;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
@@ -63,7 +64,7 @@ use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::LoadedFragmentContext;
 use crate::controller::utils::StreamingJobExtraInfo;
-use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -317,12 +318,6 @@ pub struct ReplaceStreamJobPlan {
     pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ReplaceSinkCommandInfo {
-    pub old_sink_id: SinkId,
-    pub final_sink_name: String,
-}
-
 impl ReplaceStreamJobPlan {
     /// `old_fragment_id` -> `new_fragment_id`
     pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
@@ -366,7 +361,7 @@ pub struct CreateStreamingJobCommandInfo {
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
     /// If set, this create command replaces an existing sink while creating the new sink job.
-    pub replace_sink: Option<ReplaceSinkCommandInfo>,
+    pub replace_sink: Option<SinkId>,
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
 }
@@ -834,7 +829,7 @@ impl Command {
     pub(super) fn collect_commit_epoch_info(
         database_info: &InflightDatabaseInfo,
         barrier_info: &PartialGraphBarrierInfo,
-        info: &mut CommitEpochInfo,
+        task: &mut CompleteBarrierTask,
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<JobId, (u64, HashSet<TableId>)>,
     ) {
@@ -845,6 +840,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             truncate_tables,
+            iceberg_v3_sink_metadata,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos = match &barrier_info.post_collect_command {
@@ -901,6 +897,7 @@ impl Command {
         );
 
         let epoch = barrier_info.barrier_info.prev_epoch();
+        let info = &mut task.commit_info;
         for table_id in &barrier_info.table_ids_to_commit {
             info.tables_to_commit
                 .try_insert(*table_id, epoch)
@@ -932,6 +929,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
+        task.iceberg_v3_sink_metadata
+            .extend(iceberg_v3_sink_metadata);
     }
 }
 
@@ -1131,8 +1130,7 @@ impl Command {
                     dropped_actors,
                     sink_log_store_flush: info
                         .replace_sink
-                        .as_ref()
-                        .map(|replace_sink| vec![replace_sink.old_sink_id])
+                        .map(|old_sink_id| vec![old_sink_id])
                         .unwrap_or_default(),
                 };
 
