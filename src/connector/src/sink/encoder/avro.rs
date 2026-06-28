@@ -601,6 +601,12 @@ fn on_field<D: MaybeData>(
             }
             _ => return no_match_err(),
         },
+        DataType::Variant => match inner {
+            AvroSchema::String => {
+                maybe.on_base(|s| Ok(Value::String(s.into_variant().to_string())))?
+            }
+            _ => return no_match_err(),
+        },
         DataType::Vector(_) => match inner {
             AvroSchema::Array(avro_arr) => {
                 maybe.on_list(&VECTOR_AS_LIST_TYPE, &avro_arr.items, refs)?

@@ -41,6 +41,7 @@
 #![allow(dead_code)]
 
 use std::fmt::Write;
+use std::sync::Arc;
 
 use arrow_array::array;
 use arrow_array::cast::AsArray;
@@ -56,6 +57,22 @@ use super::{ArrowIntervalType, arrow_array, arrow_buffer, arrow_cast, arrow_sche
 use crate::array::*;
 use crate::types::{DataType as RwDataType, Scalar, *};
 use crate::util::iter_util::ZipEqFast;
+
+fn variant_arrow_fields() -> arrow_schema::Fields {
+    [
+        Arc::new(arrow_schema::Field::new(
+            "metadata",
+            arrow_schema::DataType::Binary,
+            false,
+        )),
+        Arc::new(arrow_schema::Field::new(
+            "value",
+            arrow_schema::DataType::Binary,
+            false,
+        )),
+    ]
+    .into()
+}
 
 /// Defines how to convert RisingWave arrays to Arrow arrays.
 ///
@@ -114,6 +131,7 @@ pub trait ToArrow {
             ArrayImpl::Bytea(array) => self.bytea_to_arrow(array),
             ArrayImpl::Decimal(array) => self.decimal_to_arrow(data_type, array),
             ArrayImpl::Jsonb(array) => self.jsonb_to_arrow(array),
+            ArrayImpl::Variant(array) => self.variant_to_arrow(array),
             ArrayImpl::Serial(array) => self.serial_to_arrow(array),
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
@@ -226,6 +244,27 @@ pub trait ToArrow {
     #[inline]
     fn jsonb_to_arrow(&self, array: &JsonbArray) -> Result<arrow_array::ArrayRef, ArrayError> {
         Ok(Arc::new(arrow_array::StringArray::from(array)))
+    }
+
+    // Variant values follow the Parquet Variant Arrow extension layout:
+    // struct<metadata: binary, value: binary> with extension name `arrow.parquet.variant`.
+    #[inline]
+    fn variant_to_arrow(&self, array: &VariantArray) -> Result<arrow_array::ArrayRef, ArrayError> {
+        let metadata =
+            arrow_array::BinaryArray::from_iter((0..array.len()).map(|idx| array.metadata_at(idx)));
+        let value = arrow_array::BinaryArray::from_iter(
+            (0..array.len()).map(|idx| array.value_at_raw(idx)),
+        );
+        let nulls = (!array.null_bitmap().all()).then(|| array.null_bitmap().into());
+        Ok(Arc::new(
+            arrow_array::StructArray::try_new_with_length(
+                variant_arrow_fields(),
+                vec![Arc::new(metadata), Arc::new(value)],
+                nulls,
+                array.len(),
+            )
+            .map_err(ArrayError::from_arrow)?,
+        ))
     }
 
     #[inline]
@@ -358,6 +397,7 @@ pub trait ToArrow {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
+            DataType::Variant => return Ok(self.variant_type_to_arrow(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
@@ -438,6 +478,22 @@ pub trait ToArrow {
     fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
         arrow_schema::Field::new(name, arrow_schema::DataType::Utf8, true)
             .with_metadata([("ARROW:extension:name".into(), "arrowudf.json".into())].into())
+    }
+
+    #[inline]
+    fn variant_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        arrow_schema::Field::new(
+            name,
+            arrow_schema::DataType::Struct(variant_arrow_fields()),
+            true,
+        )
+        .with_metadata(
+            [(
+                "ARROW:extension:name".into(),
+                "arrow.parquet.variant".into(),
+            )]
+            .into(),
+        )
     }
 
     #[inline]
@@ -614,6 +670,7 @@ pub trait FromArrow {
         match (type_name, physical_type) {
             ("arrowudf.decimal", arrow_schema::DataType::Utf8) => Ok(DataType::Decimal),
             ("arrowudf.json", arrow_schema::DataType::Utf8) => Ok(DataType::Jsonb),
+            ("arrow.parquet.variant", arrow_schema::DataType::Struct(_)) => Ok(DataType::Variant),
             _ => Err(ArrayError::from_arrow(format!(
                 "unsupported extension type: {type_name:?}"
             ))),
@@ -740,6 +797,15 @@ pub trait FromArrow {
                         )
                     })?;
                 Ok(ArrayImpl::Jsonb(array.try_into()?))
+            }
+            "arrow.parquet.variant" => {
+                let array: &arrow_array::StructArray =
+                    array.as_any().downcast_ref().ok_or_else(|| {
+                        ArrayError::from_arrow(
+                            "expected struct array for `arrow.parquet.variant`".to_owned(),
+                        )
+                    })?;
+                Ok(ArrayImpl::Variant(array.try_into()?))
             }
             _ => Err(ArrayError::from_arrow(format!(
                 "unsupported extension type: {type_name:?}"
@@ -1525,6 +1591,80 @@ impl TryFrom<&arrow_array::StringArray> for JsonbArray {
     }
 }
 
+impl From<&VariantArray> for arrow_array::StringArray {
+    fn from(array: &VariantArray) -> Self {
+        let mut builder =
+            arrow_array::builder::StringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(variant) => {
+                    builder.append_value(variant.to_string());
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
+    }
+}
+
+impl TryFrom<&arrow_array::StringArray> for VariantArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::StringArray) -> Result<Self, Self::Error> {
+        array
+            .iter()
+            .map(|o| {
+                o.map(|s| {
+                    s.parse()
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid variant: {s}")))
+                })
+                .transpose()
+            })
+            .try_collect()
+    }
+}
+
+impl TryFrom<&arrow_array::StructArray> for VariantArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::StructArray) -> Result<Self, Self::Error> {
+        use arrow_array::Array;
+
+        let arrow_schema::DataType::Struct(fields) = array.data_type() else {
+            return Err(ArrayError::from_arrow(
+                "expected struct array for variant".to_owned(),
+            ));
+        };
+        let metadata_idx = fields
+            .iter()
+            .position(|field| field.name() == "metadata")
+            .ok_or_else(|| ArrayError::from_arrow("variant metadata field is missing"))?;
+        let value_idx = fields
+            .iter()
+            .position(|field| field.name() == "value")
+            .ok_or_else(|| ArrayError::from_arrow("variant value field is missing"))?;
+        let metadata: &arrow_array::BinaryArray = array
+            .column(metadata_idx)
+            .as_any()
+            .downcast_ref()
+            .ok_or_else(|| ArrayError::from_arrow("variant metadata field must be binary"))?;
+        let value: &arrow_array::BinaryArray = array
+            .column(value_idx)
+            .as_any()
+            .downcast_ref()
+            .ok_or_else(|| ArrayError::from_arrow("variant value field must be binary"))?;
+
+        VariantArray::from_metadata_values((0..array.len()).map(|idx| {
+            if array.is_null(idx) {
+                None
+            } else {
+                Some((metadata.value(idx), value.value(idx)))
+            }
+        }))
+        .map_err(|e| ArrayError::from_arrow(format!("invalid variant arrow array: {e}")))
+    }
+}
+
 impl From<&IntervalArray> for arrow_array::StringArray {
     fn from(array: &IntervalArray) -> Self {
         let mut builder =
@@ -1569,6 +1709,39 @@ impl TryFrom<&arrow_array::LargeStringArray> for JsonbArray {
                 o.map(|s| {
                     s.parse()
                         .map_err(|_| ArrayError::from_arrow(format!("invalid json: {s}")))
+                })
+                .transpose()
+            })
+            .try_collect()
+    }
+}
+
+impl From<&VariantArray> for arrow_array::LargeStringArray {
+    fn from(array: &VariantArray) -> Self {
+        let mut builder =
+            arrow_array::builder::LargeStringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(variant) => {
+                    builder.append_value(variant.to_string());
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
+    }
+}
+
+impl TryFrom<&arrow_array::LargeStringArray> for VariantArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::LargeStringArray) -> Result<Self, Self::Error> {
+        array
+            .iter()
+            .map(|o| {
+                o.map(|s| {
+                    s.parse()
+                        .map_err(|_| ArrayError::from_arrow(format!("invalid variant: {s}")))
                 })
                 .transpose()
             })

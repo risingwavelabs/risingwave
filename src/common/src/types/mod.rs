@@ -74,6 +74,7 @@ mod timestamptz;
 mod to_binary;
 mod to_sql;
 mod to_text;
+mod variant;
 mod with_data_type;
 
 pub use fields::Fields;
@@ -99,6 +100,7 @@ pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_text::ToText;
+pub use self::variant::{VariantRef, VariantVal};
 pub use self::with_data_type::WithDataType;
 
 /// A 32-bit floating point type with total order.
@@ -203,6 +205,9 @@ pub enum DataType {
     #[display("jsonb")]
     #[from_str(regex = "(?i)^jsonb$")]
     Jsonb,
+    #[display("variant")]
+    #[from_str(regex = "(?i)^variant$")]
+    Variant,
     #[display("serial")]
     #[from_str(regex = "(?i)^serial$")]
     Serial,
@@ -243,6 +248,7 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
+            DataTypeName::Variant => Ok(DataType::Variant),
             DataTypeName::Struct
             | DataTypeName::List
             | DataTypeName::Map
@@ -273,6 +279,7 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Interval => DataType::Interval,
             PbTypeName::Bytea => DataType::Bytea,
             PbTypeName::Jsonb => DataType::Jsonb,
+            PbTypeName::Variant => DataType::Variant,
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
@@ -338,6 +345,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::Decimal => PbTypeName::Decimal,
             DataTypeName::Bytea => PbTypeName::Bytea,
             DataTypeName::Jsonb => PbTypeName::Jsonb,
+            DataTypeName::Variant => PbTypeName::Variant,
             DataTypeName::Struct => PbTypeName::Struct,
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
@@ -397,6 +405,7 @@ pub mod data_types {
                 | DataType::Interval
                 | DataType::Bytea
                 | DataType::Jsonb
+                | DataType::Variant
                 | DataType::Serial
                 | DataType::Int256
                 | DataType::Vector(_)
@@ -486,6 +495,7 @@ impl DataType {
             | DataType::Interval
             | DataType::Bytea
             | DataType::Jsonb
+            | DataType::Variant
             | DataType::Serial
             | DataType::Int256 => (),
         }
@@ -866,7 +876,7 @@ macro_rules! impl_self_as_scalar_ref {
         )*
     };
 }
-impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_>, MapRef<'_> }
+impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, VariantRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_>, MapRef<'_> }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
 ///
@@ -1025,6 +1035,12 @@ impl From<JsonbRef<'_>> for ScalarImpl {
     }
 }
 
+impl From<VariantRef<'_>> for ScalarImpl {
+    fn from(variant: VariantRef<'_>) -> Self {
+        Self::Variant(variant.to_owned_scalar())
+    }
+}
+
 impl<T: PrimitiveArrayItemType> From<Vec<T>> for ScalarImpl {
     fn from(v: Vec<T>) -> Self {
         Self::List(v.into_iter().collect())
@@ -1092,6 +1108,10 @@ impl ScalarImpl {
                 JsonbVal::value_deserialize(bytes)
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
+            DataType::Variant => Self::Variant(
+                VariantVal::value_deserialize(bytes)
+                    .ok_or_else(|| "invalid value of Variant".to_owned())?,
+            ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
             DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
@@ -1125,6 +1145,7 @@ impl ScalarImpl {
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
+            DataType::Variant => VariantVal::from_str(s)?.into(),
             DataType::Bytea => {
                 let mut buf = Vec::new();
                 str_to_bytea(s, &mut buf)?;
@@ -1234,6 +1255,7 @@ impl ScalarRefImpl<'_> {
             }
             Self::Int256(v) => v.memcmp_serialize(ser)?,
             Self::Jsonb(v) => v.memcmp_serialize(ser)?,
+            Self::Variant(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
@@ -1290,6 +1312,7 @@ impl ScalarImpl {
                     .map_err(|e| memcomparable::Error::Message(e.to_report_string()))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
+            Ty::Variant => Self::Variant(VariantVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
@@ -1509,6 +1532,9 @@ mod tests {
                     DataType::Interval,
                 ),
                 DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::null()), DataType::Jsonb),
+                DataTypeName::Variant => {
+                    (ScalarImpl::Variant(VariantVal::null()), DataType::Variant)
+                }
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),

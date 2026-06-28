@@ -1,0 +1,47 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table variant_stream_t (
+    id int primary key,
+    payload variant
+);
+
+statement error JSONB/VARIANT column
+create materialized view variant_bad_agg as
+select payload, count(*) from variant_stream_t group by payload;
+
+statement ok
+create materialized view variant_state_mv as
+select
+    id,
+    payload,
+    variant_get(payload, '$.a') as a,
+    variant_typeof(payload) as kind
+from variant_stream_t;
+
+statement ok
+insert into variant_stream_t values
+    (1, parse_variant('{"a":10,"b":[1,2]}')),
+    (2, to_variant('plain'::varchar));
+
+query ITT rowsort
+select id, a::varchar, kind from variant_state_mv;
+----
+1 10 object
+2 NULL string
+
+statement ok
+update variant_stream_t set payload = parse_variant('{"a":20}') where id = 1;
+
+query ITT rowsort
+select id, a::varchar, kind from variant_state_mv;
+----
+1 20 object
+2 NULL string
+
+statement ok
+drop materialized view variant_state_mv;
+
+statement ok
+drop table variant_stream_t;

@@ -203,6 +203,8 @@ parking_lot = { version = "0.12", features = [
     "deadlock_detection",
 ] }
 parquet = { version = "58", features = ["async"] }
+parquet-variant = "58.1.0"
+parquet-variant-json = "58.1.0"
 pin-project-lite = "0.2"
 prost = { version = "=0.14.3" }
 prost-build = { version = "=0.14.3" }

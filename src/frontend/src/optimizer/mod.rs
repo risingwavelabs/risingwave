@@ -695,7 +695,7 @@ impl LogicalPlanRoot {
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
-                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
+                        "Using JSONB/VARIANT columns as part of the join or aggregation keys can severely impair performance. \
                         If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_owned(),
                     ).into());
                 }
@@ -1302,6 +1302,7 @@ fn find_version_column_indices(
         for (index, column) in column_catalog.iter().enumerate() {
             if column.column_desc.name == version_column_name {
                 if let &DataType::Jsonb
+                | &DataType::Variant
                 | &DataType::List(_)
                 | &DataType::Struct(_)
                 | &DataType::Bytea
