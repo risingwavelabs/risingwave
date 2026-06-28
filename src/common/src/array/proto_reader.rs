@@ -39,6 +39,7 @@ impl ArrayImpl {
             PbArrayType::Timestamptz => read_primitive_array::<Timestamptz>(array, cardinality)?,
             PbArrayType::Interval => read_primitive_array::<Interval>(array, cardinality)?,
             PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
+            PbArrayType::Variant => VariantArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
             PbArrayType::Bytea => read_string_array::<BytesValueReader>(array, cardinality)?,
