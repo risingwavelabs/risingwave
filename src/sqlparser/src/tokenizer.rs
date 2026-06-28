@@ -192,9 +192,10 @@ pub struct Word {
 impl fmt::Display for Word {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
-            Some(s) if s == '"' || s == '[' || s == '`' => {
+            Some(s) if s == '[' || s == '`' => {
                 write!(f, "{}{}{}", s, self.value, Word::matching_end_quote(s))
             }
+            Some('"') => write!(f, "\"{}\"", self.value.replace('"', "\"\"")),
             None => f.write_str(&self.value),
             _ => panic!("Unexpected quote_style!"),
         }
@@ -1161,6 +1162,18 @@ mod tests {
         ];
 
         compare(expected, tokens);
+    }
+
+    #[test]
+    fn display_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        assert_eq!(
+            tokens.iter().map(ToString::to_string).collect::<String>(),
+            sql
+        );
     }
 
     #[test]
