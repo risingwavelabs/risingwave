@@ -39,4 +39,4 @@
     select v2 from t1 group by v2, v1;
   stream_error: |-
     Not supported: VARIANT column "aggregation group key" should not be in the t1.v1.
-    HINT: Using VARIANT columns as stream keys is not supported yet because their state encoding must remain stable across releases.
+    HINT: Using VARIANT columns as stream keys is not supported.

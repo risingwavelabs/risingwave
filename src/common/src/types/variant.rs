@@ -42,9 +42,9 @@ const VARIANT_ENCODING_VERSION: u8 = 1;
 
 /// Owned value of the `variant` type.
 ///
-/// The inner bytes are a RisingWave version envelope followed by the Apache Parquet / Iceberg
-/// Variant `metadata` and `value` sections. Keep the envelope versioned because these bytes define
-/// equality, hashing, stream keys, and state table contents.
+/// The inner bytes are a RisingWave format tag followed by the Apache Parquet / Iceberg Variant
+/// `metadata` and `value` sections. This is the first RisingWave `variant` encoding, so all
+/// internal bytes must use the current tagged format.
 #[derive(Debug, Clone)]
 pub struct VariantVal {
     data: Box<[u8]>,
@@ -188,10 +188,13 @@ impl VariantVal {
         Self::from_parquet_variant(variant)
     }
 
-    fn from_parts_unchecked(metadata: &[u8], value: &[u8]) -> anyhow::Result<Self> {
-        ParquetVariant::try_new(metadata, value).context("invalid variant encoding")?;
+    fn from_canonical_parts(metadata: &[u8], value: &[u8]) -> Self {
+        assert!(
+            ParquetVariant::try_new(metadata, value).is_ok(),
+            "canonical variant parts should be valid"
+        );
         let metadata_len =
-            u32::try_from(metadata.len()).context("variant metadata exceeds u32::MAX bytes")?;
+            u32::try_from(metadata.len()).expect("variant metadata exceeds u32::MAX bytes");
         let mut data = Vec::with_capacity(
             ENCODING_VERSION_LEN + METADATA_LEN_SIZE + metadata.len() + value.len(),
         );
@@ -199,9 +202,9 @@ impl VariantVal {
         data.put_u32_le(metadata_len);
         data.extend_from_slice(metadata);
         data.extend_from_slice(value);
-        Ok(Self {
+        Self {
             data: data.into_boxed_slice(),
-        })
+        }
     }
 
     pub fn from_metadata_value(metadata: Vec<u8>, value: Vec<u8>) -> anyhow::Result<Self> {
@@ -215,7 +218,7 @@ impl VariantVal {
             .try_append_value(variant)
             .context("failed to encode variant")?;
         let (metadata, value) = builder.finish();
-        Self::from_parts_unchecked(&metadata, &value)
+        Ok(Self::from_canonical_parts(&metadata, &value))
     }
 
     pub fn from_json_value(json: &serde_json::Value) -> anyhow::Result<Self> {
@@ -224,7 +227,7 @@ impl VariantVal {
         let mut builder = canonical_builder(&field_names);
         append_json_value(json, &mut builder)?;
         let (metadata, value) = builder.finish();
-        Self::from_parts_unchecked(&metadata, &value)
+        Ok(Self::from_canonical_parts(&metadata, &value))
     }
 
     pub fn try_from_scalar_ref(
@@ -236,7 +239,7 @@ impl VariantVal {
         let mut builder = canonical_builder(&field_names);
         append_datum_value(value, data_type, &mut builder)?;
         let (metadata, value) = builder.finish();
-        Self::from_parts_unchecked(&metadata, &value)
+        Ok(Self::from_canonical_parts(&metadata, &value))
     }
 
     pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
@@ -258,15 +261,11 @@ impl VariantVal {
     }
 
     pub fn metadata(&self) -> &[u8] {
-        split_serialized_value(&self.data)
-            .expect("variant should contain valid metadata prefix")
-            .0
+        expect_serialized_value(&self.data).0
     }
 
     pub fn value(&self) -> &[u8] {
-        split_serialized_value(&self.data)
-            .expect("variant should contain valid metadata prefix")
-            .1
+        expect_serialized_value(&self.data).1
     }
 
     pub fn parquet_variant(&self) -> ParquetVariant<'_, '_> {
@@ -280,11 +279,7 @@ impl VariantVal {
 
 impl<'a> VariantRef<'a> {
     pub fn value_serialize(&self) -> Vec<u8> {
-        assert!(
-            split_serialized_value(self.data).is_some(),
-            "variant should contain valid metadata prefix"
-        );
-
+        expect_serialized_value(self.data);
         self.data.to_vec()
     }
 
@@ -297,20 +292,17 @@ impl<'a> VariantRef<'a> {
     }
 
     pub fn from_serialized(buf: &'a [u8]) -> Option<Self> {
-        split_serialized_value(buf)?;
+        let (metadata, value) = split_serialized_value(buf)?;
+        ParquetVariant::try_new(metadata, value).ok()?;
         Some(Self { data: buf })
     }
 
     pub fn metadata(&self) -> &'a [u8] {
-        split_serialized_value(self.data)
-            .expect("variant should contain valid metadata prefix")
-            .0
+        expect_serialized_value(self.data).0
     }
 
     pub fn value(&self) -> &'a [u8] {
-        split_serialized_value(self.data)
-            .expect("variant should contain valid metadata prefix")
-            .1
+        expect_serialized_value(self.data).1
     }
 
     pub fn parquet_variant(&self) -> ParquetVariant<'a, 'a> {
@@ -465,7 +457,7 @@ impl From<serde_json::Value> for VariantVal {
 }
 
 fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
-    let buf = strip_encoding_version(buf)?;
+    let buf = strip_current_encoding_tag(buf)?;
     if buf.len() < METADATA_LEN_SIZE {
         return None;
     }
@@ -486,9 +478,20 @@ fn metadata_len_from_serialized(buf: &[u8]) -> Option<u32> {
     ))
 }
 
-fn strip_encoding_version(buf: &[u8]) -> Option<&[u8]> {
-    if buf.first() == Some(&VARIANT_ENCODING_VERSION) {
-        Some(&buf[ENCODING_VERSION_LEN..])
+fn expect_serialized_value(buf: &[u8]) -> (&[u8], &[u8]) {
+    let (metadata, value) =
+        split_serialized_value(buf).expect("variant should use current serialized format");
+    assert!(
+        ParquetVariant::try_new(metadata, value).is_ok(),
+        "variant should contain valid parquet variant payload"
+    );
+    (metadata, value)
+}
+
+fn strip_current_encoding_tag(buf: &[u8]) -> Option<&[u8]> {
+    let (&version, rest) = buf.split_first()?;
+    if version == VARIANT_ENCODING_VERSION {
+        Some(rest)
     } else {
         None
     }
@@ -887,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn serializes_with_versioned_canonical_snapshot() {
+    fn serializes_current_canonical_snapshot() {
         let v: VariantVal = r#"{"a":1,"c":[true,null]}"#.parse().unwrap();
         let bytes = v.as_scalar_ref().value_serialize();
         assert_eq!(
