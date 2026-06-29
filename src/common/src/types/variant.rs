@@ -33,7 +33,9 @@ use serde::{Deserialize, Serialize};
 use super::jsonb::{JsonbRef, JsonbVal};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
-use super::{DataType, Decimal, Scalar, ScalarRef, ScalarRefImpl, StructType, VectorRef};
+use super::{
+    DataType, Decimal, Scalar, ScalarRef, ScalarRefImpl, StructType, scalar_ref_type_match,
+};
 use crate::util::iter_util::ZipEqFast;
 
 const METADATA_LEN_SIZE: usize = size_of::<u32>();
@@ -599,7 +601,7 @@ fn append_json_value(
             } else if let Some(v) = v.as_u64() {
                 builder.append_value(v);
             } else if let Some(v) = v.as_f64() {
-                builder.append_value(v);
+                append_float64(v, builder)?;
             } else {
                 bail!("unsupported JSON number: {v}");
             }
@@ -637,15 +639,23 @@ fn append_datum_value(
         builder.append_value(ParquetVariant::Null);
         return Ok(());
     };
+    assert!(
+        scalar_ref_type_match(data_type, value),
+        "variant conversion input {} does not match {data_type}",
+        value.get_ident()
+    );
 
+    // `variant` is a semi-structured value, not a lossless SQL typed-value envelope.
+    // Normalize SQL values into one canonical Parquet Variant representation so byte-based
+    // equality, hashing and ordering stay deterministic across construction paths.
     match (value, data_type) {
         (ScalarRefImpl::Bool(v), _) => builder.append_value(v),
-        (ScalarRefImpl::Int16(v), _) => builder.append_value(v),
-        (ScalarRefImpl::Int32(v), _) => builder.append_value(v),
+        (ScalarRefImpl::Int16(v), _) => builder.append_value(i64::from(v)),
+        (ScalarRefImpl::Int32(v), _) => builder.append_value(i64::from(v)),
         (ScalarRefImpl::Int64(v), _) => builder.append_value(v),
         (ScalarRefImpl::Serial(v), _) => builder.append_value(v.into_inner()),
-        (ScalarRefImpl::Float32(v), _) => append_float32(v.into_inner(), builder),
-        (ScalarRefImpl::Float64(v), _) => append_float64(v.into_inner(), builder),
+        (ScalarRefImpl::Float32(v), _) => append_float64(f64::from(v.into_inner()), builder)?,
+        (ScalarRefImpl::Float64(v), _) => append_float64(v.into_inner(), builder)?,
         (ScalarRefImpl::Decimal(v), _) => append_decimal(v, builder)?,
         (ScalarRefImpl::Utf8(v), _) => builder.append_value(v),
         (ScalarRefImpl::Bytea(v), _) => builder.append_value(v),
@@ -657,9 +667,11 @@ fn append_datum_value(
             append_json_value(&serde_json::Value::from_str(&v.to_string())?, builder)?
         }
         (ScalarRefImpl::Variant(v), _) => builder.append_value(v.parquet_variant()),
-        (ScalarRefImpl::Int256(v), _) => builder.append_value(v.to_text().as_str()),
-        (ScalarRefImpl::Interval(v), _) => builder.append_value(v.to_text().as_str()),
-        (ScalarRefImpl::Vector(v), _) => append_vector(v, builder),
+        (ScalarRefImpl::Int256(_), _)
+        | (ScalarRefImpl::Interval(_), _)
+        | (ScalarRefImpl::Vector(_), _) => {
+            bail!("{data_type} cannot be converted to variant without a standard Variant type")
+        }
         (ScalarRefImpl::List(v), DataType::List(list_type)) => {
             let mut list = builder
                 .try_new_list()
@@ -715,20 +727,13 @@ fn append_struct(
     Ok(())
 }
 
-fn append_float32(value: f32, builder: &mut impl VariantBuilderExt) {
-    if value.is_finite() {
-        builder.append_value(value);
-    } else {
-        builder.append_value(value.to_string().as_str());
+fn append_float64(value: f64, builder: &mut impl VariantBuilderExt) -> anyhow::Result<()> {
+    if !value.is_finite() {
+        bail!("non-finite float cannot be converted to variant");
     }
-}
-
-fn append_float64(value: f64, builder: &mut impl VariantBuilderExt) {
-    if value.is_finite() {
-        builder.append_value(value);
-    } else {
-        builder.append_value(value.to_string().as_str());
-    }
+    let value = if value == 0.0 { 0.0 } else { value };
+    builder.append_value(value);
+    Ok(())
 }
 
 fn append_decimal(value: Decimal, builder: &mut impl VariantBuilderExt) -> anyhow::Result<()> {
@@ -744,10 +749,6 @@ fn append_decimal(value: Decimal, builder: &mut impl VariantBuilderExt) -> anyho
         }
     }
     Ok(())
-}
-
-fn append_vector(value: VectorRef<'_>, builder: &mut impl VariantBuilderExt) {
-    builder.append_value(value.to_text().as_str());
 }
 
 enum PathToken {
@@ -825,6 +826,15 @@ fn parse_path(path: &str) -> Option<Vec<PathToken>> {
 mod tests {
     use super::*;
     use crate::array::StructValue;
+    use crate::types::{Date, F32, F64, Int256, Interval, Serial, Time, Timestamptz};
+
+    fn assert_same_variant(lhs: &VariantVal, rhs: &VariantVal) {
+        assert_eq!(lhs, rhs);
+        assert_eq!(
+            lhs.as_scalar_ref().value_serialize(),
+            rhs.as_scalar_ref().value_serialize()
+        );
+    }
 
     #[test]
     fn path_access_supports_dot_and_bracket() {
@@ -846,17 +856,117 @@ mod tests {
     }
 
     #[test]
-    fn preserves_sql_scalar_type() {
+    fn canonicalizes_numeric_scalars_across_construction_paths() {
+        let json_int: VariantVal = "1".parse().unwrap();
+        let int16 =
+            VariantVal::try_from_scalar_ref(Some(ScalarRefImpl::Int16(1)), &DataType::Int16)
+                .unwrap();
         let int32 =
             VariantVal::try_from_scalar_ref(Some(ScalarRefImpl::Int32(1)), &DataType::Int32)
                 .unwrap();
         let int64 =
             VariantVal::try_from_scalar_ref(Some(ScalarRefImpl::Int64(1)), &DataType::Int64)
                 .unwrap();
+        let serial = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Serial(Serial::from(1))),
+            &DataType::Serial,
+        )
+        .unwrap();
 
-        assert_eq!(int32.as_scalar_ref().type_name(), "int32");
-        assert_eq!(int64.as_scalar_ref().type_name(), "int64");
-        assert_ne!(int32, int64);
+        assert_eq!(json_int.as_scalar_ref().type_name(), "int64");
+        assert_same_variant(&json_int, &int16);
+        assert_same_variant(&json_int, &int32);
+        assert_same_variant(&json_int, &int64);
+        assert_same_variant(&json_int, &serial);
+
+        let json_float: VariantVal = "1.5".parse().unwrap();
+        let float32 = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Float32(F32::from(1.5))),
+            &DataType::Float32,
+        )
+        .unwrap();
+        let float64 = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Float64(F64::from(1.5))),
+            &DataType::Float64,
+        )
+        .unwrap();
+
+        assert_eq!(json_float.as_scalar_ref().type_name(), "double");
+        assert_same_variant(&json_float, &float32);
+        assert_same_variant(&json_float, &float64);
+
+        let positive_zero: VariantVal = "0.0".parse().unwrap();
+        let negative_zero = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Float64(F64::from(-0.0))),
+            &DataType::Float64,
+        )
+        .unwrap();
+        assert_same_variant(&positive_zero, &negative_zero);
+    }
+
+    #[test]
+    fn rejects_non_canonical_sql_only_scalars() {
+        assert!(
+            VariantVal::try_from_scalar_ref(
+                Some(ScalarRefImpl::Float64(F64::from(f64::NAN))),
+                &DataType::Float64,
+            )
+            .is_err()
+        );
+        assert!(
+            VariantVal::try_from_scalar_ref(
+                Some(ScalarRefImpl::Interval(Interval::from_month_day_usec(
+                    1, 2, 3
+                ))),
+                &DataType::Interval,
+            )
+            .is_err()
+        );
+
+        let int256 = Int256::from(1);
+        assert!(
+            VariantVal::try_from_scalar_ref(
+                Some(int256.as_scalar_ref().into()),
+                &DataType::Int256,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn maps_temporal_scalars_to_variant_temporal_types() {
+        let date = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Date(Date::from_ymd_uncheck(2024, 1, 2))),
+            &DataType::Date,
+        )
+        .unwrap();
+        let time = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Time(Time::from_hms_micro_uncheck(
+                3, 4, 5, 6000,
+            ))),
+            &DataType::Time,
+        )
+        .unwrap();
+        let timestamp = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Timestamp(
+                Date::from_ymd_uncheck(2024, 1, 2).and_hms_micro_uncheck(3, 4, 5, 6000),
+            )),
+            &DataType::Timestamp,
+        )
+        .unwrap();
+        let timestamptz = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Timestamptz(Timestamptz::from_micros(1))),
+            &DataType::Timestamptz,
+        )
+        .unwrap();
+
+        assert_eq!(date.as_scalar_ref().type_name(), "date");
+        assert_eq!(time.as_scalar_ref().type_name(), "time");
+        assert_eq!(
+            timestamp.as_scalar_ref().type_name(),
+            "timestamp_ntz_micros"
+        );
+        assert_eq!(timestamptz.as_scalar_ref().type_name(), "timestamp_micros");
     }
 
     #[test]
@@ -881,6 +991,15 @@ mod tests {
             json.as_scalar_ref().value_serialize(),
             variant.as_scalar_ref().value_serialize()
         );
+    }
+
+    #[test]
+    fn canonicalizes_extracted_subvalues() {
+        let root: VariantVal = r#"{"a":[{"b":1}]}"#.parse().unwrap();
+        let extracted = root.as_scalar_ref().access_path("$.a[0]").unwrap();
+        let parsed: VariantVal = r#"{"b":1}"#.parse().unwrap();
+
+        assert_same_variant(&extracted, &parsed);
     }
 
     #[test]

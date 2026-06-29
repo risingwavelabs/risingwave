@@ -14,7 +14,7 @@ select
     variant_typeof(to_variant(1.0::decimal)),
     variant_typeof(to_variant(1.0::double precision));
 ----
-int64 double int32 int64 decimal16 double
+int64 double int64 int64 decimal16 double
 
 statement ok
 drop table variant_table_definition;
