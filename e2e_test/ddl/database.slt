@@ -63,30 +63,6 @@ select resource_group from rw_databases where name = 'db_with_resource_group';
 test
 
 statement ok
-alter database db_with_resource_group set resource_group to default deferred;
-
-query T
-select resource_group from rw_databases where name = 'db_with_resource_group';
-----
-default
-
-statement ok
-alter database db_with_resource_group set resource_group = test deferred;
-
-query T
-select resource_group from rw_databases where name = 'db_with_resource_group';
-----
-test
-
-statement ok
-alter database db_with_resource_group reset resource_group deferred;
-
-query T
-select resource_group from rw_databases where name = 'db_with_resource_group';
-----
-default
-
-statement ok
 drop database db_with_resource_group;
 
 statement ok

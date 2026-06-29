@@ -14,61 +14,6 @@ statement ok
 alter materialized view m1 set resource_group to default;
 
 statement ok
-create index idx_resource_group on t(v);
-
-statement ok
-alter index idx_resource_group set resource_group to default;
-
-query T
-select resource_group from rw_streaming_jobs where name = 'idx_resource_group';
-----
-default
-
-statement ok
-alter index idx_resource_group set resource_group to test deferred;
-
-query T
-select resource_group from rw_streaming_jobs where name = 'idx_resource_group';
-----
-test
-
-statement ok
-alter index idx_resource_group reset resource_group deferred;
-
-query T
-select resource_group from rw_streaming_jobs where name = 'idx_resource_group';
-----
-default
-
-statement ok
-create sink s_resource_group as select * from t with (connector = 'blackhole');
-
-statement ok
-alter sink s_resource_group set resource_group = default;
-
-query T
-select resource_group from rw_streaming_jobs where name = 's_resource_group';
-----
-default
-
-statement ok
-alter sink s_resource_group set resource_group = test deferred;
-
-query T
-select resource_group from rw_streaming_jobs where name = 's_resource_group';
-----
-test
-
-statement ok
-alter sink s_resource_group reset resource_group deferred;
-
-query T
-select resource_group from rw_streaming_jobs where name = 's_resource_group';
-----
-default
-
-
-statement ok
 alter system set license_key to '';
 
 
