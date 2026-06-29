@@ -479,13 +479,7 @@ fn metadata_len_from_serialized(buf: &[u8]) -> Option<u32> {
 }
 
 fn expect_serialized_value(buf: &[u8]) -> (&[u8], &[u8]) {
-    let (metadata, value) =
-        split_serialized_value(buf).expect("variant should use current serialized format");
-    assert!(
-        ParquetVariant::try_new(metadata, value).is_ok(),
-        "variant should contain valid parquet variant payload"
-    );
-    (metadata, value)
+    split_serialized_value(buf).expect("variant should use current serialized format")
 }
 
 fn strip_current_encoding_tag(buf: &[u8]) -> Option<&[u8]> {
