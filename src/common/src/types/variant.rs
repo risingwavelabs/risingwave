@@ -645,13 +645,12 @@ fn append_datum_value(
         value.get_ident()
     );
 
-    // `variant` is a semi-structured value, not a lossless SQL typed-value envelope.
-    // Normalize SQL values into one canonical Parquet Variant representation so byte-based
-    // equality, hashing and ordering stay deterministic across construction paths.
+    // Preserve the SQL type identity when Parquet Variant V1 can represent it.
+    // Untyped JSON construction still follows its own default Variant primitive types.
     match (value, data_type) {
         (ScalarRefImpl::Bool(v), _) => builder.append_value(v),
-        (ScalarRefImpl::Int16(v), _) => builder.append_value(i64::from(v)),
-        (ScalarRefImpl::Int32(v), _) => builder.append_value(i64::from(v)),
+        (ScalarRefImpl::Int16(v), _) => builder.append_value(v),
+        (ScalarRefImpl::Int32(v), _) => builder.append_value(v),
         (ScalarRefImpl::Int64(v), _) => builder.append_value(v),
         (ScalarRefImpl::Serial(v), _) => builder.append_value(v.into_inner()),
         (ScalarRefImpl::Float32(v), _) => append_float64(f64::from(v.into_inner()), builder)?,
@@ -856,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn canonicalizes_numeric_scalars_across_construction_paths() {
+    fn maps_numeric_scalars_to_variant_types() {
         let json_int: VariantVal = "1".parse().unwrap();
         let int16 =
             VariantVal::try_from_scalar_ref(Some(ScalarRefImpl::Int16(1)), &DataType::Int16)
@@ -874,8 +873,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(json_int.as_scalar_ref().type_name(), "int64");
-        assert_same_variant(&json_int, &int16);
-        assert_same_variant(&json_int, &int32);
+        assert_eq!(int16.as_scalar_ref().type_name(), "int16");
+        assert_eq!(int32.as_scalar_ref().type_name(), "int32");
+        assert_eq!(int64.as_scalar_ref().type_name(), "int64");
+        assert_ne!(json_int, int16);
+        assert_ne!(json_int, int32);
         assert_same_variant(&json_int, &int64);
         assert_same_variant(&json_int, &serial);
 
