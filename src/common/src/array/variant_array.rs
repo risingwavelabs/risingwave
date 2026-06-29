@@ -124,6 +124,7 @@ impl VariantArray {
         );
         let data = Bytes::copy_from_slice(&array.values[1].body);
         validate_offsets(&offsets, data.len())?;
+        validate_serialized_values(&bitmap, &offsets, &data)?;
 
         Ok(VariantArray {
             bitmap,
@@ -270,5 +271,20 @@ fn validate_offsets(offsets: &[u32], data_len: usize) -> ArrayResult<()> {
         offsets.windows(2).all(|pair| pair[0] <= pair[1]),
         "variant offsets must be monotonic"
     );
+    Ok(())
+}
+
+fn validate_serialized_values(bitmap: &Bitmap, offsets: &[u32], data: &[u8]) -> ArrayResult<()> {
+    for (idx, not_null) in bitmap.iter().enumerate() {
+        if !not_null {
+            continue;
+        }
+        let begin = offsets[idx] as usize;
+        let end = offsets[idx + 1] as usize;
+        ensure!(
+            VariantRef::from_serialized(&data[begin..end]).is_some(),
+            "variant array element {idx} must use current valid variant encoding"
+        );
+    }
     Ok(())
 }
