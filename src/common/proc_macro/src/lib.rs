@@ -254,6 +254,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 /// A default value is required by setting the `default` option.
 /// The field name will be the parameter name. You can overwrite the parameter name by setting the `rename` option.
 /// To check the input parameter, you can use `check_hook` option.
+/// To emit a user-facing notice on `SET`, use the `deprecated` option.
 ///
 /// `flags` options include
 /// - `SETTER`: to manually write a `set_your_parameter_name` function, in which you should call `set_your_parameter_name_inner`.

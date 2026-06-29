@@ -47,6 +47,14 @@ impl Rule<Stream> for IndexDeltaJoinRule {
         let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
+        let left_backfill_type = input_left.backfill_type();
+        if left_backfill_type != BackfillType::ArrangementBackfill {
+            plan.ctx().session_ctx().notice_to_user(format!(
+                "Delta join requires ArrangementBackfill on the backfilled side, but got {:?}. Fall back to regular join.",
+                left_backfill_type
+            ));
+            return None;
+        }
 
         fn match_indexes(
             join_indices: &[usize],
@@ -144,7 +152,7 @@ impl Rule<Stream> for IndexDeltaJoinRule {
         // Delta join only needs to backfill one stream flow and others should be upstream only
         // chain. Here we choose the left one to backfill and right one to upstream only
         // chain.
-        if let Some(left) = match_indexes(&left_indices, input_left, BackfillType::Backfill) {
+        if let Some(left) = match_indexes(&left_indices, input_left, left_backfill_type) {
             if let Some(right) =
                 match_indexes(&right_indices, input_right, BackfillType::Replicated)
             {

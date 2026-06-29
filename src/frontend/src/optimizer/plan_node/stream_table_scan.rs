@@ -223,6 +223,7 @@ impl StreamTableScan {
         ));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
+        #[expect(deprecated)]
         match stream_scan_type {
             StreamScanType::Chain
             | StreamScanType::Rearrange
@@ -270,9 +271,7 @@ impl StreamTableScan {
                     catalog_builder.add_column(&Field::from(&col.column_desc));
                 }
             }
-            StreamScanType::Unspecified => {
-                unreachable!()
-            }
+            StreamScanType::Unspecified => unreachable!(),
         }
 
         // Reuse the state store pk (vnode) as the vnode as well.
@@ -390,8 +389,10 @@ impl StreamTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
-        // The required columns from the table (both scan and upstream).
         let stream_scan_type = self.stream_scan_type();
+
+        // The required columns from the table (both scan and upstream).
+        #[expect(deprecated)]
         let upstream_column_ids = match stream_scan_type {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill
