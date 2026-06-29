@@ -370,6 +370,7 @@ impl HummockManager {
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -683,6 +684,7 @@ impl HummockManager {
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -1011,6 +1013,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
+                &self.version_stat_tx,
             );
             let mut new_version_delta = version.new_delta();
             let split_key = plan.split_key();
