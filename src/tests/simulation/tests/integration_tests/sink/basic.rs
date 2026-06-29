@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -102,6 +102,54 @@ async fn basic_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.checkpoint_count() > 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_async_truncate_nondecouple_waits_for_checkpoint_truncate() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+
+    let source_parallelism = 1;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::DelayedAsyncTruncate);
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..12, 1.0, 12);
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("set sink_decouple = false").await?;
+    session.run(CREATE_SOURCE).await?;
+    session.run(CREATE_SINK).await?;
+    test_sink.wait_initial_parallelism(1).await?;
+
+    let expected_count = test_source.id_list.len();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let sink_fail_count = session
+            .run("select count(*) from rw_event_logs where event_type = 'SINK_FAIL'")
+            .await?
+            .trim()
+            .parse::<usize>()?;
+        assert!(
+            sink_fail_count == 0,
+            "unexpected sink failure while waiting for async truncate checkpoint progress"
+        );
+
+        if test_sink.store.id_count() == expected_count && test_sink.store.checkpoint_count() > 0 {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for async truncate sink to finish without sink failure"
+        );
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    session.run(DROP_SINK).await?;
+    session.run(DROP_SOURCE).await?;
+
+    assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
+    test_sink.store.check_simple_result(&test_source.id_list)?;
 
     Ok(())
 }
