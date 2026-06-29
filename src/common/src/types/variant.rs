@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use anyhow::{Context, bail};
@@ -37,19 +37,21 @@ use super::{DataType, Decimal, Scalar, ScalarRef, ScalarRefImpl, StructType, Vec
 use crate::util::iter_util::ZipEqFast;
 
 const METADATA_LEN_SIZE: usize = size_of::<u32>();
+const ENCODING_VERSION_LEN: usize = size_of::<u8>();
+const VARIANT_ENCODING_VERSION: u8 = 1;
 
 /// Owned value of the `variant` type.
 ///
-/// The inner bytes are the Apache Parquet / Iceberg Variant `metadata` and `value` sections. This
-/// deliberately has no RisingWave version envelope: the type is still unreleased, and state/wire
-/// compatibility with the earlier jsonbb prototype is intentionally dropped.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// The inner bytes are a RisingWave version envelope followed by the Apache Parquet / Iceberg
+/// Variant `metadata` and `value` sections. Keep the envelope versioned because these bytes define
+/// equality, hashing, stream keys, and state table contents.
+#[derive(Debug, Clone)]
 pub struct VariantVal {
     data: Box<[u8]>,
 }
 
 /// Borrowed value of the `variant` type.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone)]
 pub struct VariantRef<'a> {
     data: &'a [u8],
 }
@@ -91,6 +93,34 @@ impl<'a> ScalarRef<'a> for VariantRef<'a> {
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash(state);
+    }
+}
+
+impl PartialEq for VariantVal {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_scalar_ref() == other.as_scalar_ref()
+    }
+}
+
+impl Eq for VariantVal {}
+
+impl Hash for VariantVal {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_scalar_ref().hash(state);
+    }
+}
+
+impl PartialEq for VariantRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.metadata(), self.value()) == (other.metadata(), other.value())
+    }
+}
+
+impl Eq for VariantRef<'_> {}
+
+impl Hash for VariantRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.metadata(), self.value()).hash(state);
     }
 }
 
@@ -162,7 +192,10 @@ impl VariantVal {
         ParquetVariant::try_new(metadata, value).context("invalid variant encoding")?;
         let metadata_len =
             u32::try_from(metadata.len()).context("variant metadata exceeds u32::MAX bytes")?;
-        let mut data = Vec::with_capacity(METADATA_LEN_SIZE + metadata.len() + value.len());
+        let mut data = Vec::with_capacity(
+            ENCODING_VERSION_LEN + METADATA_LEN_SIZE + metadata.len() + value.len(),
+        );
+        data.put_u8(VARIANT_ENCODING_VERSION);
         data.put_u32_le(metadata_len);
         data.extend_from_slice(metadata);
         data.extend_from_slice(value);
@@ -432,6 +465,7 @@ impl From<serde_json::Value> for VariantVal {
 }
 
 fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
+    let buf = strip_encoding_version(buf)?;
     if buf.len() < METADATA_LEN_SIZE {
         return None;
     }
@@ -450,6 +484,14 @@ fn metadata_len_from_serialized(buf: &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(
         buf[..METADATA_LEN_SIZE].try_into().unwrap(),
     ))
+}
+
+fn strip_encoding_version(buf: &[u8]) -> Option<&[u8]> {
+    if buf.first() == Some(&VARIANT_ENCODING_VERSION) {
+        Some(&buf[ENCODING_VERSION_LEN..])
+    } else {
+        None
+    }
 }
 
 fn canonical_builder(field_names: &BTreeSet<String>) -> VariantBuilder {
@@ -845,10 +887,16 @@ mod tests {
     }
 
     #[test]
-    fn serializes_without_version_envelope() {
-        let v: VariantVal = r#"{"a":1}"#.parse().unwrap();
+    fn serializes_with_versioned_canonical_snapshot() {
+        let v: VariantVal = r#"{"a":1,"c":[true,null]}"#.parse().unwrap();
         let bytes = v.as_scalar_ref().value_serialize();
-        assert_ne!(bytes[0], 1);
+        assert_eq!(
+            hex::encode(&bytes),
+            "0107000000110200010261630202000100091018010000000000000003020001020400"
+        );
+        assert_eq!(bytes[0], VARIANT_ENCODING_VERSION);
         assert_eq!(VariantVal::value_deserialize(&bytes).unwrap(), v);
+        assert!(VariantVal::value_deserialize(&bytes[1..]).is_none());
+        assert!(VariantRef::from_serialized(&bytes[1..]).is_none());
     }
 }
