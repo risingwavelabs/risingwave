@@ -990,7 +990,7 @@ impl CatalogController {
             .await?;
         let to_drop_objects = to_drop_source_objects
             .into_iter()
-            .chain(to_drop_internal_table_objs.into_iter())
+            .chain(to_drop_internal_table_objs)
             .collect_vec();
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()

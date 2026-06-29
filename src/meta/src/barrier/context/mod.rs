@@ -21,10 +21,11 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::JobId;
+use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    IcebergV3SinkMetadata as PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
@@ -40,6 +41,7 @@ use crate::barrier::{
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::source_manager::SplitAssignment;
@@ -141,6 +143,16 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         database_id: DatabaseId,
         last_committed_epoch: u64,
     ) -> impl Future<Output = MetaResult<BatchRefreshJobTriggerContext>> + Send + '_;
+
+    fn pre_commit_iceberg_v3_sink_metadata(
+        &self,
+        reports: Vec<PbIcebergV3SinkMetadata>,
+    ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
+
+    fn commit_iceberg_v3_sink_metadata(
+        &self,
+        sink_ids: Vec<SinkId>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
@@ -164,9 +176,12 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
     sink_manager: SinkCoordinatorManager,
+
+    pub(super) iceberg_v3_sink_manager: IcebergV3SinkManager,
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         scheduled_barriers: ScheduledBarriers,
         status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -178,6 +193,7 @@ impl GlobalBarrierWorkerContextImpl {
         barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -190,6 +206,7 @@ impl GlobalBarrierWorkerContextImpl {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_v3_sink_manager,
         }
     }
 

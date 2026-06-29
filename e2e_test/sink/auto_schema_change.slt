@@ -41,13 +41,16 @@ drop table t1;
 
 ## end
 
-## test only support backfill type as ArrangementBackfill
+## deprecated arrangement backfill setting is ignored
 
 statement ok
 SET STREAMING_USE_ARRANGEMENT_BACKFILL=false;
 
-statement error auto schema change only support for ArrangementBackfill
+statement ok
 create sink s from t with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop sink s;
 
 statement ok
 SET STREAMING_USE_ARRANGEMENT_BACKFILL=true;

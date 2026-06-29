@@ -41,7 +41,7 @@ impl Rule<Logical> for MinMaxOnIndexRule {
         if calls.is_empty() {
             return None;
         }
-        let first_call = calls.iter().exactly_one().ok()?;
+        let first_call = Itertools::exactly_one(calls.iter()).ok()?;
 
         if matches!(
             first_call.agg_type,

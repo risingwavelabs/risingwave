@@ -773,14 +773,14 @@ message ExchangeNode {
 enum StreamScanType {
   STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
-  // ChainExecutor
-  STREAM_SCAN_TYPE_CHAIN = 1;
+  // ChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_CHAIN = 1 [deprecated = true];
 
-  // RearrangedChainExecutor
-  STREAM_SCAN_TYPE_REARRANGE = 2;
+  // RearrangedChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_REARRANGE = 2 [deprecated = true];
 
-  // BackfillExecutor
-  STREAM_SCAN_TYPE_BACKFILL = 3;
+  // BackfillExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_BACKFILL = 3 [deprecated = true];
 
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;

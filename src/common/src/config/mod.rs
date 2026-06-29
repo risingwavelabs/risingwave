@@ -491,6 +491,8 @@ pub mod tests {
         let mut config = RwConfig::default();
         // Set `license_key` to empty in the docs to avoid any confusion.
         config.system.license_key = Some(LicenseKey::empty());
+        // Keep generated docs and example config aligned with the production-safe default.
+        config.frontend.unsafe_enable_local_fs_connector = false;
         config
     }
 

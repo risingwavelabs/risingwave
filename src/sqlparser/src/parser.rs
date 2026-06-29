@@ -231,18 +231,19 @@ impl Parser<'_> {
 
     /// Parse exactly one statement from a string.
     pub fn parse_exactly_one(sql: &str) -> Result<Statement, ParserError> {
-        Parser::parse_sql(sql)
-            .map_err(|e| {
-                ParserError::ParserError(format!("failed to parse definition sql: {}", e))
-            })?
-            .into_iter()
-            .exactly_one()
-            .map_err(|e| {
-                ParserError::ParserError(format!(
-                    "expecting exactly one statement in definition: {}",
-                    e
-                ))
-            })
+        Itertools::exactly_one(
+            Parser::parse_sql(sql)
+                .map_err(|e| {
+                    ParserError::ParserError(format!("failed to parse definition sql: {}", e))
+                })?
+                .into_iter(),
+        )
+        .map_err(|e| {
+            ParserError::ParserError(format!(
+                "expecting exactly one statement in definition: {}",
+                e
+            ))
+        })
     }
 
     /// Parse object name from a string.
@@ -1859,7 +1860,7 @@ impl Parser<'_> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected(format!("{:?}", &expected).as_str())
+            self.expected(format!("{:?}", expected).as_str())
         }
     }
 
@@ -4404,6 +4405,7 @@ impl Parser<'_> {
         let token = self.next_token();
         match token.token {
             Token::SingleQuotedString(s) => Ok(s),
+            Token::DollarQuotedString(s) => Ok(s.value),
             _ => self.expected_at(checkpoint, "literal string"),
         }
     }

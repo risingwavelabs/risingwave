@@ -18,7 +18,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -384,6 +384,12 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Filesystem path of the `SQLite` metastore backing this simulated cluster.
+    #[cfg_or_panic(madsim)]
+    pub fn meta_sqlite_path(&self) -> &Path {
+        self.sqlite_file_handle.path()
+    }
+
     /// Start a RisingWave cluster for testing.
     ///
     /// This function should be called exactly once in a test.

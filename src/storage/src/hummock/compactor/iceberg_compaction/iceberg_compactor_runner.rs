@@ -446,7 +446,7 @@ pub async fn create_task_execution(
         task_type,
     } = iceberg_compaction_task;
 
-    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
+    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     let catalog = iceberg_config

@@ -188,10 +188,7 @@ impl NotificationServiceImpl {
         let frontends = cluster_guard
             .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
             .await?;
-        let worker_nodes = compute_nodes
-            .into_iter()
-            .chain(frontends.into_iter())
-            .collect();
+        let worker_nodes = compute_nodes.into_iter().chain(frontends).collect();
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((worker_nodes, notification_version))
     }

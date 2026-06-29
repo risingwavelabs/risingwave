@@ -285,12 +285,9 @@ impl<S: StateStore> NowExecutor<S> {
 
                     // Update the last timestamp.
                     state_table.update(row::once(&last_timestamp_datum), &last_row);
-                    last_timestamp_datum = last_row
-                        .into_inner()
-                        .into_vec()
-                        .into_iter()
-                        .exactly_one()
-                        .unwrap();
+                    last_timestamp_datum =
+                        Itertools::exactly_one(last_row.into_inner().into_vec().into_iter())
+                            .unwrap();
                 }
                 _ => unreachable!(),
             }

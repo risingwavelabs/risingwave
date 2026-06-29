@@ -265,7 +265,7 @@
 - id: create_mock_iceberg_sink_with_pk_index_sparse_partition
   sql: |
     create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
-    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+    explain create sink s1 from t1 WITH (
       connector = 'iceberg',
       type = 'upsert',
       catalog.type = 'mock',
@@ -277,22 +277,21 @@
       s3.region = 'us-east-1',
       s3.access.key = 'hummockadmin',
       s3.secret.key = 'hummockadmin',
-      primary_key = 'v1',
       write_mode = 'merge-on-read',
       format_version = '3',
+      create_table_if_not_exists = 'true',
       enable_pk_index = 'true'
     );
   explain_output: |
     StreamIcebergWithPkIndexDvMerger
     └─StreamExchange { dist: HashShard(file_path) }
-      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
-        └─StreamExchange { dist: HashShard($expr1) }
-          └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Time) as $expr1] }
-            └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id], downstream_pk: [t1._row_id] }
+        └─StreamExchange { dist: HashShard(t1._row_id) }
+          └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_mock_iceberg_sink_with_pk_index_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
-    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+    explain create sink s1 from t1 WITH (
       connector = 'iceberg',
       type = 'upsert',
       catalog.type = 'mock',
@@ -304,16 +303,17 @@
       s3.region = 'us-east-1',
       s3.access.key = 'hummockadmin',
       s3.secret.key = 'hummockadmin',
-      primary_key = 'v1',
       write_mode = 'merge-on-read',
       format_version = '3',
+      create_table_if_not_exists = 'true',
       enable_pk_index = 'true'
     );
   explain_output: |
     StreamIcebergWithPkIndexDvMerger
     └─StreamExchange { dist: HashShard(file_path) }
-      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
-        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id], downstream_pk: [t1._row_id] }
+        └─StreamExchange { dist: HashShard(t1._row_id) }
+          └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_upsert_jdbc_sink_with_downstream_pk1_separate_sink
   sql: |
     set streaming_separate_sink to true;
@@ -350,6 +350,63 @@
     StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
     └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t1._row_id) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+- id: iceberg_v3_pk_index_sink_hidden_extra
+  sql: |
+    create table t (v1 int, v2 bigint, v3 varchar, v4 time, PRIMARY KEY (v1, v2, v3));
+    explain create sink s as select t.v1 from t WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      write_mode = 'merge-on-read',
+      format_version = '3',
+      create_table_if_not_exists = 'true',
+      enable_pk_index = 'true'
+    );
+  explain_output: |
+    StreamIcebergWithPkIndexDvMerger
+    └─StreamExchange { dist: HashShard(file_path) }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, t.v2, t.v3], downstream_pk: [v1, t.v2, t.v3] }
+        └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
+          └─StreamTableScan { table: t, columns: [v1, v2, v3] }
+- id: iceberg_v3_pk_index_sink_visible_extra
+  sql: |
+    create table u (v1 int primary key, name varchar);
+    create table o (oid bigint primary key, v1 int, p varchar);
+    explain create sink s as select u.v1 as v1, o.oid as v2, u.name as v3, cast('00:00:00' as time) as v4 from u join o on u.v1 = o.v1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      write_mode = 'merge-on-read',
+      format_version = '3',
+      enable_pk_index = 'true'
+    );
+  explain_output: |
+    StreamIcebergWithPkIndexDvMerger
+    └─StreamExchange { dist: HashShard(file_path) }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4], downstream_pk: [v1, v2] }
+        └─StreamExchange { dist: HashShard(u.v1, o.oid) }
+          └─StreamProject { exprs: [u.v1, o.oid, u.name, '00:00:00':Time] }
+            └─StreamHashJoin { type: Inner, predicate: u.v1 = o.v1 }
+              ├─StreamExchange { dist: HashShard(u.v1) }
+              │ └─StreamTableScan { table: u, columns: [v1, name] }
+              └─StreamExchange { dist: HashShard(o.v1) }
+                └─StreamTableScan { table: o, columns: [oid, v1] }
 - id: separate_aggregation_and_sink
   sql: |
     set streaming_separate_sink to true;
@@ -380,3 +437,13 @@
           │ └─StreamTableScan { table: t, columns: [v1, _row_id] }
           └─StreamExchange { dist: HashShard(t.v1) }
             └─StreamTableScan { table: t, columns: [v1, v2, _row_id] }
+- id: create_snapshot_free_sink_query_with_project_filter
+  sql: |
+    create table t (id int primary key, v1 int, v2 int);
+    explain (verbose) create sink s as select id, v1 + 1 as v1 from t where v2 > 10
+    with (connector = 'blackhole', snapshot = 'false');
+  explain_output: |
+    StreamSink { type: upsert, columns: [id, v1] }
+    └─StreamProject { exprs: [t.id, (t.v1 + 1:Int32) as $expr1] }
+      └─StreamFilter [upsert] { predicate: (t.v2 > 10:Int32) }
+        └─StreamTableScan { table: t, columns: [t.id, t.v1, t.v2], stream_scan_type: UpstreamOnly, stream_key: [t.id], pk: [id], dist: UpstreamHashShard(t.id) }

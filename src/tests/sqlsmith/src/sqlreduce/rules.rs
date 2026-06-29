@@ -17,6 +17,7 @@
 //! This module defines reduction rules and operations for different AST node types,
 //! providing configurable reduction behavior for comprehensive SQL simplification.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 
 use risingwave_sqlparser::ast::*;
@@ -531,7 +532,7 @@ pub fn generate_reduction_candidates(
 
     // Sort candidates by dependency-aware priority (higher priority first)
     // Independent clauses (WHERE, ORDER BY) tried first, then dependent ones (SELECT, GROUP BY)
-    candidates.sort_by(|a, b| b.operation.priority().cmp(&a.operation.priority()));
+    candidates.sort_by_key(|c| Reverse(c.operation.priority()));
 
     tracing::debug!(
         "Sorted candidates by dependency-aware priority - first 10: {:?}",

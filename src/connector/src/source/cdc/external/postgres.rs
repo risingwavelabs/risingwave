@@ -1003,8 +1003,8 @@ mod tests {
         .await
         .unwrap();
 
-        println!("columns: {:?}", &table.column_descs());
-        println!("primary keys: {:?}", &table.pk_names());
+        println!("columns: {:?}", table.column_descs());
+        println!("primary keys: {:?}", table.pk_names());
     }
 
     #[test]

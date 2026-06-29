@@ -70,8 +70,9 @@ use crate::handler::create_mv::{
 };
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
-    ensure_connection_type_allowed, execute_with_long_running_notification,
-    get_table_catalog_by_table_name, reject_internal_table_dependencies,
+    ensure_connection_type_allowed, ensure_local_fs_connector_allowed,
+    execute_with_long_running_notification, get_table_catalog_by_table_name,
+    reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -201,6 +202,7 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+    ensure_local_fs_connector_allowed(session, &connector)?;
 
     // Used for debezium's table name
     let sink_from_table_name;
@@ -379,19 +381,10 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
-        Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink_from_name.is_some() || is_iceberg_engine_internal {
-                true
-            } else {
-                return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
-                )
-                .into());
-            }
-        }
-        _ => false,
-    };
+    let without_backfill = matches!(
+        resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
+        Some(flag) if flag.eq_ignore_ascii_case("false")
+    );
 
     let target_table_catalog = stmt
         .into_table_name
@@ -781,7 +774,6 @@ pub(crate) fn derive_default_column_project_for_sink(
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
         // The missing columns will be filled with default value (`null` if not explicitly defined).
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
-        #[expect(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);
@@ -974,6 +966,7 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::config::FrontendConfig;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
@@ -1020,5 +1013,42 @@ pub mod tests {
             .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
             .unwrap();
         assert_eq!(sink.name, "snk1");
+    }
+
+    #[tokio::test]
+    async fn test_create_fs_sink_requires_frontend_config() {
+        let frontend = LocalFrontend::with_frontend_config(
+            Default::default(),
+            FrontendConfig {
+                unsafe_enable_local_fs_connector: false,
+                ..Default::default()
+            },
+        )
+        .await;
+        frontend.run_sql("CREATE TABLE t(v int);").await.unwrap();
+        frontend
+            .run_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;")
+            .await
+            .unwrap();
+
+        let err = frontend
+            .run_sql(
+                r#"CREATE SINK local_sink FROM mv
+                    WITH (
+                        connector = 'fs',
+                        fs.path = '/tmp/rw-local-sink',
+                        type = 'append-only',
+                        force_append_only = 'true'
+                    ) FORMAT PLAIN ENCODE JSON (force_append_only = 'true');"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_local_fs_connector = true"),
+            "{err:?}"
+        );
     }
 }

@@ -17,9 +17,10 @@ use iceberg::writer::PositionDeleteInput;
 use risingwave_common::array::DataChunk;
 use risingwave_connector::sink::SinkWriterParam;
 use risingwave_connector::sink::iceberg::{IcebergConfig, IcebergSinkWriterInner};
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::SinkId;
 
-use super::writer::{IcebergWriter, IcebergWriterFlushOutput};
+use super::writer::IcebergWriter;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 pub struct IcebergWriterImpl {
@@ -55,7 +56,7 @@ impl IcebergWriter for IcebergWriterImpl {
         Ok(positions)
     }
 
-    async fn flush(&mut self) -> StreamExecutorResult<Option<IcebergWriterFlushOutput>> {
+    async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>> {
         let Some(data_files) = self
             .inner
             .close()
@@ -64,6 +65,10 @@ impl IcebergWriter for IcebergWriterImpl {
         else {
             return Ok(None);
         };
+        if data_files.is_empty() {
+            return Ok(None);
+        }
+
         let metadata = self
             .inner
             .generate_commit_metadata(data_files)

@@ -32,6 +32,7 @@ def _(outer_panels: Panels):
     - Merger Barrier Align: If the merger barrier align is high, it means the merger is not able to align the barriers in time.
     - Join Amplification: If the join amplification is high, it means the join is not able to process the data in time.
 - Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
+- PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
 """,
                     height=9,
                 ),
@@ -57,6 +58,13 @@ def _(outer_panels: Panels):
                                 "<",
                             ),
                             "Cross-DB Log Retention Expiring table {{table_id}} actor {{actor_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            alert_threshold(
+                                f"clamp_min({metric('pg_cdc_upstream_max_lsn')} - on(source_id) group_left(slot_name) {metric('stream_pg_cdc_state_table_lsn')}, 0)",
+                                20 * 1024 * 1024 * 1024,
+                            ),
+                            "PG CDC WAL Lag Too High slot {{slot_name}} source {{source_id}}",
                         ),
                     ],
                     ["last"],
@@ -174,7 +182,7 @@ def _(outer_panels: Panels):
                             "Abnormal Delta Log Number",
                         ),
                         panels.target(
-                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by {NODE_LABEL}", 10000000),
+                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by ({NODE_LABEL})", 10000000),
                             "Abnormal Pending Event Number @ {{%s}}" % (NODE_LABEL),
                         ),
                         panels.target(
