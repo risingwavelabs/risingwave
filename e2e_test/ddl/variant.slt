@@ -168,6 +168,21 @@ from v;
 ----
 array int64 double boolean null string object array int64
 
+query BBB
+with v as (
+    select parse_variant('{"a":[1]}') as value
+)
+select
+    variant_get(value, '$.missing') is null,
+    try_variant_get(value, '$.') is null,
+    try_variant_get(value, '$.missing') is null
+from v;
+----
+t t t
+
+statement error invalid variant path
+select variant_get(parse_variant('{"a":[1]}'), '$.');
+
 query TTTTTTT
 with v as (
     select
