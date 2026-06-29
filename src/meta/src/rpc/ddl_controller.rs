@@ -1202,7 +1202,7 @@ impl DdlController {
                 resource_type,
                 streaming_job_model,
                 notify_creating,
-                replace_sink_info.clone(),
+                replace_sink_info,
             )
             .await
         {
