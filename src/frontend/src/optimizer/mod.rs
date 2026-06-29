@@ -690,8 +690,9 @@ impl LogicalPlanRoot {
                 if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
                     return Err(ErrorCode::NotSupported(
                         err,
-                        "Using VARIANT columns as stream keys is not supported yet because their state encoding must remain stable across releases.".to_owned(),
-                    ).into());
+                        "Using VARIANT columns as stream keys is not supported.".to_owned(),
+                    )
+                    .into());
                 }
                 if !ctx
                     .session_ctx()

@@ -75,6 +75,24 @@ fn variant_arrow_fields() -> arrow_schema::Fields {
     .into()
 }
 
+fn is_variant_arrow_data_type(data_type: &arrow_schema::DataType) -> bool {
+    let arrow_schema::DataType::Struct(fields) = data_type else {
+        return false;
+    };
+    if fields.len() != 2 {
+        return false;
+    }
+
+    let metadata = &fields[0];
+    let value = &fields[1];
+    metadata.name() == "metadata"
+        && metadata.data_type() == &arrow_schema::DataType::Binary
+        && !metadata.is_nullable()
+        && value.name() == "value"
+        && value.data_type() == &arrow_schema::DataType::Binary
+        && !value.is_nullable()
+}
+
 /// Defines how to convert RisingWave arrays to Arrow arrays.
 ///
 /// This trait allows for customized conversion logic for different external systems using Arrow.
@@ -671,7 +689,14 @@ pub trait FromArrow {
         match (type_name, physical_type) {
             ("arrowudf.decimal", arrow_schema::DataType::Utf8) => Ok(DataType::Decimal),
             ("arrowudf.json", arrow_schema::DataType::Utf8) => Ok(DataType::Jsonb),
-            ("arrow.parquet.variant", arrow_schema::DataType::Struct(_)) => Ok(DataType::Variant),
+            ("arrow.parquet.variant", physical_type)
+                if is_variant_arrow_data_type(physical_type) =>
+            {
+                Ok(DataType::Variant)
+            }
+            ("arrow.parquet.variant", _) => Err(ArrayError::from_arrow(
+                "expected `arrow.parquet.variant` physical type struct<metadata: binary not null, value: binary not null>".to_owned(),
+            )),
             _ => Err(ArrayError::from_arrow(format!(
                 "unsupported extension type: {type_name:?}"
             ))),
@@ -1631,38 +1656,37 @@ impl TryFrom<&arrow_array::StructArray> for VariantArray {
     fn try_from(array: &arrow_array::StructArray) -> Result<Self, Self::Error> {
         use arrow_array::Array;
 
-        let arrow_schema::DataType::Struct(fields) = array.data_type() else {
+        if !is_variant_arrow_data_type(array.data_type()) {
             return Err(ArrayError::from_arrow(
-                "expected struct array for variant".to_owned(),
+                "expected variant array type struct<metadata: binary not null, value: binary not null>".to_owned(),
             ));
-        };
-        let metadata_idx = fields
-            .iter()
-            .position(|field| field.name() == "metadata")
-            .ok_or_else(|| ArrayError::from_arrow("variant metadata field is missing"))?;
-        let value_idx = fields
-            .iter()
-            .position(|field| field.name() == "value")
-            .ok_or_else(|| ArrayError::from_arrow("variant value field is missing"))?;
+        }
         let metadata: &arrow_array::BinaryArray = array
-            .column(metadata_idx)
+            .column(0)
             .as_any()
             .downcast_ref()
             .ok_or_else(|| ArrayError::from_arrow("variant metadata field must be binary"))?;
         let value: &arrow_array::BinaryArray = array
-            .column(value_idx)
+            .column(1)
             .as_any()
             .downcast_ref()
             .ok_or_else(|| ArrayError::from_arrow("variant value field must be binary"))?;
 
-        VariantArray::from_metadata_values((0..array.len()).map(|idx| {
+        let mut values = Vec::with_capacity(array.len());
+        for idx in 0..array.len() {
             if array.is_null(idx) {
-                None
+                values.push(None);
             } else {
-                Some((metadata.value(idx), value.value(idx)))
+                if metadata.is_null(idx) || value.is_null(idx) {
+                    return Err(ArrayError::from_arrow(format!(
+                        "variant metadata/value field must not be null at row {idx}"
+                    )));
+                }
+                values.push(Some((metadata.value(idx), value.value(idx))));
             }
-        }))
-        .map_err(|e| {
+        }
+
+        VariantArray::from_metadata_values(values).map_err(|e| {
             ArrayError::from_arrow(format!("invalid variant arrow array: {}", e.as_report()))
         })
     }
