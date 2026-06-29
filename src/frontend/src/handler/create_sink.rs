@@ -26,8 +26,8 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, CreateType, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME, Schema,
+    ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    Schema,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -694,24 +694,11 @@ async fn create_sink_or_replace(
                     )
                     .into());
                 }
-                if sink_replace_requires_exactly_once_state(&sink) {
-                    return Err(ErrorCode::NotSupported(
-                        "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
-                        "set is_exactly_once=false or recreate the sink manually".to_owned(),
-                    )
-                    .into());
-                }
 
                 sink.schema_id = original_sink.schema_id;
                 sink.database_id = original_sink.database_id;
                 sink.name = original_sink.name.clone();
                 sink.owner = original_sink.owner;
-                // `post_collect_job_fragments` drops the old sink before the replacement sink may
-                // be marked `Created` by a later progress barrier. If meta recovers in that window,
-                // a foreground creating job would be aborted, leaving neither the old nor the new
-                // sink. Background jobs are recovered instead, so replacement sinks must be
-                // background.
-                sink.create_type = CreateType::Background;
             }
         }
 
@@ -1220,7 +1207,9 @@ pub mod tests {
             )
             .unwrap();
         assert_eq!(sink.name, "snk1");
-        assert_eq!(sink.create_type, CreateType::Background);
+        // Frontend leaves the replacement job foreground for the meta foreground wait path.
+        // Meta switches it to background when marking the job Creating during cutover.
+        assert_eq!(sink.create_type, CreateType::Foreground);
     }
 
     #[tokio::test]

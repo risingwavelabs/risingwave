@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
-use replace_job_plan::{ReplaceSink, ReplaceSource, ReplaceTable};
+use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
@@ -48,7 +48,6 @@ use risingwave_pb::ddl_service::{streaming_job_resource_type, *};
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
-use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use thiserror_ext::AsReport;
@@ -142,34 +141,6 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
-    }
-
-    fn extract_replace_sink_info(
-        fragment_graph: StreamFragmentGraph,
-        replace_sink: ReplaceSink,
-    ) -> (
-        SinkId,
-        StreamingJob,
-        StreamFragmentGraph,
-        HashSet<ObjectId>,
-        streaming_job_resource_type::ResourceType,
-    ) {
-        let ReplaceSink {
-            sink,
-            old_sink_id,
-            dependencies,
-            resource_type,
-        } = replace_sink;
-
-        (
-            old_sink_id,
-            StreamingJob::Sink(sink.unwrap()),
-            fragment_graph,
-            dependencies.into_iter().collect::<HashSet<_>>(),
-            resource_type
-                .and_then(|resource_type| resource_type.resource_type)
-                .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
-        )
     }
 
     fn default_streaming_job_resource_type() -> streaming_job_resource_type::ResourceType {
@@ -895,13 +866,19 @@ impl DdlService for DdlServiceImpl {
 
         let command = match replace_job {
             Some(replace_job_plan::ReplaceJob::ReplaceSink(replace_sink)) => {
-                let (old_sink_id, stream_job, fragment_graph, dependencies, resource_type) =
-                    Self::extract_replace_sink_info(fragment_graph.unwrap(), replace_sink);
-                DdlCommand::CreateStreamingJob {
-                    stream_job,
-                    fragment_graph,
+                let replace_job_plan::ReplaceSink {
+                    sink,
+                    old_sink_id,
                     dependencies,
                     resource_type,
+                } = replace_sink;
+                DdlCommand::CreateStreamingJob {
+                    stream_job: StreamingJob::Sink(sink.unwrap()),
+                    fragment_graph: fragment_graph.unwrap(),
+                    dependencies: dependencies.into_iter().collect::<HashSet<_>>(),
+                    resource_type: resource_type
+                        .and_then(|resource_type| resource_type.resource_type)
+                        .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
                     if_not_exists: false,
                     refresh_interval_sec: None,
                     replace_sink: Some(old_sink_id),

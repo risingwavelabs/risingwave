@@ -1080,19 +1080,12 @@ impl DdlController {
         replace_sink: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let replace_sink_info = if let Some(old_sink_id) = replace_sink {
-            let StreamingJob::Sink(sink) = &mut streaming_job else {
+            let StreamingJob::Sink(sink) = &streaming_job else {
                 bail!("replace sink requires a sink job")
             };
-            // Keep the replacement sink in background mode from the beginning: it skips the
-            // creating notification below because the temporary catalog name is not visible to
-            // frontend until cutover, so the foreground wait path has no creating notification to
-            // wait on. `post_collect_job_fragments` will still mark it as creating and atomically
-            // drop the old sink.
-            sink.create_type = CreateType::Background as _;
             if sink.target_table.is_some() {
                 bail_not_implemented!("replace sink into table")
             }
-            validate_sink(sink).await?;
 
             Some(old_sink_id)
         } else {
@@ -1190,10 +1183,6 @@ impl DdlController {
         };
         // Generate streaming job metadata and issue the create command in two steps, so that the
         // error phase is classified at the barrier command boundary.
-        // Replacement sinks are created with a temporary catalog name and are not visible to
-        // frontend until the cutover transaction renames them to the old sink name. Therefore the
-        // creating notification is skipped for replacement sinks.
-        let notify_creating = replace_sink_info.is_none();
         let create_result = match self
             .generate_streaming_job(
                 ctx,
@@ -1201,7 +1190,6 @@ impl DdlController {
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
-                notify_creating,
                 replace_sink_info,
             )
             .await
@@ -1256,7 +1244,6 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
-        notify_creating: bool,
         replace_sink: Option<SinkId>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
@@ -1374,6 +1361,9 @@ impl DdlController {
         }
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
+        // Replacement sinks use a temporary catalog name before cutover, so do not notify
+        // frontend about their creating catalog.
+        let notify_creating = replace_sink.is_none();
         if notify_creating {
             self.metadata_manager
                 .catalog_controller
@@ -1387,10 +1377,12 @@ impl DdlController {
         } else {
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments_without_notification(
-                    &stream_job_fragments,
-                    streaming_job,
+                .prepare_streaming_job(
+                    stream_job_fragments.stream_job_id(),
+                    || stream_job_fragments.fragments.values(),
+                    &stream_job_fragments.downstreams,
                     false,
+                    None,
                     Some(backfill_orders),
                 )
                 .await?;

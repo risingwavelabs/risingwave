@@ -647,24 +647,6 @@ impl CatalogController {
         .await
     }
 
-    pub async fn prepare_stream_job_fragments_without_notification(
-        &self,
-        stream_job_fragments: &StreamJobFragmentsToCreate,
-        _streaming_job: &StreamingJob,
-        for_replace: bool,
-        backfill_orders: Option<BackfillOrders>,
-    ) -> MetaResult<()> {
-        self.prepare_streaming_job(
-            stream_job_fragments.stream_job_id(),
-            || stream_job_fragments.fragments.values(),
-            &stream_job_fragments.downstreams,
-            for_replace,
-            None,
-            backfill_orders,
-        )
-        .await
-    }
-
     // TODO: In this function, we also update the `Table` model in the meta store.
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
@@ -1085,13 +1067,17 @@ impl CatalogController {
         }
 
         // Mark job as CREATING.
-        StreamingJobModel::update(streaming_job::ActiveModel {
+        let mut streaming_job_model = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Creating),
             ..Default::default()
-        })
-        .exec(&txn)
-        .await?;
+        };
+        if replace_sink.is_some() {
+            streaming_job_model.create_type = Set(CreateType::Background);
+        }
+        StreamingJobModel::update(streaming_job_model)
+            .exec(&txn)
+            .await?;
 
         if let Some(split_assignment) = split_assignment {
             let fragment_splits = split_assignment
@@ -1182,10 +1168,7 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            let res = Object::delete_many()
-                .filter(object::Column::Oid.is_in(old_object_ids))
-                .exec(&txn)
-                .await?;
+            let res = Object::delete_by_id(old_sink_id).exec(&txn).await?;
             if res.rows_affected == 0 {
                 return Err(MetaError::catalog_id_not_found("sink", old_sink_id));
             }
