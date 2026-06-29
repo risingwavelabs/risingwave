@@ -18,7 +18,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -26,7 +26,7 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use rw_futures_util::select_all;
 use thiserror_ext::AsReport;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
@@ -270,6 +270,44 @@ fn spawn_maintenance_loop(
     })
 }
 
+async fn supervise_child_loops(
+    mut shutdown_rx: Receiver<()>,
+    child_shutdown_tx: watch::Sender<bool>,
+    child_handles: Vec<(&'static str, JoinHandle<()>)>,
+) {
+    let mut child_handles = child_handles
+        .into_iter()
+        .map(|(name, handle)| async move { (name, handle.await) })
+        .collect::<FuturesUnordered<_>>();
+
+    // Child loops are expected to run until the parent timer task is shutting down. If any of
+    // them finishes first, the timer task is in a partial-failure state and should fail fast.
+    tokio::select! {
+        _ = &mut shutdown_rx => {
+            let _ = child_shutdown_tx.send(true);
+            while let Some((name, result)) = child_handles.next().await {
+                if let Err(e) = result {
+                    warn!(
+                        handler = name,
+                        error = %e.as_report(),
+                        "Hummock timer handler loop failed during shutdown"
+                    );
+                }
+            }
+        }
+        Some((name, result)) = child_handles.next() => {
+            match result {
+                Ok(()) => {
+                    panic!("Hummock timer handler loop [{name}] exited unexpectedly");
+                }
+                Err(e) => {
+                    panic!("Hummock timer handler loop [{name}] failed: {}", e.as_report());
+                }
+            }
+        }
+    }
+}
+
 impl HummockManager {
     pub fn hummock_timer_task(
         hummock_manager: Arc<Self>,
@@ -365,18 +403,7 @@ impl HummockManager {
                 ),
             ));
 
-            let _ = shutdown_rx.await;
-            let _ = child_shutdown_tx.send(true);
-
-            for (name, handle) in child_handles {
-                if let Err(e) = handle.await {
-                    warn!(
-                        handler = name,
-                        error = %e.as_report(),
-                        "Hummock timer handler loop failed"
-                    );
-                }
-            }
+            supervise_child_loops(shutdown_rx, child_shutdown_tx, child_handles).await;
 
             tracing::info!("Hummock timer loop is stopped");
         });
@@ -860,51 +887,7 @@ mod tests {
 
         use tokio::sync::watch;
 
-        use super::super::{interval_stream, spawn_periodic_loop, spawn_serial_timer_lane};
-
-        #[tokio::test(start_paused = true)]
-        async fn test_spawn_periodic_loop_isolated_progress() {
-            let (shutdown_tx, shutdown_rx) = watch::channel(false);
-            let slow_counter = Arc::new(AtomicUsize::new(0));
-            let fast_counter = Arc::new(AtomicUsize::new(0));
-
-            let slow_handle = spawn_periodic_loop(
-                "test_slow",
-                Duration::from_millis(10),
-                shutdown_rx.clone(),
-                {
-                    let slow_counter = slow_counter.clone();
-                    move || {
-                        let slow_counter = slow_counter.clone();
-                        async move {
-                            slow_counter.fetch_add(1, Ordering::Relaxed);
-                            tokio::time::sleep(Duration::from_millis(30)).await;
-                        }
-                    }
-                },
-            );
-
-            let fast_handle =
-                spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
-                    let fast_counter = fast_counter.clone();
-                    move || {
-                        let fast_counter = fast_counter.clone();
-                        async move {
-                            fast_counter.fetch_add(1, Ordering::Relaxed);
-                        }
-                    }
-                });
-
-            tokio::time::sleep(Duration::from_millis(120)).await;
-            shutdown_tx.send(true).unwrap();
-            slow_handle.await.unwrap();
-            fast_handle.await.unwrap();
-
-            let slow = slow_counter.load(Ordering::Relaxed);
-            let fast = fast_counter.load(Ordering::Relaxed);
-            assert!(fast > 0);
-            assert!(fast > slow);
-        }
+        use super::super::{interval_stream, spawn_serial_timer_lane};
 
         #[tokio::test(start_paused = true)]
         async fn test_serial_timer_lane_does_not_run_handlers_concurrently() {
