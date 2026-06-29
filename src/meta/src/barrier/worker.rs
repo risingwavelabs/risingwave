@@ -61,6 +61,7 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
     rendered_layout_matches_current,
@@ -298,11 +299,13 @@ fn build_reschedule_from_context(
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
@@ -317,6 +320,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             scale_controller,
             env.clone(),
@@ -403,9 +407,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap)
+                    .instrument(span),
+            )
+            .await;
         }
 
         Box::pin(self.run_inner(shutdown_rx)).await
@@ -963,6 +969,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     "failed to notify table cache refill policies after recovery"
                 );
             }
+        }
+        if let Err(err) = context.notify_hummock_serving_table_vnode_mappings().await {
+            warn!(
+                error = %err.as_report(),
+                "failed to notify serving table vnode mappings after recovery"
+            );
         }
     }
 

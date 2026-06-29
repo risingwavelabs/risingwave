@@ -26,7 +26,7 @@ use crate::serving::{
     to_pb_serving_table_vnode_mappings,
 };
 
-fn build_hummock_serving_table_vnode_mappings(
+pub fn build_hummock_serving_table_vnode_mappings(
     serving_vnode_mapping: &ServingVnodeMappingRef,
     worker_id: WorkerId,
     streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
@@ -39,6 +39,23 @@ fn build_hummock_serving_table_vnode_mappings(
     );
 
     to_pb_serving_table_vnode_mappings(&table_vnode_mapping)
+}
+
+pub fn build_hummock_serving_table_vnode_runtime_config(
+    serving_vnode_mapping: &ServingVnodeMappingRef,
+    worker_id: WorkerId,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+    version: NotificationVersion,
+) -> PbTableRefillRuntimeConfig {
+    PbTableRefillRuntimeConfig {
+        serving_table_vnode_mappings: Some(build_hummock_serving_table_vnode_mappings(
+            serving_vnode_mapping,
+            worker_id,
+            streaming_parallelisms,
+        )),
+        version,
+        ..Default::default()
+    }
 }
 
 pub fn build_hummock_table_refill_runtime_config(
