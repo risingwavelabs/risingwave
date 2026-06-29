@@ -15,6 +15,7 @@
 use std::cmp;
 use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -55,7 +56,7 @@ pub struct Versioning {
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
     /// Latest hummock version
-    pub current_version: HummockVersion,
+    pub current_version: Arc<HummockVersion>,
     pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
@@ -155,7 +156,7 @@ impl HummockManager {
     }
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
-        f(&self.versioning.read().await.current_version)
+        f(self.versioning.read().await.current_version.as_ref())
     }
 
     pub async fn get_version_id(&self) -> HummockVersionId {
@@ -267,6 +268,7 @@ impl HummockManager {
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
+                &self.version_stat_tx,
             );
             let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {
