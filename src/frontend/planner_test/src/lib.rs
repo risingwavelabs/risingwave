@@ -39,6 +39,7 @@ use risingwave_frontend::{
     Binder, Explain, FrontendOpts, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
     WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
+use risingwave_license::{LicenseKey, LicenseManager};
 use risingwave_sqlparser::ast::{
     AstOption, BackfillOrderStrategy, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
@@ -964,6 +965,8 @@ pub fn test_data_dir() -> PathBuf {
 }
 
 pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    LicenseManager::get().refresh(LicenseKey::default().as_ref());
+
     let file_name = file_path.file_name().unwrap().to_str().unwrap();
     println!("-- running {file_name} --");
 

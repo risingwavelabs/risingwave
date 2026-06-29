@@ -72,37 +72,6 @@ fn resolve_since_timestamp_log_store_epoch(
         .into());
     };
     let first_checkpoint_epoch = first_log.checkpoint_epoch;
-    let latest_log = change_log.last().expect("checked non-empty");
-    let latest_epoch = latest_log.checkpoint_epoch;
-    if upstream_committed_epoch != latest_epoch {
-        return Err(anyhow::anyhow!(
-            "upstream committed epoch {} does not match latest changelog epoch {} for upstream table {}",
-            upstream_committed_epoch,
-            latest_epoch,
-            table_id,
-        )
-        .into());
-    }
-    if !latest_log.non_checkpoint_epochs.is_empty() {
-        return Err(anyhow::anyhow!(
-            "latest changelog of upstream table {} contains non-checkpoint epochs when resolving since_timestamp: {:?}",
-            table_id,
-            latest_log.non_checkpoint_epochs,
-        )
-        .into());
-    }
-
-    // `binary_search_by_checkpoint_epoch` searches only by the checkpoint epoch
-    // of each changelog entry. An entry may still cover earlier non-checkpoint
-    // epochs, e.g. `{ non_checkpoint_epochs: [30, 35], checkpoint_epoch: 40 }`
-    // covers `(20, 40]` if the previous checkpoint is 20. For `since_epoch =
-    // 35`, the search returns `Err(index_of_40)`, and 40 is the snapshot epoch.
-    // For `since_epoch = 40`, it returns `Ok(index_of_40)`. In both cases, the
-    // resolved snapshot epoch is the least checkpoint epoch >= `since_epoch`.
-    let checkpoint_epoch_index = match change_log.binary_search_by_checkpoint_epoch(since_epoch) {
-        Ok(index) => index,
-        Err(index) => index,
-    };
     if since_epoch < first_checkpoint_epoch {
         return Err(anyhow::anyhow!(
             "since_timestamp is earlier than the retained changelog of upstream table {}: requested epoch {}, first retained checkpoint epoch {}",
@@ -121,19 +90,54 @@ fn resolve_since_timestamp_log_store_epoch(
         )
         .into());
     }
-    let checkpoint_epoch = change_log
-        .get(checkpoint_epoch_index)
+    let latest_log = change_log.last().expect("checked non-empty");
+    if upstream_committed_epoch != latest_log.checkpoint_epoch {
+        return Err(anyhow::anyhow!(
+            "upstream committed epoch {} does not match latest changelog epoch {} for upstream table {}",
+            upstream_committed_epoch,
+            latest_log.checkpoint_epoch,
+            table_id,
+        )
+        .into());
+    }
+
+    // `binary_search_by_checkpoint_epoch` searches only by the checkpoint epoch
+    // of each changelog entry. An entry may still cover earlier non-checkpoint
+    // epochs, e.g. `{ non_checkpoint_epochs: [30, 35], checkpoint_epoch: 40 }`
+    // covers `(20, 40]` if the previous checkpoint is 20. For `since_epoch =
+    // 35`, the search returns `Err(index_of_40)`, and 40 is the snapshot epoch.
+    // For `since_epoch = 40`, it returns `Ok(index_of_40)`. In both cases, the
+    // resolved snapshot epoch is the least checkpoint epoch >= `since_epoch`.
+    let snapshot_epoch_index = match change_log.binary_search_by_checkpoint_epoch(since_epoch) {
+        Ok(index) => index,
+        Err(index) => index,
+    };
+    let snapshot_epoch = change_log
+        .get(snapshot_epoch_index)
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "since_timestamp is later than the latest changelog of upstream table {}: requested epoch {}, latest changelog epoch {}",
                 table_id,
                 since_epoch,
-                latest_epoch,
+                upstream_committed_epoch,
             )
         })?
         .checkpoint_epoch;
+    // A request inside the latest changelog entry may be smaller than
+    // `upstream_committed_epoch`, but still resolve to the latest checkpoint.
+    // That end-of-log case is not a usable historical snapshot epoch.
+    if snapshot_epoch >= upstream_committed_epoch {
+        return Err(anyhow::anyhow!(
+            "since_timestamp is too new for upstream table {}: requested epoch {}, resolved snapshot epoch {}, latest changelog epoch {}",
+            table_id,
+            since_epoch,
+            snapshot_epoch,
+            upstream_committed_epoch,
+        )
+        .into());
+    }
     let epochs = change_log
-        .range((checkpoint_epoch_index + 1)..)
+        .range((snapshot_epoch_index + 1)..)
         .map(|epoch_log| {
             (
                 epoch_log.non_checkpoint_epochs.clone(),
@@ -142,7 +146,7 @@ fn resolve_since_timestamp_log_store_epoch(
         })
         .collect::<Vec<_>>();
 
-    Ok((checkpoint_epoch, epochs))
+    Ok((snapshot_epoch, epochs))
 }
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -1044,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_since_timestamp_log_store_epoch_rejects_latest_non_checkpoint_epochs() {
+    fn test_resolve_since_timestamp_log_store_epoch_keeps_latest_non_checkpoint_epochs() {
         let table_id = TableId::new(233);
         let change_logs = TableChangeLogs::from_iter([(
             table_id,
@@ -1064,10 +1068,14 @@ mod tests {
             ]),
         )]);
 
-        let err = resolve_since_timestamp_log_store_epoch(table_id, 20, 40, &change_logs)
+        let resolved =
+            resolve_since_timestamp_log_store_epoch(table_id, 20, 40, &change_logs).unwrap();
+        assert_eq!(resolved, (20, vec![(vec![30], 40)]));
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 30, 40, &change_logs)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("contains non-checkpoint epochs"));
+        assert!(err.contains("since_timestamp is too new"));
     }
 
     #[test]

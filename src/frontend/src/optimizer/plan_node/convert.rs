@@ -166,7 +166,7 @@ pub enum BackfillType {
 }
 
 impl BackfillType {
-    pub fn derives_upsert_stream_kind(self) -> bool {
+    pub fn without_snapshot(self) -> bool {
         matches!(
             self,
             BackfillType::UpstreamOnlySink | BackfillType::SnapshotBackfillSinceTimestamp

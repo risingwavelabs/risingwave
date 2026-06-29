@@ -160,13 +160,18 @@ pub async fn gen_sink_plan(
         .map(|value| {
             let timestamp = value.parse::<Timestamptz>().map_err(|err| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "invalid value {value:?} of '{SINK_SINCE_TIMESTAMP_OPTION}' option: {err}"
+                    "invalid value {value:?} of '{SINK_SINCE_TIMESTAMP_OPTION}' option: {err}; \
+                     expected a timestamptz string with an explicit time zone, \
+                     for example '2024-01-01 00:00:00Z'"
                 ))
             })?;
             let timestamp_millis = u64::try_from(timestamp.timestamp_millis()).unwrap_or(0);
             Ok::<_, RwError>(Epoch::from_unix_millis_or_earliest(timestamp_millis).0)
         })
         .transpose()?;
+    if since_timestamp_epoch.is_some() {
+        Feature::SinkSinceTimestamp.check_available()?;
+    }
 
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
@@ -301,12 +306,6 @@ pub async fn gen_sink_plan(
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
     if since_timestamp_epoch.is_some() {
-        let Some((from_name, _)) = &direct_sink_from_name else {
-            return Err(ErrorCode::BindError(format!(
-                "`{SINK_SINCE_TIMESTAMP_OPTION}` only supports `CREATE SINK FROM MV or TABLE`"
-            ))
-            .into());
-        };
         if sink_into_table_name.is_some() {
             return Err(ErrorCode::BindError(format!(
                 "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support `CREATE SINK INTO TABLE`"
@@ -319,13 +318,17 @@ pub async fn gen_sink_plan(
             ))
             .into());
         }
-        let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
-        if table.database_id != sink_database_id {
-            return Err(ErrorCode::NotSupported(
-                format!("`{SINK_SINCE_TIMESTAMP_OPTION}` does not support cross-database sinks"),
-                "Please create the sink in the same database as the upstream table.".to_owned(),
-            )
-            .into());
+        if let Some((from_name, _)) = &direct_sink_from_name {
+            let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+            if table.database_id != sink_database_id {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support cross-database sinks"
+                    ),
+                    "Please create the sink in the same database as the upstream table.".to_owned(),
+                )
+                .into());
+            }
         }
     }
 

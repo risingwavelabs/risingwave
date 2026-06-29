@@ -621,15 +621,11 @@ impl ToStream for LogicalScan {
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
             if self.core.cross_database()
-                && matches!(
-                    ctx.backfill_type(),
-                    BackfillType::Replicated
-                        | BackfillType::UpstreamOnlySink
-                        | BackfillType::SnapshotBackfillSinceTimestamp
-                )
+                && (ctx.backfill_type() == BackfillType::Replicated
+                    || ctx.backfill_type().without_snapshot())
             {
                 return Err(ErrorCode::NotSupported(
-                    "We currently do not support cross database scan in upstream only mode."
+                    "We currently do not support cross database scan in replicated or without-snapshot mode."
                         .to_owned(),
                     "Please ensure the source table is in the same database.".to_owned(),
                 )

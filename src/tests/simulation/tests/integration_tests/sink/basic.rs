@@ -250,7 +250,30 @@ async fn test_sink_since_timestamp_starts_from_changelog() -> Result<()> {
     test_sink.wait_initial_parallelism(1).await?;
     session.flush().await?;
     test_sink.store.wait_for_count(1).await?;
-    test_sink.store.check_simple_result(&[2])?;
+    test_sink.store.check_result_rows(&[(2, "name-2")])?;
+
+    session.run("drop sink test_sink").await?;
+    drop(test_sink);
+
+    let test_sink_as_select = SimulationTestSink::register_new(TestSinkType::SinkWriter);
+    session
+        .run(format!(
+            "create sink test_sink as \
+             select id, name from t_since_sink \
+             with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
+    test_sink_as_select.wait_initial_parallelism(1).await?;
+    session.flush().await?;
+    test_sink_as_select.store.wait_for_count(1).await?;
+    test_sink_as_select
+        .store
+        .check_result_rows(&[(2, "name-2")])?;
 
     session.run("drop sink test_sink").await?;
     session.run("drop subscription sub_since_sink").await?;
