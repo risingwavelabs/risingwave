@@ -99,6 +99,8 @@ pub enum DateHandlingMode {
 pub enum TimestampHandlingMode {
     Milli,
     String,
+    /// ISO 8601 string without a timezone suffix.
+    Iso8601String,
 }
 
 #[derive(Clone, Copy)]
