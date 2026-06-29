@@ -827,11 +827,33 @@ mod tests {
     use crate::array::StructValue;
     use crate::types::{Date, F32, F64, Int256, Interval, Serial, Time, Timestamptz};
 
+    fn scalar_variant(value: ScalarRefImpl<'_>, data_type: &DataType) -> VariantVal {
+        VariantVal::try_from_scalar_ref(Some(value), data_type).unwrap()
+    }
+
     fn assert_same_variant(lhs: &VariantVal, rhs: &VariantVal) {
         assert_eq!(lhs, rhs);
         assert_eq!(
             lhs.as_scalar_ref().value_serialize(),
             rhs.as_scalar_ref().value_serialize()
+        );
+    }
+
+    fn assert_variant_parts(
+        name: &str,
+        variant: &VariantVal,
+        expected_metadata_hex: &str,
+        expected_value_hex: &str,
+    ) {
+        assert_eq!(
+            hex::encode(variant.metadata()),
+            expected_metadata_hex,
+            "{name} metadata bytes changed"
+        );
+        assert_eq!(
+            hex::encode(variant.value()),
+            expected_value_hex,
+            "{name} value bytes changed"
         );
     }
 
@@ -1016,5 +1038,120 @@ mod tests {
         assert_eq!(VariantVal::value_deserialize(&bytes).unwrap(), v);
         assert!(VariantVal::value_deserialize(&bytes[1..]).is_none());
         assert!(VariantRef::from_serialized(&bytes[1..]).is_none());
+    }
+
+    #[test]
+    fn golden_bytes_for_object_field_order_and_nested_values() {
+        let ordered_object: VariantVal = r#"{"a":1,"c":2}"#.parse().unwrap();
+        let reordered_object: VariantVal = r#"{"c":2,"a":1}"#.parse().unwrap();
+        assert_same_variant(&ordered_object, &reordered_object);
+        assert_variant_parts(
+            "object",
+            &reordered_object,
+            "11020001026163",
+            "02020001000912180100000000000000180200000000000000",
+        );
+
+        let nested: VariantVal = r#"{"z":[{"b":true,"a":1},["short",null]],"a":{"c":"longish"}}"#
+            .parse()
+            .unwrap();
+        assert_variant_parts(
+            "nested",
+            &nested,
+            "110400010203046162637a",
+            "02020003000d2f02010200081d6c6f6e67697368030200111d0202000100090a1801000000000000000403020006071573686f727400",
+        );
+    }
+
+    #[test]
+    fn golden_bytes_for_scalar_variant_values() {
+        assert_variant_parts(
+            "short_string",
+            &scalar_variant(ScalarRefImpl::Utf8("short"), &DataType::Varchar),
+            "010000",
+            "1573686f7274",
+        );
+        assert_variant_parts(
+            "long_string",
+            &scalar_variant(
+                ScalarRefImpl::Utf8(
+                    "0123456789012345678901234567890123456789012345678901234567890123",
+                ),
+                &DataType::Varchar,
+            ),
+            "010000",
+            "404000000030313233343536373839303132333435363738393031323334353637383930313233343536373839303132333435363738393031323334353637383930313233",
+        );
+        assert_variant_parts(
+            "int16",
+            &scalar_variant(ScalarRefImpl::Int16(1), &DataType::Int16),
+            "010000",
+            "100100",
+        );
+        assert_variant_parts(
+            "int32",
+            &scalar_variant(ScalarRefImpl::Int32(1), &DataType::Int32),
+            "010000",
+            "1401000000",
+        );
+        assert_variant_parts(
+            "int64",
+            &scalar_variant(ScalarRefImpl::Int64(1), &DataType::Int64),
+            "010000",
+            "180100000000000000",
+        );
+        assert_variant_parts(
+            "decimal",
+            &scalar_variant(
+                ScalarRefImpl::Decimal("123.45".parse().unwrap()),
+                &DataType::Decimal,
+            ),
+            "010000",
+            "280239300000000000000000000000000000",
+        );
+        assert_variant_parts(
+            "date",
+            &scalar_variant(
+                ScalarRefImpl::Date(Date::from_ymd_uncheck(2024, 1, 2)),
+                &DataType::Date,
+            ),
+            "010000",
+            "2c0c4d0000",
+        );
+        assert_variant_parts(
+            "time",
+            &scalar_variant(
+                ScalarRefImpl::Time(Time::from_hms_micro_uncheck(3, 4, 5, 6000)),
+                &DataType::Time,
+            ),
+            "010000",
+            "44b06a559202000000",
+        );
+        assert_variant_parts(
+            "timestamp",
+            &scalar_variant(
+                ScalarRefImpl::Timestamp(
+                    Date::from_ymd_uncheck(2024, 1, 2).and_hms_micro_uncheck(3, 4, 5, 6000),
+                ),
+                &DataType::Timestamp,
+            ),
+            "010000",
+            "34b0ea4dc0ed0d0600",
+        );
+        assert_variant_parts(
+            "timestamptz",
+            &scalar_variant(
+                ScalarRefImpl::Timestamptz(Timestamptz::from_micros(1)),
+                &DataType::Timestamptz,
+            ),
+            "010000",
+            "300100000000000000",
+        );
+        assert_variant_parts(
+            "binary",
+            &scalar_variant(ScalarRefImpl::Bytea(&[0x12, 0x34, 0xff]), &DataType::Bytea),
+            "010000",
+            "3c030000001234ff",
+        );
     }
 }
