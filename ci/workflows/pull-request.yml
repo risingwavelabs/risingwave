@@ -71,7 +71,7 @@ steps:
   - label: "check ci image rebuild"
     plugins:
       - monorepo-diff#v1.2.0:
-          diff: "git fetch --quiet --no-tags --depth=1 origin main:refs/remotes/origin/main && git diff --name-only origin/main"
+          diff: "git diff --name-only origin/main"
           watch:
             - path: "ci/.env"
               config:
