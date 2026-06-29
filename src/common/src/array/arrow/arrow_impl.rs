@@ -49,6 +49,7 @@ use arrow_buffer::OffsetBuffer;
 use arrow_schema::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 
 use super::arrow_schema::IntervalUnit;
 // This is important because we want to use the arrow version specified by the outer mod.
@@ -1675,7 +1676,9 @@ impl TryFrom<&arrow_array::StructArray> for VariantArray {
                 Some((metadata.value(idx), value.value(idx)))
             }
         }))
-        .map_err(|e| ArrayError::from_arrow(format!("invalid variant arrow array: {e}")))
+        .map_err(|e| {
+            ArrayError::from_arrow(format!("invalid variant arrow array: {}", e.as_report()))
+        })
     }
 }
 
