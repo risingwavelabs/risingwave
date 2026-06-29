@@ -687,15 +687,21 @@ impl LogicalPlanRoot {
 
         let plan = {
             {
+                if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using VARIANT columns as stream keys is not supported yet because their state encoding must remain stable across releases.".to_owned(),
+                    ).into());
+                }
                 if !ctx
                     .session_ctx()
                     .config()
                     .streaming_allow_jsonb_in_stream_key()
-                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                    && let Some(err) = StreamKeyChecker::jsonb().visit(self.plan.clone())
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
-                        "Using JSONB/VARIANT columns as part of the join or aggregation keys can severely impair performance. \
+                        "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
                         If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_owned(),
                     ).into());
                 }

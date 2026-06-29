@@ -7,9 +7,19 @@ create table variant_stream_t (
     payload variant
 );
 
-statement error JSONB/VARIANT column
+statement error VARIANT column
 create materialized view variant_bad_agg as
 select payload, count(*) from variant_stream_t group by payload;
+
+statement ok
+set rw_streaming_allow_jsonb_in_stream_key = true;
+
+statement error VARIANT column
+create materialized view variant_bad_agg_with_jsonb_opt_in as
+select payload, count(*) from variant_stream_t group by payload;
+
+statement ok
+set rw_streaming_allow_jsonb_in_stream_key = false;
 
 statement ok
 create materialized view variant_state_mv as
