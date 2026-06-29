@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 
 use bytes::Bytes;
 use risingwave_common_estimate_size::EstimateSize;
@@ -239,7 +239,7 @@ impl FromIterator<VariantVal> for VariantArray {
 }
 
 fn encode_offsets(offsets: &[u32]) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(offsets.len() * size_of::<u32>());
+    let mut buf = Vec::with_capacity(size_of_val(offsets));
     for offset in offsets {
         buf.extend_from_slice(&offset.to_le_bytes());
     }

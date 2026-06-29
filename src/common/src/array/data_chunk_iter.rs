@@ -247,6 +247,10 @@ mod tests {
     use crate::test_prelude::StreamChunkTestExt;
 
     #[test]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "test covers RowRef hashing over a fixed int-only chunk"
+    )]
     fn test_row_ref_hash() {
         let mut set = HashSet::new();
         let chunk1 = StreamChunk::from_pretty(
