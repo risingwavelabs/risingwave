@@ -40,6 +40,7 @@ use risingwave_pb::meta::subscribe_response::Operation;
 
 use super::store::version::HummockReadVersion;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
+use crate::hummock::event_handler::refiller::TableCacheRefillMonitorSnapshot;
 use crate::hummock::event_handler::uploader::SyncedData;
 use crate::hummock::utils::MemoryTracker;
 
@@ -134,6 +135,10 @@ pub enum HummockEvent {
     GetMinUncommittedObjectId {
         result_tx: oneshot::Sender<Option<HummockRawObjectId>>,
     },
+
+    GetTableCacheRefillMonitorSnapshot {
+        result_tx: oneshot::Sender<TableCacheRefillMonitorSnapshot>,
+    },
 }
 
 impl HummockEvent {
@@ -201,6 +206,9 @@ impl HummockEvent {
             HummockEvent::GetMinUncommittedObjectId { .. } => {
                 "GetMinUncommittedObjectId".to_owned()
             }
+            HummockEvent::GetTableCacheRefillMonitorSnapshot { .. } => {
+                "GetTableCacheRefillMonitorSnapshot".to_owned()
+            }
             HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
             HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
             HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
@@ -225,6 +233,9 @@ impl HummockEvent {
             HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch",
             HummockEvent::DropVectorWriter { .. } => "DropVectorWriter",
             HummockEvent::GetMinUncommittedObjectId { .. } => "GetMinUncommittedObjectId",
+            HummockEvent::GetTableCacheRefillMonitorSnapshot { .. } => {
+                "GetTableCacheRefillMonitorSnapshot"
+            }
         }
     }
 }

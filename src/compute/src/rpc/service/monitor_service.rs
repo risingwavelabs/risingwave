@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
-use itertools::Itertools;
-use parking_lot::RwLock;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -36,7 +34,10 @@ use risingwave_pb::monitor_service::{
     TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
-use risingwave_storage::hummock::event_handler::refiller::TableCacheRefillContext;
+use risingwave_storage::hummock::event_handler::refiller::{
+    TableCacheRefillContext, TableCacheRefillMonitorSnapshot,
+};
+use risingwave_storage::hummock::store::HummockStorage;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -53,7 +54,7 @@ pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
-    table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
+    hummock_storage: Option<HummockStorage>,
 }
 
 impl MonitorServiceImpl {
@@ -62,14 +63,14 @@ impl MonitorServiceImpl {
         server_config: ServerConfig,
         meta_cache: Option<MetaCache>,
         block_cache: Option<BlockCache>,
-        table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
+        hummock_storage: Option<HummockStorage>,
     ) -> Self {
         Self {
             stream_mgr,
             profile_service: ProfileServiceImpl::new(server_config),
             meta_cache,
             block_cache,
-            table_cache_refill_context,
+            hummock_storage,
         }
     }
 }
@@ -448,13 +449,22 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetTableCacheRefillStatsRequest>,
     ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
-        let Some(context) = &self.table_cache_refill_context else {
+        let Some(hummock_storage) = &self.hummock_storage else {
             return Ok(Response::new(GetTableCacheRefillStatsResponse {
                 stats: "{}".to_owned(),
             }));
         };
 
-        let stats = TableCacheRefillStats::from(&*context.read());
+        let monitor_snapshot = hummock_storage
+            .table_cache_refill_monitor_snapshot()
+            .await
+            .map_err(|err| {
+                Status::internal(format!(
+                    "failed to get table cache refill monitor snapshot: {e}",
+                    e = err.as_report()
+                ))
+            })?;
+        let stats = TableCacheRefillStats::from(&monitor_snapshot);
         let json_value = serde_json::to_value(stats).map_err(|err| {
             Status::internal(format!(
                 "failed to serialize stats: {e}",
@@ -472,8 +482,10 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 }
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TableCacheRefillStats {
+    contexts: HashMap<u32, TableCacheRefillTableStats>,
     streaming: HashMap<u32, Vec<u16>>,
     serving: HashMap<u32, Vec<u16>>,
     policies: HashMap<u32, String>,
@@ -482,68 +494,95 @@ struct TableCacheRefillStats {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillTableStats {
+    streaming: Option<Vec<u16>>,
+    serving: Option<Vec<u16>>,
+    policy: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct TableCacheRefillInternalStats {
     streaming: HashMap<u32, Vec<Vec<u16>>>,
     serving: HashMap<u32, Vec<u16>>,
 }
 
-impl From<&TableCacheRefillContext> for TableCacheRefillStats {
-    fn from(context: &TableCacheRefillContext) -> Self {
-        fn bitmap_to_vnodes(bitmap: &risingwave_common::bitmap::Bitmap) -> Vec<u16> {
-            bitmap.iter_ones().map(|idx| idx as u16).collect()
-        }
-
-        let streaming = context
-            .streaming
+impl From<&TableCacheRefillMonitorSnapshot> for TableCacheRefillStats {
+    fn from(snapshot: &TableCacheRefillMonitorSnapshot) -> Self {
+        let contexts = snapshot
+            .contexts
             .iter()
-            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
-            .collect();
-
-        let serving = context
-            .serving
+            .map(|(table_id, context)| {
+                (
+                    table_id.as_raw_id(),
+                    TableCacheRefillTableStats::from(context.clone()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let streaming = contexts
             .iter()
-            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .filter_map(|(table_id, context)| {
+                context
+                    .streaming
+                    .as_ref()
+                    .map(|vnodes| (*table_id, vnodes.clone()))
+            })
             .collect();
-
-        let policies = context
+        let serving = contexts
+            .iter()
+            .filter_map(|(table_id, context)| {
+                context
+                    .serving
+                    .as_ref()
+                    .map(|vnodes| (*table_id, vnodes.clone()))
+            })
+            .collect();
+        let policies = snapshot
             .policies
             .iter()
             .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
             .collect();
-
-        let read_version_mapping = context.read_version_mapping.read();
-        let internal_streaming = read_version_mapping
+        let internal_streaming = snapshot
+            .streaming_table_vnode_mapping
             .iter()
-            .map(|(table_id, mappings)| {
-                let vnodes = mappings
-                    .iter()
-                    .sorted_by_key(|(version, _)| **version)
-                    .map(|(_, read_version)| {
-                        let vnodes = read_version.read().vnodes();
-                        bitmap_to_vnodes(vnodes.as_ref())
-                    })
-                    .collect();
-                (table_id.as_raw_id(), vnodes)
-            })
+            // Keep the historical list-of-lists JSON shape. The refiller stores one
+            // table-level union bitmap per table.
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), vec![bitmap_to_vnodes(bitmap)]))
             .collect();
-
-        let internal_serving = context
+        let internal_serving = snapshot
             .serving_table_vnode_mapping
             .iter()
             .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
             .collect();
 
         Self {
+            contexts,
             streaming,
             serving,
             policies,
-            default_policy: context.default_policy.to_string(),
+            default_policy: snapshot.default_policy.to_string(),
             internal: TableCacheRefillInternalStats {
                 streaming: internal_streaming,
                 serving: internal_serving,
             },
         }
     }
+}
+
+impl From<TableCacheRefillContext> for TableCacheRefillTableStats {
+    fn from(context: TableCacheRefillContext) -> Self {
+        Self {
+            streaming: context
+                .streaming_vnode_bitmap
+                .as_ref()
+                .map(bitmap_to_vnodes),
+            serving: context.serving_vnode_bitmap.as_ref().map(bitmap_to_vnodes),
+            policy: context.policy.to_string(),
+        }
+    }
+}
+
+fn bitmap_to_vnodes(bitmap: &Bitmap) -> Vec<u16> {
+    bitmap.iter_ones().map(|idx| idx as u16).collect()
 }
 
 pub use grpc_middleware::*;

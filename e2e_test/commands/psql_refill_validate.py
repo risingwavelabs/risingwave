@@ -13,10 +13,10 @@ What this script validates:
    union of vnode bitmaps from `stats.internal.streaming[table_id]`.
 
 Important note:
-`stats.internal.streaming` is worker-global `read_version_mapping` state, not a
-job-scoped view. Therefore this script only filters and validates the target
-job's internal tables. It does not require all entries in
-`stats.internal.streaming` to belong to the target job.
+`stats.internal.streaming` is worker-global refiller vnode state, using the
+table-level vnode union maintained by the refiller. Therefore this script only
+filters and validates the target job's internal tables. It does not require all
+entries in `stats.internal.streaming` to belong to the target job.
 
 Examples:
     psql_refill_validate.py --job-name s3 --job-type sink --mode streaming
@@ -533,7 +533,7 @@ def main() -> int:
 
         if args.mode in ("streaming", "both"):
             logger.info(
-                "Comparing streaming refill stats against internal.read_version_mapping-derived vnode distribution"
+                "Comparing streaming refill stats against internal refiller vnode distribution"
             )
             expected_streaming = project_internal_streaming_stats(
                 stats_by_worker, relevant_table_ids
