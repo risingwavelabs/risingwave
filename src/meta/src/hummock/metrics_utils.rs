@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockVersionId};
+use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedVersion, HummockVersionStats, LevelType,
@@ -34,7 +35,6 @@ use risingwave_pb::hummock::{
 
 use super::compaction::selector::DynamicLevelSelectorCore;
 use super::compaction::{CompactionDeveloperConfig, get_compression_algorithm};
-use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -517,19 +517,22 @@ pub fn trigger_pin_unpin_version_state(
     }
 }
 
-pub fn trigger_gc_stat(
-    metrics: &MetaMetrics,
-    checkpoint: &HummockVersionCheckpoint,
+pub struct GcStaleObjectStats {
+    old_version_object_size: u64,
+    old_version_object_count: u64,
+    stale_object_size: u64,
+    stale_object_count: u64,
+}
+
+pub fn gc_stale_object_stats(
+    stale_objects: &HashMap<HummockVersionId, PbStaleObjects>,
     min_pinned_version_id: HummockVersionId,
-) {
-    let current_version_object_size_map = object_size_map(&checkpoint.version);
-    let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
-    let current_version_object_count = current_version_object_size_map.len();
+) -> GcStaleObjectStats {
     let mut old_version_object_size = 0;
     let mut old_version_object_count = 0;
     let mut stale_object_size = 0;
     let mut stale_object_count = 0;
-    checkpoint.stale_objects.iter().for_each(|(id, objects)| {
+    stale_objects.iter().for_each(|(id, objects)| {
         if *id <= min_pinned_version_id {
             stale_object_size += objects.total_file_size;
             stale_object_count += objects.id.len() as u64;
@@ -538,6 +541,28 @@ pub fn trigger_gc_stat(
             old_version_object_count += objects.id.len() as u64;
         }
     });
+    GcStaleObjectStats {
+        old_version_object_size,
+        old_version_object_count,
+        stale_object_size,
+        stale_object_count,
+    }
+}
+
+pub fn trigger_gc_stat(
+    metrics: &MetaMetrics,
+    checkpoint_version: &HummockVersion,
+    stale_object_stats: GcStaleObjectStats,
+) {
+    let GcStaleObjectStats {
+        old_version_object_size,
+        old_version_object_count,
+        stale_object_size,
+        stale_object_count,
+    } = stale_object_stats;
+    let current_version_object_size_map = object_size_map(checkpoint_version);
+    let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
+    let current_version_object_count = current_version_object_size_map.len();
     metrics
         .current_version_object_size
         .set(current_version_object_size as _);
@@ -553,7 +578,7 @@ pub fn trigger_gc_stat(
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
     // table change log
-    for (table_id, logs) in &checkpoint.version.table_change_log {
+    for (table_id, logs) in &checkpoint_version.table_change_log {
         let table_id_label = table_id.to_string();
         let labels = [table_id_label.as_str()];
         let object_count = logs
