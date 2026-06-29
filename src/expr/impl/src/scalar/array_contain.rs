@@ -89,6 +89,10 @@ use risingwave_expr::function;
 /// ----
 /// NULL
 /// ```
+#[expect(
+    clippy::mutable_key_type,
+    reason = "array containment hashes immutable scalar refs for membership checks"
+)]
 fn array_contains_impl(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let flatten = left.flatten();
     let set: HashSet<_> = flatten.iter().collect();
@@ -108,6 +112,10 @@ fn array_contained(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     array_contains_impl(right, left)
 }
 
+#[expect(
+    clippy::mutable_key_type,
+    reason = "array overlap hashes immutable scalar refs for membership checks"
+)]
 fn array_overlaps_impl(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let flatten = left.flatten();
     let set: HashSet<_> = flatten.iter().flatten().collect();
