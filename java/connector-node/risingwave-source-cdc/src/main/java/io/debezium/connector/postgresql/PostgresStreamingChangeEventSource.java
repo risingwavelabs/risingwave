@@ -148,6 +148,35 @@ public class PostgresStreamingChangeEventSource
         this.onConnectedCallback = callback;
     }
 
+    /**
+     * Close the underlying PG connections from a thread other than the source thread, so that an
+     * in-flight {@code connection.commit()} stuck in uninterruptible native JDBC I/O is unblocked
+     * via {@link java.net.SocketException}. The wedged commit then unwinds through {@link
+     * #execute}'s finally block, which runs {@link #cleanUpStreamingOnStop} and releases the
+     * keep-alive thread + replication slot.
+     *
+     * <p>Used by the coordinator's stop path as a last-resort escape hatch when {@code
+     * executor.shutdownNow()} has failed to terminate the source thread within the configured
+     * shutdown timeout, because {@link Thread#interrupt()} does not unblock native JDBC sockets.
+     */
+    public void forceCloseConnection() {
+        LOGGER.warn("Force-closing PostgresConnection to unblock wedged native I/O");
+        try {
+            if (connection != null) {
+                connection.close();
+            }
+        } catch (Exception e) {
+            LOGGER.debug("Exception while force-closing PostgresConnection", e);
+        }
+        try {
+            if (replicationConnection != null) {
+                replicationConnection.close();
+            }
+        } catch (Exception e) {
+            LOGGER.debug("Exception while force-closing ReplicationConnection", e);
+        }
+    }
+
     @Override
     public void init(PostgresOffsetContext offsetContext) {
 

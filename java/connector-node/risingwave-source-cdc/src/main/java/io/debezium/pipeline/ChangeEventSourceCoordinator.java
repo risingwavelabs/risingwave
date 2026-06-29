@@ -497,6 +497,16 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
         }
     }
 
+    private void forceCloseStreamingSourceConnection() {
+        if (streamingSource
+                instanceof io.debezium.connector.postgresql.PostgresStreamingChangeEventSource) {
+            ((io.debezium.connector.postgresql.PostgresStreamingChangeEventSource) streamingSource)
+                    .forceCloseConnection();
+        }
+        // SQL Server has the same uninterruptible JDBC commit() pattern; follow-up tracked
+        // separately. MySQL (BinaryLogClient) and MongoDB (cursor) are not affected.
+    }
+
     /** Stops this coordinator. */
     public synchronized void stop() throws InterruptedException {
         running = false;
@@ -521,7 +531,17 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
                 // Clear interrupt flag so the forced termination is always attempted
                 Thread.interrupted();
                 executor.shutdownNow();
-                executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
+                boolean shutdownNowOk =
+                        executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
+                if (!shutdownNowOk) {
+                    // shutdownNow() only interrupts; native JDBC commit() ignores
+                    // Thread.interrupt(). Force-close the underlying source connection so the
+                    // wedged commit throws SocketException, allowing the source thread to unwind
+                    // through its finally block (which releases keep-alive threads + replication
+                    // slot). See risingwavelabs/risingwave#26075.
+                    forceCloseStreamingSourceConnection();
+                    executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
+                }
             }
 
             if (!isBlockingSnapshotShutdown) {
