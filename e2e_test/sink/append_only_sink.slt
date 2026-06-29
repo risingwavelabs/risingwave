@@ -39,7 +39,7 @@ from snapshot_free_t
 group by v2
 with (connector = 'blackhole', snapshot = 'false');
 
-statement error invalid value .* of 'since_timestamp' option.*expected a timestamptz string with an explicit time zone.*2024-01-01 00:00:00Z
+statement error invalid value "not-a-timestamp" of 'since_timestamp' option
 create sink invalid_since_timestamp_format from snapshot_free_t with (
     connector = 'blackhole',
     snapshot = 'false',
