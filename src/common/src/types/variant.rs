@@ -370,14 +370,28 @@ impl<'a> VariantRef<'a> {
     }
 
     pub fn access_path(self, path: &str) -> Option<VariantVal> {
+        self.access_path_strict(path).ok().flatten()
+    }
+
+    pub fn access_path_strict(self, path: &str) -> anyhow::Result<Option<VariantVal>> {
         let mut value = self.to_owned_scalar();
         for token in parse_path(path)? {
             value = match token {
-                PathToken::Field(field) => value.as_scalar_ref().access_object_field(&field)?,
-                PathToken::Index(index) => value.as_scalar_ref().access_array_element(index)?,
+                PathToken::Field(field) => {
+                    match value.as_scalar_ref().access_object_field(&field) {
+                        Some(value) => value,
+                        None => return Ok(None),
+                    }
+                }
+                PathToken::Index(index) => {
+                    match value.as_scalar_ref().access_array_element(index) {
+                        Some(value) => value,
+                        None => return Ok(None),
+                    }
+                }
             };
         }
-        Some(value)
+        Ok(Some(value))
     }
 
     pub fn to_jsonb(self) -> JsonbVal {
@@ -755,7 +769,8 @@ enum PathToken {
     Index(i32),
 }
 
-fn parse_path(path: &str) -> Option<Vec<PathToken>> {
+fn parse_path(path: &str) -> anyhow::Result<Vec<PathToken>> {
+    let original_path = path;
     let path = path.strip_prefix('$').unwrap_or(path);
     let mut chars = path.chars().peekable();
     let mut tokens = vec![];
@@ -771,7 +786,7 @@ fn parse_path(path: &str) -> Option<Vec<PathToken>> {
                     chars.next();
                 }
                 if field.is_empty() {
-                    return None;
+                    bail!("invalid variant path `{original_path}`");
                 }
                 tokens.push(PathToken::Field(field));
             }
@@ -779,14 +794,16 @@ fn parse_path(path: &str) -> Option<Vec<PathToken>> {
                 if matches!(chars.peek(), Some('\'') | Some('"')) {
                     let quote = chars.next().unwrap();
                     let mut field = String::new();
+                    let mut closed = false;
                     for c in chars.by_ref() {
                         if c == quote {
+                            closed = true;
                             break;
                         }
                         field.push(c);
                     }
-                    if chars.next()? != ']' {
-                        return None;
+                    if !closed || chars.next() != Some(']') {
+                        bail!("invalid variant path `{original_path}`");
                     }
                     tokens.push(PathToken::Field(field));
                 } else {
@@ -798,10 +815,12 @@ fn parse_path(path: &str) -> Option<Vec<PathToken>> {
                         index.push(c);
                         chars.next();
                     }
-                    if chars.next()? != ']' {
-                        return None;
+                    if chars.next() != Some(']') {
+                        bail!("invalid variant path `{original_path}`");
                     }
-                    tokens.push(PathToken::Index(index.parse().ok()?));
+                    tokens.push(PathToken::Index(index.parse().with_context(|| {
+                        format!("invalid variant path `{original_path}`")
+                    })?));
                 }
             }
             _ if tokens.is_empty() => {
@@ -815,10 +834,10 @@ fn parse_path(path: &str) -> Option<Vec<PathToken>> {
                 }
                 tokens.push(PathToken::Field(field));
             }
-            _ => return None,
+            _ => bail!("invalid variant path `{original_path}`"),
         }
     }
-    Some(tokens)
+    Ok(tokens)
 }
 
 #[cfg(test)]
@@ -874,6 +893,14 @@ mod tests {
                 .to_string(),
             "7"
         );
+        assert!(
+            v.as_scalar_ref()
+                .access_path_strict("$.missing")
+                .unwrap()
+                .is_none()
+        );
+        assert!(v.as_scalar_ref().access_path_strict("$.").is_err());
+        assert!(v.as_scalar_ref().access_path("$.").is_none());
     }
 
     #[test]

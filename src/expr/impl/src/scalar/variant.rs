@@ -30,8 +30,13 @@ fn to_variant(input: Option<ScalarRefImpl<'_>>, ctx: &Context) -> Result<Variant
 }
 
 #[function("variant_get(variant, varchar) -> variant")]
-fn variant_get(value: VariantRef<'_>, path: &str) -> Option<VariantVal> {
-    value.access_path(path)
+fn variant_get(value: VariantRef<'_>, path: &str) -> Result<Option<VariantVal>> {
+    value
+        .access_path_strict(path)
+        .map_err(|e| ExprError::InvalidParam {
+            name: "variant_get",
+            reason: e.to_report_string().into(),
+        })
 }
 
 #[function("try_variant_get(variant, varchar) -> variant")]
