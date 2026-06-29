@@ -648,6 +648,46 @@ DROP TABLE rw_pk_only_table;
 system ok
 PGDATABASE=sink_test psql -c "DROP TABLE pg_pk_only_table"
 
+################### test foreign key table discovery doesn't panic
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_parent_table (id BIGINT PRIMARY KEY)"
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_child_table (id BIGINT PRIMARY KEY, parent_id BIGINT REFERENCES pg_parent_table(id), val VARCHAR)"
+
+statement ok
+CREATE TABLE rw_child_table (
+    id BIGINT,
+    parent_id BIGINT,
+    val VARCHAR
+);
+
+statement ok
+CREATE SINK postgres_child_sink FROM rw_child_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_child_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+DROP SINK postgres_child_sink;
+
+statement ok
+DROP TABLE rw_child_table;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_child_table"
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_parent_table"
+
 ################### Drop DB
 
 system ok
