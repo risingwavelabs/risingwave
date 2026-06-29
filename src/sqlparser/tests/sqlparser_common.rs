@@ -873,7 +873,7 @@ fn parse_bitwise_ops() {
     ];
 
     for (str_op, op) in bitwise_ops {
-        let select = verified_only_select(&format!("SELECT a {} b", &str_op));
+        let select = verified_only_select(&format!("SELECT a {} b", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
@@ -2294,6 +2294,53 @@ fn parse_literal_date() {
         },
         expr_from_projection(only(&select.projection)),
     );
+}
+
+#[test]
+fn parse_literal_string_with_dollar_quoted_string() {
+    let stmts = parse_sql_statements("SELECT DATE $$1999-01-01$$").unwrap();
+
+    let projection = match &stmts[0] {
+        Statement::Query(query) => match &query.body {
+            SetExpr::Select(select) => &select.projection,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+
+    assert_eq!(
+        &Expr::TypedString {
+            data_type: DataType::Date,
+            value: "1999-01-01".into()
+        },
+        expr_from_projection(only(projection)),
+    );
+}
+
+#[test]
+fn parse_escaped_double_quote_in_delimited_identifier() {
+    {
+        let select = verified_only_select(r#"SELECT 'STRI"NG' AS "'STRI""NG""#);
+
+        match only(&select.projection) {
+            SelectItem::ExprWithAlias { expr, alias } => {
+                assert_eq!(
+                    &Expr::Value(Value::SingleQuotedString("STRI\"NG".to_owned())),
+                    expr
+                );
+                assert_eq!(&Ident::with_quote_unchecked('"', "'STRI\"NG"), alias);
+            }
+            _ => panic!("expected ExprWithAlias"),
+        }
+    }
+
+    {
+        let select = verified_only_select(r#"SELECT "'STRI""NG""#);
+        assert_eq!(
+            &Expr::Identifier(Ident::with_quote_unchecked('"', "'STRI\"NG")),
+            expr_from_projection(only(&select.projection)),
+        );
+    }
 }
 
 #[test]

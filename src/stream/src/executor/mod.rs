@@ -90,7 +90,7 @@ mod filter;
 mod gap_fill;
 pub mod hash_join;
 mod hop_window;
-mod iceberg_with_pk_index;
+pub(crate) mod iceberg_with_pk_index;
 mod join;
 pub mod locality_provider;
 mod lookup;

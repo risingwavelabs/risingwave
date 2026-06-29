@@ -76,6 +76,7 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -192,6 +193,7 @@ pub enum DdlCommand {
         definition: String,
     },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterDatabaseResourceGroup(DatabaseId, Option<String>, bool),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
@@ -231,6 +233,7 @@ impl DdlCommand {
                 subscription_id, ..
             } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseResourceGroup(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
@@ -259,6 +262,7 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterDatabaseResourceGroup(_, _, _)
             | DdlCommand::AlterStreamingJobConfig(_, _, _)
             | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
@@ -281,6 +285,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
+    iceberg_v3_sink_manager: IcebergV3SinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -386,6 +391,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -396,6 +402,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
+            iceberg_v3_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -413,7 +420,6 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    #[expect(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -516,6 +522,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
+                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
+                        .await
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
@@ -779,6 +789,21 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_resource_group(database_id, resource_group)
+            .await?;
+
+        Ok(version)
+    }
+
     // The 'secret' part of the request we receive from the frontend is in plaintext;
     // here, we need to encrypt it before storing it in the catalog.
     fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
@@ -930,15 +955,12 @@ impl DdlController {
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
-        let stream_scan_fragment = table_fragments
-            .fragments
-            .values()
-            .filter(|f| {
+        let stream_scan_fragment =
+            Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
                     || f.fragment_type_mask
                         .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .exactly_one()
+            }))
             .ok()
             .with_context(|| {
                 format!(
@@ -1257,6 +1279,18 @@ impl DdlController {
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
+                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // so it's ready to receive epoch reports from the very first
+                // barrier instead of relying on lazy registration on every
+                // commit.
+                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                    let iceberg_config =
+                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
+                    self.iceberg_v3_sink_manager
+                        .register_v3_sink(sink.id, iceberg_config)
+                        .await
+                        .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
+                }
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1345,6 +1379,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_v3_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1430,6 +1465,14 @@ impl DdlController {
             }
         }
 
+        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // including user-created sinks with arbitrary names (not just the
+        // `__iceberg_sink_%` auto-created ones above).
+        if !removed_iceberg_v3_sink_ids.is_empty() {
+            self.iceberg_v3_sink_manager
+                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
+        }
+
         // remove secrets.
         for secret in secret_ids {
             LocalSecretManager::global().remove_secret(secret);
@@ -1512,19 +1555,6 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
-                // TODO: Remove this guard when auto schema refresh sink fully supports drop column.
-                if !removed_columns.is_empty() {
-                    return Err(anyhow!(
-                        "new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}",
-                        table.columns,
-                        original_table_columns,
-                        removed_columns
-                            .iter()
-                            .map(|col| col.column_id())
-                            .collect_vec()
-                    )
-                    .into());
-                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self

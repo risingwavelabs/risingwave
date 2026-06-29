@@ -28,7 +28,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
+    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -97,6 +97,9 @@ pub struct BarrierCompleteResult {
 
     /// CDC sources that have updated their offset at least once.
     pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+
+    /// Iceberg V3 sink metadata reports collected during this barrier.
+    pub iceberg_v3_sink_metadata: Vec<PbIcebergV3SinkMetadata>,
 
     /// The table IDs that should be truncated.
     pub truncate_tables: Vec<TableId>,
@@ -479,7 +482,8 @@ impl LocalBarrierWorker {
             Request::InjectBarrier(req) => {
                 let partial_graph_id = req.partial_graph_id;
                 let result: StreamResult<()> = try {
-                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())
+                        .map_err(StreamError::from)?;
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (partial_graph_id, e))?;
@@ -636,7 +640,7 @@ mod await_epoch_completed_future {
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
         PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-        PbListFinishedSource, PbLoadFinishedSource,
+        PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
     };
 
     use crate::error::StreamResult;
@@ -657,6 +661,7 @@ mod await_epoch_completed_future {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+        iceberg_v3_sink_metadata: Vec<PbIcebergV3SinkMetadata>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     ) -> AwaitEpochCompletedFuture {
@@ -679,6 +684,7 @@ mod await_epoch_completed_future {
                     load_finished_source_ids,
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
+                    iceberg_v3_sink_metadata,
                     truncate_tables,
                     refresh_finished_tables,
                 }),
@@ -755,6 +761,7 @@ impl LocalBarrierWorker {
                 load_finished_source_ids,
                 cdc_table_backfill_progress,
                 cdc_source_offset_updated,
+                iceberg_v3_sink_metadata,
                 truncate_tables,
                 refresh_finished_tables,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
@@ -791,6 +798,7 @@ impl LocalBarrierWorker {
                         load_finished_source_ids,
                         cdc_table_backfill_progress,
                         cdc_source_offset_updated,
+                        iceberg_v3_sink_metadata,
                         truncate_tables,
                         refresh_finished_tables,
                     )
@@ -811,6 +819,7 @@ impl LocalBarrierWorker {
             load_finished_source_ids,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
+            iceberg_v3_sink_metadata,
             truncate_tables,
             refresh_finished_tables,
         } = result;
@@ -875,6 +884,7 @@ impl LocalBarrierWorker {
                         cdc_table_backfill_progress,
                         truncate_tables,
                         refresh_finished_tables,
+                        iceberg_v3_sink_metadata,
                     },
                 )
             }

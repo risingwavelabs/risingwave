@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -37,7 +37,9 @@ use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
     FullKeyFilterKeyExtractor,
 };
-use crate::hummock::sstable::{FilterBuilder, utils};
+use crate::hummock::sstable::{
+    DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, utils,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
@@ -68,6 +70,10 @@ pub struct SstableBuilderOptions {
     pub shorten_block_meta_key_threshold: Option<usize>,
     /// Max bytes for vnode key-range hints in SST metadata. None disables collection.
     pub max_vnode_key_range_bytes: Option<usize>,
+    /// Estimated key count for one output SST. Used only as a filter-builder capacity hint.
+    pub estimated_output_key_count: Option<usize>,
+    /// Upper bound for the initial key-hash buffer allocation in plain filter builders.
+    pub filter_hash_prealloc_key_count_cap: usize,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -82,6 +88,8 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             max_sst_size: options.compactor_max_sst_size,
             shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
             max_vnode_key_range_bytes: None,
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
         }
     }
 }
@@ -97,6 +105,23 @@ impl Default for SstableBuilderOptions {
             max_sst_size: DEFAULT_MAX_SST_SIZE,
             shorten_block_meta_key_threshold: None,
             max_vnode_key_range_bytes: None,
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        }
+    }
+}
+
+impl SstableBuilderOptions {
+    pub fn estimated_output_key_count(&self) -> usize {
+        self.estimated_output_key_count
+            .unwrap_or(self.capacity / DEFAULT_ENTRY_SIZE + 1)
+    }
+
+    pub fn filter_builder_options(&self) -> FilterBuilderOptions {
+        FilterBuilderOptions {
+            estimated_key_count: self.estimated_output_key_count(),
+            estimated_block_count: self.capacity / self.block_capacity + 1,
+            hash_prealloc_key_count_cap: self.filter_hash_prealloc_key_count_cap,
         }
     }
 }
@@ -170,7 +195,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         Self::new(
             sstable_id,
             writer,
-            Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            Xor16FilterBuilder::create(options.filter_builder_options()),
             options,
             compaction_catalog_agent_ref,
             None,
@@ -470,15 +495,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let meta_offset = self.writer.data_len() as u64;
 
         let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
-        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
+        let (filter_type, filter_layout) = if filter_data.is_none() {
             (
-                BloomFilterType::BloomFilterUnspecified,
                 PbSstableFilterType::SstableFilterNone,
+                PbSstableFilterLayout::Unspecified,
             )
         } else if self.filter_builder.support_blocked_raw_data() {
-            (BloomFilterType::Blocked, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                PbSstableFilterLayout::Blocked,
+            )
         } else {
-            (BloomFilterType::Sstable, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                PbSstableFilterLayout::Plain,
+            )
         };
 
         let total_key_count = self
@@ -500,7 +531,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
-            bloom_filter: filter_data,
+            bloom_filter: filter_data.unwrap_or_default(),
             estimated_size: 0,
             key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
                 panic!(
@@ -546,26 +577,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 .map(|s| s.total_key_count as usize)
                 .sum();
 
-            if total_key_count == 0 {
-                (0, 0)
-            } else {
-                let total_key_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_key_size as usize)
-                    .sum();
+            let total_key_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_key_size as usize)
+                .sum();
 
-                let total_value_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_value_size as usize)
-                    .sum();
+            let total_value_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_value_size as usize)
+                .sum();
 
-                (
-                    total_key_size / total_key_count,
-                    total_value_size / total_key_count,
-                )
-            }
+            (
+                total_key_size.checked_div(total_key_count).unwrap_or(0),
+                total_value_size.checked_div(total_key_count).unwrap_or(0),
+            )
         };
 
         let (min_epoch, max_epoch) = {
@@ -588,7 +615,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -605,6 +631,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
             filter_type,
+            filter_layout,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();
@@ -689,8 +716,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.block_size_vec.push(block.len());
-        self.filter_builder
-            .switch_block(self.memory_limiter.clone());
         let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
             panic!(
                 "WARN overflow can't convert writer_data_len {} into u32 table {:?}",
@@ -704,6 +729,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 data_len, block_meta.offset
             )
         });
+
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
 
         if data_len as usize > self.options.capacity * 2 {
             tracing::warn!(
@@ -1230,6 +1258,7 @@ pub(super) mod tests {
     async fn test_with_xor_filter_builder<F: FilterBuilder>(
         bloom_false_positive: f64,
         expected_filter_type: PbSstableFilterType,
+        expected_filter_layout: PbSstableFilterLayout,
     ) {
         let key_count = 1000;
 
@@ -1256,6 +1285,7 @@ pub(super) mod tests {
         )
         .await;
         assert_eq!(sst_info.filter_type, expected_filter_type);
+        assert_eq!(sst_info.filter_layout, expected_filter_layout);
         let table = sstable_store
             .sstable(&sst_info, &mut StoreLocalStatistic::default())
             .await
@@ -1279,21 +1309,25 @@ pub(super) mod tests {
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.0,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor8,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Blocked,
         )
         .await;
     }
@@ -1340,7 +1374,7 @@ pub(super) mod tests {
         let mut builder = SstableBuilder::new(
             object_id,
             writer,
-            BlockedXor16FilterBuilder::new(1024),
+            BlockedXor16FilterBuilder::create(opts.filter_builder_options()),
             opts,
             compaction_catalog_agent_ref,
             None,

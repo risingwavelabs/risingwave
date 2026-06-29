@@ -31,7 +31,7 @@ use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streami
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
-use risingwave_pb::plan_common::PbField;
+use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
     PbCdcTableSnapshotSplitsWithGeneration,
@@ -55,6 +55,7 @@ use tracing::warn;
 
 use super::info::InflightDatabaseInfo;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
@@ -63,7 +64,7 @@ use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::LoadedFragmentContext;
 use crate::controller::utils::StreamingJobExtraInfo;
-use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -787,6 +788,29 @@ impl BarrierKind {
     }
 }
 
+fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
+    columns
+        .iter()
+        .filter(|col| !col.is_hidden)
+        .map(|col| {
+            let column_desc = col
+                .column_desc
+                .as_ref()
+                .expect("sink column catalog should have a column descriptor");
+            PbField {
+                data_type: Some(
+                    column_desc
+                        .column_type
+                        .as_ref()
+                        .expect("sink column descriptor should have a column type")
+                        .clone(),
+                ),
+                name: column_desc.name.clone(),
+            }
+        })
+        .collect()
+}
+
 impl BarrierInfo {
     fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
         let Some(truncate_timestamptz) = Timestamptz::from_secs(
@@ -803,7 +827,7 @@ impl Command {
     pub(super) fn collect_commit_epoch_info(
         database_info: &InflightDatabaseInfo,
         barrier_info: &PartialGraphBarrierInfo,
-        info: &mut CommitEpochInfo,
+        task: &mut CompleteBarrierTask,
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<JobId, (u64, HashSet<TableId>)>,
     ) {
@@ -814,6 +838,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             truncate_tables,
+            iceberg_v3_sink_metadata,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
@@ -872,6 +897,7 @@ impl Command {
         );
 
         let epoch = barrier_info.barrier_info.prev_epoch();
+        let info = &mut task.commit_info;
         for table_id in &barrier_info.table_ids_to_commit {
             info.tables_to_commit
                 .try_insert(*table_id, epoch)
@@ -903,6 +929,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
+        task.iceberg_v3_sink_metadata
+            .extend(iceberg_v3_sink_metadata);
     }
 }
 
@@ -1654,23 +1682,9 @@ impl Command {
                         (
                             sink.original_sink.id.as_raw_id(),
                             PbSinkSchemaChange {
-                                original_schema: sink
-                                    .original_sink
-                                    .columns
-                                    .iter()
-                                    .map(|col| PbField {
-                                        data_type: Some(
-                                            col.column_desc
-                                                .as_ref()
-                                                .unwrap()
-                                                .column_type
-                                                .as_ref()
-                                                .unwrap()
-                                                .clone(),
-                                        ),
-                                        name: col.column_desc.as_ref().unwrap().name.clone(),
-                                    })
-                                    .collect(),
+                                original_schema: sink_original_schema_fields(
+                                    &sink.original_sink.columns,
+                                ),
                                 op: Some(op),
                             },
                         )
@@ -1775,5 +1789,45 @@ impl Command {
             }
         }
         actor_upstreams
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, ColumnDesc};
+
+    use super::sink_original_schema_fields;
+
+    fn column(name: &str, type_name: PbTypeName, is_hidden: bool) -> PbColumnCatalog {
+        PbColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(PbDataType {
+                    type_name: type_name as i32,
+                    ..Default::default()
+                }),
+                name: name.to_owned(),
+                ..Default::default()
+            }),
+            is_hidden,
+        }
+    }
+
+    #[test]
+    fn test_sink_original_schema_fields_skips_hidden_columns() {
+        let columns = vec![
+            column("k", PbTypeName::Int32, false),
+            column("v", PbTypeName::Varchar, false),
+            column("_row_id", PbTypeName::Serial, true),
+        ];
+
+        let fields = sink_original_schema_fields(&columns);
+        let field_names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(field_names, ["k", "v"]);
     }
 }

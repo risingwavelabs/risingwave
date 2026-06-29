@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
@@ -745,6 +745,7 @@ impl DatabaseCheckpointControl {
                         partial_graph_manager,
                         &logical,
                         worker_nodes,
+                        refresh_interval_sec,
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {

@@ -65,6 +65,7 @@ bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
 chrono = { workspace = true, features = ["clock", "std"] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
@@ -227,11 +228,6 @@ tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
-
-[build-dependencies]
-# Workaround for datafusion. Feel free to remove it if you can.
-# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [[bench]]
 name = "debezium_json_parser"

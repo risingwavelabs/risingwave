@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Batch refresh job checkpoint control for snapshot-only materialized views.
+//! Batch refresh job checkpoint control for periodically-refreshed materialized views.
 //!
 //! It lives permanently in `DatabaseCheckpointControl.independent_checkpoint_job_controls`
 //! as an `IndependentCheckpointJobControl::BatchRefresh` variant for its entire lifetime.
 //!
-//! Lifecycle for first run (snapshot only):
-//!   DDL → `ConsumingSnapshot` → stop actors committed → `Idle`
+//! Lifecycle:
+//!   DDL → `ConsumingSnapshot` → `FinishingSnapshot` → `Idle`
+//!                                                        ↕  (periodic trigger)
+//!                                        `Idle` ← `ConsumingLogStore`
 
 use std::collections::{HashMap, HashSet};
 use std::mem::{replace, take};
@@ -97,7 +99,30 @@ pub(crate) struct BatchRefreshRenderResult {
     pub actors_to_create: StreamJobActorsToCreate,
 }
 
+// ── Batch refresh job metadata ───────────────────────────────────────────────
+
+/// Lightweight metadata for re-rendering actors on each periodic refresh run.
+///
+/// Loaded asynchronously on every trigger via `load_batch_refresh_trigger_context()`.
+/// Contains the pieces consumed by `from_context()` and `render_actors_and_build_job_info()`,
+/// as well as the resolved upstream log epochs and target epoch for this trigger.
+#[derive(Debug)]
+pub(crate) struct BatchRefreshJobTriggerContext {
+    pub fragments: HashMap<FragmentId, LoadedFragment>,
+    pub downstreams: FragmentDownstreamRelation,
+    pub streaming_job_model: streaming_job::Model,
+    pub definition: String,
+    pub database_resource_group: String,
+    /// Changelog entries per upstream table, used to derive log barriers.
+    pub upstream_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+    /// The upstream committed epoch to catch up to.
+    pub target_upstream_epoch: u64,
+}
+
 // ── Status ────────────────────────────────────────────────────────────────────
+
+/// The partial graph is being reset (always for drop).
+/// Once the reset is confirmed, the job is removed from the map.
 
 #[derive(Debug)]
 enum BatchRefreshJobStatus {
@@ -126,8 +151,32 @@ enum BatchRefreshJobStatus {
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     },
     /// The job is idle, waiting for the next trigger. No partial graph is held.
-    Idle,
-    /// The partial graph is being reset (only for drop).
+    Idle { last_committed_epoch: u64 },
+    /// The job has created a partial graph for periodic refresh and is waiting for
+    /// the initial barrier to bootstrap the newly-created actors.
+    InitializingBatchRefresh {
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+        state_table_ids: HashSet<TableId>,
+        /// Log barriers to inject after the partial graph is initialized. The
+        /// last one is the checkpoint stop barrier with `curr_epoch = u64::MAX`.
+        pending_log_barriers: Vec<BarrierInfo>,
+        logstore_start_epoch: u64,
+        target_upstream_epoch: u64,
+    },
+    /// The job is consuming upstream log store changes (periodic refresh).
+    ///
+    /// All replay barriers have been pre-injected (last with `StopMutation` at
+    /// `curr_epoch = u64::MAX`). When `target_upstream_epoch` commits,
+    /// the partial graph is removed and the job transitions to `Idle`.
+    ConsumingLogStore {
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        /// The epoch from which log consumption started (for `pinned_upstream_log_epoch`).
+        logstore_start_epoch: u64,
+        /// `prev_epoch` of the stop barrier; becomes `last_committed_epoch` when transitioning to Idle.
+        target_upstream_epoch: u64,
+    },
+    /// The partial graph is being reset (for drop).
     Resetting { notifiers: Vec<Notifier> },
 }
 
@@ -147,8 +196,9 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
     partial_graph_id: PartialGraphId,
     snapshot_backfill_upstream_tables: HashSet<TableId>,
     snapshot_epoch: u64,
+    /// Batch refresh interval in seconds. Used to determine when to trigger a refresh run.
+    batch_refresh_seconds: u64,
 
-    max_committed_epoch: Option<u64>,
     status: BatchRefreshJobStatus,
 }
 
@@ -206,16 +256,17 @@ impl BatchRefreshJobCheckpointControl {
                 );
             }
 
-            let entry_fragment_parallelism = ensemble
-                .entry_fragments()
-                .map(|fid| fragments[&fid].parallelism.clone())
-                .dedup()
-                .exactly_one()
-                .map_err(|_| {
-                    anyhow!(
-                        "entry fragments have inconsistent parallelism settings in batch refresh job"
-                    )
-                })?;
+            let entry_fragment_parallelism = Itertools::exactly_one(
+                ensemble
+                    .entry_fragments()
+                    .map(|fid| fragments[&fid].parallelism.clone())
+                    .dedup(),
+            )
+            .map_err(|_| {
+                anyhow!(
+                    "entry fragments have inconsistent parallelism settings in batch refresh job"
+                )
+            })?;
 
             let actor_template = EnsembleActorTemplate::render_new(
                 streaming_job_model,
@@ -416,6 +467,7 @@ impl BatchRefreshJobCheckpointControl {
     ///
     /// Internally calls `render_actors_and_build_job_info()` and injects the
     /// partial-graph initial barrier.
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         database_id: DatabaseId,
         job_id: JobId,
@@ -427,6 +479,7 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         logical: &BatchRefreshLogicalFragments,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        batch_refresh_seconds: u64,
     ) -> MetaResult<Self> {
         debug!(
             %job_id,
@@ -505,7 +558,8 @@ impl BatchRefreshJobCheckpointControl {
             job_id,
             snapshot_backfill_upstream_tables,
             snapshot_epoch,
-            max_committed_epoch: None,
+            batch_refresh_seconds,
+
             status: BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 version_stats: version_stat.clone(),
@@ -524,6 +578,7 @@ impl BatchRefreshJobCheckpointControl {
     ///
     /// - If `committed_epoch >= snapshot_epoch` → Idle (snapshot completed before crash).
     /// - If `committed_epoch < snapshot_epoch` → `ConsumingSnapshot` using pre-rendered actors.
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn recover(
         database_id: DatabaseId,
         job_id: JobId,
@@ -535,6 +590,7 @@ impl BatchRefreshJobCheckpointControl {
         initial_mutation: Mutation,
         render_result: BatchRefreshRenderResult,
         partial_graph_recoverer: &mut crate::barrier::partial_graph::PartialGraphRecoverer<'_>,
+        batch_refresh_seconds: u64,
     ) -> MetaResult<Self> {
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
 
@@ -551,8 +607,11 @@ impl BatchRefreshJobCheckpointControl {
                 partial_graph_id,
                 snapshot_backfill_upstream_tables,
                 snapshot_epoch,
-                max_committed_epoch: Some(committed_epoch),
-                status: BatchRefreshJobStatus::Idle,
+                batch_refresh_seconds,
+
+                status: BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: committed_epoch,
+                },
             });
         }
 
@@ -605,7 +664,7 @@ impl BatchRefreshJobCheckpointControl {
             partial_graph_id,
             snapshot_backfill_upstream_tables,
             snapshot_epoch,
-            max_committed_epoch: Some(committed_epoch),
+            batch_refresh_seconds,
             status: BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 version_stats: version_stat.clone(),
@@ -677,6 +736,8 @@ impl BatchRefreshJobCheckpointControl {
         mutation: Option<(Mutation, Vec<Notifier>)>,
     ) -> MetaResult<()> {
         if !matches!(self.status, BatchRefreshJobStatus::ConsumingSnapshot { .. }) {
+            // ConsumingLogStore has all barriers pre-injected; no forwarding needed.
+            // Idle and Resetting have no partial graph.
             return Ok(());
         }
         let (mut mutation, mut notifiers) = match mutation {
@@ -696,7 +757,13 @@ impl BatchRefreshJobCheckpointControl {
             mutation.take();
 
             // Take the status out to destructure and transition to `FinishingSnapshot`.
-            let old_status = replace(&mut self.status, BatchRefreshJobStatus::Idle);
+            // Use a placeholder; will be overwritten below.
+            let old_status = replace(
+                &mut self.status,
+                BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: 0,
+                },
+            );
             let BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 mut pending_non_checkpoint_barriers,
@@ -840,6 +907,11 @@ impl BatchRefreshJobCheckpointControl {
                 }
                 create_mview_tracker.is_finished()
             }
+            BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
+                // All barriers are pre-injected; no progress tracking needed.
+                false
+            }
             _ => false,
         }
     }
@@ -860,8 +932,11 @@ impl BatchRefreshJobCheckpointControl {
     )> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
-            | BatchRefreshJobStatus::FinishingSnapshot { .. } => {}
-            BatchRefreshJobStatus::Idle | BatchRefreshJobStatus::Resetting { .. } => {
+            | BatchRefreshJobStatus::FinishingSnapshot { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. } => {}
+            BatchRefreshJobStatus::Idle { .. }
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::Resetting { .. } => {
                 return None;
             }
         };
@@ -875,23 +950,22 @@ impl BatchRefreshJobCheckpointControl {
                 },
             )
             .map(|(epoch, resps, info)| {
-                // Take tracking job only when completing the snapshot epoch
-                // (the stop barrier). By this point the final checkpoint has
-                // already been committed in a prior task.
-                let tracking_job = if epoch == self.snapshot_epoch {
-                    match &mut self.status {
-                        BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. } => Some(
+                // Take tracking job only when the snapshot stop barrier completes
+                // (i.e., we are in FinishingSnapshot and the epoch matches snapshot_epoch).
+                // Note: ConsumingLogStore's stop barrier also has prev_epoch == target_upstream_epoch,
+                // which may coincidentally equal snapshot_epoch if no new upstream commits occurred.
+                // We must check the status, not just the epoch, to avoid a false positive.
+                let tracking_job = match &mut self.status {
+                    BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. }
+                        if epoch == self.snapshot_epoch =>
+                    {
+                        Some(
                             tracking_job
                                 .take()
                                 .expect("tracking job should not have been taken yet"),
-                        ),
-                        _ => panic!(
-                            "batch refresh job {}: expected FinishingSnapshot at snapshot epoch",
-                            self.job_id
-                        ),
+                        )
                     }
-                } else {
-                    None
+                    _ => None,
                 };
                 (epoch, resps, info, tracking_job)
             })
@@ -902,33 +976,59 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
     ) {
-        partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
-        if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
-            assert!(completed_epoch > prev_max_committed_epoch);
-        }
-
-        if completed_epoch == self.snapshot_epoch {
-            // The stop barrier (prev_epoch = snapshot_epoch) has been committed.
-            // Assert expected state and transition to idle.
-            match &self.status {
-                BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. } => {
-                    assert!(
-                        tracking_job.is_none(),
-                        "tracking job should have been taken at start_completing"
-                    );
-                }
-                _ => panic!(
-                    "batch refresh job {}: expected FinishingSnapshot when completing snapshot epoch",
-                    self.job_id
-                ),
+        match &self.status {
+            BatchRefreshJobStatus::ConsumingSnapshot { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
             }
-            info!(
-                job_id = %self.job_id,
-                completed_epoch,
-                "batch refresh job: transitioned to idle, removing partial graph"
-            );
-            partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
-            self.status = BatchRefreshJobStatus::Idle;
+            BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. }
+                if completed_epoch == self.snapshot_epoch =>
+            {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                assert!(
+                    tracking_job.is_none(),
+                    "tracking job should have been taken at start_completing"
+                );
+                info!(
+                    job_id = %self.job_id,
+                    completed_epoch,
+                    "batch refresh job: snapshot done, transitioned to idle, removing partial graph"
+                );
+                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: completed_epoch,
+                };
+            }
+            BatchRefreshJobStatus::FinishingSnapshot { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+            }
+            BatchRefreshJobStatus::ConsumingLogStore {
+                target_upstream_epoch,
+                ..
+            } if completed_epoch == *target_upstream_epoch => {
+                let target = *target_upstream_epoch;
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                info!(
+                    job_id = %self.job_id,
+                    completed_epoch,
+                    target_upstream_epoch = target,
+                    "batch refresh job: logstore done, transitioned to idle, removing partial graph"
+                );
+                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle {
+                    last_committed_epoch: target,
+                };
+            }
+            BatchRefreshJobStatus::ConsumingLogStore { .. } => {
+                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+            }
+            BatchRefreshJobStatus::Resetting { .. } => {
+                // The job was dropped while the completing task was running in the background.
+                // The partial graph has already been reset, so skip the ack.
+            }
+            BatchRefreshJobStatus::Idle { .. }
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
+                unreachable!("batch refresh job should not be completing in this state")
+            }
         }
     }
 
@@ -974,7 +1074,12 @@ impl BatchRefreshJobCheckpointControl {
                 progress: "BatchRefresh Stopping".to_owned(),
                 backfill_type: PbBackfillType::SnapshotBackfill,
             }),
-            BatchRefreshJobStatus::Idle | BatchRefreshJobStatus::Resetting { .. } => None,
+            BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. } => Some(BackfillProgress {
+                progress: "BatchRefresh LogStore".to_owned(),
+                backfill_type: PbBackfillType::SnapshotBackfill,
+            }),
+            BatchRefreshJobStatus::Idle { .. } | BatchRefreshJobStatus::Resetting { .. } => None,
         }
     }
 
@@ -994,17 +1099,42 @@ impl BatchRefreshJobCheckpointControl {
 
     /// Returns the pinned upstream log epoch and upstream table IDs.
     pub(super) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
-        (
-            self.snapshot_epoch,
-            self.snapshot_backfill_upstream_tables.clone(),
-        )
+        match &self.status {
+            BatchRefreshJobStatus::ConsumingSnapshot { .. }
+            | BatchRefreshJobStatus::FinishingSnapshot { .. } => (
+                self.snapshot_epoch,
+                self.snapshot_backfill_upstream_tables.clone(),
+            ),
+            BatchRefreshJobStatus::ConsumingLogStore {
+                logstore_start_epoch,
+                ..
+            }
+            | BatchRefreshJobStatus::InitializingBatchRefresh {
+                logstore_start_epoch,
+                ..
+            } => (
+                *logstore_start_epoch,
+                self.snapshot_backfill_upstream_tables.clone(),
+            ),
+            BatchRefreshJobStatus::Idle {
+                last_committed_epoch,
+            } => (
+                *last_committed_epoch,
+                self.snapshot_backfill_upstream_tables.clone(),
+            ),
+            BatchRefreshJobStatus::Resetting { .. } => (0, HashSet::new()),
+        }
     }
 
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { fragment_infos, .. } => Some(fragment_infos),
+            BatchRefreshJobStatus::InitializingBatchRefresh { fragment_infos, .. } => {
+                Some(fragment_infos)
+            }
+            BatchRefreshJobStatus::ConsumingLogStore { fragment_infos, .. } => Some(fragment_infos),
             BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::Idle
+            | BatchRefreshJobStatus::Idle { .. }
             | BatchRefreshJobStatus::Resetting { .. } => None,
         }
     }
@@ -1014,7 +1144,328 @@ impl BatchRefreshJobCheckpointControl {
             self.status,
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
                 | BatchRefreshJobStatus::FinishingSnapshot { .. }
+                | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+                | BatchRefreshJobStatus::ConsumingLogStore { .. }
         )
+    }
+
+    /// Whether this idle job should start a refresh run.
+    ///
+    /// Returns `true` if the job is idle and the upstream committed epoch is
+    /// far enough ahead of the job's last committed epoch (by `batch_refresh_seconds`).
+    pub(crate) fn should_start_refresh(&self, upstream_committed_epoch: u64) -> bool {
+        if let BatchRefreshJobStatus::Idle {
+            last_committed_epoch,
+        } = &self.status
+        {
+            let job_physical_ms = Epoch(*last_committed_epoch).physical_time();
+            let upstream_physical_ms = Epoch(upstream_committed_epoch).physical_time();
+            let threshold_ms = self.batch_refresh_seconds * 1000;
+            upstream_physical_ms.saturating_sub(job_physical_ms) >= threshold_ms
+        } else {
+            false
+        }
+    }
+
+    /// Returns the last committed epoch if the job is idle.
+    pub(crate) fn last_committed_epoch(&self) -> Option<u64> {
+        if let BatchRefreshJobStatus::Idle {
+            last_committed_epoch,
+        } = &self.status
+        {
+            Some(*last_committed_epoch)
+        } else {
+            None
+        }
+    }
+}
+
+// ── Logstore refresh run ──────────────────────────────────────────────────────
+
+impl BatchRefreshJobCheckpointControl {
+    /// Start a logstore consumption run.
+    ///
+    /// Preconditions: the job must be `Idle`.
+    ///
+    /// 1. Resolves log epochs from the hummock changelog
+    /// 2. Re-renders actors using the cached context
+    /// 3. Injects all barriers at once (first with `AddMutation`, last with `StopMutation`)
+    /// 4. Transitions to `ConsumingLogStore`
+    ///
+    /// Returns `true` if a refresh run was started, `false` if there are no
+    /// log epochs to consume (early return, stays idle).
+    pub(crate) fn start_refresh_run(
+        &mut self,
+        context: &BatchRefreshJobTriggerContext,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        actor_id_counter: &AtomicU32,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<bool> {
+        let last_committed_epoch = match &self.status {
+            BatchRefreshJobStatus::Idle {
+                last_committed_epoch,
+            } => *last_committed_epoch,
+            _ => panic!(
+                "batch refresh job {}: start_refresh_run called in non-Idle state {:?}",
+                self.job_id, self.status
+            ),
+        };
+
+        // Resolve log epochs into barrier infos.
+        let target_upstream_epoch = context.target_upstream_epoch;
+        let Some((first_epoch, pending_log_barriers)) = Self::resolve_log_epoch_barriers(
+            &self.snapshot_backfill_upstream_tables,
+            &context.upstream_table_log_epochs,
+            last_committed_epoch,
+        )?
+        else {
+            info!(
+                job_id = %self.job_id,
+                last_committed_epoch,
+                target_upstream_epoch,
+                "batch refresh job: no log epochs to consume, staying idle"
+            );
+            return Ok(false);
+        };
+
+        let log_target_epoch = pending_log_barriers.last().expect("non-empty").prev_epoch();
+        if target_upstream_epoch != log_target_epoch {
+            info!(
+                job_id = %self.job_id,
+                last_committed_epoch,
+                target_upstream_epoch,
+                log_target_epoch,
+                "batch refresh job: upstream target has no resolved changelog yet, staying idle"
+            );
+            return Ok(false);
+        }
+
+        // Build logical fragments from cached context.
+        let logical = BatchRefreshLogicalFragments::from_context(context);
+
+        // Re-render actors.
+        let render_result = Self::render_actors_and_build_job_info(
+            &logical.fragments,
+            &logical.downstreams,
+            &context.definition,
+            actor_id_counter,
+            worker_nodes,
+            &context.database_resource_group,
+            &context.streaming_job_model,
+            self.partial_graph_id,
+        )?;
+
+        // Build actors_to_create and initial mutation.
+        let added_actors: Vec<ActorId> = render_result
+            .fragment_infos
+            .values()
+            .flat_map(|fragment| fragment.actors.keys().copied())
+            .collect();
+
+        let initial_mutation = Mutation::Add(AddMutation {
+            actor_dispatchers: Default::default(),
+            added_actors,
+            actor_splits: Default::default(),
+            pause: false,
+            subscriptions_to_add: Default::default(),
+            backfill_nodes_to_pause: Default::default(),
+            actor_cdc_table_snapshot_splits: None,
+            new_upstream_sinks: Default::default(),
+        });
+
+        let node_actors = &render_result.node_actors;
+        let state_table_ids = &render_result.state_table_ids;
+        let initial_barrier = BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(last_committed_epoch)),
+            curr_epoch: TracedEpoch::new(Epoch(first_epoch)),
+            kind: BarrierKind::Initial,
+        };
+        let mut partial_graph_recoverer = partial_graph_manager.start_recover();
+        let recover_result = partial_graph_recoverer.recover_graph(
+            self.partial_graph_id,
+            initial_mutation,
+            &initial_barrier,
+            node_actors,
+            state_table_ids.iter().copied(),
+            render_result.actors_to_create,
+            BatchRefreshBarrierStats::new(self.job_id, self.snapshot_epoch),
+        );
+        match recover_result {
+            Ok(()) => {
+                let initializing_partial_graphs = partial_graph_recoverer.all_initializing();
+                debug_assert_eq!(initializing_partial_graphs.len(), 1);
+                debug_assert!(initializing_partial_graphs.contains(&self.partial_graph_id));
+            }
+            Err(e) => {
+                partial_graph_recoverer.failed();
+                return Err(e);
+            }
+        }
+
+        let logstore_start_epoch = last_committed_epoch;
+
+        info!(
+            job_id = %self.job_id,
+            last_committed_epoch,
+            target_upstream_epoch,
+            num_log_barriers = pending_log_barriers.len(),
+            "batch refresh job: initialized logstore consumption partial graph"
+        );
+
+        self.status = BatchRefreshJobStatus::InitializingBatchRefresh {
+            fragment_infos: render_result.fragment_infos,
+            node_actors: render_result.node_actors,
+            state_table_ids: render_result.state_table_ids,
+            pending_log_barriers,
+            logstore_start_epoch,
+            target_upstream_epoch,
+        };
+
+        Ok(true)
+    }
+
+    pub(crate) fn on_log_store_initialized(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<()> {
+        let old_status = replace(
+            &mut self.status,
+            BatchRefreshJobStatus::Idle {
+                last_committed_epoch: 0,
+            },
+        );
+        let BatchRefreshJobStatus::InitializingBatchRefresh {
+            fragment_infos,
+            node_actors,
+            state_table_ids,
+            pending_log_barriers,
+            logstore_start_epoch,
+            target_upstream_epoch,
+        } = old_status
+        else {
+            panic!(
+                "batch refresh job {}: logstore initialized in unexpected status {:?}",
+                self.job_id, old_status
+            );
+        };
+
+        let final_barrier_idx = pending_log_barriers.len() - 1;
+        let mut stop_mutation = Some(Mutation::Stop(StopMutation {
+            actors: fragment_infos
+                .values()
+                .flat_map(|fragment| fragment.actors.keys().copied())
+                .collect(),
+            dropped_sink_fragments: vec![],
+        }));
+        for (idx, barrier) in pending_log_barriers.into_iter().enumerate() {
+            let is_stop_barrier = idx == final_barrier_idx;
+            let mutation = is_stop_barrier.then(|| stop_mutation.take().expect("unused"));
+            Self::inject_barrier(
+                self.partial_graph_id,
+                partial_graph_manager,
+                &node_actors,
+                &state_table_ids,
+                barrier,
+                None,
+                mutation,
+                vec![],
+                None,
+                is_stop_barrier,
+            )?;
+        }
+
+        self.status = BatchRefreshJobStatus::ConsumingLogStore {
+            fragment_infos,
+            logstore_start_epoch,
+            target_upstream_epoch,
+        };
+        Ok(())
+    }
+
+    /// Resolve upstream log epochs from the hummock changelog into barrier infos.
+    ///
+    /// Returns `(first_epoch, log_barriers)`. `first_epoch` is consumed by the
+    /// initial barrier. `log_barriers` contains all barriers to inject after
+    /// initialization, ending with the final checkpoint stop barrier.
+    fn resolve_log_epoch_barriers(
+        snapshot_backfill_upstream_tables: &HashSet<TableId>,
+        upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        exclusive_start_log_epoch: u64,
+    ) -> MetaResult<Option<(u64, Vec<BarrierInfo>)>> {
+        let table_id = snapshot_backfill_upstream_tables
+            .iter()
+            .next()
+            .expect("snapshot backfill job should have upstream");
+        let Some(epochs) = upstream_table_log_epochs.get(table_id) else {
+            return Ok(None);
+        };
+
+        // Find the starting point: skip entries up to and including exclusive_start_log_epoch.
+        let mut epochs_iter = epochs.iter().peekable();
+        loop {
+            match epochs_iter.peek() {
+                Some((_, checkpoint_epoch)) if *checkpoint_epoch <= exclusive_start_log_epoch => {
+                    epochs_iter.next();
+                }
+                _ => break,
+            }
+        }
+
+        let mut epoch_infos = vec![];
+        for (non_checkpoint_epochs, checkpoint_epoch) in epochs_iter {
+            epoch_infos.extend(
+                non_checkpoint_epochs
+                    .iter()
+                    .copied()
+                    .map(|epoch| (epoch, false)),
+            );
+            epoch_infos.push((*checkpoint_epoch, true));
+        }
+        if epoch_infos.is_empty() {
+            return Ok(None);
+        }
+
+        let first_epoch = epoch_infos[0].0;
+        let mut pending_non_checkpoint_epochs = vec![];
+        let mut replay_barriers = vec![];
+        for window in epoch_infos.windows(2) {
+            let (prev_epoch, is_checkpoint) = window[0];
+            let curr_epoch = window[1].0;
+            assert!(prev_epoch > exclusive_start_log_epoch);
+            assert!(curr_epoch > prev_epoch);
+            pending_non_checkpoint_epochs.push(prev_epoch);
+            let kind = if is_checkpoint {
+                BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_epochs))
+            } else {
+                BarrierKind::Barrier
+            };
+            replay_barriers.push(BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
+                kind,
+            });
+        }
+
+        let (last_epoch, _) = *epoch_infos.last().expect("non-empty");
+        assert!(last_epoch > exclusive_start_log_epoch);
+        pending_non_checkpoint_epochs.push(last_epoch);
+        replay_barriers.push(BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(last_epoch)),
+            curr_epoch: TracedEpoch::new(Epoch(u64::MAX)),
+            kind: BarrierKind::Checkpoint(pending_non_checkpoint_epochs),
+        });
+
+        Ok(Some((first_epoch, replay_barriers)))
+    }
+}
+
+impl BatchRefreshLogicalFragments {
+    /// Build logical fragments from a trigger context.
+    pub(crate) fn from_context(ctx: &BatchRefreshJobTriggerContext) -> Self {
+        Self {
+            fragments: ctx.fragments.clone(),
+            downstreams: ctx.downstreams.clone(),
+        }
     }
 }
 
@@ -1030,6 +1481,7 @@ impl BatchRefreshJobCheckpointControl {
         match &mut self.status {
             BatchRefreshJobStatus::Resetting {
                 notifiers: existing_notifiers,
+                ..
             } => {
                 for notifier in &mut *notifiers {
                     notifier.notify_started();
@@ -1038,7 +1490,9 @@ impl BatchRefreshJobCheckpointControl {
                 true
             }
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
-            | BatchRefreshJobStatus::FinishingSnapshot { .. } => {
+            | BatchRefreshJobStatus::FinishingSnapshot { .. }
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
                 for notifier in &mut *notifiers {
                     notifier.notify_started();
                 }
@@ -1048,7 +1502,7 @@ impl BatchRefreshJobCheckpointControl {
                 };
                 true
             }
-            BatchRefreshJobStatus::Idle => {
+            BatchRefreshJobStatus::Idle { .. } => {
                 // Idle has no running partial graph, but we still go through
                 // the reset flow so the cleanup path is uniform.
                 for notifier in &mut *notifiers {
@@ -1071,8 +1525,10 @@ impl BatchRefreshJobCheckpointControl {
         match self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::Idle => false,
-            BatchRefreshJobStatus::Resetting { notifiers } => {
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. }
+            | BatchRefreshJobStatus::Idle { .. } => false,
+            BatchRefreshJobStatus::Resetting { notifiers, .. } => {
                 for notifier in notifiers {
                     notifier.notify_collected();
                 }

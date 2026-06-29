@@ -28,12 +28,15 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::PbSstableFilterType;
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
+use crate::hummock::compactor::compaction_utils::{
+    blocked_xor_filter_key_count_threshold, estimate_output_key_count_by_size,
+};
 use crate::hummock::compactor::context::{CompactorContext, await_tree_key};
 use crate::hummock::compactor::{CompactOutput, Compactor, check_flush_result};
 use crate::hummock::event_handler::uploader::UploadTaskOutput;
@@ -171,19 +174,28 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     });
 
     let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
-    let (splits, sub_compaction_sstable_size, table_vnode_partition) =
+    let (splits, sub_compaction_sstable_size, table_vnode_partition, compact_data_size) =
         generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
-    // Shared buffer compaction always goes to L0. Use block_based_filter when kv_count is large.
+    // Shared buffer compaction always goes to L0. Use a blocked filter when kv_count is large.
     // Use None to apply the default threshold since shared buffer flush doesn't have a CompactTask.
-    let use_block_based_filter =
-        risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
-            total_key_count as u64,
+    let estimated_output_key_count = estimate_output_key_count_by_size(
+        total_key_count as u64,
+        compact_data_size,
+        sub_compaction_sstable_size as usize,
+    );
+    let sstable_filter_layout =
+        if risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+            estimated_output_key_count as u64,
             None,
-        );
+        ) {
+            PbSstableFilterLayout::Blocked
+        } else {
+            PbSstableFilterLayout::Plain
+        };
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
@@ -191,8 +203,9 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
+            estimated_output_key_count,
             table_vnode_partition.clone(),
-            use_block_based_filter,
+            sstable_filter_layout,
             object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
@@ -321,7 +334,7 @@ fn generate_splits(
     payload: &Vec<ImmutableMemtable>,
     existing_table_ids: &HashSet<TableId>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64, BTreeMap<TableId, u32>) {
+) -> (Vec<KeyRange>, u64, BTreeMap<TableId, u32>, u64) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
     let mut table_size_infos: HashMap<TableId, u64> = HashMap::default();
@@ -392,7 +405,12 @@ fn generate_splits(
     // mul 1.2 for other extra memory usage.
     // Ensure that the size of each sstable is still less than `sstable_size` after optimization to avoid generating a huge size sstable which will affect the object store
     let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    (splits, sub_compaction_sstable_size, table_vnode_partition)
+    (
+        splits,
+        sub_compaction_sstable_size,
+        table_vnode_partition,
+        compact_data_size,
+    )
 }
 
 pub struct SharedBufferCompactRunner {
@@ -406,12 +424,15 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
+        estimated_output_key_count: usize,
         table_vnode_partition: BTreeMap<TableId, u32>,
-        use_block_based_filter: bool,
+        sstable_filter_layout: PbSstableFilterLayout,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
+        options.estimated_output_key_count = Some(estimated_output_key_count);
+        options.filter_hash_prealloc_key_count_cap = blocked_xor_filter_key_count_threshold(None);
         let compactor = Compactor::new(
             context,
             options,
@@ -421,9 +442,9 @@ impl SharedBufferCompactRunner {
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 table_vnode_partition,
-                use_block_based_filter,
-                // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
-                sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+                sstable_filter_layout,
+                // L0 flush writes overlapping SSTs, so keep a conservative filter type here.
+                sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },
@@ -540,7 +561,7 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity, vnodes) = generate_splits(
+        let (splits, _sstable_capacity, vnodes, _) = generate_splits(
             &payload,
             &HashSet::from_iter([1.into(), 2.into()]),
             &storage_opts,
@@ -605,7 +626,7 @@ mod tests {
 
         // Test with payload in wrong order (zzz, aaa, mmm) instead of sorted order (aaa, mmm, zzz)
         let payload = vec![imm1, imm2, imm3];
-        let (splits, _sstable_capacity, _vnodes) =
+        let (splits, _sstable_capacity, _vnodes, _) =
             generate_splits(&payload, &HashSet::from_iter([1.into()]), &storage_opts);
 
         // Should have multiple splits due to large data size

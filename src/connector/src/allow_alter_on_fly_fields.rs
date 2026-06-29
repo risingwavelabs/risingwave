@@ -315,6 +315,14 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // TurbopufferConfig
+    map.try_insert(
+        std::any::type_name::<TurbopufferConfig>().to_owned(),
+        [
+            "write_batch_size".to_owned(),
+            "max_linger_second".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // Jdbc
     map.try_insert(
         JdbcSink::SINK_NAME.to_owned(),

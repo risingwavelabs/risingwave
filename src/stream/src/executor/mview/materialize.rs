@@ -94,6 +94,12 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// The cache for conflict handling. `None` if conflict behavior is `NoCheck`.
     materialize_cache: Option<MaterializeCache>,
 
+    /// Indices of columns that may carry a Debezium unchanged-TOAST placeholder
+    /// (PostgreSQL CDC only). Mirrors the value passed into `MaterializeCache`.
+    /// Used at runtime to prevent the `Overwrite -> NoCheck` downgrade from
+    /// bypassing the placeholder replacement path.
+    toastable_column_indices: Option<Vec<usize>>,
+
     conflict_behavior: ConflictBehavior,
 
     /// Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
@@ -249,13 +255,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // - jsonb (DataType::Jsonb)
                     // - varchar (DataType::Varchar)
                     // - bytea (DataType::Bytea)
+                    // - pgvector (DataType::Vector)
                     // - One-dimensional arrays of the above types (DataType::List)
                     //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
 
                     // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
-                    DataType::Varchar | DataType::List(_) | DataType::Bytea | DataType::Jsonb => {
-                        Some(index)
-                    }
+                    DataType::Varchar
+                    | DataType::List(_)
+                    | DataType::Bytea
+                    | DataType::Jsonb
+                    | DataType::Vector(_) => Some(index),
                     _ => None,
                 })
                 .collect();
@@ -338,9 +347,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 row_serde,
                 version_column_indices.clone(),
                 conflict_behavior,
-                toastable_column_indices,
+                toastable_column_indices.clone(),
                 cache_metrics,
             ),
+            toastable_column_indices,
             conflict_behavior,
             cleaned_by_ttl_watermark,
             version_column_indices,
@@ -426,7 +436,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 .collect();
             if !incomplete_vnodes.is_empty() {
                 // Resume from merge stage since some VNodes were left incomplete
-                inner_state = Box::new(MaterializeStreamState::<_>::MergingData);
+                *inner_state = MaterializeStreamState::<_>::MergingData;
                 tracing::info!(
                     incomplete_vnodes = incomplete_vnodes.len(),
                     "Recovery: Resuming refresh from merge stage due to incomplete VNodes"
@@ -471,11 +481,18 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // while outputting inconsistent changes to downstream which no one will subscribe to.
                                 // For tables with watermark TTL (indicated by `cleaned_by_ttl_watermark`), conflict check must be enabled.
                                 // TODO(ttl): differentiate between table consistency and downstream consistency.
+                                // When the table carries TOAST-able columns (PostgreSQL CDC), the
+                                // `MaterializeCache` is the only place where the Debezium
+                                // unchanged-TOAST placeholder is detected and swapped for the row's
+                                // previous value. Demoting to `NoCheck` here would skip the cache
+                                // entirely and let the placeholder land in state. Keep the original
+                                // `Overwrite` behavior in that case so the replacement path runs.
                                 let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
                                     self.conflict_behavior
                                     && !self.state_table.is_consistent_op()
                                     && !self.cleaned_by_ttl_watermark
                                     && self.version_column_indices.is_empty()
+                                    && self.toastable_column_indices.is_none()
                                 {
                                     ConflictBehavior::NoCheck
                                 } else {
@@ -828,8 +845,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"
                                     );
-                                    expect_next_state =
-                                        Box::new(MaterializeStreamState::<_>::MergingData);
+                                    *expect_next_state = MaterializeStreamState::<_>::MergingData;
                                 }
                             }
                             _ => {}
@@ -1209,6 +1225,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 None,
                 cache_metrics,
             ),
+            toastable_column_indices: None,
             conflict_behavior,
             cleaned_by_ttl_watermark: false,
             version_column_indices: vec![],

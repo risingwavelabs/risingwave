@@ -18,6 +18,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -38,7 +40,8 @@ use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
 };
-use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
@@ -310,6 +313,95 @@ fn build_stream_actors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    fn resolve_job_committed_epoch(
+        job_id: JobId,
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        state_table_committed_epochs: &HashMap<TableId, u64>,
+    ) -> MetaResult<u64> {
+        let mut table_id_iter = fragments
+            .values()
+            .flat_map(|fragment| fragment.state_table_ids.iter().copied());
+        let Some(first_table_id) = table_id_iter.next() else {
+            bail!("job {} has no state table", job_id);
+        };
+        let committed_epoch = *state_table_committed_epochs
+            .get(&first_table_id)
+            .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", first_table_id))?;
+        for table_id in table_id_iter {
+            let table_committed_epoch = *state_table_committed_epochs
+                .get(&table_id)
+                .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?;
+            if committed_epoch != table_committed_epoch {
+                bail!(
+                    "table {} has committed epoch {} different to other table {} with committed epoch {} in job {}",
+                    first_table_id,
+                    committed_epoch,
+                    table_id,
+                    table_committed_epoch,
+                    job_id
+                );
+            }
+        }
+
+        Ok(committed_epoch)
+    }
+
+    async fn finish_completed_batch_refresh_background_jobs(
+        &self,
+        recovery_context: &LoadedRecoveryContext,
+        state_table_committed_epochs: &HashMap<TableId, u64>,
+        background_jobs: &mut HashSet<JobId>,
+    ) -> MetaResult<()> {
+        let background_job_ids = background_jobs.iter().copied().collect_vec();
+        for job_id in background_job_ids {
+            let Some(job) = recovery_context.fragment_context.job_map.get(&job_id) else {
+                continue;
+            };
+            if job.refresh_interval_sec.is_none() {
+                continue;
+            }
+            let Some(fragments) = recovery_context.fragment_context.job_fragments.get(&job_id)
+            else {
+                continue;
+            };
+
+            let committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                fragments
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+            let snapshot_epoch = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values()
+                .find_map(|e| *e)
+                .unwrap_or(committed_epoch);
+            if committed_epoch < snapshot_epoch {
+                continue;
+            }
+
+            info!(
+                %job_id,
+                committed_epoch,
+                snapshot_epoch,
+                "finish completed batch refresh background job during recovery"
+            );
+            self.finish_creating_job(TrackingJob::recovered_from_fragment_nodes(
+                job_id,
+                fragments
+                    .iter()
+                    .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
+            ))
+            .await?;
+            background_jobs.remove(&job_id);
+        }
+
+        Ok(())
+    }
+
     async fn apply_pre_applied_drop_cancel(
         &self,
         database_id: Option<DatabaseId>,
@@ -374,9 +466,52 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .list_sink_ids(Some(database_id))
                 .await?;
-            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+            self.sink_manager
+                .stop_sink_coordinator(sink_ids.clone())
+                .await;
+            self.iceberg_v3_sink_manager.unregister_v3_sinks(sink_ids);
         } else {
             self.sink_manager.reset().await;
+            self.iceberg_v3_sink_manager.reset();
+        }
+        Ok(())
+    }
+
+    /// Re-register iceberg V3 sink commit coordinators after recovery wipes them.
+    async fn reregister_iceberg_v3_sinks(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        let pb_sinks = self
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await?;
+        let mut futs = FuturesUnordered::new();
+        for pb_sink in pb_sinks {
+            if database_id.is_some_and(|db_id| pb_sink.database_id != db_id)
+                || !crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&pb_sink.properties)
+            {
+                continue;
+            }
+            let config = crate::manager::iceberg_v3_sink::build_iceberg_config(&pb_sink)
+                .with_context(|| {
+                    format!(
+                        "build iceberg config while re-registering v3 sink {}",
+                        pb_sink.id
+                    )
+                })?;
+            let manager = &self.iceberg_v3_sink_manager;
+            futs.push(async move {
+                (
+                    pb_sink.id,
+                    manager.register_v3_sink(pb_sink.id, config).await,
+                )
+            });
+        }
+
+        while let Some((id, res)) = futs.next().await {
+            if let Err(e) = res {
+                let msg = format!("register iceberg v3 sink {} during recovery", id);
+                return Err(e.context(msg).into());
+            }
         }
         Ok(())
     }
@@ -588,30 +723,8 @@ impl GlobalBarrierWorkerContextImpl {
         };
         let mut min_downstream_committed_epochs = HashMap::new();
         for (job_id, fragments) in background_jobs {
-            let job_committed_epoch = {
-                let mut table_id_iter = fragments
-                    .values()
-                    .flat_map(|fragment| fragment.state_table_ids.iter().copied());
-                let Some(first_table_id) = table_id_iter.next() else {
-                    bail!("job {} has no state table", job_id);
-                };
-                let job_committed_epoch = get_table_committed_epoch(first_table_id)?;
-                for table_id in table_id_iter {
-                    let table_committed_epoch = get_table_committed_epoch(table_id)?;
-                    if job_committed_epoch != table_committed_epoch {
-                        bail!(
-                            "table {} has committed epoch {} different to other table {} with committed epoch {} in job {}",
-                            first_table_id,
-                            job_committed_epoch,
-                            table_id,
-                            table_committed_epoch,
-                            job_id
-                        );
-                    }
-                }
-
-                job_committed_epoch
-            };
+            let job_committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
                 StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                     fragments
@@ -713,9 +826,16 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("abort dirty pending sink state")?;
 
+                    // We must abort dirty pending sink state before registering iceberg V3 sinks,
+                    // otherwise recover_pending will take speculative (epoch > committed epoch) pending sink state
+                    // as valid and cause duplicated iceberg commit.
+                    self.reregister_iceberg_v3_sinks(None)
+                        .await
+                        .context("re-register iceberg v3 sinks after recovery")?;
+
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
-                    let initial_background_jobs = self
+                    let mut initial_background_jobs = self
                         .list_background_job_progress(None)
                         .await
                         .context("recover background job progress should not fail")?;
@@ -816,6 +936,13 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .await?;
 
+                    self.finish_completed_batch_refresh_background_jobs(
+                        &recovery_context,
+                        &state_table_committed_epochs,
+                        &mut initial_background_jobs,
+                    )
+                    .await?;
+
                     let mv_depended_subscriptions = self
                         .metadata_manager
                         .get_mv_depended_subscriptions(None)
@@ -877,6 +1004,9 @@ impl GlobalBarrierWorkerContextImpl {
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
+        self.reregister_iceberg_v3_sinks(Some(database_id))
+            .await
+            .context("re-register iceberg v3 sinks after recovery")?;
 
         // Background job progress needs to be recovered.
         tracing::info!(
@@ -884,7 +1014,7 @@ impl GlobalBarrierWorkerContextImpl {
             "recovering background job progress of database"
         );
 
-        let background_jobs = self
+        let mut background_jobs = self
             .list_background_job_progress(Some(database_id))
             .await
             .context("recover background job progress of database should not fail")?;
@@ -931,6 +1061,13 @@ impl GlobalBarrierWorkerContextImpl {
                 )
             })
             .await?;
+
+        self.finish_completed_batch_refresh_background_jobs(
+            &recovery_context,
+            &state_table_committed_epochs,
+            &mut background_jobs,
+        )
+        .await?;
 
         let mv_depended_subscriptions = self
             .metadata_manager

@@ -20,7 +20,9 @@ use std::sync::Arc;
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_pb::id::{FragmentId, PartialGraphId};
+use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
+use risingwave_pb::stream_service::PbIcebergV3SinkRole;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -83,6 +85,13 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor_id: ActorId,
         source_id: SourceId,
+    },
+    ReportIcebergV3SinkMetadata {
+        epoch: EpochPair,
+        sink_id: SinkId,
+        actor_id: ActorId,
+        role: PbIcebergV3SinkRole,
+        metadata: Option<SinkMetadata>,
     },
 }
 
@@ -239,6 +248,23 @@ impl LocalBarrierManager {
             epoch,
             actor_id,
             source_id,
+        });
+    }
+
+    pub fn report_iceberg_v3_sink_metadata(
+        &self,
+        epoch: EpochPair,
+        sink_id: risingwave_common::id::SinkId,
+        actor_id: ActorId,
+        role: PbIcebergV3SinkRole,
+        metadata: Option<SinkMetadata>,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportIcebergV3SinkMetadata {
+            epoch,
+            sink_id,
+            actor_id,
+            role,
+            metadata,
         });
     }
 }

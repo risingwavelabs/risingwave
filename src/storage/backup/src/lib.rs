@@ -13,12 +13,8 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(custom_test_frameworks)]
-#![feature(map_try_insert)]
 #![feature(error_generic_member_access)]
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod error;
 pub mod meta_snapshot;

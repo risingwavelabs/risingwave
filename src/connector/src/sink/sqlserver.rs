@@ -373,7 +373,7 @@ impl SqlServerSinkWriter {
             .map(|idx| {
                 format!(
                     "[SOURCE].[{}]=[TARGET].[{}]",
-                    &self.schema[*idx].name, &self.schema[*idx].name
+                    self.schema[*idx].name, self.schema[*idx].name
                 )
             })
             .collect::<Vec<_>>()
@@ -389,7 +389,7 @@ impl SqlServerSinkWriter {
             .map(|idx| {
                 format!(
                     "[{}]=[SOURCE].[{}]",
-                    &self.schema[*idx].name, &self.schema[*idx].name
+                    self.schema[*idx].name, self.schema[*idx].name
                 )
             })
             .collect::<Vec<_>>()

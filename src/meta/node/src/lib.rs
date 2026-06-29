@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 
@@ -586,7 +586,7 @@ pub fn start(
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            config.session_init,
             shutdown,
         ))
         .await

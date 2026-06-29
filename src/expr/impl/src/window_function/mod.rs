@@ -38,7 +38,7 @@ fn create_window_state_impl(call: &WindowFuncCall) -> Result<BoxedWindowState> {
                 "{}({}) -> {}",
                 kind,
                 call.args.arg_types().iter().format(", "),
-                &call.return_type,
+                call.return_type,
             )));
         }
     })

@@ -92,7 +92,7 @@ struct PartialGraphRunningState {
 impl PartialGraphRunningState {
     fn new(stat: Box<dyn PartialGraphStat>) -> Self {
         Self {
-            barrier_item_collector: BarrierItemCollector::new(),
+            barrier_item_collector: BarrierItemCollector::new(true),
             completing_epoch: None,
             stat,
         }
@@ -335,7 +335,7 @@ impl PartialGraphManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        context: &impl GlobalBarrierWorkerContext,
+        context: Arc<impl GlobalBarrierWorkerContext>,
     ) {
         self.control_stream_manager
             .add_worker(node, existing_graphs(&self.graphs), &self.term_id, context)

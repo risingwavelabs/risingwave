@@ -49,6 +49,7 @@ pub mod sqlserver;
 feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
+pub mod turbopuffer;
 pub mod utils;
 pub mod writer;
 pub mod prelude {
@@ -65,6 +66,7 @@ use std::sync::{Arc, LazyLock};
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono_tz::{Tz, UTC};
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
@@ -127,6 +129,7 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
+                { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
@@ -243,6 +246,10 @@ pub const SINK_USER_IGNORE_DELETE_OPTION: &str = "ignore_delete";
 /// Alias for [`SINK_USER_IGNORE_DELETE_OPTION`], kept for backward compatibility.
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
+/// When enabled, the sink executor preserves distinct upstream stream-key changes that map to the
+/// same downstream primary key instead of compacting them into one final-state update within a
+/// barrier. Upstream changes under the same stream key may still be compacted earlier.
+pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
@@ -590,6 +597,7 @@ pub struct SinkWriterParam {
     pub sink_name: String,
     pub connector: String,
     pub streaming_config: StreamingConfig,
+    pub time_zone: Tz,
 }
 
 #[derive(Clone)]
@@ -686,6 +694,7 @@ impl SinkWriterParam {
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
             streaming_config: StreamingConfig::default(),
+            time_zone: UTC,
         }
     }
 }

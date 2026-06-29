@@ -43,7 +43,7 @@ use crate::optimizer::plan_node::{
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
-use crate::optimizer::rule::IndexSelectionRule;
+use crate::optimizer::rule::{IndexSelectionRule, StreamingIndexSelectionRule};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -343,7 +343,7 @@ impl LogicalScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    fn clone_with_predicate(&self, predicate: Condition) -> Self {
+    pub(crate) fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
             self.output_col_idx().clone(),
             self.table().clone(),
@@ -620,7 +620,12 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            if self.core.cross_database() && ctx.backfill_type() == BackfillType::UpstreamOnly {
+            if self.core.cross_database()
+                && matches!(
+                    ctx.backfill_type(),
+                    BackfillType::Replicated | BackfillType::UpstreamOnlySink
+                )
+            {
                 return Err(ErrorCode::NotSupported(
                     "We currently do not support cross database scan in upstream only mode."
                         .to_owned(),
@@ -629,11 +634,10 @@ impl ToStream for LogicalScan {
                 .into());
             }
 
-            Ok(StreamTableScan::new_with_stream_scan_type(
-                self.core.clone(),
-                ctx.backfill_type().to_stream_scan_type(),
+            Ok(
+                StreamTableScan::new_with_backfill_type(self.core.clone(), ctx.backfill_type())
+                    .into(),
             )
-            .into())
         } else {
             if ctx.backfill_type() == BackfillType::SnapshotBackfill {
                 let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
@@ -642,10 +646,11 @@ impl ToStream for LogicalScan {
                 )?;
 
                 if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
+                    // Single scan range — direct pushdown.
                     let (core, predicate, project_expr) = self.predicate_pull_up();
                     let scan = StreamTableScan::new_with_scan_range(
                         core,
-                        ctx.backfill_type().to_stream_scan_type(),
+                        ctx.backfill_type(),
                         Some(scan_ranges.into_iter().next().unwrap()),
                     );
                     LogicalFilter::check_stream_predicate(&predicate)?;
@@ -672,6 +677,24 @@ impl ToStream for LogicalScan {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        // For snapshot backfill, apply streaming index selection rule which handles:
+        // 1. Covering index selection (picks lowest-cost covering index)
+        // 2. IN expansion (splits IN predicates into LogicalUnion of LogicalScans)
+        // This must happen here (not in to_stream) so that upper operators see the
+        // correct stream key from the rewritten plan.
+        if ctx.backfill_type() == BackfillType::SnapshotBackfill
+            && !self.predicate().always_true()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+            && let Some(rewritten) = StreamingIndexSelectionRule::rewrite(self)
+        {
+            return rewritten.logical_rewrite_for_stream(ctx);
+        }
+
         let mut output_col_idx = self.output_col_idx().clone();
         let original_len = output_col_idx.len();
 

@@ -16,20 +16,24 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
+use thiserror_ext::AsReport;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, ResumeBackfillTarget};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -241,6 +245,118 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         Ok(())
     }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        self.load_batch_refresh_trigger_context_impl(job_id, database_id, last_committed_epoch)
+            .await
+    }
+
+    #[await_tree::instrument]
+    async fn pre_commit_iceberg_v3_sink_metadata(
+        &self,
+        reports: Vec<PbIcebergV3SinkMetadata>,
+    ) -> MetaResult<Vec<SinkId>> {
+        let grouped = group_v3_reports_by_sink(reports)?;
+        let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
+        let futs = FuturesUnordered::new();
+        for (sink_id, (prev_epoch, reports)) in grouped {
+            if reports.is_empty() {
+                continue;
+            }
+            let manager = &self.iceberg_v3_sink_manager;
+            futs.push(async move {
+                (
+                    sink_id,
+                    manager
+                        .pre_commit_v3_epoch(sink_id, prev_epoch, reports)
+                        .await,
+                )
+            });
+        }
+
+        // Drain all futures regardless of individual failures, so that no coordinator is left with
+        // state inconsistent vs. the caller's view.
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(success_ids)
+        } else {
+            Err(aggregate_v3_sink_errors("pre-commit", errs).into())
+        }
+    }
+
+    #[await_tree::instrument]
+    async fn commit_iceberg_v3_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+        let futs = FuturesUnordered::new();
+        for sink_id in sink_ids {
+            let manager = &self.iceberg_v3_sink_manager;
+            futs.push(async move { (sink_id, manager.commit_v3_epoch(sink_id).await) });
+        }
+
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(aggregate_v3_sink_errors("commit", errs).into())
+        }
+    }
+}
+
+/// Combine per-sink errors from a fan-out into a single `anyhow::Error`. The first failing
+/// sink's error is used as the source so the original chain is preserved; the message lists
+/// every failing `sink_id` and its error stringified.
+fn aggregate_v3_sink_errors(
+    phase: &'static str,
+    mut errs: Vec<(SinkId, anyhow::Error)>,
+) -> anyhow::Error {
+    debug_assert!(!errs.is_empty());
+    let sink_ids: Vec<String> = errs.iter().map(|(id, _)| id.to_string()).collect();
+    let details: Vec<String> = errs
+        .iter()
+        .map(|(id, e)| format!("sink {}: {}", id, e.as_report()))
+        .collect();
+    // Preserve the first error's chain as the cause.
+    let (_, first_err) = errs.remove(0);
+    first_err.context(format!(
+        "iceberg v3 sink {} failed for sink_id(s) [{}]: {}",
+        phase,
+        sink_ids.join(", "),
+        details.join("; ")
+    ))
+}
+
+fn group_v3_reports_by_sink(
+    reports: Vec<PbIcebergV3SinkMetadata>,
+) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)>> {
+    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)> = HashMap::new();
+    for r in reports {
+        let sink_id = r.sink_id;
+        let prev_epoch = r.prev_epoch;
+        let entry = grouped.entry(sink_id).or_insert((prev_epoch, Vec::new()));
+        if entry.0 != prev_epoch {
+            return Err(anyhow::anyhow!(
+                "iceberg v3 sink {} reports disagree on prev_epoch: {} vs {}",
+                sink_id,
+                entry.0,
+                prev_epoch
+            )
+            .into());
+        }
+        entry.1.push(r);
+    }
+    Ok(grouped)
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -279,6 +395,153 @@ impl GlobalBarrierWorkerContextImpl {
 
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
+    }
+
+    /// Load the context metadata and resolve upstream log epochs for a batch refresh trigger.
+    async fn load_batch_refresh_trigger_context_impl(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        use itertools::Itertools;
+        use sea_orm::TransactionTrait;
+
+        use crate::controller::scale::load_fragment_context_for_jobs;
+
+        // Load metadata from the catalog under a single transaction.
+        let inner = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let txn = inner.db.begin().await?;
+
+        // 1. Load fragment context (job model, database model).
+        let fragment_context =
+            load_fragment_context_for_jobs(&txn, HashSet::from([job_id])).await?;
+
+        let streaming_job_model = fragment_context
+            .job_map
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("streaming job model not found for job {}", job_id))?
+            .clone();
+
+        let database_model = fragment_context
+            .database_map
+            .get(&database_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("database model not found for database {}", database_id)
+            })?;
+        let database_resource_group = database_model.resource_group.clone();
+
+        // 2. Load job definition.
+        let mut job_extra_info = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_extra_info_in_txn(&txn, vec![job_id])
+            .await?;
+        let definition = job_extra_info
+            .remove(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("extra info not found for job {}", job_id))?
+            .job_definition;
+
+        // 3. Get fragments from fragment_context and load downstream relations.
+        let fragments = fragment_context
+            .job_fragments
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("fragments not found for job {}", job_id))?
+            .clone();
+
+        // Derive upstream table IDs from the snapshot backfill scan nodes in the fragments.
+        let upstream_table_ids: HashSet<TableId> = {
+            use crate::stream::StreamFragmentGraph;
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                fragments.values().map(|f| (&f.nodes, f.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| {
+                anyhow::anyhow!("batch refresh job {} has no snapshot backfill info", job_id)
+            })?;
+            snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .into_keys()
+                .collect()
+        };
+
+        let fragment_ids: Vec<_> = fragments.keys().copied().collect();
+        let downstreams = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_downstream_relations_in_txn(&txn, fragment_ids)
+            .await?;
+
+        txn.commit().await?;
+        drop(inner);
+
+        // Resolve upstream log epochs from the hummock changelog.
+        let (upstream_table_log_epochs, target_upstream_epoch) = self
+            .hummock_manager
+            .on_current_version_and_table_change_log(|version, table_change_log| {
+                let mut target_upstream_epoch = last_committed_epoch;
+                let mut log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>> = HashMap::new();
+
+                for &upstream_table_id in &upstream_table_ids {
+                    let upstream_committed_epoch = version
+                        .state_table_info
+                        .info()
+                        .get(&upstream_table_id)
+                        .map(|info| info.committed_epoch)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot get committed epoch for upstream table {}",
+                                upstream_table_id
+                            )
+                        })?;
+
+                    target_upstream_epoch =
+                        std::cmp::max(target_upstream_epoch, upstream_committed_epoch);
+
+                    if upstream_committed_epoch <= last_committed_epoch {
+                        continue;
+                    }
+
+                    if let Some(change_log) = table_change_log.get(&upstream_table_id) {
+                        let epochs = change_log
+                            .filter_epoch((last_committed_epoch, upstream_committed_epoch))
+                            .map(|epoch_log| {
+                                (
+                                    epoch_log.non_checkpoint_epochs.clone(),
+                                    epoch_log.checkpoint_epoch,
+                                )
+                            })
+                            .collect_vec();
+                        if !epochs.is_empty() {
+                            log_epochs.insert(upstream_table_id, epochs);
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "upstream table {} has lagged downstream on epoch {} but no table change log (upstream committed: {})",
+                            upstream_table_id,
+                            last_committed_epoch,
+                            upstream_committed_epoch,
+                        );
+                    }
+                }
+
+                Ok((log_epochs, target_upstream_epoch))
+            })
+            .await?;
+
+        Ok(BatchRefreshJobTriggerContext {
+            fragments,
+            downstreams,
+            streaming_job_model,
+            definition,
+            database_resource_group,
+            upstream_table_log_epochs,
+            target_upstream_epoch,
+        })
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -46,6 +47,8 @@ pub enum Error {
     InvalidSst(HummockSstableObjectId),
     #[error("invalid manual compaction option: {0}")]
     InvalidManualCompactionOption(String),
+    #[error("time-travel version expired: table {table_id}, epoch {epoch}")]
+    TimeTravelVersionExpired { table_id: TableId, epoch: u64 },
     #[error("time travel")]
     TimeTravel(
         #[source]
@@ -82,6 +85,7 @@ impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
         let code = match &err {
             Error::InvalidManualCompactionOption(_) => tonic::Code::InvalidArgument,
+            Error::TimeTravelVersionExpired { .. } => tonic::Code::OutOfRange,
             _ => tonic::Code::Internal,
         };
         err.to_status(code, "hummock")
