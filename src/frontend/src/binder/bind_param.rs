@@ -16,7 +16,7 @@ use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
 use risingwave_common::bail;
 use risingwave_common::error::BoxedError;
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, Timestamp, Timestamptz};
 
 use super::BoundStatement;
 use super::statement::RewriteExprsRecursive;
@@ -28,15 +28,21 @@ pub(crate) struct ParamRewriter {
     pub(crate) params: Vec<Option<Bytes>>,
     pub(crate) parsed_params: Vec<Datum>,
     pub(crate) param_formats: Vec<Format>,
+    pub(crate) session_timezone: String,
     pub(crate) error: Option<BoxedError>,
 }
 
 impl ParamRewriter {
-    pub(crate) fn new(param_formats: Vec<Format>, params: Vec<Option<Bytes>>) -> Self {
+    pub(crate) fn new(
+        param_formats: Vec<Format>,
+        params: Vec<Option<Bytes>>,
+        session_timezone: String,
+    ) -> Self {
         Self {
             parsed_params: vec![None; params.len()],
             params,
             param_formats,
+            session_timezone,
             error: None,
         }
     }
@@ -74,7 +80,45 @@ impl ExprRewriter for ParamRewriter {
         let datum: Datum = if let Some(val_bytes) = self.params[parameter_index].clone() {
             let res = match self.param_formats[parameter_index] {
                 Format::Text => {
-                    cstr_to_str(&val_bytes).and_then(|str| ScalarImpl::from_text(str, &data_type))
+                    let text_res =
+                        cstr_to_str(&val_bytes).and_then(|str| ScalarImpl::from_text(str, &data_type));
+                    // Timestamptz fallback: if from_text fails (no timezone in string),
+                    // try parsing as naive Timestamp and apply session timezone.
+                    // This matches PostgreSQL behavior where `$1::timestamptz` with a
+                    // date-only string like '2026-05-01' uses the session timezone.
+                    if matches!(&data_type, DataType::Timestamptz) && text_res.is_err() {
+                        cstr_to_str(&val_bytes).and_then(|s| {
+                            let ts: Timestamp = s.parse().map_err(|e| {
+                                Box::new(e) as BoxedError
+                            })?;
+                            let tz = Timestamptz::lookup_time_zone(&self.session_timezone)
+                                .map_err(|e| {
+                                    Box::<dyn std::error::Error + Send + Sync>::from(e) as BoxedError
+                                })?;
+                            let instant_local = match ts.0.and_local_timezone(tz) {
+                                chrono::LocalResult::Single(t) => t,
+                                chrono::LocalResult::None => {
+                                    // Spring-forward gap: shift back 3h, convert, shift forward
+                                    (ts.0 - chrono::Duration::hours(3))
+                                        .and_local_timezone(tz)
+                                        .single()
+                                        .ok_or_else(|| {
+                                            Box::<dyn std::error::Error + Send + Sync>::from(
+                                                "invalid local timestamp in DST gap",
+                                            )
+                                                as BoxedError
+                                        })?
+                                        + chrono::Duration::hours(3)
+                                }
+                                chrono::LocalResult::Ambiguous(_, latest) => latest,
+                            };
+                            Ok(ScalarImpl::from(Timestamptz::from_micros(
+                                instant_local.timestamp_micros(),
+                            )))
+                        })
+                    } else {
+                        text_res
+                    }
                 }
                 Format::Binary => ScalarImpl::from_binary(&val_bytes, &data_type),
             };
@@ -99,12 +143,14 @@ impl BoundStatement {
         mut self,
         params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
+        session_timezone: String,
     ) -> Result<(BoundStatement, Vec<Datum>)> {
         let mut rewriter = ParamRewriter::new(
             FormatIterator::new(&param_formats, params.len())
                 .map_err(ErrorCode::BindError)?
                 .collect(),
             params,
+            session_timezone,
         );
 
         self.rewrite_exprs_recursive(&mut rewriter);
@@ -121,7 +167,7 @@ impl BoundStatement {
 mod test {
     use bytes::Bytes;
     use pgwire::types::Format;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_sqlparser::test_utils::parse_sql_statements;
 
     use crate::binder::BoundStatement;
@@ -142,7 +188,7 @@ mod test {
         let mut binder = mock_binder_with_param_types(param_types);
         let stmt = parse_sql_statements(sql).unwrap().remove(0);
         let bound = binder.bind(stmt).unwrap();
-        bound.bind_parameter(params, param_formats).unwrap().0
+        bound.bind_parameter(params, param_formats, "UTC".to_owned()).unwrap().0
     }
 
     fn expect_actual_eq(expect: BoundStatement, actual: BoundStatement) {
@@ -225,6 +271,136 @@ mod test {
                 vec![Some("1".into())],
                 vec![Format::Text],
             ),
+        );
+    }
+
+    /// Test that `$1::timestamptz` with a date-only string uses session timezone.
+    /// This is the fix for <https://github.com/risingwavelabs/risingwave/issues/25563>.
+    #[tokio::test]
+    async fn timestamptz_date_only_bind_param() {
+        use risingwave_common::types::Timestamptz;
+
+        let mut binder = mock_binder_with_param_types(vec![Some(DataType::Timestamptz)]);
+        let stmt = parse_sql_statements("select $1::timestamptz").unwrap().remove(0);
+        let bound = binder.bind(stmt).unwrap();
+        let (_bound, parsed_params) = bound
+            .bind_parameter(
+                vec![Some("2026-05-01".into())],
+                vec![Format::Text],
+                "UTC".to_owned(),
+            )
+            .unwrap();
+
+        // "2026-05-01" with UTC timezone should be 2026-05-01 00:00:00+00:00
+        let expected = Timestamptz::from_micros(
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_micros(),
+        );
+        assert_eq!(
+            parsed_params[0],
+            Some(ScalarImpl::from(expected)),
+            "date-only string '2026-05-01' should parse as 2026-05-01T00:00:00Z in UTC"
+        );
+    }
+
+    /// Test that `cast($1 as timestamptz)` with a date-only string uses session timezone.
+    #[tokio::test]
+    async fn cast_timestamptz_date_only_bind_param() {
+        use risingwave_common::types::Timestamptz;
+
+        let mut binder = mock_binder_with_param_types(vec![Some(DataType::Timestamptz)]);
+        let stmt = parse_sql_statements("select cast($1 as timestamptz)")
+            .unwrap()
+            .remove(0);
+        let bound = binder.bind(stmt).unwrap();
+        let (_bound, parsed_params) = bound
+            .bind_parameter(
+                vec![Some("2026-05-01".into())],
+                vec![Format::Text],
+                "UTC".to_owned(),
+            )
+            .unwrap();
+
+        let expected = Timestamptz::from_micros(
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_micros(),
+        );
+        assert_eq!(
+            parsed_params[0],
+            Some(ScalarImpl::from(expected)),
+            "cast($1 as timestamptz) with date-only string should use session timezone"
+        );
+    }
+
+    /// Test that timestamptz bind param with explicit timezone still works.
+    #[tokio::test]
+    async fn timestamptz_with_timezone_bind_param() {
+        use risingwave_common::types::Timestamptz;
+
+        let mut binder = mock_binder_with_param_types(vec![Some(DataType::Timestamptz)]);
+        let stmt = parse_sql_statements("select $1::timestamptz").unwrap().remove(0);
+        let bound = binder.bind(stmt).unwrap();
+        let (_bound, parsed_params) = bound
+            .bind_parameter(
+                vec![Some("2026-05-01 12:00:00+08:00".into())],
+                vec![Format::Text],
+                "UTC".to_owned(),
+            )
+            .unwrap();
+
+        // 2026-05-01 12:00:00+08:00 = 2026-05-01 04:00:00 UTC
+        let expected = Timestamptz::from_micros(
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 1)
+                .unwrap()
+                .and_hms_opt(4, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_micros(),
+        );
+        assert_eq!(
+            parsed_params[0],
+            Some(ScalarImpl::from(expected)),
+            "explicit timezone in bind param should still work via from_str path"
+        );
+    }
+
+    /// Test that timestamptz bind param with non-UTC session timezone works.
+    #[tokio::test]
+    async fn timestamptz_date_only_non_utc_timezone() {
+        use risingwave_common::types::Timestamptz;
+
+        let mut binder = mock_binder_with_param_types(vec![Some(DataType::Timestamptz)]);
+        let stmt = parse_sql_statements("select $1::timestamptz").unwrap().remove(0);
+        let bound = binder.bind(stmt).unwrap();
+        let (_bound, parsed_params) = bound
+            .bind_parameter(
+                vec![Some("2026-05-01".into())],
+                vec![Format::Text],
+                "Asia/Shanghai".to_owned(),
+            )
+            .unwrap();
+
+        // "2026-05-01" in Asia/Shanghai (UTC+8) = 2026-04-30 16:00:00 UTC
+        let expected = Timestamptz::from_micros(
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 30)
+                .unwrap()
+                .and_hms_opt(16, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_micros(),
+        );
+        assert_eq!(
+            parsed_params[0],
+            Some(ScalarImpl::from(expected)),
+            "date-only string with Asia/Shanghai timezone should be 2026-04-30T16:00:00Z"
         );
     }
 }
