@@ -967,7 +967,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
-    use crate::connector_common::PostgresExternalTable;
+    use crate::connector_common::{PostgresExternalTable, PostgresExternalTableConnectOptions};
     use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
@@ -998,8 +998,10 @@ mod tests {
             &config.table,
             &config.ssl_mode,
             &config.ssl_root_cert,
-            false,
-            Some("SELECT"),
+            PostgresExternalTableConnectOptions {
+                is_append_only: false,
+                required_table_privilege: Some("SELECT"),
+            },
         )
         .await
         .unwrap();

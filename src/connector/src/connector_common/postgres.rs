@@ -194,6 +194,11 @@ pub struct PostgresExternalTable {
     pk_names: Vec<String>,
 }
 
+pub struct PostgresExternalTableConnectOptions {
+    pub is_append_only: bool,
+    pub required_table_privilege: Option<&'static str>,
+}
+
 struct PostgresTablePrivilege {
     user_name: String,
     schema_exists: bool,
@@ -436,8 +441,7 @@ impl PostgresExternalTable {
         table: &str,
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
-        is_append_only: bool,
-        required_table_privilege: Option<&str>,
+        options: PostgresExternalTableConnectOptions,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
 
@@ -451,7 +455,7 @@ impl PostgresExternalTable {
             table,
             ssl_mode,
             ssl_root_cert,
-            required_table_privilege,
+            options.required_table_privilege,
         )
         .await?;
 
@@ -487,7 +491,7 @@ impl PostgresExternalTable {
         }
 
         // Check primary key existence using the directly discovered pk_names
-        if !is_append_only && pk_names.is_empty() {
+        if !options.is_append_only && pk_names.is_empty() {
             return Err(anyhow!(
                 "Postgres table should define the primary key for non-append-only tables"
             )
