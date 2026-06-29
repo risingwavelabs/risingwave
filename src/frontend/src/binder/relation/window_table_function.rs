@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
 use super::{Binder, Relation, Result};
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::error::ErrorCode;
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {
@@ -48,7 +48,7 @@ impl FromStr for WindowTableFunctionKind {
 pub struct BoundWindowTableFunction {
     pub(crate) input: Relation,
     pub(crate) kind: WindowTableFunctionKind,
-    pub(crate) time_col: InputRef,
+    pub(crate) time_col: ExprImpl,
     pub(crate) args: Vec<ExprImpl>,
 }
 
@@ -64,7 +64,6 @@ impl RewriteExprsRecursive for BoundWindowTableFunction {
 }
 
 const ERROR_1ST_ARG: &str = "The 1st arg of window table function should be a table name (incl. source, CTE, view) but not complex structure (subquery, join, another table function). Consider using an intermediate CTE or view as workaround.";
-const ERROR_2ND_ARG_EXPR: &str = "The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.";
 const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of window table function should be a column of type timestamp with time zone, timestamp or date.";
 
 impl Binder {
@@ -74,15 +73,31 @@ impl Binder {
         kind: WindowTableFunctionKind,
         args: &[FunctionArg],
     ) -> Result<BoundWindowTableFunction> {
+        if args.len() < 3 {
+            return Err(ErrorCode::BindError(
+                "Time window function requires at least 3 arguments: input, start_time, interval"
+                    .to_owned(),
+            )
+            .into());
+        }
+
         let mut args = args.iter();
 
         self.push_context();
 
         let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
 
-        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
+        let time_col = self
+            .bind_function_arg(args.next().unwrap())?
+            .into_iter()
+            .exactly_one()
+            .map_err(|_| {
+                ErrorCode::BindError(
+                    "The 2rd arg of time window function should be a single expression".to_owned(),
+                )
+            })?;
 
-        let Some(output_type) = DataType::window_of(&time_col.data_type) else {
+        let Some(output_type) = DataType::window_of(&time_col.return_type()) else {
             return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_owned()).into());
         };
 
@@ -119,7 +134,7 @@ impl Binder {
             .try_collect()?;
         Ok(BoundWindowTableFunction {
             input: base,
-            time_col: *time_col,
+            time_col,
             kind,
             args: exprs,
         })

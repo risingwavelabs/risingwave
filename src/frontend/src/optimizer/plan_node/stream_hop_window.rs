@@ -52,7 +52,9 @@ impl StreamHopWindow {
         let internal2output = core.internal2output_col_mapping();
 
         let mut internal_watermark_columns = input.watermark_columns().map_clone(&input2internal);
-        if let Some(wtmk_group) = input.watermark_columns().get_group(core.time_col.index) {
+        if let Some(time_col) = core.time_col.as_input_ref()
+            && let Some(wtmk_group) = input.watermark_columns().get_group(time_col.index())
+        {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
             internal_watermark_columns.insert(core.internal_window_start_col_idx(), wtmk_group);
             internal_watermark_columns.insert(core.internal_window_end_col_idx(), wtmk_group);
@@ -121,8 +123,14 @@ impl TryToStreamPb for StreamHopWindow {
             .iter()
             .map(|expr| expr.to_expr_proto_checked_pure(retract, "HOP window end"))
             .collect::<crate::error::Result<Vec<_>>>()?;
+        let time_col = self
+            .core
+            .time_col
+            .as_input_ref()
+            .expect("time_col must be an InputRef when converting HopWindow to stream plan")
+            .index();
         Ok(PbNodeBody::HopWindow(Box::new(HopWindowNode {
-            time_col: self.core.time_col.index() as _,
+            time_col: time_col as _,
             window_slide: Some(self.core.window_slide.into()),
             window_size: Some(self.core.window_size.into()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),

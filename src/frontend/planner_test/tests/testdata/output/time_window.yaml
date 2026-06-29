@@ -14,7 +14,7 @@
 - sql: |
     create materialized view t as select * from s;
     select * from tumble(t, (country).created_at, interval '3' day);
-  binder_error: 'Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.'
+  binder_error: 'Bind error: The 2st arg of window table function should be a column of type timestamp with time zone, timestamp or date.'
   create_source:
     format: plain
     encode: protobuf

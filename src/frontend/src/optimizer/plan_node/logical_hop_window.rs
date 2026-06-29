@@ -24,8 +24,9 @@ use super::{
     StreamPlanRef, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
-use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::HopWindow;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -47,16 +48,16 @@ impl LogicalHopWindow {
     /// compared with `LogicalHopWindow::create`
     fn new(
         input: PlanRef,
-        time_col: InputRef,
+        time_col: ExprImpl,
         window_slide: Interval,
         window_size: Interval,
         window_offset: Interval,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
-        let output_indices =
-            output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
-        let core = generic::HopWindow {
+        let output_indices = output_indices
+            .unwrap_or_else(|| (0..input.schema().len() + Self::ADDITION_COLUMN_LEN).collect_vec());
+        let core = HopWindow {
             input,
             time_col,
             window_slide,
@@ -77,7 +78,7 @@ impl LogicalHopWindow {
         LogicalHopWindow { base, core }
     }
 
-    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
+    pub fn into_parts(self) -> (PlanRef, ExprImpl, Interval, Interval, Interval, Vec<usize>) {
         self.core.into_parts()
     }
 
@@ -89,14 +90,14 @@ impl LogicalHopWindow {
     /// NULL time value. <https://github.com/risingwavelabs/risingwave/issues/8130>
     pub fn create(
         input: PlanRef,
-        time_col: InputRef,
+        time_col: ExprImpl,
         window_slide: Interval,
         window_size: Interval,
         window_offset: Interval,
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
-            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone().into()])
+            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone()])
                 .unwrap()
                 .into(),
         );
@@ -163,10 +164,9 @@ impl PlanTreeNodeUnary<Logical> for LogicalHopWindow {
     fn rewrite_with_input(
         &self,
         input: PlanRef,
-        input_col_change: ColIndexMapping,
+        mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let mut time_col = self.core.time_col.clone();
-        time_col.index = input_col_change.map(time_col.index);
+        let time_col = input_col_change.rewrite_expr(self.core.time_col.clone());
         let mut columns_to_be_kept = Vec::new();
         let new_output_indices = self
             .core
@@ -221,7 +221,12 @@ impl ColPrunable for LogicalHopWindow {
             tmp = o2i.rewrite_bitset(&tmp);
             // LogicalHopWindow should keep all required cols from upstream,
             // as well as its own time_col.
-            tmp.put(self.core.time_col.index());
+            tmp.union_with(
+                &self
+                    .core
+                    .time_col
+                    .collect_input_refs(self.input().schema().len()),
+            );
             tmp.ones().collect_vec()
         };
         let input = self.input().prune_col(&input_required_cols, ctx);
@@ -377,6 +382,7 @@ mod test {
 
     use super::*;
     use crate::Explain;
+    use crate::expr::InputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
@@ -407,7 +413,7 @@ mod test {
         );
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
-            InputRef::new(0, DataType::Date),
+            InputRef::new(0, DataType::Date).into(),
             Interval::from_month_day_usec(0, 1, 0),
             Interval::from_month_day_usec(0, 3, 0),
             Interval::from_month_day_usec(0, 0, 0),
@@ -463,7 +469,7 @@ mod test {
             .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
-            InputRef::new(0, DataType::Date),
+            InputRef::new(0, DataType::Date).into(),
             Interval::from_month_day_usec(0, 1, 0),
             Interval::from_month_day_usec(0, 3, 0),
             Interval::from_month_day_usec(0, 0, 0),
