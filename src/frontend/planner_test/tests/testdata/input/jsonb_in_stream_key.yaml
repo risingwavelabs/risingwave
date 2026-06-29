@@ -27,3 +27,10 @@
     WHERE rank <= 2;
   expected_outputs:
   - stream_error
+- name: variant in group by with jsonb opt-in
+  sql: |
+    set rw_streaming_allow_jsonb_in_stream_key = true;
+    create table t1 (v1 variant, v2 int);
+    select v2 from t1 group by v2, v1;
+  expected_outputs:
+  - stream_error
