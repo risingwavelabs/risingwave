@@ -17,10 +17,11 @@ use std::str::FromStr;
 use risingwave_common::types::{JsonbVal, ScalarRefImpl, VariantRef, VariantVal};
 use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
+use thiserror_ext::AsReport;
 
 #[function("parse_variant(varchar) -> variant")]
 fn parse_variant(input: &str) -> Result<VariantVal> {
-    VariantVal::from_str(input).map_err(|e| ExprError::Parse(e.to_string().into()))
+    VariantVal::from_str(input).map_err(|e| ExprError::Parse(e.to_report_string().into()))
 }
 
 #[function("to_variant(any) -> variant")]
