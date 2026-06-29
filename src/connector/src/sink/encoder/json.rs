@@ -143,7 +143,7 @@ impl JsonEncoder {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::Iso8601String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::Turbopuffer,
             jsonb_handling_mode: JsonbHandlingMode::Dynamic,
@@ -333,6 +333,9 @@ fn datum_to_json_object(
                 TimestampHandlingMode::Milli => json!(v.0.and_utc().timestamp_millis()),
                 TimestampHandlingMode::String => {
                     json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+                }
+                TimestampHandlingMode::Iso8601String => {
+                    json!(v.0.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
                 }
             }
         }

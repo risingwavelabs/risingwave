@@ -148,10 +148,11 @@ pub struct StreamingDeveloperConfig {
     pub memory_controller_sequence_tls_lag: u64,
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
-    /// Enable arrangement backfill
-    /// If false, the arrangement backfill will be disabled,
-    /// even if session variable set.
-    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
+    /// Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the
+    /// fallback backfill type.
+    #[deprecated(
+        note = "Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the fallback backfill type."
+    )]
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_enable_snapshot_backfill")]

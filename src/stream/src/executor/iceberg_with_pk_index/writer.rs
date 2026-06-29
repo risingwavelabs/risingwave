@@ -89,7 +89,6 @@ where
     /// Buffer for accumulating delete position messages before the next barrier flush.
     delete_position_buffer: Option<DataChunkBuilder>,
     chunk_size: usize,
-    pk_matched: bool,
     sink_id: SinkId,
     local_barrier_manager: LocalBarrierManager,
 }
@@ -107,7 +106,6 @@ where
         pk_index_state_table: StateTable<S>,
         writer: W,
         chunk_size: usize,
-        pk_matched: bool,
         sink_id: SinkId,
         local_barrier_manager: LocalBarrierManager,
     ) -> Self {
@@ -119,7 +117,6 @@ where
             writer,
             delete_position_buffer: None,
             chunk_size,
-            pk_matched,
             sink_id,
             local_barrier_manager,
         }
@@ -164,13 +161,10 @@ where
     // chunk in the same checkpoint observes earlier writes/deletes via the state table.
     #[try_stream(ok = DataChunk, error = StreamExecutorError)]
     async fn process_chunk(&mut self, chunk: StreamChunk) {
-        // PK uniqueness within a chunk is not guaranteed by upstream. Run compaction ourselves so
-        // the loop below can stay linear. `Warn` tolerates inconsistent upstream PK rather than
-        // panic.
         let chunk = compact_chunk_inline::<{ output_kind::RETRACT }>(
             chunk,
             &self.pk_indices,
-            InconsistencyBehavior::Warn,
+            InconsistencyBehavior::Panic,
         );
 
         let mut delete_position_buffer = self
@@ -179,6 +173,10 @@ where
             .unwrap_or_else(|| new_chunk_builder(self.chunk_size));
         let pk_indices = self.pk_indices.clone();
 
+        // Invariant: every input column is visible and written to Iceberg verbatim. The planner
+        // (`promote_iceberg_pk_index_stream_key` in `stream_sink.rs`) enforces this by promoting
+        // hidden stream-key columns to visible and by not adding the extra partition column for
+        // pk-index sinks, so the writer has no hidden-column projection and writes the whole row.
         // `chunk.capacity() + 1` is an upper bound on appended rows: each surviving record
         // contributes at most one row (Insert / Update::new), and `records()` yields at most
         // `capacity` records.
@@ -189,15 +187,6 @@ where
         for record in chunk.records() {
             match record {
                 Record::Insert { new_row } => {
-                    if !self.pk_matched {
-                        let pk_row = new_row.project(&pk_indices);
-                        if let Some(chunk) = self
-                            .delete_existing_row(pk_row, &mut delete_position_buffer)
-                            .await?
-                        {
-                            yield chunk;
-                        }
-                    }
                     let overflow = insert_chunk.append_one_row(new_row);
                     debug_assert!(overflow.is_none(), "insert chunk exceeds capacity");
                     insert_pks.push(new_row.project(&pk_indices));
@@ -228,8 +217,8 @@ where
         }
 
         if !insert_pks.is_empty() {
-            let insert_chunk = insert_chunk.finish();
-            let positions = self.writer.write_chunk(insert_chunk).await?;
+            let write_chunk = insert_chunk.finish();
+            let positions = self.writer.write_chunk(write_chunk).await?;
 
             for (pk, pos) in insert_pks.into_iter().zip_eq_fast(positions) {
                 let mut index_row_data = Vec::with_capacity(pk_indices.len() + 2);
@@ -435,13 +424,19 @@ mod tests {
 
     impl WriterTestHarness {
         async fn new() -> Self {
+            Self::with_schema(input_schema()).await
+        }
+
+        /// Build a harness with a custom input schema. The PK is always the first column (Int64)
+        /// so the shared `create_pk_index_state_table` schema applies.
+        async fn with_schema(input_schema: Schema) -> Self {
             let store = MemoryStateStore::new();
             let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
             let writer = IcebergWriterMock::new(TEST_FILE_PATH);
             let written_chunks = writer.written_chunks();
 
             let (tx, source) = MockSource::channel();
-            let source = source.into_executor(input_schema(), vec![0]);
+            let source = source.into_executor(input_schema, vec![0]);
             let lbm = LocalBarrierManager::for_test();
             let executor = WriterExecutor::new(
                 ActorContext::for_test(123),
@@ -450,7 +445,6 @@ mod tests {
                 state_table,
                 writer,
                 CHUNK_SIZE,
-                true,
                 SinkId::new(0),
                 lbm,
             )
@@ -491,13 +485,6 @@ mod tests {
 
         fn written_chunks(&self) -> Vec<StreamChunk> {
             self.written_chunks.lock().unwrap().clone()
-        }
-
-        fn compacted_written_chunks(&self) -> Vec<StreamChunk> {
-            self.written_chunks()
-                .into_iter()
-                .map(StreamChunk::compact_vis)
-                .collect()
         }
     }
 
@@ -663,8 +650,12 @@ mod tests {
         );
     }
 
+    /// Two deletes for the same PK within one chunk are inconsistent input: the PK is derived from
+    /// the upstream stream key, which guarantees uniqueness within a chunk. The writer panics on
+    /// compaction rather than silently swallowing the duplicate.
     #[tokio::test]
-    async fn test_writer_executor_delete_then_delete_emits_one_position_delete() {
+    #[should_panic(expected = "inconsistency happened")]
+    async fn test_writer_executor_duplicate_delete_in_same_chunk_panics() {
         let mut harness = WriterTestHarness::new().await;
         harness.init().await;
 
@@ -682,17 +673,8 @@ mod tests {
         );
         harness.push_barrier(3);
 
-        harness
-            .expect_position_chunk(vec![test_file_position(0)])
-            .await;
+        // Processing the duplicate-delete chunk panics during compaction.
         harness.expect_barrier().await;
-        assert_eq!(
-            harness.written_chunks(),
-            vec![StreamChunk::from_pretty(
-                " I I
-                + 1 10",
-            )]
-        );
     }
 
     #[tokio::test]
@@ -723,8 +705,11 @@ mod tests {
         );
     }
 
+    /// Two inserts for the same PK within one chunk are inconsistent input: the upstream stream key
+    /// guarantees PK uniqueness within a chunk, so the writer panics on compaction.
     #[tokio::test]
-    async fn test_writer_executor_insert_then_insert_in_same_chunk_keeps_latest_row() {
+    #[should_panic(expected = "inconsistency happened")]
+    async fn test_writer_executor_duplicate_insert_in_same_chunk_panics() {
         let mut harness = WriterTestHarness::new().await;
         harness.init().await;
 
@@ -735,24 +720,7 @@ mod tests {
         );
         harness.push_barrier(2);
 
-        harness.expect_barrier().await;
-        assert_eq!(
-            harness.compacted_written_chunks(),
-            vec![StreamChunk::from_pretty(
-                " I I
-                + 1 99",
-            )]
-        );
-
-        harness.push_pretty_chunk(
-            " I I
-            - 1 99",
-        );
-        harness.push_barrier(3);
-
-        harness
-            .expect_position_chunk(vec![test_file_position(0)])
-            .await;
+        // Processing the duplicate-insert chunk panics during compaction.
         harness.expect_barrier().await;
     }
 
