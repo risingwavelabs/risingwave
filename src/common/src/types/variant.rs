@@ -17,7 +17,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, bail};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use itertools::Itertools;
 use memcomparable::{Deserializer, Serializer};
@@ -34,6 +34,7 @@ use super::jsonb::{JsonbRef, JsonbVal};
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{DataType, Decimal, Scalar, ScalarRef, ScalarRefImpl, StructType, VectorRef};
+use crate::util::iter_util::ZipEqFast;
 
 const METADATA_LEN_SIZE: usize = size_of::<u32>();
 
@@ -152,14 +153,13 @@ impl VariantVal {
     }
 
     pub fn from_parts(metadata: &[u8], value: &[u8]) -> anyhow::Result<Self> {
-        let variant = ParquetVariant::try_new(metadata, value)
-            .map_err(|e| anyhow!("invalid variant encoding: {e}"))?;
+        let variant =
+            ParquetVariant::try_new(metadata, value).context("invalid variant encoding")?;
         Self::from_parquet_variant(variant)
     }
 
     fn from_parts_unchecked(metadata: &[u8], value: &[u8]) -> anyhow::Result<Self> {
-        ParquetVariant::try_new(metadata, value)
-            .map_err(|e| anyhow!("invalid variant encoding: {e}"))?;
+        ParquetVariant::try_new(metadata, value).context("invalid variant encoding")?;
         let metadata_len =
             u32::try_from(metadata.len()).context("variant metadata exceeds u32::MAX bytes")?;
         let mut data = Vec::with_capacity(METADATA_LEN_SIZE + metadata.len() + value.len());
@@ -180,7 +180,7 @@ impl VariantVal {
         let mut builder = canonical_builder(&field_names);
         builder
             .try_append_value(variant)
-            .map_err(|e| anyhow!("failed to encode variant: {e}"))?;
+            .context("failed to encode variant")?;
         let (metadata, value) = builder.finish();
         Self::from_parts_unchecked(&metadata, &value)
     }
@@ -264,9 +264,7 @@ impl<'a> VariantRef<'a> {
     }
 
     pub fn from_serialized(buf: &'a [u8]) -> Option<Self> {
-        if split_serialized_value(buf).is_none() {
-            return None;
-        }
+        split_serialized_value(buf)?;
         Some(Self { data: buf })
     }
 
@@ -490,8 +488,7 @@ fn collect_variant_field_names_inner(
     match variant {
         ParquetVariant::Object(object) => {
             for field in object.iter_try() {
-                let (field_name, value) =
-                    field.map_err(|e| anyhow!("failed to read variant object: {e}"))?;
+                let (field_name, value) = field.context("failed to read variant object")?;
                 field_names.insert(field_name.to_owned());
                 collect_variant_field_names_inner(value, field_names)?;
             }
@@ -499,7 +496,7 @@ fn collect_variant_field_names_inner(
         ParquetVariant::List(list) => {
             for value in list.iter_try() {
                 collect_variant_field_names_inner(
-                    value.map_err(|e| anyhow!("failed to read variant list: {e}"))?,
+                    value.context("failed to read variant list")?,
                     field_names,
                 )?;
             }
@@ -531,7 +528,8 @@ fn collect_datum_field_names(
             }
         }
         (ScalarRefImpl::Struct(v), DataType::Struct(struct_type)) => {
-            for (value, (field_name, field_type)) in v.iter_fields_ref().zip_eq(struct_type.iter())
+            for (value, (field_name, field_type)) in
+                v.iter_fields_ref().zip_eq_fast(struct_type.iter())
             {
                 field_names.insert(field_name.to_owned());
                 collect_datum_field_names(value, field_type, field_names)?;
@@ -571,7 +569,7 @@ fn append_json_value(
         serde_json::Value::Array(values) => {
             let mut list = builder
                 .try_new_list()
-                .map_err(|e| anyhow!("failed to create variant list: {e}"))?;
+                .context("failed to create variant list")?;
             for value in values {
                 append_json_value(value, &mut list)?;
             }
@@ -580,7 +578,7 @@ fn append_json_value(
         serde_json::Value::Object(fields) => {
             let mut object = builder
                 .try_new_object()
-                .map_err(|e| anyhow!("failed to create variant object: {e}"))?;
+                .context("failed to create variant object")?;
             for (field, value) in fields.iter().sorted_by(|a, b| a.0.cmp(b.0)) {
                 let mut field_builder = ObjectFieldBuilder::new(field.as_str(), &mut object);
                 append_json_value(value, &mut field_builder)?;
@@ -626,7 +624,7 @@ fn append_datum_value(
         (ScalarRefImpl::List(v), DataType::List(list_type)) => {
             let mut list = builder
                 .try_new_list()
-                .map_err(|e| anyhow!("failed to create variant list: {e}"))?;
+                .context("failed to create variant list")?;
             for value in v.iter() {
                 append_datum_value(value, list_type.elem(), &mut list)?;
             }
@@ -638,7 +636,7 @@ fn append_datum_value(
         (ScalarRefImpl::Map(v), DataType::Map(map_type)) => {
             let mut object = builder
                 .try_new_object()
-                .map_err(|e| anyhow!("failed to create variant map object: {e}"))?;
+                .context("failed to create variant map object")?;
             let entries = v
                 .iter()
                 .map(|(key, value)| {
@@ -665,10 +663,10 @@ fn append_struct(
 ) -> anyhow::Result<()> {
     let mut object = builder
         .try_new_object()
-        .map_err(|e| anyhow!("failed to create variant struct object: {e}"))?;
+        .context("failed to create variant struct object")?;
     let fields = value
         .iter_fields_ref()
-        .zip_eq(struct_type.iter())
+        .zip_eq_fast(struct_type.iter())
         .sorted_by(|(_, (field_a, _)), (_, (field_b, _))| field_a.cmp(field_b));
     for (value, (field_name, field_type)) in fields {
         let mut field_builder = ObjectFieldBuilder::new(field_name, &mut object);
@@ -699,7 +697,7 @@ fn append_decimal(value: Decimal, builder: &mut impl VariantBuilderExt) -> anyho
         Decimal::Normalized(value) => {
             let value = value.normalize();
             let decimal = VariantDecimal16::try_new(value.mantissa(), value.scale() as u8)
-                .map_err(|e| anyhow!("failed to encode decimal as variant: {e}"))?;
+                .context("failed to encode decimal as variant")?;
             builder.append_value(decimal);
         }
         Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf => {

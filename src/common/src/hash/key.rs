@@ -685,6 +685,10 @@ mod tests {
         (DataChunk::new(columns, capacity), types)
     }
 
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "test compares hash-key grouping with Row over a fixed non-variant chunk"
+    )]
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> DataChunk,

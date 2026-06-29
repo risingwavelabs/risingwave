@@ -233,6 +233,10 @@ mod scalar {
         }
 
         /// Returns error if [map invariants](`super::MapArray`) are violated.
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "map keys are restricted to scalar key types without interior mutability"
+        )]
         pub fn try_from_entries(entries: ListValue) -> Result<Self, String> {
             // validates list type is valid
             let _ = MapType::try_from_entries(entries.elem_type())?;
@@ -250,6 +254,10 @@ mod scalar {
         }
 
         /// Returns error if [map invariants](`super::MapArray`) are violated.
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "map keys are restricted to scalar key types without interior mutability"
+        )]
         pub fn try_from_kv(keys: ListValue, values: ListValue) -> Result<Self, String> {
             if keys.len() != values.len() {
                 return Err("map keys and values have different length".to_owned());
@@ -275,6 +283,10 @@ mod scalar {
 
         /// # Panics
         /// Panics if `m1` and `m2` have different types.
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "map keys are restricted to scalar key types without interior mutability"
+        )]
         pub fn concat(m1: MapRef<'_>, m2: MapRef<'_>) -> Self {
             debug_assert_eq!(m1.inner().elem_type(), m2.inner().elem_type());
             let m2_keys = m2.keys();
@@ -333,6 +345,10 @@ mod scalar {
             self.0.as_map_kv()
         }
 
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "map keys are restricted to scalar key types without interior mutability"
+        )]
         pub fn keys(&self) -> HashSet<ScalarRefImpl<'_>> {
             self.iter().map(|(k, _v)| k).collect()
         }

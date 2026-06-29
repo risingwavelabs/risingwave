@@ -432,40 +432,40 @@
     select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c, null:Decimal(hidden), null:Int64(hidden), t1.a(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, null:Decimal(hidden), null:Int64(hidden), null:Serial(hidden), t1.a(hidden), $src(hidden)], stream_key: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_columns: [t1.a, null:Decimal, null:Int64, null:Serial, $src], pk_conflict: NoCheck }
     └── StreamUnion { all: true }
-        ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 1
-        ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 2
-        ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 3
-        ├── StreamExchange Hash([5, 3, 4, 6, 7]) from 4
-        └── StreamExchange Hash([5, 3, 4, 6, 7]) from 5
+        ├── StreamExchange Hash([6, 3, 4, 5, 7]) from 1
+        ├── StreamExchange Hash([6, 3, 4, 5, 7]) from 2
+        ├── StreamExchange Hash([6, 3, 4, 5, 7]) from 3
+        ├── StreamExchange Hash([6, 3, 4, 5, 7]) from 4
+        └── StreamExchange Hash([6, 3, 4, 5, 7]) from 5
 
     Fragment 1
-    StreamProject { exprs: [t1.a, t1.b, t1.c, null:Decimal, null:Int64, t1.a, null:Serial, 0:Int32] }
+    StreamProject { exprs: [t1.a, t1.b, t1.c, null:Decimal, null:Int64, null:Serial, t1.a, 0:Int32] }
     └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: SnapshotBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) } { tables: [ StreamScan: 0 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
-    StreamProject { exprs: [t2.a, t2.b, t2.c, t2.b, null:Int64, null:Int32, null:Serial, 1:Int32] }
+    StreamProject { exprs: [t2.a, t2.b, t2.c, t2.b, null:Int64, null:Serial, null:Int32, 1:Int32] }
     └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: SnapshotBackfill, stream_key: [t2.b], pk: [b], dist: UpstreamHashShard(t2.b) } { tables: [ StreamScan: 1 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
-    StreamProject { exprs: [t3.a, t3.b, t3.c, null:Decimal, t3.c, null:Int32, null:Serial, 2:Int32] }
+    StreamProject { exprs: [t3.a, t3.b, t3.c, null:Decimal, t3.c, null:Serial, null:Int32, 2:Int32] }
     └── StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c], stream_scan_type: SnapshotBackfill, stream_key: [t3.c], pk: [c], dist: UpstreamHashShard(t3.c) } { tables: [ StreamScan: 2 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 4
-    StreamProject { exprs: [t4.a, t4.b, t4.c, null:Decimal, null:Int64, null:Int32, t4._row_id, 3:Int32] }
+    StreamProject { exprs: [t4.a, t4.b, t4.c, null:Decimal, null:Int64, t4._row_id, null:Int32, 3:Int32] }
     └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t4._row_id], pk: [_row_id], dist: UpstreamHashShard(t4._row_id) } { tables: [ StreamScan: 3 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
-    StreamProject { exprs: [t5.a, t5.b, t5.c, t5.b, null:Int64, t5.a, null:Serial, 4:Int32] }
+    StreamProject { exprs: [t5.a, t5.b, t5.c, t5.b, null:Int64, null:Serial, t5.a, 4:Int32] }
     └── StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c], stream_scan_type: SnapshotBackfill, stream_key: [t5.a, t5.b], pk: [a, b], dist: UpstreamHashShard(t5.a, t5.b) } { tables: [ StreamScan: 4 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -480,7 +480,7 @@
 
     Table 4 { columns: [ vnode, epoch, row_count, is_epoch_finished, a, b, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ a, b, c, null:Decimal, null:Int64, t1.a, null:Serial, $src, _rw_timestamp ], primary key: [ $5 ASC, $3 ASC, $4 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 5, 3, 4, 6, 7 ], read pk prefix len hint: 5 }
+    Table 4294967294 { columns: [ a, b, c, null:Decimal, null:Int64, null:Serial, t1.a, $src, _rw_timestamp ], primary key: [ $6 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 6, 3, 4, 5, 7 ], read pk prefix len hint: 5 }
 
 - name: test merged union stream key (4 columns, row_id + src_col + a + b)
   sql: |
