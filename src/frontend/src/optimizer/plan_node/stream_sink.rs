@@ -292,7 +292,7 @@ impl StreamSink {
         target_table: Option<Arc<TableCatalog>>,
         target_table_mapping: Option<Vec<Option<usize>>>,
         definition: String,
-        properties: WithOptionsSecResolved,
+        mut properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
@@ -300,7 +300,8 @@ impl StreamSink {
         let (sink_type, ignore_delete) =
             Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
-        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
+        let mut emit_pk_extension_notice: Option<String> = None;
+        let mut columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(
             input.clone(),
             user_distributed_by.clone(),
@@ -309,56 +310,99 @@ impl StreamSink {
         );
         let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
 
+        let is_iceberg_pk_index = properties.is_iceberg_connector()
+            && properties
+                .get(ENABLE_PK_INDEX)
+                .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+
+        // For Iceberg V3 pk-index sinks, the iceberg primary key is derived entirely from the
+        // upstream stream key, so the user must not specify `primary_key` explicitly.
+        if is_iceberg_pk_index && properties.get(DOWNSTREAM_PK_KEY).is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Iceberg V3 sink with `enable_pk_index='true'` does not allow a user-specified `primary_key`. \
+                The primary key is automatically derived from the upstream stream key.".to_owned(),
+            )
+            .into());
+        }
+
         // Get downstream pk from user input, override and perform some checks if applicable.
-        let downstream_pk = {
-            let downstream_pk = properties
-                .get(DOWNSTREAM_PK_KEY)
-                .map(|v| Self::parse_downstream_pk(v, &columns))
-                .transpose()?;
+        let mut downstream_pk = properties
+            .get(DOWNSTREAM_PK_KEY)
+            .map(|v| Self::parse_downstream_pk(v, &columns))
+            .transpose()?;
 
-            if let Some(t) = &target_table {
-                let user_defined_primary_key_table = t.row_id_index.is_none();
-                let sink_is_append_only = sink_type.is_append_only();
+        if let Some(t) = &target_table {
+            let user_defined_primary_key_table = t.row_id_index.is_none();
+            let sink_is_append_only = sink_type.is_append_only();
 
-                if !user_defined_primary_key_table && !sink_is_append_only {
-                    return Err(RwError::from(ErrorCode::BindError(
+            if !user_defined_primary_key_table && !sink_is_append_only {
+                return Err(RwError::from(ErrorCode::BindError(
                         "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
-                }
+            }
 
-                if t.append_only && !sink_is_append_only {
-                    return Err(RwError::from(ErrorCode::BindError(
+            if t.append_only && !sink_is_append_only {
+                return Err(RwError::from(ErrorCode::BindError(
                         "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
-                }
+            }
 
-                if sink_is_append_only {
-                    None
-                } else {
-                    let target_table_mapping = target_table_mapping.unwrap();
-                    Some(t.pk()
+            if sink_is_append_only {
+                downstream_pk = None;
+            } else {
+                let target_table_mapping = target_table_mapping.unwrap();
+                let pk = t.pk()
                         .iter()
                         .map(|c| {
                             target_table_mapping[c.column_index].ok_or_else(
                                 || ErrorCode::InvalidInputSyntax("When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()).into())
                         })
-                        .try_collect::<_, _, RwError>()?)
-                }
-            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
-                && sink_type == SinkType::Upsert
-                && downstream_pk.is_none()
-            {
-                Some(derived_pk.clone())
-            } else if properties.is_iceberg_connector()
-                && sink_type == SinkType::Upsert
-                && downstream_pk.is_none()
-            {
-                // If user doesn't specify the downstream primary key, we use the stream key as the pk.
-                Some(derived_pk.clone())
-            } else {
-                downstream_pk
+                        .try_collect::<_, _, RwError>()?;
+                downstream_pk = Some(pk);
             }
-        };
+        } else if downstream_pk.is_none()
+            && sink_type == SinkType::Upsert
+            && (properties
+                .get(CREATE_TABLE_IF_NOT_EXISTS)
+                .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+                || properties.is_iceberg_connector())
+        {
+            downstream_pk = Some(derived_pk.clone())
+        } else if is_iceberg_pk_index {
+            // For Iceberg V3 pk-index sinks: derive the iceberg primary key entirely from the
+            // upstream stream key. Every stream-key column becomes a pk column; hidden ones are
+            // promoted to visible so they are carried into the iceberg table verbatim.
+            let (pk, promoted) = promote_iceberg_pk_index_stream_key(&input, &mut columns)?;
+
+            let pk_names = pk
+                .iter()
+                .map(|&i| columns[i].name().to_owned())
+                .collect::<Vec<_>>()
+                .join(",");
+
+            // Promoting hidden stream-key columns adds new columns to the iceberg table, which is
+            // only possible at table-creation time. Sinking into an existing iceberg table would
+            // silently drop them and corrupt the pk index, so require `create_table_if_not_exists`.
+            if promoted
+                && !properties
+                    .get(CREATE_TABLE_IF_NOT_EXISTS)
+                    .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+            {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "Iceberg sink with `enable_pk_index='true'` requires `create_table_if_not_exists='true'` \
+                     because the planner needs to add the hidden upstream stream-key columns to the iceberg table. \
+                     Existing iceberg tables cannot be extended in-place by this sink."
+                        .to_owned(),
+                )
+                .into());
+            }
+
+            // Inform the user of the derived iceberg primary key, since they did not (and
+            // cannot) specify it explicitly.
+            emit_pk_extension_notice = Some(pk_names.clone());
+            properties.insert(DOWNSTREAM_PK_KEY.to_owned(), pk_names);
+            downstream_pk = Some(pk);
+        }
 
         // Since we've already rejected empty pk in `parse_downstream_pk`, if we still get an empty pk here,
         // it's likely that the derived stream key is used and it's empty, which is possible in cases of
@@ -417,6 +461,7 @@ impl StreamSink {
                 }
             }
         }
+
         let mut extra_partition_col_idx = None;
 
         let required_dist = match input.distribution() {
@@ -435,7 +480,15 @@ impl StreamSink {
                         RequiredDist::hash_shard(downstream_pk)
                     }
                     Some(s) if s == ICEBERG_SINK => {
-                        let (required_dist, new_input, partition_col_idx) =
+                        // V3 pk-index sinks shard by pk for state-table locality and never use the
+                        // partition-based shuffle, so skip computing the extra partition column
+                        // entirely.
+                        let partition_info = if is_iceberg_pk_index {
+                            None
+                        } else {
+                            partition_info
+                        };
+                        let (default_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
                                 input,
                                 partition_info,
@@ -443,7 +496,14 @@ impl StreamSink {
                             )?;
                         input = new_input;
                         extra_partition_col_idx = partition_col_idx;
-                        required_dist
+                        // Use an exact hash-shard on the full pk (not `shard_by_key`): the pk-index
+                        // state table is distributed by the whole derived pk in pk order, so the
+                        // writer fragment must hash on exactly the same columns and order.
+                        if is_iceberg_pk_index && let Some(pk) = &downstream_pk {
+                            RequiredDist::hash_shard(pk)
+                        } else {
+                            default_dist
+                        }
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
@@ -597,7 +657,15 @@ impl StreamSink {
             input
         };
 
-        Ok(Self::new(input, sink_desc, log_store_type))
+        let sink = Self::new(input, sink_desc, log_store_type);
+        if let Some(pk_names) = emit_pk_extension_notice {
+            sink.base.ctx().session_ctx().notice_to_user(format!(
+                "Iceberg V3 sink `{}`: the iceberg primary key was automatically derived from \
+                 the upstream stream key as ({}).",
+                sink.sink_desc.name, pk_names,
+            ));
+        }
+        Ok(sink)
     }
 
     fn sink_type_in_prop(properties: &WithOptionsSecResolved) -> Result<Option<SinkType>> {
@@ -772,7 +840,7 @@ impl StreamSink {
     /// Convert this `StreamSink` into a `PlanRef`.
     ///
     /// For Iceberg pk index sinks, this rewrites the plan into
-    /// `Upstream → Writer → Exchange(Single) → DvMerger` instead of a single `SinkNode`.
+    /// `Upstream → Writer → Exchange(Hash) → DvMerger` instead of a single `SinkNode`.
     /// For all other sinks, returns `self` as-is.
     pub fn into_stream_plan(self) -> Result<PlanRef> {
         use super::{StreamIcebergWithPkIndexDvMerger, StreamIcebergWithPkIndexWriter};
@@ -802,6 +870,56 @@ pub fn is_iceberg_with_pk_index_sink(sink_desc: &SinkDesc) -> Result<bool> {
         .get(ENABLE_PK_INDEX)
         .is_some_and(|v| v.eq_ignore_ascii_case("true"));
     Ok(res)
+}
+
+/// For Iceberg pk-index sinks, promote the `downstream_pk` and sink columns that use the
+/// full upstream stream key as the iceberg primary key.
+///
+/// Every stream-key column becomes an iceberg pk column. A stream-key column that is hidden
+/// (e.g. a join key the user did not `SELECT`, or a RisingWave-internal column such as
+/// `_row_id`) is promoted to visible (`is_hidden = false`) so it is carried into the iceberg
+/// table, keeping its type.
+///
+/// Returns `(downstream_pk, promoted)` where `promoted` is true if any hidden column was promoted
+fn promote_iceberg_pk_index_stream_key(
+    input: &PlanRef,
+    columns: &mut Vec<ColumnCatalog>,
+) -> Result<(Vec<usize>, bool)> {
+    let mut promoted = false;
+    let stream_key = input.expect_stream_key();
+    if stream_key.is_empty() {
+        bail_invalid_input_syntax!(
+            "Iceberg V3 sink with `enable_pk_index='true'` requires a non-empty upstream stream key \
+             to derive the primary key from."
+        );
+    }
+
+    for &i in stream_key {
+        if !columns[i].is_hidden {
+            continue;
+        }
+        // Promote the hidden stream-key column to visible so it is carried into iceberg.
+        columns[i].is_hidden = false;
+        promoted = true;
+    }
+
+    // The iceberg pk-index writer writes every input column verbatim (it has no hidden-column
+    // projection). After promoting the stream-key columns, any column still hidden would be one
+    // that is neither user-selected nor part of the stream key — the optimizer is expected to have
+    // pruned such columns. A violation here is an internal planner bug rather than invalid user
+    // input, so fail loudly at planning time instead of silently writing the column into the
+    // iceberg table.
+    if let Some(col) = columns.iter().find(|c| c.is_hidden) {
+        return Err(ErrorCode::InternalError(format!(
+            "iceberg V3 pk-index sink has a hidden column `{}` after stream-key promotion; \
+             all sink columns must be visible",
+            col.name()
+        ))
+        .into());
+    }
+
+    let downstream_pk = stream_key.to_vec();
+    Ok((downstream_pk, promoted))
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {

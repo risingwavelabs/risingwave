@@ -37,7 +37,6 @@ WITH (
     database.name = 'public',
     table.name = 'no_partition_upsert_v3_pk_index_table',
     create_table_if_not_exists = 'true',
-    primary_key = 'v1',
     write_mode = 'merge-on-read',
     format_version = '3',
     enable_pk_index = 'true'
