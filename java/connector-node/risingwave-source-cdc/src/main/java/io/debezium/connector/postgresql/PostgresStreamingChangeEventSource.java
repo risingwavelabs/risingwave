@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -149,31 +150,48 @@ public class PostgresStreamingChangeEventSource
     }
 
     /**
-     * Close the underlying PG connections from a thread other than the source thread, so that an
+     * Abort the underlying PG connections from a thread other than the source thread, so that an
      * in-flight {@code connection.commit()} stuck in uninterruptible native JDBC I/O is unblocked
-     * via {@link java.net.SocketException}. The wedged commit then unwinds through {@link
-     * #execute}'s finally block, which runs {@link #cleanUpStreamingOnStop} and releases the
-     * keep-alive thread + replication slot.
+     * via {@link java.io.IOException}. The wedged commit then unwinds through {@link #execute}'s
+     * finally block, which runs {@link #cleanUpStreamingOnStop} and releases the keep-alive thread
+     * + replication slot.
      *
      * <p>Used by the coordinator's stop path as a last-resort escape hatch when {@code
      * executor.shutdownNow()} has failed to terminate the source thread within the configured
      * shutdown timeout, because {@link Thread#interrupt()} does not unblock native JDBC sockets.
+     *
+     * <p>Uses {@link java.sql.Connection#abort(Executor)} (JDBC 4.1) rather than {@code close()}.
+     * pgjdbc's {@code close()} iterates prepared statements via {@code
+     * PgStatement.closeForNextExecution()}, which acquires the {@code ResourceLock} that the wedged
+     * {@code commit()} is holding for the duration of its native socket I/O. This deadlocks the
+     * close. {@code abort()} on pgjdbc instead does a CAS-guarded raw {@code Socket.close()} with
+     * zero lock acquisition (see {@code QueryExecutorCloseAction.abort()}), which causes the wedged
+     * thread's blocked socket read/write to throw {@code IOException} and release the {@code
+     * ResourceLock}.
      */
     public void forceCloseConnection() {
-        LOGGER.warn("Force-closing PostgresConnection to unblock wedged native I/O");
+        LOGGER.warn("Force-aborting PG connections to unblock wedged native I/O");
+        Executor abortExecutor = Runnable::run;
         try {
             if (connection != null) {
-                connection.close();
+                java.sql.Connection raw = connection.connection(false);
+                if (raw != null) {
+                    raw.abort(abortExecutor);
+                }
             }
         } catch (Exception e) {
-            LOGGER.debug("Exception while force-closing PostgresConnection", e);
+            LOGGER.debug("Exception while force-aborting regular PG connection", e);
         }
         try {
-            if (replicationConnection != null) {
-                replicationConnection.close();
+            if (replicationConnection instanceof io.debezium.jdbc.JdbcConnection) {
+                java.sql.Connection raw =
+                        ((io.debezium.jdbc.JdbcConnection) replicationConnection).connection(false);
+                if (raw != null) {
+                    raw.abort(abortExecutor);
+                }
             }
         } catch (Exception e) {
-            LOGGER.debug("Exception while force-closing ReplicationConnection", e);
+            LOGGER.debug("Exception while force-aborting replication connection", e);
         }
     }
 
