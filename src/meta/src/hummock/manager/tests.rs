@@ -1393,7 +1393,7 @@ async fn test_extend_objects_to_delete() {
             .len(),
         orphan_sst_num
     );
-    let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version2 = hummock_manager.pin_version(context_id).await.unwrap();
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
@@ -1419,7 +1419,7 @@ async fn test_extend_objects_to_delete() {
         )
         .await
         .unwrap();
-    let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version3 = hummock_manager.pin_version(context_id).await.unwrap();
     assert_eq!(new_epoch, version_max_committed_epoch(&pinned_version3));
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
@@ -3052,7 +3052,7 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
     // will pass the stale read set to catalog acquire and fail before compaction can run.
     initial_manager
         .write_checkpoint(&HummockVersionCheckpoint {
-            version: dirty_version,
+            version: Arc::new(dirty_version),
             stale_objects: Default::default(),
         })
         .await
