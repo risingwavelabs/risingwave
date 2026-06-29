@@ -356,6 +356,7 @@ impl Strong {
             | ExprType::RwClusterId
             | ExprType::RwFragmentVnodes
             | ExprType::RwActorVnodes
+            | ExprType::PgRelationIsUpdatable
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasFunctionPrivilege
