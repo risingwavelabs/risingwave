@@ -101,7 +101,7 @@ create table cross_db_since_timestamp_t (id int primary key, v int);
 statement ok
 set database to since_timestamp_cross_db_2;
 
-statement error `since_timestamp` does not support cross-database sinks
+statement error cross-database references are not implemented
 create sink cross_db_since_timestamp_sink from since_timestamp_cross_db_1.public.cross_db_since_timestamp_t with (
     connector = 'blackhole',
     snapshot = 'false',
@@ -114,6 +114,9 @@ drop database since_timestamp_cross_db_1;
 connection other
 statement ok
 drop database since_timestamp_cross_db_2;
+
+statement ok
+set database to dev;
 
 statement ok
 set sink_decouple=false;
