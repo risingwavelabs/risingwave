@@ -23,7 +23,6 @@ WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    primary_key = 'v1',
     partition_by = 'v1,v2,truncate(2,v3)',
     write_mode = 'merge-on-read',
     format_version = '3',
