@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
@@ -23,7 +23,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
@@ -34,14 +33,16 @@ use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
+    AddMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
     PbUpstreamSinkInfo, ThrottleMutation,
 };
 use tracing::warn;
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
+    DatabaseCheckpointControl, IndependentCheckpointJobControl,
+};
 use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -55,7 +56,7 @@ use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
-    ComponentFragmentAligner, EnsembleActorTemplate, NoShuffleEnsemble,
+    ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
     build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
 use crate::model::{
@@ -67,6 +68,7 @@ use crate::stream::{
     GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
+use crate::{MetaError, MetaResult};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -164,7 +166,7 @@ type ApplyCommandResult = (
 );
 
 /// Result of actor rendering for a create/replace streaming job.
-pub(super) struct RenderResult {
+pub(crate) struct RenderResult {
     /// Rendered actors grouped by fragment.
     pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
     /// Worker placement for each actor.
@@ -179,7 +181,7 @@ pub(super) struct RenderResult {
 /// and categorizes them into:
 /// - Ensembles whose entry fragments include existing (non-new) fragments
 /// - Ensembles whose entry fragments are all newly created
-fn resolve_no_shuffle_ensembles(
+pub(crate) fn resolve_no_shuffle_ensembles(
     fragments: &StreamJobFragmentsToCreate,
     upstream_fragment_downstreams: &FragmentDownstreamRelation,
 ) -> MetaResult<Vec<NoShuffleEnsemble>> {
@@ -258,7 +260,7 @@ fn resolve_no_shuffle_ensembles(
 /// 1. For each ensemble, resolve `EnsembleActorTemplate` (from existing or fresh).
 /// 2. For each new component fragment, allocate actor IDs and compute worker/vnode assignments.
 /// 3. Expand the simple assignments into full `StreamActor` structures.
-fn render_actors(
+pub(super) fn render_actors(
     fragments: &StreamJobFragmentsToCreate,
     database_info: &InflightDatabaseInfo,
     definition: &str,
@@ -266,7 +268,6 @@ fn render_actors(
     streaming_job_model: &streaming_job::Model,
     actor_id_counter: &AtomicU32,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ensembles: &[NoShuffleEnsemble],
     database_resource_group: &str,
 ) -> MetaResult<RenderResult> {
@@ -328,7 +329,6 @@ fn render_actors(
             EnsembleActorTemplate::render_new(
                 streaming_job_model,
                 worker_map,
-                adaptive_parallelism_strategy,
                 None,
                 database_resource_group.to_owned(),
                 distribution_type,
@@ -411,7 +411,6 @@ impl DatabaseCheckpointControl {
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<ApplyCommandInfo> {
         debug_assert!(
@@ -492,7 +491,11 @@ impl DatabaseCheckpointControl {
             None => self.apply_simple_command(None, "barrier"),
             Some(Command::CreateStreamingJob {
                 mut info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(mut snapshot_backfill_info),
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        mut snapshot_backfill_info,
+                        since_epoch,
+                    },
                 cross_db_snapshot_backfill_info,
             }) => {
                 let ensembles = resolve_no_shuffle_ensembles(
@@ -510,13 +513,30 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
                 {
                     assert!(!self.state.is_paused());
-                    let snapshot_epoch = barrier_info.prev_epoch();
+                    let (snapshot_epoch, since_timestamp_upstream_log_epochs) =
+                        if let Some(since_epoch) = &since_epoch {
+                            let (snapshot_epoch, log_epochs) =
+                                since_epoch.resolved.as_ref().ok_or_else(|| {
+                            MetaError::from(anyhow::anyhow!(
+                                "since_timestamp epoch has not been resolved for snapshot backfill"
+                            ))
+                        })?;
+                            (
+                                *snapshot_epoch,
+                                Some((
+                                    log_epochs,
+                                    to_partial_graph_id(self.database_id, None),
+                                    barrier_info.prev_epoch(),
+                                )),
+                            )
+                        } else {
+                            (barrier_info.prev_epoch(), None)
+                        };
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -541,7 +561,6 @@ impl DatabaseCheckpointControl {
                         .keys()
                         .cloned()
                         .collect();
-
                     // Build edges first (needed for no-shuffle mapping used in split resolution)
                     let mut edges = self.database_info.build_edge(
                         Some((&info, true)),
@@ -559,7 +578,8 @@ impl DatabaseCheckpointControl {
                         &self.database_info,
                     )?;
 
-                    let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
+                    let Entry::Vacant(entry) =
+                        self.independent_checkpoint_job_controls.entry(job_id)
                     else {
                         panic!("duplicated creating snapshot backfill job {job_id}");
                     };
@@ -571,10 +591,12 @@ impl DatabaseCheckpointControl {
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: resolved_split_assignment.clone(),
+                            refresh_interval_sec: None,
                         },
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         partial_graph_manager,
                         &mut edges,
@@ -582,9 +604,12 @@ impl DatabaseCheckpointControl {
                         &actors,
                     )?;
 
-                    self.database_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.fragment_infos_with_job_id());
+                    if let Some(fragment_infos) = job.fragment_infos() {
+                        self.database_info.shared_actor_infos.upsert(
+                            self.database_id,
+                            fragment_infos.values().map(|f| (f, job_id)),
+                        );
+                    }
 
                     for upstream_mv_table_id in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -599,7 +624,10 @@ impl DatabaseCheckpointControl {
 
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
-                        &CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                        &CreateStreamingJobType::SnapshotBackfill {
+                            snapshot_backfill_info,
+                            since_epoch,
+                        },
                         self.state.is_paused(),
                         &mut edges,
                         partial_graph_manager.control_stream_manager(),
@@ -608,6 +636,164 @@ impl DatabaseCheckpointControl {
                         &actors.stream_actors,
                         &actors.actor_location,
                     )?;
+
+                    let (table_ids, node_actors) = self.collect_base_info();
+                    (
+                        Some(mutation),
+                        table_ids,
+                        None,
+                        node_actors,
+                        PostCollectCommand::barrier(),
+                    )
+                }
+            }
+            Some(Command::CreateStreamingJob {
+                mut info,
+                job_type: CreateStreamingJobType::BatchRefresh(mut batch_refresh_info),
+                cross_db_snapshot_backfill_info,
+            }) => {
+                {
+                    if self.state.is_paused() {
+                        bail!("cannot create batch refresh job while database barrier is paused");
+                    }
+                    let snapshot_epoch = barrier_info.prev_epoch();
+                    let job_id = info.stream_job_fragments.stream_job_id();
+                    let database_id = info.streaming_job.database_id();
+
+                    // 1. Fill snapshot backfill epochs.
+                    let snapshot_backfill_info = &mut batch_refresh_info.snapshot_backfill_info;
+                    for snapshot_backfill_epoch in snapshot_backfill_info
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .values_mut()
+                    {
+                        assert_eq!(
+                            snapshot_backfill_epoch.replace(snapshot_epoch),
+                            None,
+                            "must not set previously"
+                        );
+                    }
+                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
+                        fill_snapshot_backfill_epoch(
+                            &mut fragment.nodes,
+                            Some(snapshot_backfill_info),
+                            &cross_db_snapshot_backfill_info,
+                        )?;
+                    }
+                    let snapshot_backfill_upstream_tables: HashSet<TableId> =
+                        snapshot_backfill_info
+                            .upstream_mv_table_id_to_backfill_epoch
+                            .keys()
+                            .cloned()
+                            .collect();
+
+                    // 2. Build BatchRefreshLogicalFragments (after epoch filling).
+                    let logical = BatchRefreshLogicalFragments {
+                        fragments: info
+                            .stream_job_fragments
+                            .inner
+                            .fragments
+                            .iter()
+                            .map(|(&fid, fragment)| {
+                                (
+                                    fid,
+                                    LoadedFragment {
+                                        fragment_id: fid,
+                                        job_id,
+                                        fragment_type_mask: fragment.fragment_type_mask,
+                                        distribution_type: fragment.distribution_type.into(),
+                                        vnode_count: fragment.vnode_count(),
+                                        nodes: fragment.nodes.clone(),
+                                        state_table_ids: fragment
+                                            .state_table_ids
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
+                                        parallelism: None,
+                                    },
+                                )
+                            })
+                            .collect(),
+                        downstreams: info.stream_job_fragments.downstreams.clone(),
+                    };
+
+                    // 3. Create BatchRefreshJobCheckpointControl. `new()` handles actor
+                    //    rendering, the partial-graph initial barrier, and produces the
+                    //    database-graph mutation for the main barrier.
+                    assert!(
+                        !self
+                            .independent_checkpoint_job_controls
+                            .contains_key(&job_id),
+                        "duplicated creating batch refresh job {job_id}"
+                    );
+
+                    let snapshot_backfill_info_clone =
+                        batch_refresh_info.snapshot_backfill_info.clone();
+                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
+
+                    // Database-graph `Add` mutation: batch refresh has no actors in the
+                    // database graph; it only needs to register snapshot-backfill
+                    // subscribers on the upstream MV tables.
+                    let subscriber_id =
+                        info.stream_job_fragments.stream_job_id().as_subscriber_id();
+                    let mutation = Mutation::Add(AddMutation {
+                        actor_dispatchers: Default::default(),
+                        added_actors: Default::default(),
+                        actor_splits: Default::default(),
+                        pause: false,
+                        subscriptions_to_add: snapshot_backfill_info_clone
+                            .upstream_mv_table_id_to_backfill_epoch
+                            .keys()
+                            .map(|table_id| PbSubscriptionUpstreamInfo {
+                                subscriber_id,
+                                upstream_mv_table_id: *table_id,
+                            })
+                            .collect(),
+                        backfill_nodes_to_pause: Default::default(),
+                        actor_cdc_table_snapshot_splits: None,
+                        new_upstream_sinks: Default::default(),
+                    });
+
+                    let job = BatchRefreshJobCheckpointControl::new(
+                        database_id,
+                        job_id,
+                        CreateSnapshotBackfillJobCommandInfo {
+                            info: info.clone(),
+                            snapshot_backfill_info: snapshot_backfill_info_clone.clone(),
+                            cross_db_snapshot_backfill_info,
+                            resolved_split_assignment: Default::default(),
+                            refresh_interval_sec: Some(refresh_interval_sec),
+                        },
+                        take(notifiers),
+                        snapshot_backfill_upstream_tables,
+                        snapshot_epoch,
+                        hummock_version_stats,
+                        partial_graph_manager,
+                        &logical,
+                        worker_nodes,
+                        refresh_interval_sec,
+                    )?;
+
+                    if let Some(fragment_infos) = job.fragment_infos() {
+                        self.database_info.shared_actor_infos.upsert(
+                            self.database_id,
+                            fragment_infos.values().map(|f| (f, job_id)),
+                        );
+                    }
+
+                    self.independent_checkpoint_job_controls
+                        .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
+
+                    // Register permanent subscriber (never unregistered until MV is dropped)
+                    for upstream_mv_table_id in snapshot_backfill_info_clone
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .keys()
+                    {
+                        self.database_info.register_subscriber(
+                            upstream_mv_table_id.as_job_id(),
+                            info.streaming_job.id().as_subscriber_id(),
+                            SubscriberType::SnapshotBackfill,
+                        );
+                    }
 
                     let (table_ids, node_actors) = self.collect_base_info();
                     (
@@ -639,7 +825,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
@@ -787,27 +972,19 @@ impl DatabaseCheckpointControl {
 
             Some(Command::Throttle { jobs, config }) => {
                 let mutation = Some(Command::throttle_to_mutation(&config));
+                for (fragment_id, throttle_config) in &config {
+                    self.database_info
+                        .pre_apply_throttle(*fragment_id, throttle_config);
+                }
                 throttle_for_creating_jobs = Some((jobs, config));
                 self.apply_simple_command(mutation, "Throttle")
             }
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_state_table_ids,
-                unregistered_fragment_ids,
+                unregistered_state_table_ids: _,
                 dropped_sink_fragment_by_targets,
             }) => {
-                let actors = self
-                    .database_info
-                    .fragment_infos()
-                    .filter(|fragment| {
-                        self.database_info
-                            .job_id_by_fragment(fragment.fragment_id)
-                            .is_some_and(|job_id| streaming_job_ids.contains(&job_id))
-                    })
-                    .flat_map(|fragment| fragment.actors.keys().copied())
-                    .collect::<Vec<_>>();
-
                 // pre_apply: drop node upstream for sink targets
                 for (target_fragment, sink_fragments) in &dropped_sink_fragment_by_targets {
                     self.database_info
@@ -816,9 +993,20 @@ impl DatabaseCheckpointControl {
 
                 let (table_ids, node_actors) = self.collect_base_info();
 
-                // post_apply: remove fragments
-                self.database_info
-                    .post_apply_remove_fragments(unregistered_fragment_ids.iter().cloned());
+                let mut actors = Vec::new();
+                for job_id in streaming_job_ids {
+                    let Some(job) = self.database_info.post_apply_remove_job(job_id) else {
+                        warn!(
+                            %job_id,
+                            "skip drop payload for streaming job that has already been removed from barrier worker"
+                        );
+                        continue;
+                    };
+
+                    for fragment in job.fragment_infos.values() {
+                        actors.extend(fragment.actors.keys().copied());
+                    }
+                }
 
                 let mutation = Some(Command::drop_streaming_jobs_to_mutation(
                     &actors,
@@ -829,10 +1017,7 @@ impl DatabaseCheckpointControl {
                     table_ids,
                     None,
                     node_actors,
-                    PostCollectCommand::DropStreamingJobs {
-                        streaming_job_ids,
-                        unregistered_state_table_ids,
-                    },
+                    PostCollectCommand::DropStreamingJobs,
                 )
             }
 
@@ -944,7 +1129,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &plan.database_resource_group,
                 )?;
@@ -1271,8 +1455,11 @@ impl DatabaseCheckpointControl {
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
-                    for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
-                        if creating_job.should_merge_to_upstream() {
+                    for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
+                        if let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
+                            job
+                            && creating_job.should_merge_to_upstream()
+                        {
                             let info = creating_job
                                 .start_consume_upstream(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
@@ -1499,35 +1686,46 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        // Forward barrier to creating streaming job controls
-        for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
-            if !finished_snapshot_backfill_jobs.contains(job_id) {
-                let throttle_mutation = if let Some((ref jobs, ref config)) =
-                    throttle_for_creating_jobs
-                    && jobs.contains(job_id)
-                {
-                    assert_eq!(
-                        jobs.len(),
-                        1,
-                        "should not alter rate limit of snapshot backfill job with other jobs"
-                    );
-                    Some((
-                        Mutation::Throttle(ThrottleMutation {
-                            fragment_throttle: config
-                                .iter()
-                                .map(|(fragment_id, config)| (*fragment_id, *config))
-                                .collect(),
-                        }),
-                        take(notifiers),
-                    ))
-                } else {
-                    None
-                };
-                creating_job.on_new_upstream_barrier(
-                    partial_graph_manager,
-                    &barrier_info,
-                    throttle_mutation,
-                )?;
+        // Forward barrier to independent job controls
+        for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            match job {
+                IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
+                    if !finished_snapshot_backfill_jobs.contains(job_id) {
+                        let throttle_mutation = if let Some((ref jobs, ref config)) =
+                            throttle_for_creating_jobs
+                            && jobs.contains(job_id)
+                        {
+                            assert_eq!(
+                                jobs.len(),
+                                1,
+                                "should not alter rate limit of snapshot backfill job with other jobs"
+                            );
+                            Some((
+                                Mutation::Throttle(ThrottleMutation {
+                                    fragment_throttle: config
+                                        .iter()
+                                        .map(|(fragment_id, config)| (*fragment_id, *config))
+                                        .collect(),
+                                }),
+                                take(notifiers),
+                            ))
+                        } else {
+                            None
+                        };
+                        creating_job.on_new_upstream_barrier(
+                            partial_graph_manager,
+                            &barrier_info,
+                            throttle_mutation,
+                        )?;
+                    }
+                }
+                IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
+                    batch_refresh_job.on_new_upstream_barrier(
+                        partial_graph_manager,
+                        &barrier_info,
+                        None, // no throttle mutation for batch refresh jobs
+                    )?;
+                }
             }
         }
 

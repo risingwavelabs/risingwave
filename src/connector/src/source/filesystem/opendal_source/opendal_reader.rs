@@ -17,7 +17,7 @@ use std::pin::Pin;
 
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use prometheus::core::GenericCounter;
@@ -29,14 +29,16 @@ use tokio_util::io::StreamReader;
 use super::OpendalSource;
 use super::opendal_enumerator::OpendalEnumerator;
 use crate::error::ConnectorResult;
-use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParserConfig};
+use crate::parser::{
+    ByteStreamSourceParserImpl, EncodingProperties, ParserConfig, into_data_chunk_stream,
+};
 use crate::source::filesystem::OpendalFsSplit;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::iceberg::read_parquet_file;
 use crate::source::{
-    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMessageEvent, SourceMeta,
+    SplitMetaData, SplitReader,
 };
 
 #[derive(Debug, Clone)]
@@ -141,7 +143,9 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
                         .await?;
-                chunk_stream = Box::pin(parser.parse_stream(line_stream));
+                chunk_stream = Box::pin(into_data_chunk_stream(parser.parse_stream_with_events(
+                    line_stream.map_ok(SourceMessageEvent::Data).boxed(),
+                )));
             }
 
             #[for_await]

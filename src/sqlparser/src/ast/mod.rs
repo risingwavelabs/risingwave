@@ -21,8 +21,7 @@ mod statement;
 mod value;
 
 use std::collections::HashSet;
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -30,10 +29,10 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
-    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
-    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
-    WebhookSourceInfo,
+    AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
+    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -162,9 +161,11 @@ impl Ident {
         })
     }
 
-    /// Value after considering quote style
-    /// In certain places, double quotes can force case-sensitive, but not always
-    /// e.g. session variables.
+    /// Returns the identifier value used for name lookup and comparison.
+    ///
+    /// Unquoted identifiers are folded to lowercase, while double-quoted identifiers preserve
+    /// their case and unescaped contents. For example, `Foo` becomes `foo`, while `"Foo"` remains
+    /// `Foo` and `"a""b"` becomes `a"b`.
     pub fn real_value(&self) -> String {
         match self.quote_style {
             Some('"') => self.value.clone(),
@@ -172,13 +173,16 @@ impl Ident {
         }
     }
 
-    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
-    /// [`QuoteIdent`] wrapper.
+    /// Creates an identifier from a name used internally by the database.
+    ///
+    /// The input is stored as its unescaped value. Double quotes are selected when needed to
+    /// preserve the name in SQL; escaping embedded quotes is left to the [`Display`] implementation.
+    /// This behaves like the SQL `quote_ident` function and the [`QuoteIdent`] wrapper.
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = QuoteIdent::needs_quotes(value);
 
         if needs_quotes {
-            Self::with_quote_unchecked('"', value.replace('"', "\"\""))
+            Self::with_quote_unchecked('"', value)
         } else {
             Self::new_unchecked(value)
         }
@@ -204,7 +208,8 @@ impl ParseTo for Ident {
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
-            Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
+            Some(q) if q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
+            Some('"') => write!(f, "\"{}\"", self.value.replace('"', "\"\"")),
             Some('[') => write!(f, "[{}]", self.value),
             None => f.write_str(&self.value),
             _ => panic!("unexpected quote style"),
@@ -682,7 +687,7 @@ impl fmt::Display for Expr {
             Expr::Parameter { index } => write!(f, "${}", index),
             Expr::TypedString { data_type, value } => {
                 write!(f, "{}", data_type)?;
-                write!(f, " '{}'", &value::escape_single_quote_string(value))
+                write!(f, " '{}'", value::escape_single_quote_string(value))
             }
             Expr::Function(fun) => write!(f, "{}", fun),
             Expr::Case {
@@ -1256,7 +1261,7 @@ pub enum WaitTarget {
 }
 
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Statement {
     /// Analyze (Hive)
@@ -1503,6 +1508,11 @@ pub enum Statement {
     AlterFragment {
         fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
+    },
+    /// ALTER COMPACTION GROUP
+    AlterCompactionGroup {
+        group_ids: Vec<u64>,
+        operation: AlterCompactionGroupOperation,
     },
     /// DESCRIBE relation
     /// ALTER DEFAULT PRIVILEGES
@@ -1773,7 +1783,7 @@ impl Statement {
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
@@ -2518,6 +2528,17 @@ impl Statement {
                     operation
                 )
             }
+            Statement::AlterCompactionGroup {
+                group_ids,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER COMPACTION GROUP {} {}",
+                    display_comma_separated(group_ids),
+                    operation
+                )
+            }
             Statement::AlterDefaultPrivileges {
                 target_users,
                 schema_names,
@@ -2990,6 +3011,8 @@ pub enum FunctionArgExpr {
     QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*` or `* except (columns)`
     Wildcard(Option<Vec<Expr>>),
+    /// A secret reference, e.g. `SECRET my_secret` or `SECRET my_secret AS FILE`
+    SecretRef(SecretRefValue),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -3021,6 +3044,7 @@ impl fmt::Display for FunctionArgExpr {
                 None => write!(f, "{}.*", prefix),
             },
 
+            FunctionArgExpr::SecretRef(secret_ref) => write!(f, "SECRET {}", secret_ref),
             FunctionArgExpr::Wildcard(except) => match except {
                 Some(exprs) => write!(
                     f,

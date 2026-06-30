@@ -142,7 +142,7 @@ impl LogScan {
             .collect();
         fields.push(Field::with_name(
             OP_TYPE,
-            format!("{}.{}", &self.table_name, OP_NAME),
+            format!("{}.{}", self.table_name, OP_NAME),
         ));
         Schema { fields }
     }

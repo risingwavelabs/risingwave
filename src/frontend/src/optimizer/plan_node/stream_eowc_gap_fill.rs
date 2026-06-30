@@ -26,7 +26,7 @@ use crate::binder::BoundFillStrategy;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -42,15 +42,46 @@ impl StreamEowcGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
 
-        // Force singleton distribution for GapFill operations.
-        // GapFill requires access to all data across time ranges to correctly identify and fill gaps, so that missing intervals can be detected and filled appropriately.
+        let dist = if core.partition_by_cols.is_empty() {
+            Distribution::Single
+        } else {
+            let partition_indices: Vec<usize> =
+                core.partition_by_cols.iter().map(|c| c.index()).collect();
+            Distribution::HashShard(partition_indices)
+        };
+
+        // A late anchor makes gap fill back-fill a partition below the already-forwarded time
+        // watermark, so the time watermark is never preserved. Only `PARTITION BY` columns are
+        // copied unchanged into generated rows, so only their watermark can be propagated.
+        let mut watermark_columns = WatermarkColumns::new();
+        for partition_col in &core.partition_by_cols {
+            let idx = partition_col.index();
+            if let Some(group) = input.watermark_columns().get_group(idx) {
+                watermark_columns.insert(idx, group);
+            }
+        }
+
+        // Without partitioning the output stays time-sorted, so the time column is monotonic.
+        // With partitioning, cross-partition interleaving breaks that; only the copied
+        // `PARTITION BY` columns keep their monotonicity.
+        let mut columns_monotonicity = MonotonicityMap::new();
+        if core.partition_by_cols.is_empty() {
+            let idx = core.time_col.index();
+            columns_monotonicity.insert(idx, input.columns_monotonicity()[idx]);
+        } else {
+            for partition_col in &core.partition_by_cols {
+                let idx = partition_col.index();
+                columns_monotonicity.insert(idx, input.columns_monotonicity()[idx]);
+            }
+        }
+
         let base = PlanBase::new_stream_with_core(
             &core,
-            Distribution::Single,
+            dist,
             input.stream_kind(),
             true, // provides EOWC semantics
-            input.watermark_columns().clone(),
-            input.columns_monotonicity().clone(),
+            watermark_columns,
+            columns_monotonicity,
         );
         Self { base, core }
     }
@@ -67,6 +98,7 @@ impl StreamEowcGapFill {
             time_col,
             interval,
             fill_strategies,
+            partition_by_cols: vec![],
         };
         Self::new(core)
     }
@@ -83,21 +115,6 @@ impl StreamEowcGapFill {
         &self.core.fill_strategies
     }
 
-    fn infer_buffer_table(&self) -> TableCatalog {
-        let mut tbl_builder = TableCatalogBuilder::default();
-
-        let out_schema = self.core.schema();
-        for field in out_schema.fields() {
-            tbl_builder.add_column(field);
-        }
-
-        // Just use time column as the primary key since SortBuffer requires it for ordering
-        let time_col_idx = self.time_col().index();
-        tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
-
-        tbl_builder.build(vec![], 0)
-    }
-
     fn infer_prev_row_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
 
@@ -105,11 +122,25 @@ impl StreamEowcGapFill {
             tbl_builder.add_column(field);
         }
 
-        if !self.core.schema().fields().is_empty() {
-            tbl_builder.add_order_column(0, OrderType::ascending());
+        if self.core.partition_by_cols.is_empty() {
+            // No partition: single-row table, use first column as PK
+            if !self.core.schema().fields().is_empty() {
+                tbl_builder.add_order_column(0, OrderType::ascending());
+            }
+            tbl_builder.build(vec![], 0)
+        } else {
+            // With partition: PK = partition_cols (one prev_row per partition)
+            for pc in &self.core.partition_by_cols {
+                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
+            }
+            let dist_key_indices: Vec<usize> = self
+                .core
+                .partition_by_cols
+                .iter()
+                .map(|c| c.index())
+                .collect();
+            tbl_builder.build(dist_key_indices, 0)
         }
-
-        tbl_builder.build(vec![], 0)
     }
 }
 
@@ -145,11 +176,6 @@ impl TryToStreamPb for StreamEowcGapFill {
             })
             .collect();
 
-        let buffer_table = self
-            .infer_buffer_table()
-            .with_id(state.gen_table_id_wrapped())
-            .to_internal_table_prost();
-
         let prev_row_table = self
             .infer_prev_row_table()
             .with_id(state.gen_table_id_wrapped())
@@ -167,8 +193,13 @@ impl TryToStreamPb for StreamEowcGapFill {
                 .map(|strategy| strategy.target_col.index() as u32)
                 .collect(),
             fill_strategies,
-            buffer_table: Some(buffer_table),
             prev_row_table: Some(prev_row_table),
+            partition_by_indices: self
+                .core
+                .partition_by_cols
+                .iter()
+                .map(|c| c.index() as u32)
+                .collect(),
         })))
     }
 }

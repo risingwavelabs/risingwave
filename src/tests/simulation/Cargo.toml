@@ -13,9 +13,10 @@ cfg-or-panic = "0.2"
 clap = { workspace = true }
 console = "0.16"
 expect-test = "1"
-fail = { version = "0.5" }
+fail = { version = "0.5", features = ["failpoints"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
+iceberg = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 madsim = { workspace = true }
@@ -36,9 +37,11 @@ risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_expr_impl = { workspace = true } # Note: no UDF support (except for SQL functions)
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 sea-orm = { workspace = true }
@@ -48,7 +51,7 @@ shell-words = "1.1.0"
 sqllogictest = "0.29.1"
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

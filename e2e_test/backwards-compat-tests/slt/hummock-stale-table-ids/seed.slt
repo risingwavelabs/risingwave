@@ -1,0 +1,23 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO false;
+
+statement ok
+DROP TABLE IF EXISTS hummock_stale_live;
+
+statement ok
+DROP TABLE IF EXISTS hummock_stale_dropped;
+
+statement ok
+CREATE TABLE hummock_stale_live(k int primary key, v int);
+
+statement ok
+CREATE TABLE hummock_stale_dropped(k int primary key, v int);
+
+statement ok
+INSERT INTO hummock_stale_live SELECT a AS k, a * 10 AS v FROM generate_series(1, 1000) AS s(a);
+
+statement ok
+INSERT INTO hummock_stale_dropped SELECT a AS k, a * 100 AS v FROM generate_series(1, 1000) AS s(a);
+
+statement ok
+FLUSH;

@@ -25,7 +25,6 @@ pub struct BytesAccessBuilder {
 }
 
 impl AccessBuilder for BytesAccessBuilder {
-    #[allow(clippy::unused_async)]
     async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,

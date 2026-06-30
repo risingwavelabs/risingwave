@@ -34,7 +34,7 @@ jobs:
       pr_sha: ${{ steps.filter-release-branches.outputs.pr_sha }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0 # Ensures all branches are fetched
 
@@ -107,7 +107,7 @@ jobs:
         branch: ${{ fromJson(needs.get-target-release-branches.outputs.branches) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master

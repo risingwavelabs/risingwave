@@ -26,6 +26,7 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
@@ -139,9 +140,6 @@ impl ReplaceOriginalJobInfo {
             // We don't expect replacing a job with a different config override.
             // Thus always use the original config override.
             config_override: self.config_override.clone().unwrap_or_default().into(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
         }
     }
 
@@ -169,7 +167,7 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -178,10 +176,13 @@ impl CatalogController {
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
         ctx: StreamContext,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
+        backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -196,16 +197,19 @@ impl CatalogController {
             create_type: create_type.into(),
             timezone: ctx.timezone,
             config_override: Some(ctx.config_override.to_string()),
-            adaptive_parallelism_strategy: ctx
-                .adaptive_parallelism_strategy
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
                 .as_ref()
                 .map(ToString::to_string),
             parallelism: streaming_parallelism,
             backfill_parallelism,
+            backfill_adaptive_parallelism_strategy: backfill_adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string),
             backfill_orders: None,
             max_parallelism: max_parallelism as _,
             specific_resource_group,
             is_serverless_backfill,
+            refresh_interval_sec: refresh_interval_sec.map(|s| s as i64),
         };
         let job = model.clone().into_active_model();
         StreamingJobModel::insert(job).exec(txn).await?;
@@ -218,6 +222,7 @@ impl CatalogController {
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
     /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument]
     pub async fn create_job_catalog(
         &self,
@@ -228,6 +233,9 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -240,7 +248,12 @@ impl CatalogController {
         };
         let backfill_parallelism = backfill_parallelism
             .as_ref()
-            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _))
+            .or_else(|| {
+                backfill_adaptive_parallelism_strategy
+                    .as_ref()
+                    .map(|_| StreamingParallelism::Adaptive)
+            });
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
@@ -283,6 +296,22 @@ impl CatalogController {
                     "some dependent relations are being altered",
                 ));
             }
+
+            // Check if any dependency is a batch refresh job.
+            // Streaming on batch refresh materialized views is not supported.
+            let batch_refresh_cnt = StreamingJobModel::find()
+                .filter(
+                    streaming_job::Column::JobId
+                        .is_in(dependencies.iter().map(|id| JobId::new(id.as_raw_id())))
+                        .and(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+                )
+                .count(&txn)
+                .await?;
+            if batch_refresh_cnt != 0 {
+                return Err(MetaError::permission_denied(
+                    "creating streaming jobs on batch refresh materialized views is not supported",
+                ));
+            }
         }
 
         let streaming_job_model = match streaming_job {
@@ -295,10 +324,13 @@ impl CatalogController {
                     Some(table.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
+                    refresh_interval_sec,
                 )
                 .await?;
                 table.id = streaming_job_model.job_id.as_mv_table_id();
@@ -326,10 +358,13 @@ impl CatalogController {
                     Some(sink.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
@@ -346,10 +381,13 @@ impl CatalogController {
                     Some(table.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 let job_id = streaming_job_model.job_id;
@@ -408,10 +446,13 @@ impl CatalogController {
                     Some(index.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -443,10 +484,13 @@ impl CatalogController {
                     Some(src.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 src.id = streaming_job_model.job_id.as_shared_source_id();
@@ -599,6 +643,12 @@ impl CatalogController {
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
 
+        // Collect fragment IDs before consuming `fragments` for serving mapping notification.
+        let inserted_fragment_ids: Vec<crate::model::FragmentId> = fragments
+            .iter()
+            .map(|f| f.fragment_id as crate::model::FragmentId)
+            .collect();
+
         if !fragments.is_empty() {
             let fragment_models = fragments
                 .into_iter()
@@ -682,6 +732,13 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        // Notify serving module about newly inserted fragments so it can establish
+        // serving vnode mappings. This is driven by the fragment model insertion,
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_update(inserted_fragment_ids);
+
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
         // need to either forward the notification or filter catalogs without any fragments in the metastore.
@@ -727,7 +784,6 @@ impl CatalogController {
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
-            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
                 .into_iter()
                 .map(|(sink, target)| (target as _, vec![sink as _]))
@@ -887,41 +943,14 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
-        // Check if the job is creating sink into table.
-        if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
-                .select_only()
-                .column(sink::Column::TargetTable)
-                .into_tuple::<Option<TableId>>()
-                .one(&txn)
-                .await?
-        {
-            let tmp_id: Option<ObjectId> = ObjectDependency::find()
-                .select_only()
-                .column(object_dependency::Column::UsedBy)
-                .join(
-                    JoinType::InnerJoin,
-                    object_dependency::Relation::Object1.def(),
-                )
-                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-                .filter(
-                    object_dependency::Column::Oid
-                        .eq(target_table_id)
-                        .and(object::Column::ObjType.eq(ObjectType::Table))
-                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
-                )
-                .into_tuple()
-                .one(&txn)
-                .await?;
-            if let Some(tmp_id) = tmp_id {
-                tracing::warn!(
-                    id = %tmp_id,
-                    "aborting temp streaming job for sink into table"
-                );
-
-                Object::delete_by_id(tmp_id).exec(&txn).await?;
-            }
-        }
+        // Query fragment IDs before cascade-deleting them, for serving mapping cleanup.
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
@@ -953,6 +982,13 @@ impl CatalogController {
             let _ = tx.send(Err(abort_reason.clone()));
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
 
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
@@ -1042,6 +1078,27 @@ impl CatalogController {
             ));
         }
 
+        // Check if any dependent job is a batch refresh job.
+        // Replace table is not supported when a batch refresh MV depends on it.
+        let batch_refresh_dep_cnt = ObjectDependency::find()
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(id)
+                    .and(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+            )
+            .count(&txn)
+            .await?;
+        if batch_refresh_dep_cnt != 0 {
+            return Err(MetaError::permission_denied(
+                "replacing a table with dependent batch refresh materialized views is not supported",
+            ));
+        }
+
         // 3. check parallelism.
         let original_job = StreamingJobModel::find_by_id(id)
             .one(&txn)
@@ -1065,6 +1122,10 @@ impl CatalogController {
 
         let parallelism = original_job.resolved_parallelism(specified_parallelism);
         let ctx = original_job.stream_context(ctx);
+        let adaptive_parallelism_strategy = original_job
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
         let resource_type = original_job.resource_type();
 
         // 4. create streaming object for new replace table.
@@ -1076,6 +1137,7 @@ impl CatalogController {
             Some(streaming_job.schema_id() as _),
             streaming_job.create_type(),
             ctx,
+            adaptive_parallelism_strategy,
             parallelism,
             original_job.max_parallelism as _,
             resource_type,
@@ -1083,6 +1145,8 @@ impl CatalogController {
             // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
             // would render actors at the backfill parallelism and never recover to steady-state.
             None,
+            None,
+            None, // refresh_interval_sec: not applicable for replace jobs
         )
         .await?;
 
@@ -1376,18 +1440,28 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, delete_notification_objs) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            replace_upstream,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-            drop_table_connector_ctx,
-            auto_refresh_schema_sinks,
-        )
-        .await?;
+        let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                replace_upstream,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+                auto_refresh_schema_sinks,
+            )
+            .await?;
 
         txn.commit().await?;
+
+        // Notify serving module: delete old fragment mappings, upsert new ones.
+        let notification_manager = self.env.notification_manager();
+        notification_manager.notify_serving_fragment_mapping_delete(
+            old_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
+        notification_manager.notify_serving_fragment_mapping_update(
+            new_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
 
         let mut version = self
             .notify_frontend(
@@ -1478,9 +1552,30 @@ impl CatalogController {
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
         auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
-    ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+        Vec<FragmentId>,
+        Vec<FragmentId>,
+    )> {
         let original_job_id = streaming_job.id();
         let job_type = streaming_job.job_type();
+
+        // Query old fragment IDs (will be deleted) and new fragment IDs (will be reassigned).
+        let old_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(original_job_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        let new_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(tmp_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
 
         let mut index_item_rewriter = None;
         let mut updated_iceberg_source_id: Option<SourceId> = None;
@@ -1798,11 +1893,12 @@ impl CatalogController {
                         ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
-                if let Some((log_store_table_id, new_log_store_table_columns)) =
-                    finish_sink_context.new_log_store_table
-                {
+                if let Some(new_log_store_table) = finish_sink_context.new_log_store_table {
+                    let log_store_table_id = new_log_store_table.id;
                     let new_log_store_table_columns: ColumnCatalogArray =
-                        new_log_store_table_columns.into();
+                        new_log_store_table.columns.clone().into();
+                    let new_log_store_table_value_indices =
+                        new_log_store_table.value_indices.clone();
                     let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
                         .find_also_related(Object)
                         .one(txn)
@@ -1811,11 +1907,13 @@ impl CatalogController {
                     Table::update(table::ActiveModel {
                         table_id: Set(log_store_table_id),
                         columns: Set(new_log_store_table_columns.clone()),
+                        value_indices: Set(new_log_store_table_value_indices.clone().into()),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
                     table.columns = new_log_store_table_columns;
+                    table.value_indices = new_log_store_table_value_indices.into();
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
@@ -1832,7 +1930,12 @@ impl CatalogController {
                 Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
         }
 
-        Ok((objects, notification_objs))
+        Ok((
+            objects,
+            notification_objs,
+            old_fragment_ids,
+            new_fragment_ids,
+        ))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -1843,6 +1946,20 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Query fragment IDs of the temp job and temp sinks before cascade-deleting them.
+        let mut all_job_ids: Vec<ObjectId> = vec![tmp_job_id.into()];
+        if let Some(ref sink_ids) = tmp_sink_ids {
+            all_job_ids.extend(sink_ids.iter().copied());
+        }
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(all_job_ids))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         Object::delete_by_id(tmp_job_id).exec(&txn).await?;
         if let Some(tmp_sink_ids) = tmp_sink_ids {
             for tmp_sink_id in tmp_sink_ids {
@@ -1850,6 +1967,14 @@ impl CatalogController {
             }
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted replace job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
+
         Ok(())
     }
 
@@ -2426,7 +2551,7 @@ impl CatalogController {
             source_id.as_share_source_job_id()
         }]
         .into_iter()
-        .chain(dep_source_job_ids.into_iter())
+        .chain(dep_source_job_ids)
         .collect_vec();
 
         // update fragments
@@ -2846,12 +2971,40 @@ impl CatalogController {
                         .map(|secret_ref| secret_ref.to_protobuf())
                         .unwrap_or_default(),
                 );
-                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                let (source_to_add_secret_dep, source_to_remove_secret_dep) =
                     source_options_with_secret
                         .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // Validate the updated source properties
                 let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Keep source-level secret dependencies in sync with the source properties that
+                // are rewritten from the altered connection.
+                let source_used_by_id = source
+                    .optional_associated_table_id
+                    .map(|table_id| table_id.as_object_id())
+                    .unwrap_or_else(|| source_id.as_object_id());
+                if !source_to_add_secret_dep.is_empty() {
+                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
+                        |secret_id| object_dependency::ActiveModel {
+                            oid: Set(secret_id.into()),
+                            used_by: Set(source_used_by_id),
+                            ..Default::default()
+                        },
+                    ))
+                    .exec(&txn)
+                    .await?;
+                }
+                if !source_to_remove_secret_dep.is_empty() {
+                    let _ = ObjectDependency::delete_many()
+                        .filter(
+                            object_dependency::Column::Oid
+                                .is_in(source_to_remove_secret_dep)
+                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
+                        )
+                        .exec(&txn)
+                        .await?;
+                }
 
                 // Prepare source update
                 let active_source = source::ActiveModel {
@@ -2894,7 +3047,7 @@ impl CatalogController {
                     };
                 let job_ids = vec![base_job_id]
                     .into_iter()
-                    .chain(dep_source_job_ids.into_iter())
+                    .chain(dep_source_job_ids)
                     .collect_vec();
 
                 fragment_updates.push(DependentSourceFragmentUpdate {
@@ -3348,7 +3501,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
-    pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
+    pub new_log_store_table: Option<Box<PbTable>>,
 }
 
 async fn update_connector_props_fragments<F>(

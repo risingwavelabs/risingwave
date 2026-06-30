@@ -28,6 +28,8 @@ use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
+use risingwave_common::config::FrontendConfig;
+use risingwave_common::id::ObjectId;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{
     DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
@@ -35,8 +37,9 @@ use risingwave_common::types::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::sink::file_sink::fs::FS_SINK;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::{BATCH_POSIX_FS_CONNECTOR, KAFKA_CONNECTOR, POSIX_FS_CONNECTOR};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
@@ -51,6 +54,31 @@ use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::{SessionImpl, current};
 use crate::{Binder, HashSet, TableCatalog};
+
+pub fn ensure_local_fs_connector_allowed(session: &SessionImpl, connector: &str) -> RwResult<()> {
+    let is_local_fs_connector = is_local_fs_connector(connector);
+
+    if !is_local_fs_connector
+        || is_local_fs_connector_enabled(session.env().frontend_config(), connector)
+    {
+        return Ok(());
+    }
+
+    Err(RwError::from(ProtocolError(format!(
+        "local filesystem connector '{}' is disabled. Set `frontend.unsafe_enable_local_fs_connector = true` in `risingwave.toml` to enable it.",
+        connector
+    ))))
+}
+
+fn is_local_fs_connector_enabled(frontend_config: &FrontendConfig, connector: &str) -> bool {
+    !is_local_fs_connector(connector) || frontend_config.unsafe_enable_local_fs_connector
+}
+
+fn is_local_fs_connector(connector: &str) -> bool {
+    connector.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+        || connector.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+        || connector.eq_ignore_ascii_case(FS_SINK)
+}
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -333,6 +361,36 @@ pub fn get_table_catalog_by_table_name(
     }
 }
 
+pub fn reject_internal_table_dependency(
+    table: &TableCatalog,
+    statement_name: &str,
+) -> RwResult<()> {
+    if table.is_internal_table() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "{statement_name} does not support internal table \"{}\"",
+            table.name()
+        ))));
+    }
+    Ok(())
+}
+
+pub fn reject_internal_table_dependencies<'a, I>(
+    session: &SessionImpl,
+    dependent_relations: I,
+    statement_name: &str,
+) -> RwResult<()>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    for object_id in dependent_relations {
+        if let Ok(table) = catalog_reader.get_any_table_by_id(object_id.as_table_id()) {
+            reject_internal_table_dependency(table.as_ref(), statement_name)?;
+        }
+    }
+    Ok(())
+}
+
 /// Execute an async operation with a notification if it takes too long.
 /// This is useful for operations that might be delayed due to high barrier latency.
 ///
@@ -522,7 +580,8 @@ mod tests {
 
     #[test]
     fn test_value_format() {
-        use {DataType as T, ScalarRefImpl as S};
+        use DataType as T;
+        use ScalarRefImpl as S;
         let static_session = StaticSessionData {
             timezone: "UTC".into(),
         };
@@ -571,5 +630,55 @@ mod tests {
             ),
             "1969-12-31 23:59:59.999999+00:00"
         );
+    }
+
+    #[test]
+    fn test_local_fs_connector_config_gate() {
+        let frontend_config = FrontendConfig::default();
+        let default_enabled = cfg!(debug_assertions);
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, POSIX_FS_CONNECTOR),
+            default_enabled
+        );
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, BATCH_POSIX_FS_CONNECTOR),
+            default_enabled
+        );
+        assert_eq!(
+            is_local_fs_connector_enabled(&frontend_config, FS_SINK),
+            default_enabled
+        );
+        assert!(is_local_fs_connector_enabled(
+            &frontend_config,
+            KAFKA_CONNECTOR
+        ));
+
+        let disabled_config = FrontendConfig {
+            unsafe_enable_local_fs_connector: false,
+            ..Default::default()
+        };
+        assert!(!is_local_fs_connector_enabled(
+            &disabled_config,
+            POSIX_FS_CONNECTOR
+        ));
+        assert!(!is_local_fs_connector_enabled(
+            &disabled_config,
+            BATCH_POSIX_FS_CONNECTOR
+        ));
+        assert!(!is_local_fs_connector_enabled(&disabled_config, FS_SINK));
+
+        let enabled_config = FrontendConfig {
+            unsafe_enable_local_fs_connector: true,
+            ..Default::default()
+        };
+        assert!(is_local_fs_connector_enabled(
+            &enabled_config,
+            POSIX_FS_CONNECTOR
+        ));
+        assert!(is_local_fs_connector_enabled(
+            &enabled_config,
+            BATCH_POSIX_FS_CONNECTOR
+        ));
+        assert!(is_local_fs_connector_enabled(&enabled_config, FS_SINK));
     }
 }

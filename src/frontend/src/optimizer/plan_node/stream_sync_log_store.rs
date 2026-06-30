@@ -23,8 +23,10 @@ use crate::optimizer::plan_node::utils::{
     Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef,
 };
+use crate::optimizer::plan_rewriter::PlanRewriter;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -81,9 +83,9 @@ impl StreamNode for StreamSyncLogStore {
             aligned: false,
 
             // The following fields should now be read from per-job config override.
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             pause_duration_ms: None,
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             buffer_size: None,
         }))
     }
@@ -92,3 +94,26 @@ impl StreamNode for StreamSyncLogStore {
 impl ExprRewritable<Stream> for StreamSyncLogStore {}
 
 impl ExprVisitable for StreamSyncLogStore {}
+
+/// Run after the final stream job root is created, so physical explain and graph building see the
+/// same sync log store fragment boundary.
+pub(crate) fn ensure_sync_log_store_fragment_root(plan: PlanRef) -> PlanRef {
+    plan.rewrite_with(&mut EnsureSyncLogStoreFragmentRootRewriter)
+}
+
+/// Insert no-shuffle exchanges above sync log stores that are not already separated by an exchange.
+struct EnsureSyncLogStoreFragmentRootRewriter;
+
+impl PlanRewriter<Stream> for EnsureSyncLogStoreFragmentRootRewriter {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef, mut inputs: Vec<PlanRef>) -> PlanRef {
+        if plan.as_stream_exchange().is_none() {
+            for input in &mut inputs {
+                if input.as_stream_sync_log_store().is_some() {
+                    *input = StreamExchange::new_no_shuffle(input.clone()).into();
+                }
+            }
+        }
+
+        plan.clone_root_with_inputs(&inputs)
+    }
+}

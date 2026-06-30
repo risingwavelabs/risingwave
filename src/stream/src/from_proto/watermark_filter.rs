@@ -26,6 +26,8 @@ use crate::executor::{UpsertWatermarkFilterExecutor, WatermarkFilterExecutor};
 
 pub struct WatermarkFilterBuilder;
 
+impl_stream_node_body!(WatermarkFilter(WatermarkFilterNode) => WatermarkFilterBuilder);
+
 impl ExecutorBuilder for WatermarkFilterBuilder {
     type Node = WatermarkFilterNode;
 

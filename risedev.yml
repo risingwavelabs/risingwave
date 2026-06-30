@@ -1111,6 +1111,36 @@ profile:
       - use: nats
       - use: mqtt
 
+  local-nats-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+        id: minio-local-nats-test
+      - use: sqlite
+        id: sqlite-local-nats-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: nats
+
+  local-mqtt-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-mqtt-test
+      - use: sqlite
+        id: sqlite-local-mqtt-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mqtt
+
   local-mongodb-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1179,6 +1209,20 @@ profile:
         id: minio-local-deltalake-sink-test
       - use: sqlite
         id: sqlite-local-deltalake-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  deltalake-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-deltalake-sink-test
+      - use: sqlite
+        id: sqlite-deltalake-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1780,7 +1824,7 @@ template:
     address: "127.0.0.1"
     port: 4222
     monitor-port: 8222
-    image: "nats:latest"
+    image: "nats:2.11.3"
     persist-data: true
     user-managed: false
 
@@ -1789,7 +1833,7 @@ template:
     id: mqtt-${port}
     address: "127.0.0.1"
     port: 1883
-    image: "eclipse-mosquitto"
+    image: "eclipse-mosquitto:2.0.21"
     persist-data: true
     user-managed: false
 

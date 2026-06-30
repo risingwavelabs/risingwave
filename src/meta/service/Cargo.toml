@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+test = ["risingwave_meta/test"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -26,14 +29,7 @@ risingwave_pb = { workspace = true }
 sea-orm = { workspace = true }
 serde_json = "1"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"

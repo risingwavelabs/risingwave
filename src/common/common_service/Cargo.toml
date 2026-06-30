@@ -9,8 +9,10 @@ repository = { workspace = true }
 
 [dependencies]
 async-trait = "0.1"
+await-tree = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["query"] }
+either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
 prometheus = { version = "0.14" }
@@ -20,7 +22,7 @@ risingwave_rpc_client = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.6", features = ["add-extension", "compression-gzip"] }

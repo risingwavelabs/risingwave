@@ -17,7 +17,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP, SessionConfig};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -83,6 +83,10 @@ pub fn handle_set(
             status: &mut status,
         },
     )?;
+
+    if let Some(notice) = SessionConfig::deprecated_notice(&param_name)? {
+        handler_args.session.notice_to_user(notice);
+    }
 
     Ok(PgResponse::builder(StatementType::SET_VARIABLE)
         .status(status)

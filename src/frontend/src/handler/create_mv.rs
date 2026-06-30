@@ -17,7 +17,8 @@ use std::collections::HashSet;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_common::catalog::{FunctionId, ObjectId, SecretId};
+use risingwave_common::license::Feature;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
@@ -32,20 +33,41 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, execute_with_long_running_notification,
+    reject_internal_table_dependencies,
+};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::plan_node::{
+    BackfillType, Explain, StreamPlanRef as PlanRef, ensure_sync_log_store_fragment_root,
+};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::ordinal;
+use crate::utils::{MV_REFRESH_INTERVAL_SEC_KEY, ordinal};
 use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
+
+pub(crate) struct StreamingJobResourceOptions {
+    pub resource_group: Option<String>,
+    pub serverless_backfill_enabled: Option<bool>,
+}
+
+pub(crate) fn extract_streaming_job_resource_options(
+    with_options: &mut WithOptions,
+) -> StreamingJobResourceOptions {
+    StreamingJobResourceOptions {
+        resource_group: with_options.remove(RESOURCE_GROUP_KEY),
+        serverless_backfill_enabled: with_options
+            .remove(CLOUD_SERVERLESS_BACKFILL_ENABLED)
+            .map(|value| value.parse::<bool>().unwrap_or(false)),
+    }
+}
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -85,7 +107,7 @@ pub(super) fn get_column_names(
 }
 
 /// Bind and generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub fn explain_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
@@ -95,7 +117,7 @@ pub fn gen_create_mv_plan(
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(&query)?;
-    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode, None)
 }
 
 /// Generate create MV plan from a bound query
@@ -106,6 +128,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    refresh_interval_sec: Option<u64>,
 ) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
@@ -132,18 +155,27 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
+
+    let backfill_type = if refresh_interval_sec.is_some() {
+        plan_root.require_snapshot_backfill_for_batch_refresh()?;
+        BackfillType::SnapshotBackfill
+    } else {
+        plan_root.derive_backfill_type(true)
+    };
+
     let materialize = plan_root.gen_materialize_plan(
         database_id,
         schema_id,
         table_name,
         definition,
         emit_on_window_close,
+        backfill_type,
     )?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    let plan: PlanRef = materialize.into();
+    let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -163,12 +195,13 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound_query) = {
+    let (dependent_relations, dependent_udfs, dependent_secrets, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(&query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound_query,
         )
     };
@@ -179,6 +212,7 @@ pub async fn handle_create_mv(
         bound_query,
         dependent_relations,
         dependent_udfs,
+        dependent_secrets,
         columns,
         emit_mode,
     )
@@ -210,110 +244,26 @@ pub async fn provision_resource_group(sbc_addr: String) -> Result<String> {
     }
 }
 
-fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
-    let context = OptimizerContext::from_handler_args(handler_args);
-    context.with_options().clone()
-}
-
-pub async fn handle_create_mv_bound(
-    handler_args: HandlerArgs,
-    if_not_exists: bool,
-    name: ObjectName,
-    query: BoundQuery,
-    dependent_relations: HashSet<ObjectId>,
-    dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
-    columns: Vec<Ident>,
-    emit_mode: Option<EmitMode>,
-) -> Result<RwPgResponse> {
-    let session = handler_args.session.clone();
-
-    // Check cluster limits
-    session.check_cluster_limits().await?;
-
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
-        name.clone(),
-        StatementType::CREATE_MATERIALIZED_VIEW,
-        if_not_exists,
-    )? {
-        return Ok(resp);
-    }
-
-    let (table, graph, dependencies, resource_type) = {
-        gen_create_mv_graph(
-            handler_args,
-            name,
-            query,
-            dependent_relations,
-            dependent_udfs,
-            columns,
-            emit_mode,
-        )
-        .await?
-    };
-
-    // Ensure writes to `StreamJobTracker` are atomic.
-    let _job_guard =
-        session
-            .env()
-            .creating_streaming_job_tracker()
-            .guard(CreatingStreamingJobInfo::new(
-                session.session_id(),
-                table.database_id,
-                table.schema_id,
-                table.name.clone(),
-            ));
-
-    let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(
-        catalog_writer.create_materialized_view(
-            table.to_prost(),
-            graph,
-            dependencies,
-            resource_type,
-            if_not_exists,
-        ),
-        &session,
-        "CREATE MATERIALIZED VIEW",
-        LongRunningNotificationAction::MonitorBackfillJob,
-    )
-    .await?;
-
-    Ok(PgResponse::empty_result(
-        StatementType::CREATE_MATERIALIZED_VIEW,
-    ))
-}
-
-pub(crate) async fn gen_create_mv_graph(
-    handler_args: HandlerArgs,
-    name: ObjectName,
-    query: BoundQuery,
-    dependent_relations: HashSet<ObjectId>,
-    dependent_udfs: HashSet<FunctionId>,
-    columns: Vec<Ident>,
-    emit_mode: Option<EmitMode>,
-) -> Result<(
-    TableCatalog,
-    PbStreamFragmentGraph,
-    HashSet<ObjectId>,
-    streaming_job_resource_type::ResourceType,
-)> {
-    let mut with_options = get_with_options(handler_args.clone());
-    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+pub(crate) async fn resolve_streaming_job_resource_type(
+    session: &SessionImpl,
+    with_options: &mut WithOptions,
+) -> Result<streaming_job_resource_type::ResourceType> {
+    let StreamingJobResourceOptions {
+        resource_group,
+        serverless_backfill_enabled,
+    } = extract_streaming_job_resource_options(with_options);
 
     if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup.check_available()?;
+        Feature::ResourceGroup.check_available()?;
     }
 
-    let serverless_backfill_from_with = with_options
-        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .map(|value| value.parse::<bool>().unwrap_or(false));
-    let is_serverless_backfill = match serverless_backfill_from_with {
+    let is_serverless_backfill = match serverless_backfill_enabled {
         Some(value) => value,
         None => {
             if resource_group.is_some() {
                 false
             } else {
-                handler_args.session.config().enable_serverless_backfill()
+                session.config().enable_serverless_backfill()
             }
         }
     };
@@ -322,14 +272,6 @@ pub(crate) async fn gen_create_mv_graph(
         return Err(RwError::from(InvalidInputSyntax(
             "Please do not specify serverless backfilling and resource group together".to_owned(),
         )));
-    }
-
-    if !with_options.is_empty() {
-        // get other useful fields by `remove`, the logic here is to reject unknown options.
-        return Err(RwError::from(ProtocolError(format!(
-            "unexpected options in WITH clause: {:?}",
-            with_options.keys()
-        ))));
     }
 
     let sbc_addr = match SESSION_MANAGER.get() {
@@ -366,6 +308,123 @@ pub(crate) async fn gen_create_mv_graph(
     } else {
         streaming_job_resource_type::ResourceType::Regular(true)
     };
+
+    Ok(resource_type)
+}
+
+fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
+    let context = OptimizerContext::from_handler_args(handler_args);
+    context.with_options().clone()
+}
+
+pub async fn handle_create_mv_bound(
+    handler_args: HandlerArgs,
+    if_not_exists: bool,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<ObjectId>,
+    dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
+    dependent_secrets: HashSet<SecretId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+
+    // Check cluster limits
+    session.check_cluster_limits().await?;
+
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
+
+    reject_internal_table_dependencies(
+        session.as_ref(),
+        &dependent_relations,
+        "CREATE MATERIALIZED VIEW",
+    )?;
+
+    let (table, graph, dependencies, resource_type, refresh_interval_sec) = {
+        gen_create_mv_graph(
+            handler_args,
+            name,
+            query,
+            dependent_relations,
+            dependent_udfs,
+            dependent_secrets,
+            columns,
+            emit_mode,
+        )
+        .await?
+    };
+
+    // Ensure writes to `StreamJobTracker` are atomic.
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                table.database_id,
+                table.schema_id,
+                table.name.clone(),
+            ));
+
+    let catalog_writer = session.catalog_writer()?;
+    execute_with_long_running_notification(
+        catalog_writer.create_materialized_view(
+            table.to_prost(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+            refresh_interval_sec,
+        ),
+        &session,
+        "CREATE MATERIALIZED VIEW",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
+
+    Ok(PgResponse::empty_result(
+        StatementType::CREATE_MATERIALIZED_VIEW,
+    ))
+}
+
+pub(crate) async fn gen_create_mv_graph(
+    handler_args: HandlerArgs,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<ObjectId>,
+    dependent_udfs: HashSet<FunctionId>,
+    dependent_secrets: HashSet<SecretId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<(
+    TableCatalog,
+    PbStreamFragmentGraph,
+    HashSet<ObjectId>,
+    streaming_job_resource_type::ResourceType,
+    Option<u64>,
+)> {
+    let mut with_options = get_with_options(handler_args.clone());
+    let refresh_interval_sec = with_options.refresh_interval_sec()?;
+    with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
+    let resource_type =
+        resolve_streaming_job_resource_type(handler_args.session.as_ref(), &mut with_options)
+            .await?;
+
+    if !with_options.is_empty() {
+        // get other useful fields by `remove`, the logic here is to reject unknown options.
+        return Err(RwError::from(ProtocolError(format!(
+            "unexpected options in WITH clause: {:?}",
+            with_options.keys()
+        ))));
+    }
+
     let context = OptimizerContext::from_handler_args(handler_args);
     let has_order_by = !query.order.is_empty();
     if has_order_by {
@@ -374,20 +433,18 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
     }
 
-    if resource_type.resource_group().is_some()
-        && !context
-            .session_ctx()
-            .config()
-            .streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-    }
-
     let context: OptimizerContextRef = context.into();
     let session = context.session_ctx().as_ref();
 
-    let (plan, table) =
-        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+    let (plan, table) = gen_create_mv_plan_bound(
+        session,
+        context.clone(),
+        query,
+        name,
+        columns,
+        emit_mode,
+        refresh_interval_sec,
+    )?;
 
     let backfill_order = plan_backfill_order(
         session,
@@ -400,6 +457,12 @@ It only indicates the physical clustering of the data, which may improve the per
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
         .chain(dependent_udfs.iter().copied().map_into())
+        .chain(
+            dependent_secrets
+                .iter()
+                .copied()
+                .map(|id| id.as_object_id()),
+        )
         .collect();
 
     let graph = build_graph_with_strategy(
@@ -408,7 +471,13 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_type))
+    Ok((
+        table,
+        graph,
+        dependencies,
+        resource_type,
+        refresh_interval_sec,
+    ))
 }
 
 #[cfg(test)]

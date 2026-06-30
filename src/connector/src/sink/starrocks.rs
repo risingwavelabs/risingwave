@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
+use chrono_tz::Tz;
 use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
@@ -195,6 +196,15 @@ impl StarrocksSink {
 }
 
 impl StarrocksSink {
+    fn starrocks_data_type_contains_any(
+        starrocks_data_type: &str,
+        expected_types: &[&str],
+    ) -> bool {
+        expected_types
+            .iter()
+            .any(|expected_type| starrocks_data_type.contains(expected_type))
+    }
+
     fn check_column_name_and_type(
         &self,
         starrocks_columns_desc: HashMap<String, String>,
@@ -223,11 +233,14 @@ impl StarrocksSink {
 
     fn check_and_correct_column_type(
         rw_data_type: &DataType,
-        starrocks_data_type: &String,
+        starrocks_data_type: &str,
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
-                Ok(starrocks_data_type.contains("tinyint") | starrocks_data_type.contains("boolean"))
+                Ok(Self::starrocks_data_type_contains_any(
+                    starrocks_data_type,
+                    &["tinyint", "boolean"],
+                ))
             }
             risingwave_common::types::DataType::Int16 => {
                 Ok(starrocks_data_type.contains("smallint"))
@@ -253,9 +266,14 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Timestamp => {
                 Ok(starrocks_data_type.contains("datetime"))
             }
-            risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(
-                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_owned(),
-            )),
+            risingwave_common::types::DataType::Timestamptz => {
+                // StarRocks JSON encoding writes timestamptz as a timestamp string without a
+                // timezone suffix, so StarRocks can parse it into DATETIME or store it as text.
+                Ok(Self::starrocks_data_type_contains_any(
+                    starrocks_data_type,
+                    &["datetime", "varchar", "char", "string"],
+                ))
+            }
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
                 "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
@@ -350,6 +368,7 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            writer_param.time_zone,
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
@@ -391,6 +410,7 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        time_zone: Tz,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {
@@ -432,7 +452,7 @@ impl StarrocksSinkWriter {
             is_append_only,
             client: None,
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
-            row_encoder: JsonEncoder::new_with_starrocks(schema, None),
+            row_encoder: JsonEncoder::new_with_starrocks(schema, None, time_zone),
             curr_txn_label: None,
         })
     }
@@ -715,7 +735,7 @@ impl StarrocksSchemaClient {
             .first()
             .ok_or_else(|| {
                 SinkError::Starrocks(format!(
-                    "Can't find schema with table {:?} and database {:?}",
+                    "Can't find schema for StarRocks table {:?} in database {:?}. Please check that the table exists and the StarRocks user has write permission on the target table.",
                     self.table, self.db
                 ))
             })?
@@ -858,4 +878,42 @@ impl StarrocksTxnClient {
     pub async fn load(&self, label: String) -> Result<InserterInner> {
         self.request_builder.build_txn_inserter(label).await
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+
+    fn is_compatible(rw_data_type: DataType, starrocks_data_type: &str) -> bool {
+        StarrocksSink::check_and_correct_column_type(&rw_data_type, starrocks_data_type).unwrap()
+    }
+
+    #[test]
+    fn test_timestamptz_compatible_starrocks_types() {
+        for starrocks_data_type in [
+            "datetime",
+            "datetime(6)",
+            "varchar(64)",
+            "char(32)",
+            "string",
+        ] {
+            assert!(
+                is_compatible(DataType::Timestamptz, starrocks_data_type),
+                "{starrocks_data_type} should be compatible with timestamptz"
+            );
+        }
+    }
+
+    #[test]
+    fn test_timestamptz_incompatible_starrocks_types() {
+        for starrocks_data_type in ["date", "int", "bigint", "json", "boolean"] {
+            assert!(
+                !is_compatible(DataType::Timestamptz, starrocks_data_type),
+                "{starrocks_data_type} should not be compatible with timestamptz"
+            );
+        }
+    }
+
 }

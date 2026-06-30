@@ -361,7 +361,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use futures_async_stream::for_await;
-    use risingwave_common::array::{Array as _, I64Array};
+    use risingwave_common::array::I64Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
