@@ -42,9 +42,30 @@ pub(super) fn resolve_streaming_job_id_for_alter(
     let reader = session.env().catalog_reader().read_guard();
 
     let job_id = match alter_stmt_type {
-        StatementType::ALTER_TABLE
-        | StatementType::ALTER_MATERIALIZED_VIEW
-        | StatementType::ALTER_INDEX => {
+        StatementType::ALTER_TABLE => {
+            let (table, schema_name) =
+                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+            match table.table_type() {
+                TableType::Internal => {
+                    // we treat internal table as NOT FOUND
+                    return Err(CatalogError::not_found("table", table.name()).into());
+                }
+                TableType::Table => {}
+                _ => {
+                    bail_invalid_input_syntax!(
+                        "cannot alter {alter_target} of {} {} by {}",
+                        table.table_type().to_prost().as_str_name(),
+                        table.name(),
+                        alter_stmt_type,
+                    );
+                }
+            }
+
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            table.id.as_job_id()
+        }
+        StatementType::ALTER_MATERIALIZED_VIEW | StatementType::ALTER_INDEX => {
             let (table, schema_name) =
                 reader.get_table_by_name(db_name, schema_path, &real_table_name, true)?;
 

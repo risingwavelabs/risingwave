@@ -40,7 +40,7 @@ pub async fn handle_alter_table_connector_props(
     let source_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
         let Some(associate_source_id) = table.associated_source_id else {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Only table with connector can use ALTER TABLE CONNECTOR syntax.".to_owned(),
