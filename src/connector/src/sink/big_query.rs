@@ -330,7 +330,9 @@ impl BigQuerySink {
         // family instead of requiring exact string equality.
         let normalized = bigquery_type.trim().to_ascii_uppercase();
         matches!(
-            normalized.split_once('(').map_or(normalized.as_str(), |(prefix, _)| prefix),
+            normalized
+                .split_once('(')
+                .map_or(normalized.as_str(), |(prefix, _)| prefix),
             "NUMERIC" | "BIGNUMERIC"
         )
     }
@@ -1001,13 +1003,13 @@ fn build_protobuf_field(
 #[cfg(test)]
 mod test {
 
-    use std::collections::HashMap;
     use std::assert_matches;
+    use std::collections::HashMap;
 
-    use crate::connector_common::AwsAuthProps;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};
 
+    use crate::connector_common::AwsAuthProps;
     use crate::sink::big_query::{
         BigQueryCommon, BigQueryConfig, BigQuerySink, build_protobuf_descriptor_pool,
         build_protobuf_schema,
@@ -1096,7 +1098,9 @@ mod test {
         assert!(BigQuerySink::is_decimal_type_compatible("NUMERIC"));
         assert!(BigQuerySink::is_decimal_type_compatible("numeric(31, 2)"));
         assert!(BigQuerySink::is_decimal_type_compatible("BIGNUMERIC"));
-        assert!(BigQuerySink::is_decimal_type_compatible("bignumeric(35, 12)"));
+        assert!(BigQuerySink::is_decimal_type_compatible(
+            "bignumeric(35, 12)"
+        ));
         assert!(!BigQuerySink::is_decimal_type_compatible("STRING"));
     }
 
@@ -1145,5 +1149,4 @@ mod test {
         )]))
         .unwrap();
     }
-
 }
