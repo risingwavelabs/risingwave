@@ -117,7 +117,17 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.two_phase_agg_enabled()
             && !self.agg_calls.is_empty()
             && self.agg_calls.iter().all(|call| {
-                let agg_type_ok = !matches!(call.agg_type, agg_types::simply_cannot_two_phase!());
+                // Vector SUM/AVG use an f64 accumulator plus the non-null count. That state cannot
+                // be represented by their vector return value across a partial/total boundary.
+                let vector_stateful_agg = matches!(
+                    (&call.agg_type, &call.return_type),
+                    (
+                        AggType::Builtin(PbAggKind::Sum | PbAggKind::Avg),
+                        DataType::Vector(_)
+                    )
+                );
+                let agg_type_ok = !vector_stateful_agg
+                    && !matches!(call.agg_type, agg_types::simply_cannot_two_phase!());
                 let order_ok = matches!(
                     call.agg_type,
                     agg_types::result_unaffected_by_order_by!()
@@ -457,105 +467,114 @@ impl Agg<StreamPlanRef> {
 
         self.agg_calls
             .iter()
-            .map(|agg_call| match agg_call.agg_type {
-                agg_types::single_value_state_iff_in_append_only!() if in_append_only => {
-                    AggCallState::Value
+            .map(|agg_call| {
+                if matches!(
+                    (&agg_call.agg_type, &agg_call.return_type),
+                    (AggType::Builtin(PbAggKind::Avg), DataType::Vector(_))
+                ) {
+                    return AggCallState::Value;
                 }
-                agg_types::single_value_state!() => AggCallState::Value,
-                agg_types::materialized_input_state!() => {
-                    // columns with order requirement in state table
-                    let sort_keys = {
-                        match agg_call.agg_type {
-                            AggType::Builtin(PbAggKind::Min) => {
-                                vec![(OrderType::ascending(), agg_call.inputs[0].index)]
+                match agg_call.agg_type {
+                    agg_types::single_value_state_iff_in_append_only!() if in_append_only => {
+                        AggCallState::Value
+                    }
+                    agg_types::single_value_state!() => AggCallState::Value,
+                    agg_types::materialized_input_state!() => {
+                        // columns with order requirement in state table
+                        let sort_keys = {
+                            match agg_call.agg_type {
+                                AggType::Builtin(PbAggKind::Min) => {
+                                    vec![(OrderType::ascending(), agg_call.inputs[0].index)]
+                                }
+                                AggType::Builtin(PbAggKind::Max) => {
+                                    vec![(OrderType::descending(), agg_call.inputs[0].index)]
+                                }
+                                AggType::Builtin(
+                                    PbAggKind::FirstValue
+                                    | PbAggKind::LastValue
+                                    | PbAggKind::StringAgg
+                                    | PbAggKind::ArrayAgg
+                                    | PbAggKind::JsonbAgg
+                                    | PbAggKind::PercentileCont
+                                    | PbAggKind::PercentileDisc
+                                    | PbAggKind::Mode,
+                                )
+                                | AggType::WrapScalar(_) => {
+                                    if agg_call.order_by.is_empty() {
+                                        me.ctx().warn_to_user(format!(
+                                        "{} without ORDER BY may produce non-deterministic result",
+                                        agg_call.agg_type,
+                                    ));
+                                    }
+                                    agg_call
+                                        .order_by
+                                        .iter()
+                                        .map(|o| {
+                                            (
+                                                if matches!(
+                                                    agg_call.agg_type,
+                                                    AggType::Builtin(PbAggKind::LastValue)
+                                                ) {
+                                                    o.order_type.reverse()
+                                                } else {
+                                                    o.order_type
+                                                },
+                                                o.column_index,
+                                            )
+                                        })
+                                        .collect()
+                                }
+                                AggType::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
+                                    .order_by
+                                    .iter()
+                                    .map(|o| (o.order_type, o.column_index))
+                                    .collect(),
+                                _ => unreachable!(),
                             }
-                            AggType::Builtin(PbAggKind::Max) => {
-                                vec![(OrderType::descending(), agg_call.inputs[0].index)]
-                            }
+                        };
+
+                        // columns to ensure each row unique
+                        let extra_keys = if agg_call.distinct {
+                            // if distinct, use distinct keys as extra keys
+                            let distinct_key = agg_call.inputs[0].index;
+                            vec![distinct_key]
+                        } else {
+                            // if not distinct, use primary keys as extra keys
+                            in_pks.clone()
+                        };
+
+                        // other columns that should be contained in state table
+                        let include_keys = match agg_call.agg_type {
+                            // `agg_types::materialized_input_state` except for `min`/`max`
                             AggType::Builtin(
                                 PbAggKind::FirstValue
                                 | PbAggKind::LastValue
                                 | PbAggKind::StringAgg
                                 | PbAggKind::ArrayAgg
                                 | PbAggKind::JsonbAgg
+                                | PbAggKind::JsonbObjectAgg
                                 | PbAggKind::PercentileCont
                                 | PbAggKind::PercentileDisc
                                 | PbAggKind::Mode,
                             )
                             | AggType::WrapScalar(_) => {
-                                if agg_call.order_by.is_empty() {
-                                    me.ctx().warn_to_user(format!(
-                                        "{} without ORDER BY may produce non-deterministic result",
-                                        agg_call.agg_type,
-                                    ));
-                                }
-                                agg_call
-                                    .order_by
-                                    .iter()
-                                    .map(|o| {
-                                        (
-                                            if matches!(
-                                                agg_call.agg_type,
-                                                AggType::Builtin(PbAggKind::LastValue)
-                                            ) {
-                                                o.order_type.reverse()
-                                            } else {
-                                                o.order_type
-                                            },
-                                            o.column_index,
-                                        )
-                                    })
-                                    .collect()
+                                agg_call.inputs.iter().map(|i| i.index).collect()
                             }
-                            AggType::Builtin(PbAggKind::JsonbObjectAgg) => agg_call
-                                .order_by
-                                .iter()
-                                .map(|o| (o.order_type, o.column_index))
-                                .collect(),
-                            _ => unreachable!(),
-                        }
-                    };
+                            _ => vec![],
+                        };
 
-                    // columns to ensure each row unique
-                    let extra_keys = if agg_call.distinct {
-                        // if distinct, use distinct keys as extra keys
-                        let distinct_key = agg_call.inputs[0].index;
-                        vec![distinct_key]
-                    } else {
-                        // if not distinct, use primary keys as extra keys
-                        in_pks.clone()
-                    };
-
-                    // other columns that should be contained in state table
-                    let include_keys = match agg_call.agg_type {
-                        // `agg_types::materialized_input_state` except for `min`/`max`
-                        AggType::Builtin(
-                            PbAggKind::FirstValue
-                            | PbAggKind::LastValue
-                            | PbAggKind::StringAgg
-                            | PbAggKind::ArrayAgg
-                            | PbAggKind::JsonbAgg
-                            | PbAggKind::JsonbObjectAgg
-                            | PbAggKind::PercentileCont
-                            | PbAggKind::PercentileDisc
-                            | PbAggKind::Mode,
-                        )
-                        | AggType::WrapScalar(_) => {
-                            agg_call.inputs.iter().map(|i| i.index).collect()
-                        }
-                        _ => vec![],
-                    };
-
-                    let state = gen_materialized_input_state(sort_keys, extra_keys, include_keys);
-                    AggCallState::MaterializedInput(Box::new(state))
-                }
-                agg_types::rewritten!() => {
-                    unreachable!("should have been rewritten")
-                }
-                AggType::Builtin(
-                    PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
-                ) => {
-                    unreachable!("invalid agg kind")
+                        let state =
+                            gen_materialized_input_state(sort_keys, extra_keys, include_keys);
+                        AggCallState::MaterializedInput(Box::new(state))
+                    }
+                    agg_types::rewritten!() => {
+                        unreachable!("should have been rewritten")
+                    }
+                    AggType::Builtin(
+                        PbAggKind::Unspecified | PbAggKind::UserDefined | PbAggKind::WrapScalar,
+                    ) => {
+                        unreachable!("invalid agg kind")
+                    }
                 }
             })
             .collect()
