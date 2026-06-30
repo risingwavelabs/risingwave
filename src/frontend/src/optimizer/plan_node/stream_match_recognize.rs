@@ -118,6 +118,77 @@ impl StreamMatchRecognize {
         // (it cannot compute a vnode from an empty prefix), so we must not assert a prefix length.
         tbl_builder.build(partition_positions, 0)
     }
+
+    /// `frontier_meta_table`: `pk (partition...) -> next_wakeup_order_key`. Point-looked-up by
+    /// partition key on insert to read/update a partition's wakeup. Distributed by partition so each
+    /// actor owns its partitions' frontier. `read_prefix_len_hint` is the full partition length (it
+    /// is always accessed by a complete partition key).
+    fn infer_frontier_meta_table(&self) -> TableCatalog {
+        let mut b = TableCatalogBuilder::default();
+        let input_fields = self.core.input.schema().fields().to_vec();
+        let partition_indices = self
+            .core
+            .partition_key_indices()
+            .expect("partition keys validated to be columns");
+        let time_idx = self
+            .core
+            .order_key_indices()
+            .expect("order keys validated to be columns")[0];
+
+        // columns: partition columns, then next_wakeup (same type as the leading ORDER BY column).
+        for &i in &partition_indices {
+            b.add_column(&input_fields[i]);
+        }
+        b.add_column(&Field::with_name(
+            input_fields[time_idx].data_type(),
+            "next_wakeup",
+        ));
+
+        let p = partition_indices.len();
+        // pk = partition columns (positions 0..p in this table's own column list).
+        for pos in 0..p {
+            b.add_order_column(pos, OrderType::ascending());
+        }
+        let dist: Vec<usize> = (0..p).collect();
+        b.build(dist, p)
+    }
+
+    /// `frontier_index_table`: `pk (next_wakeup_order_key, partition...)`, distributed by partition.
+    /// Range-scanned per owned vnode with `next_wakeup <= watermark` to find the partitions that need
+    /// attention. The PK leads with `next_wakeup` (so the range scan is a key-prefix scan) while the
+    /// distribution stays on the partition columns (so a partition's index entry lives on the same
+    /// vnode as its buffered rows). `read_prefix_len_hint = 0`: the scan provides no key prefix, only
+    /// a range bound, like the main buffer table.
+    fn infer_frontier_index_table(&self) -> TableCatalog {
+        let mut b = TableCatalogBuilder::default();
+        let input_fields = self.core.input.schema().fields().to_vec();
+        let partition_indices = self
+            .core
+            .partition_key_indices()
+            .expect("partition keys validated to be columns");
+        let time_idx = self
+            .core
+            .order_key_indices()
+            .expect("order keys validated to be columns")[0];
+
+        // columns: next_wakeup (position 0), then partition columns (positions 1..=p).
+        b.add_column(&Field::with_name(
+            input_fields[time_idx].data_type(),
+            "next_wakeup",
+        ));
+        for &i in &partition_indices {
+            b.add_column(&input_fields[i]);
+        }
+
+        let p = partition_indices.len();
+        // pk = (next_wakeup, partition...): order columns 0..=p.
+        for pos in 0..=p {
+            b.add_order_column(pos, OrderType::ascending());
+        }
+        // Distribute by the partition columns (positions 1..=p), NOT the PK prefix.
+        let dist: Vec<usize> = (1..=p).collect();
+        b.build(dist, 0)
+    }
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamMatchRecognize {
@@ -235,6 +306,14 @@ impl TryToStreamPb for StreamMatchRecognize {
             .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
+        let frontier_meta_table = self
+            .infer_frontier_meta_table()
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost();
+        let frontier_index_table = self
+            .infer_frontier_index_table()
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost();
 
         Ok(NodeBody::MatchRecognize(Box::new(MatchRecognizeNode {
             partition_by,
@@ -243,6 +322,8 @@ impl TryToStreamPb for StreamMatchRecognize {
             defines,
             pattern_node: Some(lower_pattern(&self.core.pattern)?),
             state_table: Some(state_table),
+            frontier_meta_table: Some(frontier_meta_table),
+            frontier_index_table: Some(frontier_index_table),
             after_match_skip: {
                 use risingwave_sqlparser::ast::AfterMatchSkip;
                 match &self.core.after_match_skip {

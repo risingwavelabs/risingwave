@@ -102,10 +102,29 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
 
         let input_arity = input.schema().len();
 
+        let vnode_bitmap = params.vnode_bitmap.clone().map(std::sync::Arc::new);
         let state_table = StateTableBuilder::new(
             node.get_state_table().as_ref().unwrap(),
+            store.clone(),
+            vnode_bitmap.clone(),
+        )
+        .forbid_preload_all_rows()
+        .build()
+        .await;
+        // Wakeup frontier: distributed by partition (same as the buffer table), so they re-shard
+        // together on rescale. High cardinality → do not preload all rows.
+        let frontier_meta_table = StateTableBuilder::new(
+            node.get_frontier_meta_table().as_ref().unwrap(),
+            store.clone(),
+            vnode_bitmap.clone(),
+        )
+        .forbid_preload_all_rows()
+        .build()
+        .await;
+        let frontier_index_table = StateTableBuilder::new(
+            node.get_frontier_index_table().as_ref().unwrap(),
             store,
-            params.vnode_bitmap.clone().map(std::sync::Arc::new),
+            vnode_bitmap,
         )
         .forbid_preload_all_rows()
         .build()
@@ -125,6 +144,8 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             skip,
             input_arity,
             state_table,
+            frontier_meta_table,
+            frontier_index_table,
         });
 
         Ok((params.info, exec).into())
