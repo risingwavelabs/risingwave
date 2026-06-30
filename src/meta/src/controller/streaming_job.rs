@@ -65,6 +65,7 @@ use risingwave_pb::plan_common::source_refresh_mode::{
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
@@ -3271,39 +3272,55 @@ impl CatalogController {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
+        throttle_type: ThrottleType,
     ) -> MetaResult<()> {
-        let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
-                                 stream_node: &mut PbStreamNode| {
+        let update_rate_limit = move |_fragment_type_mask: FragmentTypeMask,
+                                      stream_node: &mut PbStreamNode| {
             let mut found = false;
-            if fragment_type_mask.contains_any(
-                FragmentTypeFlag::dml_rate_limit_fragments()
-                    .chain(FragmentTypeFlag::sink_rate_limit_fragments())
-                    .chain(FragmentTypeFlag::backfill_rate_limit_fragments())
-                    .chain(FragmentTypeFlag::source_rate_limit_fragments()),
-            ) {
-                visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::Dml(node) = node {
+            visit_stream_node_mut(stream_node, |node| match throttle_type {
+                ThrottleType::Source => {
+                    if let PbNodeBody::Source(node) = node
+                        && let Some(node_inner) = &mut node.source_inner
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    if let PbNodeBody::StreamFsFetch(node) = node
+                        && let Some(node_inner) = &mut node.node_inner
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
+                    }
+                }
+                ThrottleType::Backfill => match node {
+                    PbNodeBody::StreamCdcScan(node) => {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
+                    PbNodeBody::StreamScan(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    PbNodeBody::SourceBackfill(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                    _ => {}
+                },
+                ThrottleType::Sink => {
                     if let PbNodeBody::Sink(node) = node {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
-                    if let PbNodeBody::StreamCdcScan(node) = node {
+                }
+                ThrottleType::Dml => {
+                    if let PbNodeBody::Dml(node) = node {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
-                    if let PbNodeBody::StreamScan(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                    if let PbNodeBody::SourceBackfill(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                });
-            }
+                }
+                ThrottleType::Unspecified => {}
+            });
             found
         };
         self.mutate_fragment_by_fragment_id(fragment_id, update_rate_limit, "fragment not found")

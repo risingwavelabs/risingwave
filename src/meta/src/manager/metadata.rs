@@ -23,7 +23,7 @@ use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
-use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, ThrottleType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use sea_orm::TransactionTrait;
@@ -601,9 +601,10 @@ impl MetadataManager {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
+        throttle_type: ThrottleType,
     ) -> MetaResult<()> {
         self.catalog_controller
-            .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit)
+            .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit, throttle_type)
             .await
     }
 
