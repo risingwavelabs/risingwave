@@ -1,16 +1,29 @@
 locals {
-  cache_prefix = "docker/"
+  docker_sccache_prefix = "${trimsuffix(var.docker_sccache_prefix, "/")}/"
+  manage_lifecycle      = coalesce(var.manage_lifecycle_rules, var.create_bucket)
+  bucket_id             = var.create_bucket ? aws_s3_bucket.docker_sccache[0].id : data.aws_s3_bucket.docker_sccache[0].id
+  bucket_arn            = var.create_bucket ? aws_s3_bucket.docker_sccache[0].arn : data.aws_s3_bucket.docker_sccache[0].arn
+  bucket_name           = var.create_bucket ? aws_s3_bucket.docker_sccache[0].bucket : data.aws_s3_bucket.docker_sccache[0].bucket
 }
 
 resource "aws_s3_bucket" "docker_sccache" {
-  bucket        = var.bucket_name
-  bucket_prefix = var.bucket_name == null ? var.bucket_name_prefix : null
+  count = var.create_bucket ? 1 : 0
+
+  bucket = var.bucket_name
 
   tags = var.tags
 }
 
+data "aws_s3_bucket" "docker_sccache" {
+  count = var.create_bucket ? 0 : 1
+
+  bucket = var.bucket_name
+}
+
 resource "aws_s3_bucket_public_access_block" "docker_sccache" {
-  bucket = aws_s3_bucket.docker_sccache.id
+  count = var.create_bucket ? 1 : 0
+
+  bucket = aws_s3_bucket.docker_sccache[0].id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -19,7 +32,9 @@ resource "aws_s3_bucket_public_access_block" "docker_sccache" {
 }
 
 resource "aws_s3_bucket_ownership_controls" "docker_sccache" {
-  bucket = aws_s3_bucket.docker_sccache.id
+  count = var.create_bucket ? 1 : 0
+
+  bucket = aws_s3_bucket.docker_sccache[0].id
 
   rule {
     object_ownership = "BucketOwnerEnforced"
@@ -27,7 +42,9 @@ resource "aws_s3_bucket_ownership_controls" "docker_sccache" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "docker_sccache" {
-  bucket = aws_s3_bucket.docker_sccache.id
+  count = var.create_bucket ? 1 : 0
+
+  bucket = aws_s3_bucket.docker_sccache[0].id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -37,14 +54,16 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "docker_sccache" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "docker_sccache" {
-  bucket = aws_s3_bucket.docker_sccache.id
+  count = local.manage_lifecycle ? 1 : 0
+
+  bucket = local.bucket_id
 
   rule {
     id     = "expire-docker-sccache"
     status = "Enabled"
 
     filter {
-      prefix = local.cache_prefix
+      prefix = local.docker_sccache_prefix
     }
 
     expiration {
@@ -66,14 +85,14 @@ data "aws_iam_policy_document" "docker_sccache" {
     ]
 
     resources = [
-      aws_s3_bucket.docker_sccache.arn,
+      local.bucket_arn,
     ]
 
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
       values = [
-        "${local.cache_prefix}*",
+        "${local.docker_sccache_prefix}*",
       ]
     }
   }
@@ -89,7 +108,7 @@ data "aws_iam_policy_document" "docker_sccache" {
     ]
 
     resources = [
-      "${aws_s3_bucket.docker_sccache.arn}/${local.cache_prefix}*",
+      "${local.bucket_arn}/${local.docker_sccache_prefix}*",
     ]
   }
 }

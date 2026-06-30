@@ -109,7 +109,10 @@ if [[ "${ENABLE_DOCKER_SCCACHE}" == "true" ]]; then
   } >"${docker_sccache_credentials_dir}/config"
 
   cache_branch="$(sanitize_cache_component "${BUILDKITE_BRANCH:-unknown}")"
-  DOCKER_SCCACHE_PREFIX=${DOCKER_SCCACHE_PREFIX:-${DOCKER_SCCACHE_S3_KEY_PREFIX:-"docker/${cache_branch}/${arch}/${CARGO_PROFILE}"}}
+  DOCKER_SCCACHE_PREFIX_ROOT="${DOCKER_SCCACHE_PREFIX_ROOT:-sccache/docker}"
+  DOCKER_SCCACHE_PREFIX_ROOT="${DOCKER_SCCACHE_PREFIX_ROOT#/}"
+  DOCKER_SCCACHE_PREFIX_ROOT="${DOCKER_SCCACHE_PREFIX_ROOT%/}"
+  DOCKER_SCCACHE_PREFIX=${DOCKER_SCCACHE_PREFIX:-"${DOCKER_SCCACHE_PREFIX_ROOT}/${cache_branch}/${arch}/${CARGO_PROFILE}"}
   echo "Docker sccache prefix: ${DOCKER_SCCACHE_PREFIX}"
 
   build_secret_args+=(

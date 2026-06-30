@@ -5,27 +5,38 @@ variable "aws_profile" {
 }
 
 variable "aws_region" {
-  description = "AWS region for the Docker sccache bucket."
+  description = "AWS region for the shared build cache bucket."
   type        = string
   default     = "us-east-2"
 }
 
 variable "bucket_name" {
-  description = "Optional fixed bucket name. Leave null to use bucket_name_prefix."
+  description = "Stable shared build cache bucket name. The module creates it when create_bucket is true, or reuses it when create_bucket is false."
   type        = string
-  default     = null
 }
 
-variable "bucket_name_prefix" {
-  description = "Bucket prefix used when bucket_name is null."
+variable "create_bucket" {
+  description = "Whether to create the shared build cache bucket. Set false to use an existing bucket."
+  type        = bool
+  default     = true
+}
+
+variable "docker_sccache_prefix" {
+  description = "S3 key prefix reserved for Docker sccache objects inside the shared build cache bucket."
   type        = string
-  default     = "rw-docker-sccache-"
+  default     = "sccache/docker/"
 }
 
 variable "cache_retention_days" {
-  description = "How long to retain cached compiler objects under the docker/ prefix."
+  description = "How long to retain cached compiler objects under the Docker sccache prefix."
   type        = number
   default     = 60
+}
+
+variable "manage_lifecycle_rules" {
+  description = "Whether this module should manage lifecycle rules for the Docker sccache prefix. Defaults to create_bucket when null."
+  type        = bool
+  default     = null
 }
 
 variable "buildkite_agent_role_arns" {
@@ -45,6 +56,6 @@ variable "tags" {
   type        = map(string)
   default = {
     Service = "buildkite"
-    Purpose = "docker-sccache"
+    Purpose = "build-cache"
   }
 }
