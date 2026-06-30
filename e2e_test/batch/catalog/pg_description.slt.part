@@ -105,14 +105,16 @@ drop table t;
 statement ok
 create schema comment_on_schema;
 
+control substitution on
+
 statement ok
-create table dev.comment_on_schema.commented_table(col int);
+create table $__DATABASE__.comment_on_schema.commented_table(col int);
 
 statement error cross-database references are not implemented
 comment on column another_database.comment_on_schema.commented_table.col is 'cross-database column comment';
 
 statement ok
-comment on column dev.comment_on_schema.commented_table.col is 'database-qualified column comment';
+comment on column $__DATABASE__.comment_on_schema.commented_table.col is 'database-qualified column comment';
 
 query T
 SELECT d.description
@@ -126,14 +128,14 @@ WHERE n.nspname = 'comment_on_schema'
 database-qualified column comment
 
 statement ok
-create materialized view dev.comment_on_schema.commented_mv as
-select col from dev.comment_on_schema.commented_table;
+create materialized view $__DATABASE__.comment_on_schema.commented_mv as
+select col from $__DATABASE__.comment_on_schema.commented_table;
 
 statement error cross-database references are not implemented
 comment on column another_database.comment_on_schema.commented_mv.col is 'cross-database materialized view column comment';
 
 statement ok
-comment on column dev.comment_on_schema.commented_mv.col is 'materialized view column comment';
+comment on column $__DATABASE__.comment_on_schema.commented_mv.col is 'materialized view column comment';
 
 query T
 SELECT d.description
@@ -147,10 +149,12 @@ WHERE n.nspname = 'comment_on_schema'
 materialized view column comment
 
 statement ok
-drop materialized view dev.comment_on_schema.commented_mv;
+drop materialized view $__DATABASE__.comment_on_schema.commented_mv;
 
 statement ok
-drop table dev.comment_on_schema.commented_table;
+drop table $__DATABASE__.comment_on_schema.commented_table;
+
+control substitution off
 
 statement ok
 drop schema comment_on_schema;
