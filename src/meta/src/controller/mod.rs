@@ -90,10 +90,10 @@ impl SqlMetaStore {
 
         /// Enable SQLite foreign-key enforcement on an established connection.
         ///
-        /// SQLite disables foreign-key enforcement by default and requires
+        /// `SQLite` disables foreign-key enforcement by default and requires
         /// `PRAGMA foreign_keys = ON` to be issued on **every connection**.
         /// sea-orm 1.x `ConnectOptions` has no dedicated API for this, so we
-        /// run the statement once after the pool is created.  Because SQLite
+        /// run the statement once after the pool is created.  Because `SQLite`
         /// connections always use `max_connections(1)`, the single pooled
         /// connection retains the pragma for its lifetime.
         ///
