@@ -684,8 +684,7 @@ pub async fn handle_create_sink(
     }
 
     let resource_type =
-        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
-            .await?;
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)?;
 
     let (mut sink, graph, target_table_catalog, dependencies, since_timestamp_epoch) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
