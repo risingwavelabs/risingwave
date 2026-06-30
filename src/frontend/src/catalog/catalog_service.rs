@@ -148,6 +148,7 @@ pub trait CatalogWriter: Send + Sync {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -487,10 +488,18 @@ impl CatalogWriter for CatalogWriterImpl {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, dependencies, resource_type, if_not_exists)
+            .create_sink(
+                sink,
+                graph,
+                dependencies,
+                resource_type,
+                if_not_exists,
+                since_timestamp_epoch,
+            )
             .await?;
         self.wait_version(version).await
     }
