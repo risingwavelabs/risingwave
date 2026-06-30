@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
@@ -52,6 +53,7 @@ use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -136,6 +138,13 @@ impl LocalFrontend {
     #[expect(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
+        Self { opts, env }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn with_frontend_config(opts: FrontendOpts, frontend_config: FrontendConfig) -> Self {
+        let mut env = FrontendEnv::mock();
+        env.set_frontend_config_for_test(frontend_config);
         Self { opts, env }
     }
 
@@ -307,6 +316,7 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -356,6 +366,7 @@ impl CatalogWriter for MockCatalogWriter {
             dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
+            None,
         )
         .await?;
         Ok(())
@@ -393,7 +404,9 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
@@ -409,6 +422,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
@@ -767,11 +781,28 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: TableId,
+        _job_id: JobId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
+            database.to_prost()
+        };
+        pb_database.resource_group =
+            resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
     }
 
     async fn alter_database_param(
@@ -1445,6 +1476,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _limit: Option<u32>,
     ) -> RpcResult<TableChangeLogs> {
         Ok(HashMap::default())
+    }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<risingwave_hummock_sdk::CompactionGroupId>,
+        _configs: Vec<PbMutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 }
 

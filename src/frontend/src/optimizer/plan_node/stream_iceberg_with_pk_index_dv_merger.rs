@@ -30,8 +30,8 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// with pk index sink. It merges delete-position messages from the upstream `WriterExecutor`
 /// with historical deletion vectors and writes merged DV files.
 ///
-/// This node enforces `Distribution::Single` (singleton) — an `Exchange` node is automatically
-/// inserted if the input is not already single-distributed.
+/// This node shardes the input stream by `file_path` (the first column) to ensure all messages
+/// for the same file are processed by the same merger instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamIcebergWithPkIndexDvMerger {
     pub base: PlanBase<Stream>,
@@ -44,7 +44,7 @@ impl StreamIcebergWithPkIndexDvMerger {
         debug_assert_eq!(input.schema().len(), 2); // Expecting `[file_path, position]` from the Writer.
         let input = RequiredDist::shard_by_key(2, &[0])
             .streaming_enforce_if_not_satisfies(input)
-            .expect("single distribution enforcement is infallible");
+            .expect("distribution enforcement is infallible");
 
         let base = PlanBase::new_stream(
             input.ctx(),

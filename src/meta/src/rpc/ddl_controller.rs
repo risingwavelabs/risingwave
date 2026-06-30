@@ -66,7 +66,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -76,6 +76,7 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -166,6 +167,8 @@ pub enum DdlCommand {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
+        since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -191,6 +194,7 @@ pub enum DdlCommand {
         definition: String,
     },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterDatabaseResourceGroup(DatabaseId, Option<String>, bool),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
@@ -230,6 +234,7 @@ impl DdlCommand {
                 subscription_id, ..
             } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseResourceGroup(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
@@ -258,6 +263,7 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterDatabaseResourceGroup(_, _, _)
             | DdlCommand::AlterStreamingJobConfig(_, _, _)
             | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
@@ -280,6 +286,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
+    iceberg_v3_sink_manager: IcebergV3SinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -385,6 +392,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -395,6 +403,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
+            iceberg_v3_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -412,7 +421,6 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    #[expect(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -453,6 +461,8 @@ impl DdlController {
                     dependencies,
                     resource_type,
                     if_not_exists,
+                    refresh_interval_sec,
+                    since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -460,6 +470,8 @@ impl DdlController {
                         dependencies,
                         resource_type,
                         if_not_exists,
+                        refresh_interval_sec,
+                        since_timestamp_epoch,
                     )
                     .await
                 }
@@ -513,6 +525,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
+                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
+                        .await
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
@@ -776,6 +792,21 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_resource_group(database_id, resource_group)
+            .await?;
+
+        Ok(version)
+    }
+
     // The 'secret' part of the request we receive from the frontend is in plaintext;
     // here, we need to encrypt it before storing it in the catalog.
     fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
@@ -927,15 +958,12 @@ impl DdlController {
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
-        let stream_scan_fragment = table_fragments
-            .fragments
-            .values()
-            .filter(|f| {
+        let stream_scan_fragment =
+            Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
                     || f.fragment_type_mask
                         .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .exactly_one()
+            }))
             .ok()
             .with_context(|| {
                 format!(
@@ -1048,6 +1076,8 @@ impl DdlController {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         if let StreamingJob::Sink(sink) = &streaming_job
             && let Some(target_table) = sink.target_table
@@ -1080,6 +1110,7 @@ impl DdlController {
                 &fragment_graph.backfill_parallelism,
                 adaptive_parallelism_strategy,
                 backfill_adaptive_parallelism_strategy,
+                refresh_interval_sec,
             )
             .await
         {
@@ -1127,21 +1158,30 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-
-        // create streaming job.
-        match self
-            .create_streaming_job_inner(
+        // Generate streaming job metadata and issue the create command in two steps, so that the
+        // error phase is classified at the barrier command boundary.
+        let create_result = match self
+            .generate_streaming_job(
                 ctx,
                 streaming_job,
                 fragment_graph,
                 resource_type,
-                permit,
                 streaming_job_model,
+                since_timestamp_epoch,
             )
             .await
         {
+            Ok((stream_job_fragments, ctx)) => self
+                .stream_manager
+                .create_streaming_job(stream_job_fragments, ctx, permit)
+                .await
+                .map_err(|err| (err, true)),
+            Err(err) => Err((err, false)),
+        };
+
+        match create_result {
             Ok(version) => Ok(version),
-            Err(err) => {
+            Err((err, is_cancelled)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1155,10 +1195,10 @@ impl DdlController {
                 let (aborted, _) = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
+                    .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
                 if aborted {
-                    tracing::warn!(id = %job_id, "aborted streaming job");
+                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
@@ -1174,15 +1214,15 @@ impl DdlController {
     }
 
     #[await_tree::instrument(boxed)]
-    async fn create_streaming_job_inner(
+    async fn generate_streaming_job(
         &self,
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
         streaming_job_model: streaming_job::Model,
-    ) -> MetaResult<NotificationVersion> {
+        since_timestamp_epoch: Option<u64>,
+    ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
@@ -1208,6 +1248,7 @@ impl DdlController {
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
+                since_timestamp_epoch,
             )
             .await?;
 
@@ -1241,10 +1282,22 @@ impl DdlController {
             }
             StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
-                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?;
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
+                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // so it's ready to receive epoch reports from the very first
+                // barrier instead of relying on lazy registration on every
+                // commit.
+                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                    let iceberg_config =
+                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
+                    self.iceberg_v3_sink_manager
+                        .register_v3_sink(sink.id, iceberg_config)
+                        .await
+                        .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
+                }
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1295,13 +1348,7 @@ impl DdlController {
             )
             .await?;
 
-        // create streaming jobs.
-        let version = self
-            .stream_manager
-            .create_streaming_job(stream_job_fragments, ctx, permit)
-            .await?;
-
-        Ok(version)
+        Ok((stream_job_fragments, ctx))
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
@@ -1339,6 +1386,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_v3_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1420,8 +1468,16 @@ impl DdlController {
 
             for sink_id in iceberg_sink_ids {
                 self.iceberg_compaction_manager
-                    .clear_iceberg_commits_by_sink_id(sink_id);
+                    .clear_iceberg_maintenance_by_sink_id(sink_id);
             }
+        }
+
+        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // including user-created sinks with arbitrary names (not just the
+        // `__iceberg_sink_%` auto-created ones above).
+        if !removed_iceberg_v3_sink_ids.is_empty() {
+            self.iceberg_v3_sink_manager
+                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
         }
 
         // remove secrets.
@@ -1506,19 +1562,6 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
-                // TODO: Remove this guard when auto schema refresh sink fully supports drop column.
-                if !removed_columns.is_empty() {
-                    return Err(anyhow!(
-                        "new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}",
-                        table.columns,
-                        original_table_columns,
-                        removed_columns
-                            .iter()
-                            .map(|col| col.column_id())
-                            .collect_vec()
-                    )
-                    .into());
-                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
@@ -1774,6 +1817,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
@@ -1947,7 +1991,9 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
-            streaming_job_model,
+            streaming_job_model: streaming_job_model.clone(),
+            refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
+            since_timestamp_epoch,
         };
 
         Ok((

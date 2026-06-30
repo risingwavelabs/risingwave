@@ -54,7 +54,14 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 PULSAR_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "payload", "message_id_data"]),
+                HashSet::from([
+                    "key",
+                    "partition",
+                    "offset",
+                    "payload",
+                    "message_id_data",
+                    "header",
+                ]),
             ),
             (
                 KINESIS_CONNECTOR,
@@ -446,6 +453,8 @@ pub fn get_kafka_header_item_datatype() -> DataType {
 
 #[cfg(test)]
 mod test {
+    use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+
     use super::*;
 
     #[test]
@@ -466,6 +475,29 @@ mod test {
                 Some(&DataType::Varchar)
             ),
             "_rw_kafka_header_inner_varchar"
+        );
+    }
+
+    #[test]
+    fn test_build_pulsar_header_additional_column() {
+        let col = build_additional_column_desc(
+            ColumnId::new(1),
+            PULSAR_CONNECTOR,
+            "header",
+            Some("pulsar_header".to_owned()),
+            Some("tenant"),
+            Some(&DataType::Varchar),
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(col.name, "pulsar_header");
+        assert_eq!(col.data_type, DataType::Varchar);
+        assert_matches::assert_matches!(
+            col.additional_column.column_type,
+            Some(AdditionalColumnType::HeaderInner(ref header))
+                if header.inner_field == "tenant"
         );
     }
 }

@@ -1257,6 +1257,7 @@ pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_sync_log_store::StreamSyncLogStore;
+pub(crate) use stream_sync_log_store::ensure_sync_log_store_fragment_root;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;

@@ -146,7 +146,7 @@ async fn handle_alter_mv_bound(
 
     // TODO(alter-mv): use `ColumnIdGenerator` to generate IDs for MV columns, in order to
     // support schema changes.
-    let (mut table, graph, _dependencies, _resource_group) = {
+    let (mut table, graph, _dependencies, _resource_group, refresh_interval_sec) = {
         create_mv::gen_create_mv_graph(
             handler_args,
             name,
@@ -159,6 +159,14 @@ async fn handle_alter_mv_bound(
         )
         .await?
     };
+
+    if refresh_interval_sec.is_some() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "ALTER MATERIALIZED VIEW is not supported for batch refresh materialized views"
+                .to_owned(),
+        )
+        .into());
+    }
 
     // After alter, the data of the MV is not guaranteed to be consistent.
     // Always set the conflict handler to avoid producing inconsistent changes to downstream.

@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -95,6 +95,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         self.0.send(ContextRequest::MarkReady).unwrap();
     }
 
+    async fn resolve_log_store_epoch<'a>(
+        &'a self,
+        _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+        _since_epoch: u64,
+    ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+        Ok(Default::default())
+    }
+
     async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
         unreachable!()
     }
@@ -158,6 +166,29 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         &self,
         _refresh_finished_table_ids: Vec<JobId>,
     ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        _job_id: JobId,
+        _database_id: DatabaseId,
+        _last_committed_epoch: u64,
+    ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+    {
+        unimplemented!()
+    }
+
+    async fn pre_commit_iceberg_v3_sink_metadata(
+        &self,
+        _reports: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+        >,
+    ) -> MetaResult<Vec<SinkId>> {
+        unimplemented!()
+    }
+
+    async fn commit_iceberg_v3_sink_metadata(&self, _sink_ids: Vec<SinkId>) -> MetaResult<()> {
         unimplemented!()
     }
 }
@@ -254,6 +285,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         max_parallelism: 1,
         specific_resource_group: Some(resource_group.to_owned()),
         is_serverless_backfill: false,
+        refresh_interval_sec: None,
     };
     let job_model1 = build_job_model(job_id1, worker1_group);
     let job_model2 = build_job_model(job_id2, worker2_group);
@@ -289,6 +321,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                     config_override: Arc::<str>::from(""),
                     job_definition: "".to_owned(),
                     backfill_orders: None,
+                    refresh_interval_sec: None,
                 },
             ),
             (
@@ -298,6 +331,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                     config_override: Arc::<str>::from(""),
                     job_definition: "".to_owned(),
                     backfill_orders: None,
+                    refresh_interval_sec: None,
                 },
             ),
         ]),

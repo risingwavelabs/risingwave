@@ -1736,8 +1736,11 @@ impl CatalogController {
                     .column(fragment::Column::DistributionType)
                     .into_tuple()
                     .one(txn)
-                    .await?
-                    .ok_or_else(|| anyhow!("failed to find fragment: {}", fragment_id))?
+                    .await
+                    .map_err(MetaError::from)?
+                    .ok_or_else(|| {
+                        MetaError::from(anyhow!("failed to find fragment: {}", fragment_id))
+                    })?
             };
             result
         };

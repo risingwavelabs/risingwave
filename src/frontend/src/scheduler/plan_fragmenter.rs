@@ -325,7 +325,10 @@ pub enum SourceFetchParameters {
 
 #[derive(Debug, Clone)]
 pub enum UnpartitionedData {
-    Iceberg(IcebergFileScanTask),
+    Iceberg {
+        task: IcebergFileScanTask,
+        limit: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -377,29 +380,38 @@ impl SourceScanInfo {
 
 impl UnpartitionedData {
     fn complete(self, batch_parallelism: usize) -> SchedulerResult<SourceScanInfo> {
-        macro_rules! split_iceberg_tasks {
-            ($tasks:expr, $variant:ident) => {
-                IcebergSplitEnumerator::split_n_vecs($tasks, batch_parallelism)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(id, tasks)| {
-                        SplitImpl::Iceberg(IcebergSplit {
-                            split_id: id.try_into().unwrap(),
-                            task: IcebergFileScanTask::$variant(tasks),
+        macro_rules! iceberg_tasks {
+            ($tasks:expr, $variant:ident, $limit:expr) => {
+                if let Some(limit) = $limit {
+                    vec![SplitImpl::Iceberg(IcebergSplit {
+                        split_id: 0,
+                        task: IcebergFileScanTask::$variant($tasks),
+                        limit: Some(limit),
+                    })]
+                } else {
+                    IcebergSplitEnumerator::split_n_vecs($tasks, batch_parallelism)
+                        .into_iter()
+                        .enumerate()
+                        .map(|(id, tasks)| {
+                            SplitImpl::Iceberg(IcebergSplit {
+                                split_id: id.try_into().unwrap(),
+                                task: IcebergFileScanTask::$variant(tasks),
+                                limit: None,
+                            })
                         })
-                    })
-                    .collect()
+                        .collect()
+                }
             };
         }
 
         let splits = match self {
-            UnpartitionedData::Iceberg(task) => match task {
-                IcebergFileScanTask::Data(tasks) => split_iceberg_tasks!(tasks, Data),
+            UnpartitionedData::Iceberg { task, limit } => match task {
+                IcebergFileScanTask::Data(tasks) => iceberg_tasks!(tasks, Data, limit),
                 IcebergFileScanTask::EqualityDelete(tasks) => {
-                    split_iceberg_tasks!(tasks, EqualityDelete)
+                    iceberg_tasks!(tasks, EqualityDelete, None)
                 }
                 IcebergFileScanTask::PositionDelete(tasks) => {
-                    split_iceberg_tasks!(tasks, PositionDelete)
+                    iceberg_tasks!(tasks, PositionDelete, None)
                 }
             },
         };
@@ -1230,8 +1242,9 @@ impl BatchPlanFragmenter {
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
             let batch_iceberg_scan: &BatchIcebergScan = batch_iceberg_scan;
             let task = batch_iceberg_scan.task.clone();
+            let limit = batch_iceberg_scan.limit();
             return Ok(Some(SourceScanInfo::Unpartitioned(
-                UnpartitionedData::Iceberg(task),
+                UnpartitionedData::Iceberg { task, limit },
             )));
         } else if let Some(source_node) = node.as_batch_source() {
             // TODO: use specific batch operator instead of batch source.

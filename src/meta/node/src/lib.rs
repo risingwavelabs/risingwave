@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 
@@ -132,7 +132,7 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
-    /// False positive probability of bloom filter.
+    /// Deprecated: Bloom filter is no longer a supported SST filter implementation.
     #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
@@ -586,7 +586,7 @@ pub fn start(
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            config.session_init,
             shutdown,
         ))
         .await

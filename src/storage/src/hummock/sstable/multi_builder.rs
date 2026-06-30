@@ -337,7 +337,7 @@ where
     pub async fn finish(mut self) -> HummockResult<Vec<LocalSstableInfo>> {
         use futures::future::try_join_all;
         self.seal_current().await?;
-        try_join_all(self.concurrent_upload_join_handle.into_iter())
+        try_join_all(self.concurrent_upload_join_handle)
             .await
             .map_err(HummockError::sstable_upload_error)?
             .into_iter()

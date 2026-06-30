@@ -24,6 +24,8 @@ use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
 
+impl_stream_node_body!(Dml(DmlNode) => DmlExecutorBuilder);
+
 impl ExecutorBuilder for DmlExecutorBuilder {
     type Node = DmlNode;
 

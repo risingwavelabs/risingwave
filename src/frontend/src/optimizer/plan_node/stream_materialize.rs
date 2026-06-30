@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::num::NonZeroU32;
 
 use fixedbitset::FixedBitSet;
@@ -438,7 +438,7 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            read_prefix_len_hint: _,
             version,
             watermark_columns: _,
             dist_key_in_pk,
@@ -507,7 +507,10 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            // Refresh staging tables are consumed by the refresh merge path with
+            // `iter_keyed_row_with_vnode` range scans. They are not read by
+            // fixed-prefix lookups, so prefix SST filters would only add write cost.
+            read_prefix_len_hint: 0,
             version,
             created_at_epoch,
             initialized_at_epoch,

@@ -624,6 +624,7 @@ impl LogicalAggBuilder {
             // Rewrite avg to cast(sum as avg_return_type) / count.
             AggType::Builtin(PbAggKind::Avg) => {
                 assert_eq!(agg_call.args.len(), 1);
+                let return_type = agg_call.return_type();
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Sum.into(),
@@ -644,7 +645,18 @@ impl LogicalAggBuilder {
                     agg_call.direct_args,
                 )?)?);
 
-                Ok(FunctionCall::new(ExprType::Divide, Vec::from([sum, count]))?.into())
+                let target = ExprImpl::from(FunctionCall::new(
+                    ExprType::Divide,
+                    Vec::from([sum, count.clone()]),
+                )?);
+                let null = ExprImpl::from(Literal::new(None, return_type));
+                let zero = ExprImpl::literal_int(0);
+                let case_cond =
+                    ExprImpl::from(FunctionCall::new(ExprType::Equal, vec![count, zero])?);
+                Ok(ExprImpl::from(FunctionCall::new(
+                    ExprType::Case,
+                    vec![case_cond, null, target],
+                )?))
             }
             // We compute `var_samp` as
             // (sum(sq) - sum * sum / count) / (count - 1)
@@ -660,7 +672,7 @@ impl LogicalAggBuilder {
                 | PbAggKind::VarPop
                 | PbAggKind::VarSamp),
             ) => {
-                let arg = agg_call.args().iter().exactly_one().unwrap();
+                let arg = Itertools::exactly_one(agg_call.args().iter()).unwrap();
                 let squared_arg = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![arg.clone(), arg.clone()],

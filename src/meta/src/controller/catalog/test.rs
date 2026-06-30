@@ -380,6 +380,7 @@ mod tests {
             max_parallelism: Set(1),
             specific_resource_group: Set(None),
             is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
         }
         .insert(&txn)
         .await?;
@@ -472,6 +473,7 @@ mod tests {
             max_parallelism: Set(1),
             specific_resource_group: Set(None),
             is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
         }
         .insert(&txn)
         .await?;

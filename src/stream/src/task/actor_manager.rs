@@ -26,7 +26,6 @@ use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_co
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
-use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     self, StreamNode, StreamScanNode, StreamScanType, SyncLogStoreNode,
@@ -122,7 +121,7 @@ impl StreamActorManager {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
 
-        let info = Self::get_executor_info(
+        let upstream_info = Self::get_executor_info(
             upstream_node,
             Self::get_executor_id(actor_context, upstream_node),
         );
@@ -135,19 +134,24 @@ impl StreamActorManager {
             local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             actor_context.clone(),
-            info,
+            upstream_info,
             upstream_merge,
             chunk_size,
         )
         .await?;
 
-        let table_desc: &StorageTableDesc = node.get_table_desc()?;
+        let table_desc = node.get_table_desc()?;
 
         let output_indices = node
             .output_indices
             .iter()
             .map(|&i| i as usize)
             .collect_vec();
+        let info = Self::get_executor_info(
+            stream_node,
+            Self::get_executor_id(actor_context, stream_node),
+        );
+        let stream_key = info.stream_key.clone();
 
         let column_ids = node
             .upstream_column_ids
@@ -173,7 +177,9 @@ impl StreamActorManager {
             upstream_table,
             state_table,
             upstream,
+            node.pk_scan_range.as_ref(),
             output_indices,
+            stream_key,
             actor_context.clone(),
             progress,
             chunk_size,
@@ -181,13 +187,8 @@ impl StreamActorManager {
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
-        )
+        )?
         .boxed();
-
-        let info = Self::get_executor_info(
-            stream_node,
-            Self::get_executor_id(actor_context, stream_node),
-        );
 
         if crate::consistency::insane() {
             let mut troubled_info = info.clone();
@@ -429,6 +430,7 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
+        let expr_context = actor.expr_context.clone().unwrap();
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -439,7 +441,6 @@ impl StreamActorManager {
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
-        let expr_context = actor.expr_context.clone().unwrap();
 
         let (executor, subtasks) = self
             .create_nodes(
@@ -483,6 +484,7 @@ impl StreamActorManager {
         sync: Box<SyncLogStoreNode>,
         state_store: S,
     ) -> StreamResult<Actor<SyncLogStoreDispatchExecutor<S>>> {
+        let expr_context = actor.expr_context.clone().unwrap();
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -493,7 +495,6 @@ impl StreamActorManager {
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
-        let expr_context = actor.expr_context.clone().unwrap();
 
         let [input] = node.input.as_slice() else {
             bail!("SyncLogStoreNode should have exactly one input");
@@ -553,9 +554,15 @@ impl StreamActorManager {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
             let node_body = node.get_node_body().unwrap().clone();
+            let use_sync_log_store_dispatcher =
+                !actor_config.developer.disable_sync_log_store_dispatcher;
             // wrap the future of `create_actor` with `boxed` to avoid stack overflow
             let actor = match node_body {
-                NodeBody::SyncLogStore(sync) => {
+                NodeBody::SyncLogStore(sync) if use_sync_log_store_dispatcher => {
+                    tracing::info!(
+                        "SyncLogStoreDispatchExecutor is created for fragment {}",
+                        fragment_id
+                    );
                     dispatch_state_store!(self.env.state_store(), store, {
                         self
                         .clone()

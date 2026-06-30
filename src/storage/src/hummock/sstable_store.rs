@@ -232,8 +232,8 @@ pub struct SstableStore {
     use_new_object_prefix_strategy: bool,
 
     /// sst serde happens when a sst meta is written to meta disk cache.
-    /// excluding bloom filter from serde can reduce the meta disk cache entry size
-    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    /// Excluding the SST filter from serde can reduce the meta disk cache entry size
+    /// and reduce disk IO throughput at the cost of making the SST filter useless.
     skip_bloom_filter_in_serde: bool,
 }
 
@@ -274,7 +274,8 @@ impl SstableStore {
             .memory(meta_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                u64::BITS as usize / 8 + value.estimate_size()
+                std::mem::size_of::<HummockSstableObjectId>()
+                    + value.estimated_meta_cache_memory_weight()
             })
             .storage()
             .build()
@@ -285,8 +286,7 @@ impl SstableStore {
             .memory(block_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                // FIXME(MrCroxx): Calculate block weight more accurately.
-                u64::BITS as usize * 2 / 8 + value.raw().len()
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
             })
             .storage()
             .build()

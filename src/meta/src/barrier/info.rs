@@ -627,8 +627,9 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill { .. }
+                | CreateStreamingJobType::BatchRefresh(_) => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -702,8 +703,7 @@ impl InflightDatabaseInfo {
             .values()
             .flat_map(|resp| &resp.cdc_source_offset_updated)
         {
-            use risingwave_common::id::SourceId;
-            let source_id = SourceId::new(cdc_offset_updated.source_id);
+            let source_id = cdc_offset_updated.source_id;
             let job_id = source_id.as_share_source_job_id();
             if let Some(job) = self.jobs.get_mut(&job_id) {
                 if let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status {

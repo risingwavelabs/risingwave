@@ -61,7 +61,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -169,7 +169,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -221,11 +221,11 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 6 ] }
 
-    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ t1_ts, t1__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 3 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -560,7 +560,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 5 ] }
 
-    Table 0 { columns: [ t_a, t_ta, t__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t_a, t_ta, t__row_id, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -669,7 +669,7 @@
     └── StreamFilter { predicate: IsNull(t1.ta) }
         └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ t1_a, t1_ta, t2_b, t2_tb, t1__row_id, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC, $5 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 1, 3, 4, 5 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ t1_a, t1_ta, t2_b, t2_tb, t1__row_id, t2__row_id, _rw_timestamp ], primary key: [ $1 ASC, $4 ASC, $5 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 1, 3, 4, 5 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

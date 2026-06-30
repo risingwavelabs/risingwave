@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(cursor_split)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
+#![cfg_attr(test, feature(cursor_split))]
 
 mod collector;
 mod error;

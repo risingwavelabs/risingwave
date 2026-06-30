@@ -24,9 +24,19 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterDatabaseOperation {
-    ChangeOwner { new_owner_name: Ident },
-    RenameDatabase { database_name: ObjectName },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    RenameDatabase {
+        database_name: ObjectName,
+    },
     SetParam(ConfigParam),
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,6 +92,12 @@ pub enum AlterTableOperation {
     AlterColumn {
         column_name: Ident,
         op: AlterColumnOperation,
+    },
+    /// `ALTER WATERMARK FOR <column> AS <expr> [WITH TTL]`
+    AlterWatermark {
+        column_name: Ident,
+        expr: Expr,
+        with_ttl: bool,
     },
     /// `OWNER TO <owner_name>`
     ChangeOwner {
@@ -148,6 +164,12 @@ pub enum AlterIndexOperation {
     /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetBackfillParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
     /// `SET CONFIG (key = value, ...)`
@@ -231,6 +253,12 @@ pub enum AlterSinkOperation {
     /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetBackfillParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
     /// `SET CONFIG (key = value, ...)`
@@ -347,6 +375,11 @@ pub enum AlterFragmentOperation {
     SetParallelism { parallelism: SetVariableValue },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AlterCompactionGroupOperation {
+    Set { configs: Vec<ConfigParam> },
+}
+
 impl fmt::Display for AlterDatabaseOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -358,6 +391,18 @@ impl fmt::Display for AlterDatabaseOperation {
             }
             AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
                 write!(f, "SET {} TO {}", param, value)
+            }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
             }
         }
     }
@@ -388,6 +433,17 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::AlterColumn { column_name, op } => {
                 write!(f, "ALTER COLUMN {} {}", column_name, op)
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                write!(f, "ALTER WATERMARK FOR {} AS {}", column_name, expr)?;
+                if *with_ttl {
+                    write!(f, " WITH TTL")?;
+                }
+                Ok(())
             }
             AlterTableOperation::DropConstraint { name } => write!(f, "DROP CONSTRAINT {}", name),
             AlterTableOperation::DropColumn {
@@ -519,6 +575,18 @@ impl fmt::Display for AlterIndexOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -576,9 +644,9 @@ impl fmt::Display for AlterViewOperation {
                 let deferred = if *deferred { " DEFERRED" } else { "" };
 
                 if let Some(resource_group) = resource_group {
-                    write!(f, "SET RESOURCE_GROUP TO {} {}", resource_group, deferred)
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
                 } else {
-                    write!(f, "RESET RESOURCE_GROUP {}", deferred)
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
                 }
             }
             AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
@@ -630,6 +698,18 @@ impl fmt::Display for AlterSinkOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
             }
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
@@ -858,6 +938,25 @@ impl fmt::Display for AlterFragmentOperation {
             }
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterCompactionGroupOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterCompactionGroupOperation::Set { configs } => {
+                struct Assign<'a>(&'a ConfigParam);
+
+                impl fmt::Display for Assign<'_> {
+                    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        write!(f, "{} = {}", self.0.param, self.0.value)
+                    }
+                }
+
+                let assigns: Vec<Assign<'_>> = configs.iter().map(Assign).collect();
+                write!(f, "SET {}", display_comma_separated(&assigns))
             }
         }
     }

@@ -15,6 +15,7 @@
 #![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
 
 pub mod compaction_config;
+pub(crate) mod in_progress_compaction;
 mod overlap_strategy;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
@@ -28,16 +29,20 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
+use risingwave_hummock_sdk::filter_utils::{
+    must_resolve_sstable_filter_layout, must_resolve_sstable_filter_type,
+};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
-use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
+use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
 use super::GroupStateValidator;
 use crate::MetaOpts;
+use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -69,6 +74,8 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub base_level: usize,
     pub compression_algorithm: String,
+    pub sstable_filter_type: PbSstableFilterType,
+    pub sstable_filter_layout: PbSstableFilterLayout,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
 }
@@ -105,6 +112,7 @@ impl CompactStatus {
         developer_config: Arc<CompactionDeveloperConfig>,
         table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
         state_table_info: &HummockVersionStateTableInfo,
+        in_progress_compactions: &InProgressCompactionView,
     ) -> Option<CompactionTask> {
         let selector_context = CompactionSelectorContext {
             group,
@@ -116,6 +124,7 @@ impl CompactStatus {
             developer_config: developer_config.clone(),
             table_watermarks,
             state_table_info,
+            in_progress_compactions,
         };
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -141,6 +150,7 @@ impl CompactStatus {
                         developer_config,
                         table_watermarks,
                         state_table_info,
+                        in_progress_compactions,
                     };
                     return EmergencySelector::default().pick_compaction(task_id, selector_context);
                 }
@@ -177,6 +187,16 @@ pub fn create_compaction_task(
 
     CompactionTask {
         compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
+        sstable_filter_type: must_resolve_sstable_filter_type(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
+        sstable_filter_layout: must_resolve_sstable_filter_layout(
             compaction_config,
             base_level,
             input.target_level,
