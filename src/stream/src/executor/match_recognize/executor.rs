@@ -408,6 +408,10 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     /// Number of input columns; the buffered raw input row stored per row in the state table.
     pub input_arity: usize,
     pub state_table: StateTable<S>,
+    /// Wakeup frontier: `pk (partition...) -> next_wakeup_order_key`. Point-looked-up by partition.
+    pub frontier_meta_table: StateTable<S>,
+    /// Wakeup frontier: `pk (next_wakeup_order_key, partition...)`, distributed by partition.
+    pub frontier_index_table: StateTable<S>,
 }
 
 pub struct MatchRecognizeExecutor<S: StateStore> {
@@ -428,6 +432,10 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     skip: SkipMode,
     input_arity: usize,
     state_table: StateTable<S>,
+    /// Wakeup frontier (see [`MatchRecognizeExecutorArgs`]). Maintained on insert so a watermark can
+    /// visit only the partitions that need attention.
+    frontier_meta_table: StateTable<S>,
+    frontier_index_table: StateTable<S>,
 }
 
 /// A buffered input row, materialized from the state table while processing one partition.
@@ -464,6 +472,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             skip: args.skip,
             input_arity: args.input_arity,
             state_table: args.state_table,
+            frontier_meta_table: args.frontier_meta_table,
+            frontier_index_table: args.frontier_index_table,
         }
     }
 
@@ -475,6 +485,59 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         datums.push(Some(ScalarImpl::Int64(row.seq)));
         datums.extend(row.row.iter().map(|d| d.to_owned_datum()));
         OwnedRow::new(datums)
+    }
+
+    /// Maintain the wakeup frontier for one partition on insert. If the partition has no frontier
+    /// entry, or the chunk's earliest new order key precedes its recorded wakeup, (re)point the
+    /// frontier at `new_min`. On insert `next_wakeup` only ever moves *earlier*; a watermark pass
+    /// recomputes it precisely (including any WITHIN-driven expiry) after processing the partition.
+    ///
+    /// `frontier_meta`: `pk (partition...) -> next_wakeup` — updated in place (pk unchanged).
+    /// `frontier_index`: `pk (next_wakeup, partition...)` — `next_wakeup` is part of the key, so a
+    /// change is a delete of the old entry plus an insert of the new one.
+    async fn update_frontier_on_insert(
+        meta: &mut StateTable<S>,
+        index: &mut StateTable<S>,
+        partition_key: &OwnedRow,
+        new_min: Datum,
+    ) -> StreamExecutorResult<()> {
+        // This point-reads the meta table per touched partition. With `forbid_preload_all_rows` a
+        // cold partition round-trips to the state store, so it adds a read to the ingest path. For
+        // high-cardinality workloads a bounded in-memory frontier cache (mirroring
+        // `append_only_dedup`'s `ManagedLruCache`) would absorb hot partitions; deferred until the
+        // watermark path consumes the frontier and profiling justifies the added complexity.
+        let p = partition_key.len();
+        let old = meta.get_row(partition_key).await?;
+        let old_wakeup: Option<Datum> = old.as_ref().map(|r| r.datum_at(p).to_owned_datum());
+        let should_update = match &old_wakeup {
+            None => true,
+            Some(ow) => new_min
+                .as_ref()
+                .unwrap()
+                .default_cmp(ow.as_ref().unwrap())
+                .is_lt(),
+        };
+        if !should_update {
+            return Ok(());
+        }
+        // Build the written rows by chaining *references* (the row params are `impl Row`), so neither
+        // `partition_key` nor the old meta row is cloned for the meta/index writes — only the small
+        // single-datum wakeup rows are allocated.
+        let wakeup_row = OwnedRow::new(vec![new_min.clone()]);
+        // meta: pk (partition...) -> next_wakeup. pk is unchanged, so update in place.
+        match &old {
+            Some(old_row) => meta.update(old_row, partition_key.chain(&wakeup_row)),
+            None => meta.insert(partition_key.chain(&wakeup_row)),
+        }
+        // index: pk (next_wakeup, partition...). next_wakeup is part of the key, so a change is a
+        // delete of the old entry plus an insert of the new one.
+        if let Some(ow) = &old_wakeup {
+            let old_wakeup_row = OwnedRow::new(vec![ow.clone()]);
+            index.delete(old_wakeup_row.chain(partition_key));
+        }
+        let new_index_key = OwnedRow::new(vec![new_min]);
+        index.insert(new_index_key.chain(partition_key));
+        Ok(())
     }
 }
 
@@ -501,6 +564,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             skip,
             input_arity,
             mut state_table,
+            mut frontier_meta_table,
+            mut frontier_index_table,
         } = *self;
 
         let mut input = input.execute();
@@ -508,6 +573,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
+        frontier_meta_table.init_epoch(first_epoch).await?;
+        frontier_index_table.init_epoch(first_epoch).await?;
 
         // Generator for two hidden i64s: the buffer-table PK tiebreaker `seq` (assigned to every
         // input row) and the output `_match_id` (every emitted match). A snowflake-style id
@@ -535,6 +602,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // Append-only input: write each row through to the state table. DEFINE and
                     // MEASURES are evaluated later, at watermark time, against the buffered rows.
                     let chunk = chunk.compact_vis();
+                    // Earliest new order key per partition touched by this chunk, so the wakeup
+                    // frontier is updated once per distinct partition (O(#partitions in chunk)) rather
+                    // than once per row.
+                    let mut chunk_min: HashMap<OwnedRow, Datum> = HashMap::new();
                     for (op, row_ref) in chunk.rows() {
                         // The input is required to be append-only (enforced at planning time), so only
                         // Insert is expected. Fail loud on anything else rather than silently
@@ -554,12 +625,39 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         if order_key.is_none() {
                             continue;
                         }
+                        let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
+                        chunk_min
+                            .entry(partition_key)
+                            .and_modify(|m| {
+                                if order_key
+                                    .as_ref()
+                                    .unwrap()
+                                    .default_cmp(m.as_ref().unwrap())
+                                    .is_lt()
+                                {
+                                    *m = order_key.clone();
+                                }
+                            })
+                            .or_insert_with(|| order_key.clone());
                         let buffered = BufferedRow {
                             seq: row_id_gen.next(),
                             order_key,
                             row: row_ref.to_owned_row(),
                         };
                         state_table.insert(Self::state_row(&buffered));
+                    }
+                    // One frontier update per distinct partition. The frontier is maintained but not
+                    // yet read by the watermark path (that is a follow-up); keeping it correct now
+                    // locks the state layout in this pre-release PR and proves the write path is
+                    // side-effect-clean.
+                    for (partition_key, new_min) in chunk_min {
+                        Self::update_frontier_on_insert(
+                            &mut frontier_meta_table,
+                            &mut frontier_index_table,
+                            &partition_key,
+                            new_min,
+                        )
+                        .await?;
                     }
                 }
                 Message::Watermark(watermark) => {
@@ -738,9 +836,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
+                    // Commit all three state tables at this epoch. The frontier tables are
+                    // distributed by partition like the buffer table, so they re-shard together on a
+                    // vnode-bitmap change.
                     let post_commit = state_table.commit(barrier.epoch).await?;
+                    let meta_post_commit = frontier_meta_table.commit(barrier.epoch).await?;
+                    let index_post_commit = frontier_index_table.commit(barrier.epoch).await?;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
+                    meta_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    index_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
                     // On a vnode-bitmap change (rescaling) the set of partitions this actor owns
                     // shifts. There is no in-memory buffer to reload — the state table is
                     // authoritative and the next watermark scans whatever vnodes are now owned. Only
