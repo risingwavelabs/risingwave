@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
@@ -71,8 +71,8 @@ use crate::user::UserId;
 ///
 /// - **Order Key**: the primary key for storage, used to sort and access data.
 ///
-///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
-///   the remaining columns in pk will follow behind.
+///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key
+///   until the stream key is covered. The remaining stream-key columns will follow behind.
 ///
 ///   If there's no `ORDER BY` clause, the order key will be the same as pk.
 ///
@@ -630,11 +630,35 @@ impl TableCatalog {
         }
     }
 
-    /// Get columns excluding hidden columns and generated columns.
-    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
-        self.columns
+    /// Get insertable columns together with the shifted `row_id_index` used by DML.
+    ///
+    /// The returned columns exclude hidden columns and generated columns. The shifted
+    /// `row_id_index` rules out generated columns before the row-id column, matching the DML
+    /// input schema.
+    pub fn columns_to_insert(
+        &self,
+    ) -> (
+        impl Iterator<Item = (&ColumnCatalog, bool)> + '_,
+        Option<usize>,
+    ) {
+        let pk_column_indices: HashSet<_> =
+            self.pk.iter().map(|column| column.column_index).collect();
+        let columns = self
+            .columns
             .iter()
-            .filter(|c| !c.is_hidden() && !c.is_generated())
+            .enumerate()
+            .filter(|(_, c)| !c.is_hidden() && !c.is_generated())
+            .map(move |(idx, column)| (column, pk_column_indices.contains(&idx)));
+        let row_id_index = self.row_id_index.map(|row_id_index| {
+            let generated_column_count = self
+                .columns()
+                .iter()
+                .take(row_id_index + 1)
+                .filter(|column| column.is_generated())
+                .count();
+            row_id_index - generated_column_count
+        });
+        (columns, row_id_index)
     }
 
     pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {

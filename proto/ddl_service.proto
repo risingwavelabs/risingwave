@@ -103,6 +103,7 @@ message CreateSinkRequest {
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
+  StreamingJobResourceType resource_type = 6;
 }
 
 message CreateSinkResponse {
@@ -163,6 +164,7 @@ message CreateMaterializedViewRequest {
   repeated uint32 dependencies = 4;
 
   bool if_not_exists = 6;
+  optional uint64 refresh_interval_sec = 7;
 }
 
 message CreateMaterializedViewResponse {
@@ -354,12 +356,23 @@ message AlterCdcTableBackfillParallelismRequest {
 message AlterCdcTableBackfillParallelismResponse {}
 
 message AlterResourceGroupRequest {
-  uint32 table_id = 1;
+  uint32 job_id = 1;
   optional string resource_group = 2;
   bool deferred = 3;
 }
 
 message AlterResourceGroupResponse {}
+
+message AlterDatabaseResourceGroupRequest {
+  uint32 database_id = 1;
+  optional string resource_group = 2;
+  bool deferred = 3;
+}
+
+message AlterDatabaseResourceGroupResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
 
 message AlterOwnerResponse {
   common.Status status = 1;
@@ -453,6 +466,7 @@ message CreateIndexRequest {
   catalog.Table index_table = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   bool if_not_exists = 4;
+  StreamingJobResourceType resource_type = 5;
 }
 
 message CreateIndexResponse {
@@ -729,6 +743,7 @@ service DdlService {
   rpc AlterBackfillParallelism(AlterBackfillParallelismRequest) returns (AlterBackfillParallelismResponse);
   rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
+  rpc AlterDatabaseResourceGroup(AlterDatabaseResourceGroupRequest) returns (AlterDatabaseResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc RisectlResumeBackfill(RisectlResumeBackfillRequest) returns (RisectlResumeBackfillResponse);

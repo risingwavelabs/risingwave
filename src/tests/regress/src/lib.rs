@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![allow(dead_code)]
-#![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]

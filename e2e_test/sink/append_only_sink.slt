@@ -23,6 +23,23 @@ statement error unsupported sink type invalid
 create sink invalid_connector from t with (connector = 'invalid');
 
 statement ok
+create table snapshot_free_t (id int primary key, v1 int, v2 int);
+
+statement ok
+create sink snapshot_free_project_filter as
+select id, v1 + 1 as projected_v1
+from snapshot_free_t
+where v2 > 10
+with (connector = 'blackhole', snapshot = 'false');
+
+statement error upsert stream is not supported
+create sink snapshot_free_agg as
+select v2, count(*) as cnt
+from snapshot_free_t
+group by v2
+with (connector = 'blackhole', snapshot = 'false');
+
+statement ok
 set sink_decouple=false;
 
 statement error
@@ -54,6 +71,12 @@ drop sink s2
 
 statement ok
 drop sink s3
+
+statement ok
+drop sink snapshot_free_project_filter
+
+statement ok
+drop table snapshot_free_t
 
 statement ok
 drop table t

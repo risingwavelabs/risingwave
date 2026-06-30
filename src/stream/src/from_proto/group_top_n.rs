@@ -27,6 +27,9 @@ use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder<const APPEND_ONLY: bool>;
 
+impl_stream_node_body!(GroupTopN(GroupTopNNode) => GroupTopNExecutorBuilder<false>);
+impl_stream_node_body!(AppendOnlyGroupTopN(GroupTopNNode) => GroupTopNExecutorBuilder<true>);
+
 impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEND_ONLY> {
     type Node = GroupTopNNode;
 

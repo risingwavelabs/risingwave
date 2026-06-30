@@ -606,9 +606,17 @@ pub(super) enum MarkReadyOptions {
     },
 }
 
+pub(super) struct PreApplyDropCancel {
+    pub streaming_job_ids: Vec<JobId>,
+    pub dropped_state_table_ids: Vec<TableId>,
+}
+
 impl ScheduledBarriers {
     /// Pre buffered drop and cancel command, return all dropped state tables if any.
-    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> Vec<TableId> {
+    pub(super) fn pre_apply_drop_cancel(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> PreApplyDropCancel {
         self.pre_apply_drop_cancel_scheduled(database_id)
     }
 
@@ -749,9 +757,12 @@ impl ScheduledBarriers {
     pub(super) fn pre_apply_drop_cancel_scheduled(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> Vec<TableId> {
+    ) -> PreApplyDropCancel {
         let mut queue = self.inner.queue.lock();
-        let mut dropped_tables = vec![];
+        let mut drop_cancel = PreApplyDropCancel {
+            streaming_job_ids: vec![],
+            dropped_state_table_ids: vec![],
+        };
 
         let mut pre_apply_drop_cancel = |queue: &mut DatabaseScheduledQueue| {
             while let Some(ScheduledQueueItem {
@@ -760,10 +771,14 @@ impl ScheduledBarriers {
             {
                 match command {
                     Command::DropStreamingJobs {
+                        streaming_job_ids,
                         unregistered_state_table_ids,
                         ..
                     } => {
-                        dropped_tables.extend(unregistered_state_table_ids);
+                        drop_cancel.streaming_job_ids.extend(streaming_job_ids);
+                        drop_cancel
+                            .dropped_state_table_ids
+                            .extend(unregistered_state_table_ids);
                     }
                     Command::DropSubscription { .. } => {}
                     _ => {
@@ -789,7 +804,7 @@ impl ScheduledBarriers {
             }
         }
 
-        dropped_tables
+        drop_cancel
     }
 }
 
@@ -918,6 +933,32 @@ mod tests {
         async fn handle_refresh_finished_table_ids(
             &self,
             _refresh_finished_table_ids: Vec<JobId>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn load_batch_refresh_trigger_context(
+            &self,
+            _job_id: JobId,
+            _database_id: DatabaseId,
+            _last_committed_epoch: u64,
+        ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+        {
+            unimplemented!()
+        }
+
+        async fn pre_commit_iceberg_v3_sink_metadata(
+            &self,
+            _reports: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+            >,
+        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+            unimplemented!()
+        }
+
+        async fn commit_iceberg_v3_sink_metadata(
+            &self,
+            _sink_ids: Vec<risingwave_meta_model::SinkId>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

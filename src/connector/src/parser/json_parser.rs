@@ -42,13 +42,8 @@ pub struct JsonAccessBuilder {
     json_parse_options: JsonParseOptions,
 }
 
-impl AccessBuilder for JsonAccessBuilder {
-    #[allow(clippy::unused_async)]
-    async fn generate_accessor(
-        &mut self,
-        payload: Vec<u8>,
-        _: &crate::source::SourceMeta,
-    ) -> ConnectorResult<AccessImpl<'_>> {
+impl JsonAccessBuilder {
+    pub fn generate_json_access(&mut self, payload: Vec<u8>) -> ConnectorResult<JsonAccess<'_>> {
         // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
@@ -59,21 +54,41 @@ impl AccessBuilder for JsonAccessBuilder {
             &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
         )
         .context("failed to parse json payload")?;
-        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+        Ok(JsonAccess::new_with_options(
             value,
             // Debezium and Canal have their special json access builder and will not
             // use this
             &self.json_parse_options,
-        )))
+        ))
+    }
+}
+
+impl AccessBuilder for JsonAccessBuilder {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
+        Ok(AccessImpl::Json(self.generate_json_access(payload)?))
     }
 }
 
 impl JsonAccessBuilder {
     pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
         let mut json_parse_options = JsonParseOptions::DEFAULT;
+        if let Some(mode) = config.timestamp_handling {
+            json_parse_options.timestamp_handling = mode;
+        }
         if let Some(mode) = config.timestamptz_handling {
             json_parse_options.timestamptz_handling = mode;
         }
+        if let Some(mode) = config.time_handling {
+            json_parse_options.time_handling = mode;
+        }
+        if let Some(mode) = config.bigint_unsigned_handling {
+            json_parse_options.bigint_unsigned_handling = mode;
+        }
+        json_parse_options.handle_toast_columns = config.handle_toast_columns;
         Ok(Self {
             value: None,
             payload_start_idx: if config.use_schema_registry { 5 } else { 0 },

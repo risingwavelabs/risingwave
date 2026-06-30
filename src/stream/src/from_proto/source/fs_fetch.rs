@@ -35,6 +35,8 @@ use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
 
+impl_stream_node_body!(StreamFsFetch(StreamFsFetchNode) => FsFetchExecutorBuilder);
+
 impl ExecutorBuilder for FsFetchExecutorBuilder {
     type Node = StreamFsFetchNode;
 

@@ -1,0 +1,62 @@
+# Seed a dropped exactly-once Iceberg sink so it leaks `pending_sink_state` rows.
+#
+# Exactly-once (two-phase) sinks persist per-epoch pre-commit metadata in the
+# `pending_sink_state` meta-store table. On versions before the `ON DELETE CASCADE`
+# foreign key was added, dropping such a sink leaves those rows orphaned forever.
+# The upgrade migration must clean them up, otherwise adding the foreign key would
+# fail referential-integrity validation (on Postgres/MySQL) or the table recreate
+# would have to cope with the leftover data (on SQLite).
+#
+# See https://github.com/risingwavelabs/risingwave/issues/26044.
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+SET RW_IMPLICIT_FLUSH = true;
+
+statement ok
+CREATE TABLE pending_sink_state_src (v1 int primary key, v2 bigint);
+
+statement ok
+CREATE SINK pending_sink_state_sink AS SELECT v1, v2 FROM pending_sink_state_src WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'v1',
+    is_exactly_once = 'true',
+    warehouse.path = 's3a://icebergdata/backwards_compat',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name = 'backwards_compat_db',
+    table.name = 'pending_sink_state_table',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true'
+);
+
+statement ok
+INSERT INTO pending_sink_state_src VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+FLUSH;
+
+# Let the exactly-once coordinator persist at least one epoch of `pending_sink_state`.
+sleep 10s
+
+statement ok
+INSERT INTO pending_sink_state_src VALUES (4, 40);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Drop the sink. Before the foreign-key fix this leaks its `pending_sink_state` rows.
+statement ok
+DROP SINK pending_sink_state_sink;
+
+statement ok
+DROP TABLE pending_sink_state_src;

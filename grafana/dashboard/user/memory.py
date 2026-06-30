@@ -53,7 +53,7 @@ def _(outer_panels: Panels):
                         ),
                         panels.target(
                             f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
-                            "materialized_view {{materialized_view_id}}",
+                            "relation {{materialized_view_id}}",
                         ),
                     ],
                 ),

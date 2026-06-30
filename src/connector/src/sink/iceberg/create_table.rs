@@ -23,7 +23,7 @@ use iceberg::spec::{
     UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
-use iceberg::{NamespaceIdent, TableCreation};
+use iceberg::{Catalog, NamespaceIdent, TableCreation};
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
@@ -33,6 +33,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
@@ -57,7 +58,7 @@ impl IcebergOrderKeyField {
     }
 }
 
-pub(super) async fn create_and_validate_table_impl(
+pub async fn create_and_validate_table_impl(
     config: &IcebergConfig,
     param: &SinkParam,
 ) -> Result<Table> {
@@ -85,27 +86,13 @@ pub(super) async fn create_table_if_not_exists_impl(
     param: &SinkParam,
 ) -> Result<()> {
     let catalog = config.create_catalog().await?;
-    let namespace = if let Some(database_name) = config.table.database_name() {
-        let namespace = NamespaceIdent::new(database_name.to_owned());
-        if !catalog
-            .namespace_exists(&namespace)
-            .await
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
-        {
-            catalog
-                .create_namespace(&namespace, HashMap::default())
-                .await
-                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                .context("failed to create iceberg namespace")?;
-        }
-        namespace
-    } else {
-        bail!("database name must be set if you want to create table")
-    };
-
     let table_id = config
         .full_table_name()
         .context("Unable to parse table name")?;
+    let namespace = table_id.namespace().clone();
+    let table_name = table_id.name().to_owned();
+    create_namespace_if_not_exists(catalog.as_ref(), &namespace).await?;
+
     if !catalog
         .table_exists(&table_id)
         .await
@@ -122,7 +109,7 @@ pub(super) async fn create_table_if_not_exists_impl(
                     .map_err(|e| SinkError::Iceberg(anyhow!(e)))
                     .context(format!(
                         "failed to convert {}: {} to arrow type",
-                        &column.name, &column.data_type
+                        column.name, column.data_type
                     ))?)
             })
             .collect::<Result<Vec<ArrowField>>>()?;
@@ -133,11 +120,11 @@ pub(super) async fn create_table_if_not_exists_impl(
 
         let location = {
             let mut names = namespace.clone().inner();
-            names.push(config.table.table_name().to_owned());
+            names.push(table_name.clone());
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                    // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                    // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
                     let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                     let url = Url::parse(warehouse_path);
                     if url.is_err() || is_s3_tables || is_bq_catalog_federation {
@@ -206,7 +193,7 @@ pub(super) async fn create_table_if_not_exists_impl(
         )]);
 
         let table_creation_builder = TableCreation::builder()
-            .name(config.table.table_name().to_owned())
+            .name(table_name)
             .schema(iceberg_schema)
             .format_version(config.table_format_version())
             .properties(properties);
@@ -243,6 +230,34 @@ pub(super) async fn create_table_if_not_exists_impl(
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
             .context("failed to create iceberg table")?;
     }
+    Ok(())
+}
+
+async fn create_namespace_if_not_exists(
+    catalog: &dyn Catalog,
+    namespace: &NamespaceIdent,
+) -> Result<()> {
+    let mut namespaces = vec![namespace.clone()];
+    let mut parent = namespace.parent();
+    while let Some(parent_namespace) = parent {
+        parent = parent_namespace.parent();
+        namespaces.push(parent_namespace);
+    }
+
+    for namespace in namespaces.into_iter().rev() {
+        if !catalog
+            .namespace_exists(&namespace)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            catalog
+                .create_namespace(&namespace, HashMap::default())
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .with_context(|| format!("failed to create iceberg namespace: {namespace}"))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -367,6 +382,29 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     });
 
     check_compatibility(schema_fields, &arrow_schema.fields)?;
+
+    // The sink writes columns to the Iceberg table by position, so the column order
+    // must match. The check above only validates the name set and types.
+    for (idx, (rw_field, arrow_field)) in rw_schema
+        .fields
+        .iter()
+        .zip_eq_fast(arrow_schema.fields().iter())
+        .enumerate()
+    {
+        if rw_field.name.as_str() != arrow_field.name().as_str() {
+            bail!(
+                "Column order mismatch at position {}: the sink has column `{}` but the \
+                 Iceberg table has column `{}`. The Iceberg sink maps columns to the table \
+                 by position, so the sink's column order must match the Iceberg table \
+                 columns [{}].",
+                idx,
+                rw_field.name,
+                arrow_field.name(),
+                arrow_schema.fields().iter().map(|f| f.name()).join(", "),
+            );
+        }
+    }
+
     Ok(())
 }
 

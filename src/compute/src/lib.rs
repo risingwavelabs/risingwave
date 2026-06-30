@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(trait_alias)]
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 #[macro_use]

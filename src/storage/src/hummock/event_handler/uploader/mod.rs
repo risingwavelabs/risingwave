@@ -260,8 +260,8 @@ impl UploadingTask {
     fn new(task_id: UploadingTaskId, input: UploadTaskInput, context: &UploaderContext) -> Self {
         assert!(!input.is_empty());
         let mut epochs = input
-            .iter()
-            .flat_map(|(_, imms)| imms.iter().flat_map(|imm| imm.epochs().iter().cloned()))
+            .values()
+            .flat_map(|imms| imms.iter().map(|imm| imm.epoch()))
             .sorted()
             .dedup()
             .collect_vec();
@@ -497,8 +497,7 @@ impl LocalInstanceEpochData {
     }
 
     fn add_imm(&mut self, imm: UploaderImm) {
-        assert_eq!(imm.max_epoch(), imm.min_epoch());
-        assert_eq!(self.epoch, imm.min_epoch());
+        assert_eq!(self.epoch, imm.epoch());
         if let Some(prev_imm) = self.imms.front() {
             assert_gt!(imm.batch_id(), prev_imm.batch_id());
         }
@@ -1642,8 +1641,8 @@ impl UploaderData {
             for table_data in self.unsync_data.table_data.values() {
                 for task_id in table_data
                     .spill_tasks
-                    .iter()
-                    .flat_map(|(_, tasks)| tasks.iter())
+                    .values()
+                    .flat_map(|tasks| tasks.iter())
                 {
                     assert!(
                         spill_task_table_id_from_data

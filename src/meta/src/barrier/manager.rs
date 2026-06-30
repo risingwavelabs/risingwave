@@ -39,6 +39,7 @@ use crate::barrier::{
     RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
@@ -199,6 +200,7 @@ impl GlobalBarrierManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
@@ -213,6 +215,7 @@ impl GlobalBarrierManager {
             hummock_manager,
             source_manager,
             sink_manager,
+            iceberg_v3_sink_manager,
             scale_controller,
             request_rx,
             barrier_scheduler,

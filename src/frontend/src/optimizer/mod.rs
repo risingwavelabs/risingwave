@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools as _;
+use itertools::Itertools;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
@@ -85,14 +85,16 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BackfillType, Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker,
-    PlanTreeNode, Stream, StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion,
-    StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
+    PlanTreeNode, RewriteStreamContext, Stream, StreamExchange, StreamPlanRef, StreamUnion,
+    StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
     LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
 };
 use crate::optimizer::property::Distribution;
-use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
+use crate::utils::{
+    ColIndexMappingRewriteExt, MV_REFRESH_INTERVAL_SEC_KEY, WithOptionsSecResolved,
+};
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -265,7 +267,7 @@ impl LogicalPlanRoot {
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
-        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+        let Ok(select_idx) = Itertools::exactly_one(self.out_fields.ones()) else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
@@ -524,22 +526,15 @@ impl BatchPlanRoot {
 
 impl LogicalPlanRoot {
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(
-        self,
-        emit_on_window_close: bool,
-        allow_snapshot_backfill: bool,
-    ) -> Result<StreamOptimizedLogicalPlanRoot> {
-        let backfill_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+    pub(crate) fn derive_backfill_type(&self, allow_snapshot_backfill: bool) -> BackfillType {
+        if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
-        };
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)
+            BackfillType::ArrangementBackfill
+        }
     }
 
-    fn gen_optimized_stream_plan_inner(
+    fn gen_optimized_stream_plan(
         self,
         emit_on_window_close: bool,
         backfill_type: BackfillType,
@@ -649,6 +644,36 @@ impl LogicalPlanRoot {
         Ok(optimized_plan.into_phase(plan))
     }
 
+    pub(crate) fn require_snapshot_backfill_for_batch_refresh(&self) -> Result<()> {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let snapshot_backfill_enabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_snapshot_backfill
+            && session_ctx.config().streaming_use_snapshot_backfill();
+        if !snapshot_backfill_enabled {
+            return Err(ErrorCode::NotSupported(
+                "Batch refresh materialized view requires snapshot backfill".to_owned(),
+                format!(
+                    "Please enable snapshot backfill or remove `{}` from the WITH clause.",
+                    MV_REFRESH_INTERVAL_SEC_KEY
+                ),
+            )
+            .into());
+        }
+        if let Some(reason) = self.plan.forbid_snapshot_backfill() {
+            return Err(ErrorCode::NotSupported(
+                format!("Batch refresh materialized view requires snapshot backfill, but {reason}"),
+                "Please rewrite the query to avoid operators that forbid snapshot backfill."
+                    .to_owned(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(
         self,
@@ -674,14 +699,14 @@ impl LogicalPlanRoot {
                 }
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
                 let (plan, out_col_change) = {
-                    let (plan, out_col_change) = optimized_plan
-                        .plan
-                        .logical_rewrite_for_stream(&mut Default::default())?;
+                    let (plan, out_col_change) = optimized_plan.plan.logical_rewrite_for_stream(
+                        &mut RewriteStreamContext::new_with_backfill_type(backfill_type),
+                    )?;
                     if out_col_change.is_injective() {
                         (plan, out_col_change)
                     } else {
                         let mut output_indices = (0..plan.schema().len()).collect_vec();
-                        #[allow(unused_assignments)]
+                        #[expect(unused_assignments)]
                         let (mut map, mut target_size) = out_col_change.into_parts();
 
                         // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
@@ -703,7 +728,6 @@ impl LogicalPlanRoot {
                         (plan.into(), out_col_change)
                     }
                 };
-
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
                     ctx.trace(plan.explain_to_string());
@@ -767,8 +791,9 @@ impl LogicalPlanRoot {
             engine,
         }: CreateTableProps,
     ) -> Result<StreamMaterialize> {
+        let backfill_type = self.derive_backfill_type(false);
         // Snapshot backfill is not allowed for create table
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, backfill_type)?;
 
         assert!(!pk_column_ids.is_empty() || row_id_index.is_some());
 
@@ -831,7 +856,9 @@ impl LogicalPlanRoot {
 
         let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
-                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                Itertools::exactly_one(pk_column_indices.iter())
+                    .copied()
+                    .unwrap(),
                 row_id_index
             );
             if append_only {
@@ -872,7 +899,15 @@ impl LogicalPlanRoot {
                 context.clone(),
                 None,
             )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            .and_then(|s| {
+                s.to_stream(&mut ToStreamContext::new_with_backfill_type(
+                    false,
+                    // Dummy DML source planning does not create stream table scans, so this
+                    // required context value is only a placeholder and is not used for backfill
+                    // selection.
+                    BackfillType::ArrangementBackfill,
+                ))
+            })?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -935,7 +970,7 @@ impl LogicalPlanRoot {
             .chain([dml_node, upstream_sink_union.into()])
             .collect_vec();
 
-        let mut stream_plan = StreamUnion::new_with_dist(
+        let mut stream_plan: StreamPlanRef = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
@@ -951,26 +986,28 @@ impl LogicalPlanRoot {
             .map(|d| d.watermark_idx as usize)
             .collect_vec();
 
+        let add_row_id_gen = |stream_plan: StreamPlanRef, row_id_index| match kind {
+            PrimaryKeyKind::UserDefinedPrimaryKey => {
+                unreachable!()
+            }
+            PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
+                StreamRowIdGen::new_with_dist(
+                    stream_plan,
+                    row_id_index,
+                    Distribution::HashShard(vec![row_id_index]),
+                )
+                .into()
+            }
+        };
+
+        // Add RowIDGen before WatermarkFilter, so filtering always sees a valid row-id key.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = add_row_id_gen(stream_plan, row_id_index);
+        }
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
-        // Add RowIDGen node if needed.
-        if let Some(row_id_index) = row_id_index {
-            match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey => {
-                    unreachable!()
-                }
-                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
-                    stream_plan = StreamRowIdGen::new_with_dist(
-                        stream_plan,
-                        row_id_index,
-                        Distribution::HashShard(vec![row_id_index]),
-                    )
-                    .into();
-                }
-            }
         }
 
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
@@ -1055,9 +1092,10 @@ impl LogicalPlanRoot {
         mv_name: String,
         definition: String,
         emit_on_window_close: bool,
+        backfill_type: BackfillType,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, true)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, backfill_type)?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -1080,7 +1118,8 @@ impl LogicalPlanRoot {
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let backfill_type = self.derive_backfill_type(false);
+        let stream_plan = self.gen_optimized_stream_plan(false, backfill_type)?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -1104,7 +1143,8 @@ impl LogicalPlanRoot {
         vector_index_info: PbVectorIndexInfo,
     ) -> Result<StreamVectorIndexWrite> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let backfill_type = self.derive_backfill_type(false);
+        let stream_plan = self.gen_optimized_stream_plan(false, backfill_type)?;
 
         StreamVectorIndexWrite::create(
             stream_plan,
@@ -1137,7 +1177,7 @@ impl LogicalPlanRoot {
         allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
-            BackfillType::UpstreamOnly
+            BackfillType::UpstreamOnlySink
         } else if allow_snapshot_backfill
             && self.should_use_snapshot_backfill()
             && {
@@ -1155,10 +1195,8 @@ impl LogicalPlanRoot {
             );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         };
         if auto_refresh_schema_from_table.is_some()
             && backfill_type != BackfillType::ArrangementBackfill
@@ -1169,8 +1207,7 @@ impl LogicalPlanRoot {
             ))
             .into());
         }
-        let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, backfill_type)?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
@@ -1189,17 +1226,6 @@ impl LogicalPlanRoot {
             partition_info,
             auto_refresh_schema_from_table,
         )
-    }
-
-    pub fn should_use_arrangement_backfill(&self) -> bool {
-        let ctx = self.plan.ctx();
-        let session_ctx = ctx.session_ctx();
-        let arrangement_backfill_enabled = session_ctx
-            .env()
-            .streaming_config()
-            .developer
-            .enable_arrangement_backfill;
-        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
@@ -1231,7 +1257,7 @@ impl<P: PlanPhase> PlanRoot<P> {
         tar_cols: &[ColumnCatalog],
         user_specified_columns: bool,
     ) -> Vec<Option<usize>> {
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         let visible_cols: Vec<(usize, String)> = self
             .out_fields
             .ones()
@@ -1391,7 +1417,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let values = LogicalValues::new(
             vec![],
             Schema::new(vec![

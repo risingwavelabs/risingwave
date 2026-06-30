@@ -83,7 +83,7 @@ macro_rules! for_all_params {
             { sstable_size_mb,                          u32,                            Some(256_u32),                  false,  "Target size of the Sstable.", },
             { parallel_compact_size_mb,                 u32,                            Some(512_u32),                  false,  "The size of parallel task for one compact/flush job.", },
             { block_size_kb,                            u32,                            Some(64_u32),                   false,  "Size of each block in bytes in SST.", },
-            { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "False positive probability of bloom filter.", },
+            { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "DEPRECATED: Bloom filter is no longer a supported SST filter implementation. This field is kept for backward compatibility and no longer controls whether SST filters are emitted.", },
             { state_store,                              String,                         None,                           false,  "URL for the state store", },
             { data_directory,                           String,                         None,                           false,  "Remote directory for storing data and metadata objects.", },
             { backup_storage_url,                       String,                         None,                           true,   "Remote storage url for storing snapshots.", },
@@ -94,7 +94,6 @@ macro_rules! for_all_params {
             { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
             { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },
             { time_travel_retention_ms,                 u64,                            Some(600000_u64),               true,   "The data retention period for time travel.", },
-            { adaptive_parallelism_strategy,            risingwave_common::system_param::AdaptiveParallelismStrategy,   Some(risingwave_common::system_param::AdaptiveParallelismStrategy::Bounded(std::num::NonZeroUsize::new(64).unwrap())),       true,   "The strategy for Adaptive Parallelism.", },
             { per_database_isolation,                   bool,                           Some(true),                     true,   "Whether per database isolation is enabled", },
             { enforce_secret,                  bool,                           Some(false),                    true,   "Whether to enforce secret on cloud.", },
         }
@@ -169,6 +168,7 @@ pub mod default {
 macro_rules! impl_check_missing_fields {
     ($({ $field:ident, $($rest:tt)* },)*) => {
         /// Check if any undeprecated fields are missing.
+        #[expect(deprecated)]
         pub fn check_missing_params(params: &PbSystemParams) -> Result<()> {
             $(
                 if params.$field.is_none() {
@@ -186,6 +186,7 @@ macro_rules! impl_system_params_to_kv {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         #[allow(clippy::vec_init_then_push)]
+        #[expect(deprecated)]
         pub fn system_params_to_kv(params: &PbSystemParams) -> Result<Vec<(String, String)>> {
             check_missing_params(params)?;
             let mut ret = Vec::new();
@@ -200,6 +201,7 @@ macro_rules! impl_system_params_to_kv {
 
 macro_rules! impl_derive_missing_fields {
     ($({ $field:ident, $($rest:tt)* },)*) => {
+        #[expect(deprecated)]
         pub fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
@@ -215,6 +217,7 @@ macro_rules! impl_system_params_from_kv {
     ($({ $field:ident, $($rest:tt)* },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Return error if there are unrecognized fields.
+        #[expect(deprecated)]
         pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<PbSystemParams>
         where
             K: AsRef<[u8]> + Debug,
@@ -319,6 +322,7 @@ macro_rules! impl_set_system_param {
         ///
         /// Returns the new value if changed, or an error if the parameter is unrecognized,
         /// immutable, or the value is invalid.
+        #[expect(deprecated)]
         pub fn set_system_param(
             params: &mut PbSystemParams,
             key: &str,
@@ -382,6 +386,7 @@ macro_rules! impl_is_mutable {
 macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::needless_update)]
+        #[expect(deprecated)]
         pub fn system_params_for_test() -> PbSystemParams {
             let mut ret = PbSystemParams {
                 $(
@@ -408,6 +413,7 @@ macro_rules! impl_validate_all_params {
         /// regardless of whether a parameter is mutable. It is suitable for validating
         /// initial parameters.
         #[allow(rw::format_error)]
+        #[expect(deprecated)]
         pub fn validate_init_system_params(params: &PbSystemParams) -> Result<()> {
             $(
                 if let Some(ref v_pb) = params.$field {
@@ -503,7 +509,6 @@ mod tests {
             (USE_NEW_OBJECT_PREFIX_STRATEGY_KEY, "false"),
             (LICENSE_KEY_KEY, "foo"),
             (TIME_TRAVEL_RETENTION_MS_KEY, "0"),
-            (ADAPTIVE_PARALLELISM_STRATEGY_KEY, "Auto"),
             (PER_DATABASE_ISOLATION_KEY, "true"),
             (ENFORCE_SECRET_KEY, "false"),
             ("a_deprecated_param", "foo"),

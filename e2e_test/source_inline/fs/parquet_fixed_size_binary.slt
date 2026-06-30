@@ -1,0 +1,51 @@
+# Regression test for reading Parquet `FixedSizeBinary` columns as `bytea`.
+#
+# Iceberg represents `uuid` as Arrow `FixedSizeBinary(16)` and `fixed[L]` as
+# Arrow `FixedSizeBinary(L)`. Before the fix, the Arrow -> RisingWave conversion
+# in `src/common/src/array/arrow/arrow_impl.rs` did not handle `FixedSizeBinary`,
+# so creating/reading such a source panicked the frontend with:
+#
+#     called `Result::unwrap()` on an `Err` value:
+#       FromArrow("unsupported arrow data type: FixedSizeBinary(16)")
+#
+# The Parquet file source shares the exact same conversion code path
+# (`is_parquet_schema_match_source_schema` + `IcebergArrowConvert::array_from_arrow_array`
+# in `src/connector/src/parser/parquet_parser.rs`), so this test reproduces the
+# bug without needing an external Iceberg catalog: pyarrow's `binary(16)` /
+# `binary(8)` produce real Parquet `FixedSizeBinary` columns.
+#
+# The Parquet file below was generated with pyarrow 23.0.1:
+#   id: int32      = [1, 2, 3]
+#   u:  binary(16) = [0x1234..f0, NULL, 0x0011..ff]
+#   f:  binary(8)  = [0x0011..77, 0x8899..ff, NULL]
+
+system ok
+bash -euo pipefail -c '
+  rm -rf /tmp/rw_parquet_fixed_size_binary
+  mkdir -p /tmp/rw_parquet_fixed_size_binary
+  printf "%s" "UEFSMRUEFRgVHEwVBhUAEgAADCwBAAAAAgAAAAMAAAAVABUUFRgsFQYVEBUGFQYcGAQDAAAAGAQBAAAAFgAoBAMAAAAYBAEAAAAREQAAAAokAgAAAAYBAgMkABUEFUAVOkwVBBUAEgAAIBwSNFZ4mrze8BEIPAARIjNEVWZ3iJmqu8zd7v8VABUSFRYsFQYVEBUGFQYcNgIoEBI0VniavN7wEjRWeJq83vAYEAARIjNEVWZ3iJmqu8zd7v8REQAAAAkgAgAAAAMFAQMCFQQVIBUkTBUEFQASAAAQPAARIjNEVWZ3iJmqu8zd7v8VABUSFRYsFQYVEBUGFQYcNgIoCIiZqrvM3e7/GAgAESIzRFVmdxERAAAACSACAAAAAwMBAwIVBBlMNQAYBnNjaGVtYRUGABUCJQIYAmlkABUOFSAVAhgBdQAVDhUQFQIYAWYAFgYZHBk8JgAcFQIZNQAGEBkYAmlkFQIWBhamARauASZAJggcGAQDAAAAGAQBAAAAFgAoBAMAAAAYBAEAAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYABgAAACYAHBUOGTUABhAZGAF1FQIWBhbkARbiASaMAia2ARw2AigQEjRWeJq83vASNFZ4mrze8BgQABEiM0RVZneImaq7zN3u/xERABksFQQVABUCABUAFRAVAgA8KQYZJgIEAAAAJgAcFQ4ZNQAGEBkYAWYVAhYGFqQBFqwBJtgDJpgDHDYCKAiImaq7zN3u/xgIABEiM0RVZncREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYCBAAAABauBBYGJggWvAQAGRwYDEFSUk9XOnNjaGVtYRisAi8vLy8vOWdBQUFBUUFBQUFBQUFLQUF3QUJnQUZBQWdBQ2dBQUFBQUJCQUFNQUFBQUNBQUlBQUFBQkFBSUFBQUFCQUFBQUFNQUFBQndBQUFBTUFBQUFBUUFBQUNzLy8vL0FBQUJEeEFBQUFBVUFBQUFCQUFBQUFBQUFBQUJBQUFBWmdBQUFOci8vLzhJQUFBQTFQLy8vd0FBQVE4UUFBQUFHQUFBQUFRQUFBQUFBQUFBQVFBQUFIVUFCZ0FJQUFRQUJnQUFBQkFBQUFBUUFCUUFDQUFHQUFjQURBQUFBQkFBRUFBQUFBQUFBUUlRQUFBQUhBQUFBQVFBQUFBQUFBQUFBZ0FBQUdsa0FBQUlBQXdBQ0FBSEFBZ0FBQUFBQUFBQklBQUFBQUFBQUFBPQAYIHBhcnF1ZXQtY3BwLWFycm93IHZlcnNpb24gMjMuMC4xGTwcAAAcAAAcAAAAtgIAAFBBUjE=" \
+    | base64 -d > /tmp/rw_parquet_fixed_size_binary/data.parquet
+'
+
+statement ok
+CREATE TABLE parquet_fixed_size_binary (
+    id int,
+    u bytea,
+    f bytea
+) WITH (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp/rw_parquet_fixed_size_binary'
+) FORMAT PLAIN ENCODE PARQUET;
+
+query ITT retry 20 backoff 1s
+SELECT id, u, f FROM parquet_fixed_size_binary ORDER BY id;
+----
+1 \x123456789abcdef0123456789abcdef0 \x0011223344556677
+2 NULL \x8899aabbccddeeff
+3 \x00112233445566778899aabbccddeeff NULL
+
+statement ok
+DROP TABLE parquet_fixed_size_binary;
+
+system ok
+rm -rf /tmp/rw_parquet_fixed_size_binary

@@ -125,9 +125,8 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
     "compaction.write_parquet_max_row_group_rows";
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
-pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
 pub const ORDER_KEY: &str = "order_key";
-pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
@@ -136,10 +135,6 @@ pub(super) const PARQUET_CREATED_BY: &str =
 
 fn default_commit_retry_num() -> u32 {
     8
-}
-
-fn default_commit_checkpoint_size_threshold_mb() -> Option<u64> {
-    Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
 }
 
 fn default_iceberg_write_mode() -> IcebergWriteMode {
@@ -323,13 +318,6 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
-    /// Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
-    /// Default is 128 MB.
-    #[serde(default = "default_commit_checkpoint_size_threshold_mb")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
-    pub commit_checkpoint_size_threshold_mb: Option<u64>,
-
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
@@ -362,7 +350,7 @@ pub struct IcebergConfig {
     /// Whether to enable iceberg expired snapshots.
     #[serde(
         rename = "enable_snapshot_expiration",
-        default,
+        default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
     #[with_option(allow_alter_on_fly)]
@@ -411,6 +399,7 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
+    /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -541,6 +530,10 @@ impl IcebergConfig {
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
+        if config.enable_compaction && !values.contains_key(COMPACTION_MAX_SNAPSHOTS_NUM) {
+            config.max_snapshots_num_before_compaction = Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM);
+        }
+
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",
@@ -558,7 +551,11 @@ impl IcebergConfig {
                         SINK_TYPE_UPSERT
                     )));
                 }
-            } else {
+            } else if !config.enable_pk_index {
+                // When `enable_pk_index = true`, the planner auto-derives the iceberg pk
+                // from the upstream stream key, so the user does not need to spell it out
+                // in WITH options. The derived pk is written back into properties before
+                // this validation is consulted again at sink-construction time.
                 return Err(SinkError::Config(anyhow!(
                     "Must set `primary-key` in {}",
                     SINK_TYPE_UPSERT
@@ -589,9 +586,15 @@ impl IcebergConfig {
             )));
         }
 
-        if config.commit_checkpoint_size_threshold_mb == Some(0) {
+        if config.trigger_snapshot_count == Some(0) {
             return Err(SinkError::Config(anyhow!(
-                "`commit_checkpoint_size_threshold_mb` must be greater than 0"
+                "`compaction.trigger_snapshot_count` must be greater than 0"
+            )));
+        }
+
+        if config.max_snapshots_num_before_compaction == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.max_snapshots_num` must be greater than 0"
             )));
         }
 
@@ -615,6 +618,24 @@ impl IcebergConfig {
     }
 
     pub async fn load_table(&self) -> Result<Table> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            let catalog =
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "mock_v3 catalog_type set but no mock catalog registered"
+                    ))
+                })?;
+            let table_id = self
+                .table
+                .to_table_ident()
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Unable to parse table name")))?;
+            let table = catalog
+                .load_table(&table_id)
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Failed to load mock table")))?;
+            return Ok(table);
+        }
         self.common
             .load_table(&self.table, &self.java_catalog_props)
             .await
@@ -622,6 +643,14 @@ impl IcebergConfig {
     }
 
     pub async fn create_catalog(&self) -> Result<Arc<dyn Catalog>> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            return Ok(
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    anyhow::anyhow!("mock_v3 catalog_type set but no mock catalog registered")
+                })?,
+            );
+        }
         self.common
             .create_catalog(&self.java_catalog_props)
             .await
@@ -666,11 +695,6 @@ impl IcebergConfig {
 
     pub fn target_file_size_mb(&self) -> u64 {
         self.target_file_size_mb.unwrap_or(1024)
-    }
-
-    pub fn commit_checkpoint_size_threshold_bytes(&self) -> Option<u64> {
-        self.commit_checkpoint_size_threshold_mb
-            .map(|threshold_mb| threshold_mb.saturating_mul(1024 * 1024))
     }
 
     /// Get the compaction type as an enum
