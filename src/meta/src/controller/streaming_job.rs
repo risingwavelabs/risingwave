@@ -51,6 +51,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -65,7 +66,6 @@ use risingwave_pb::plan_common::source_refresh_mode::{
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::common::ThrottleType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
