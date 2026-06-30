@@ -43,7 +43,7 @@ use crate::barrier::{
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
-use crate::serving::{fetch_serving_infos, notify_hummock_serving_table_vnode_mappings};
+use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
@@ -88,10 +88,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .await
     }
 
-    async fn notify_hummock_serving_table_vnode_mappings(&self) -> MetaResult<()> {
+    async fn sync_serving_table_vnode_mappings_to_hummock(&self) -> MetaResult<()> {
         let (serving_workers, fragment_parallelisms) =
             fetch_serving_infos(&self.metadata_manager).await?;
-        notify_hummock_serving_table_vnode_mappings(
+        sync_serving_table_vnode_mappings_to_hummock(
             &self.env.notification_manager_ref(),
             &self.serving_vnode_mapping,
             &serving_workers,

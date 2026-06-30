@@ -371,9 +371,10 @@ async fn flush_imms(
 }
 
 impl HummockEventHandler {
+    // Table refill runtime config applies by field presence for both snapshot
+    // and update notifications.
     fn apply_table_refill_runtime_config(
         refiller: &mut CacheRefiller,
-        _operation: Operation,
         config: PbTableRefillRuntimeConfig,
     ) {
         if let Some(policies) = config.table_cache_refill_policies {
@@ -516,12 +517,12 @@ impl HummockEventHandler {
                 _
             ))
         ) {
-            let Some(HummockObserverEvent::TableRefillRuntimeConfig(operation, config)) =
+            let Some(HummockObserverEvent::TableRefillRuntimeConfig(_, config)) =
                 pending_observer_events.pop_front()
             else {
                 unreachable!();
             };
-            Self::apply_table_refill_runtime_config(&mut refiller, operation, config);
+            Self::apply_table_refill_runtime_config(&mut refiller, config);
         }
 
         Self {
@@ -722,8 +723,8 @@ impl HummockEventHandler {
             HummockObserverEvent::VersionUpdate(version_update) => {
                 self.handle_version_update(version_update);
             }
-            HummockObserverEvent::TableRefillRuntimeConfig(operation, config) => {
-                Self::apply_table_refill_runtime_config(&mut self.refiller, operation, config);
+            HummockObserverEvent::TableRefillRuntimeConfig(_, config) => {
+                Self::apply_table_refill_runtime_config(&mut self.refiller, config);
             }
         }
     }
@@ -1411,7 +1412,6 @@ mod tests {
 
         HummockEventHandler::apply_table_refill_runtime_config(
             &mut refiller,
-            Operation::Snapshot,
             table_refill_runtime_config_for_test(
                 [
                     (old_table_id, CacheRefillPolicy::Serving),
@@ -1422,7 +1422,6 @@ mod tests {
         );
         HummockEventHandler::apply_table_refill_runtime_config(
             &mut refiller,
-            Operation::Update,
             PbTableRefillRuntimeConfig {
                 table_cache_refill_policies: Some(TableCacheRefillPolicies {
                     policies: vec![
@@ -1450,7 +1449,6 @@ mod tests {
         }
         HummockEventHandler::apply_table_refill_runtime_config(
             &mut refiller,
-            Operation::Update,
             PbTableRefillRuntimeConfig {
                 serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                     mappings: vec![PbServingTableVnodeMapping {

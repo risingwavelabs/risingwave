@@ -26,6 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMappings,
+    PbTableRefillRuntimeConfig,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -35,7 +36,7 @@ use crate::controller::fragment::FragmentParallelismInfo;
 use crate::controller::session_params::SessionParamsControllerRef;
 use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef, WorkerKey};
 use crate::model::FragmentId;
-use crate::table_refill::build_hummock_serving_table_vnode_runtime_config;
+use crate::table_refill::build_hummock_serving_table_vnode_mappings;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
@@ -174,7 +175,7 @@ pub(crate) async fn fetch_serving_infos(
     ))
 }
 
-pub async fn notify_hummock_serving_table_vnode_mappings(
+pub(crate) async fn sync_serving_table_vnode_mappings_to_hummock(
     notification_manager: &NotificationManagerRef,
     serving_vnode_mapping: &ServingVnodeMappingRef,
     workers: &[WorkerNode],
@@ -185,18 +186,16 @@ pub async fn notify_hummock_serving_table_vnode_mappings(
             tracing::warn!(worker_id = %worker.id, "serving worker host not found");
             continue;
         };
-        let config = build_hummock_serving_table_vnode_runtime_config(
-            serving_vnode_mapping,
-            worker.id,
-            streaming_parallelisms,
-            0,
-        );
+        let config = PbTableRefillRuntimeConfig {
+            serving_table_vnode_mappings: Some(build_hummock_serving_table_vnode_mappings(
+                serving_vnode_mapping,
+                worker.id,
+                streaming_parallelisms,
+            )),
+            ..Default::default()
+        };
         notification_manager
-            .notify_hummock_targeted(
-                WorkerKey(host),
-                Operation::Update,
-                Info::TableRefillRuntimeConfig(config),
-            )
+            .notify_hummock_targeted_update(WorkerKey(host), Info::TableRefillRuntimeConfig(config))
             .await;
     }
 }
@@ -241,7 +240,7 @@ pub fn start_serving_vnode_mapping_worker(
                     mappings: to_fragment_worker_slot_mapping(&mappings),
                 }),
             );
-            notify_hummock_serving_table_vnode_mappings(
+            sync_serving_table_vnode_mappings_to_hummock(
                 &notification_manager,
                 &serving_vnode_mapping,
                 &workers,
@@ -294,7 +293,7 @@ pub fn start_serving_vnode_mapping_worker(
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
                                         notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.keys().cloned())}));
                                     }
-                                    notify_hummock_serving_table_vnode_mappings(
+                                    sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
                                         &serving_vnode_mapping,
                                         &workers,
@@ -314,7 +313,7 @@ pub fn start_serving_vnode_mapping_worker(
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager)
                                         .await
                                         .expect("fail to fetch serving infos");
-                                    notify_hummock_serving_table_vnode_mappings(
+                                    sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
                                         &serving_vnode_mapping,
                                         &workers,
@@ -390,5 +389,95 @@ pub fn to_pb_serving_table_vnode_mappings(
                 bitmap: Some(bitmap.to_protobuf()),
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_pb::common::{HostAddress, worker_node};
+    use risingwave_pb::meta::subscribe_response::Info;
+    use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::controller::SqlMetaStore;
+    use crate::manager::NotificationManager;
+
+    fn serving_worker(id: u32) -> WorkerNode {
+        WorkerNode {
+            id: id.into(),
+            r#type: WorkerType::ComputeNode.into(),
+            host: Some(HostAddress {
+                host: format!("host{}", id),
+                port: id as i32,
+            }),
+            state: worker_node::State::Running as i32,
+            property: Some(worker_node::Property {
+                is_serving: true,
+                parallelism: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sync_serving_table_vnode_mappings_to_hummock_targets_each_worker() {
+        let notification_manager =
+            Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let worker1 = serving_worker(1);
+        let worker2 = serving_worker(2);
+        let workers = vec![worker1.clone(), worker2.clone()];
+        let worker_key1 = WorkerKey(worker1.host.clone().unwrap());
+        let worker_key2 = WorkerKey(worker2.host.clone().unwrap());
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        notification_manager.insert_sender(SubscribeType::Hummock, worker_key1, tx1);
+        notification_manager.insert_sender(SubscribeType::Hummock, worker_key2, tx2);
+
+        let table_id = TableId::from(233);
+        let fragment_id = FragmentId::new(234);
+        let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+        let streaming_parallelisms = HashMap::from([(
+            fragment_id,
+            FragmentParallelismInfo {
+                distribution_type: FragmentDistributionType::Hash,
+                vnode_count: VirtualNode::COUNT_FOR_TEST,
+                state_table_ids: HashSet::from([table_id]),
+            },
+        )]);
+        let (upserted, failed) =
+            serving_vnode_mapping.upsert(&streaming_parallelisms, &workers, None);
+        assert_eq!(upserted.len(), 1);
+        assert!(failed.is_empty());
+
+        sync_serving_table_vnode_mappings_to_hummock(
+            &notification_manager,
+            &serving_vnode_mapping,
+            &workers,
+            &streaming_parallelisms,
+        )
+        .await;
+
+        let response1 = rx1.recv().await.unwrap().unwrap();
+        let response2 = rx2.recv().await.unwrap().unwrap();
+        assert!(rx1.try_recv().is_err());
+        assert!(rx2.try_recv().is_err());
+
+        let serving_bitmap_count = |response: SubscribeResponse| {
+            let Some(Info::TableRefillRuntimeConfig(config)) = response.info else {
+                panic!("expect table refill runtime config");
+            };
+            let mappings = config.serving_table_vnode_mappings.unwrap().mappings;
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].table_id, table_id.as_raw_id());
+            Bitmap::from(mappings[0].bitmap.clone().unwrap()).count_ones()
+        };
+        let count1 = serving_bitmap_count(response1);
+        let count2 = serving_bitmap_count(response2);
+        assert!(count1 > 0);
+        assert!(count2 > 0);
+        assert_eq!(count1 + count2, VirtualNode::COUNT_FOR_TEST);
     }
 }

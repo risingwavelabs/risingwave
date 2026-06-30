@@ -93,7 +93,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         Ok(PbTableCacheRefillPolicies::default())
     }
 
-    async fn notify_hummock_serving_table_vnode_mappings(&self) -> MetaResult<()> {
+    async fn sync_serving_table_vnode_mappings_to_hummock(&self) -> MetaResult<()> {
         Ok(())
     }
 
