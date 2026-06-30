@@ -31,6 +31,7 @@ use crate::source::cdc::external::{
 pub struct MockExternalTableReader {
     binlog_watermarks: Vec<MySqlOffset>,
     snapshot_cnt: AtomicUsize,
+    cdc_offset_idx: AtomicUsize,
     parallel_backfill_snapshots: Vec<OwnedRow>,
 }
 
@@ -86,6 +87,7 @@ impl MockExternalTableReader {
             binlog_watermarks,
             snapshot_cnt: AtomicUsize::new(0),
             parallel_backfill_snapshots,
+            cdc_offset_idx: AtomicUsize::new(0),
         }
     }
 
@@ -163,9 +165,9 @@ impl MockExternalTableReader {
 
 impl ExternalTableReader for MockExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        static IDX: AtomicUsize = AtomicUsize::new(0);
-
-        let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let idx = self
+            .cdc_offset_idx
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if idx < self.binlog_watermarks.len() {
             Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
         } else {
