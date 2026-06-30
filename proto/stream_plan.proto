@@ -773,14 +773,14 @@ message ExchangeNode {
 enum StreamScanType {
   STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
-  // ChainExecutor
-  STREAM_SCAN_TYPE_CHAIN = 1;
+  // ChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_CHAIN = 1 [deprecated = true];
 
-  // RearrangedChainExecutor
-  STREAM_SCAN_TYPE_REARRANGE = 2;
+  // RearrangedChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_REARRANGE = 2 [deprecated = true];
 
-  // BackfillExecutor
-  STREAM_SCAN_TYPE_BACKFILL = 3;
+  // BackfillExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_BACKFILL = 3 [deprecated = true];
 
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
@@ -1117,7 +1117,8 @@ message EowcGapFillNode {
   expr.ExprNode interval = 2;
   repeated uint32 fill_columns = 3;
   repeated string fill_strategies = 4;
-  catalog.Table buffer_table = 5;
+  reserved 5;
+  reserved "buffer_table";
   catalog.Table prev_row_table = 6;
   repeated uint32 partition_by_indices = 7;
 }

@@ -309,12 +309,6 @@ pub(crate) async fn resolve_streaming_job_resource_type(
         streaming_job_resource_type::ResourceType::Regular(true)
     };
 
-    if resource_type.resource_group().is_some()
-        && !session.config().streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-    }
-
     Ok(resource_type)
 }
 

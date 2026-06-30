@@ -101,7 +101,7 @@ use crate::handler::util::{
     ensure_local_fs_connector_allowed,
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
@@ -1234,7 +1234,12 @@ pub(super) fn generate_stream_graph_for_source(
         None,
     )?;
 
-    let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+    let stream_plan = source_node.to_stream(&mut ToStreamContext::new_with_backfill_type(
+        false,
+        // Shared source planning does not create stream table scans, so this required context
+        // value is only a placeholder and is not used for backfill selection.
+        BackfillType::ArrangementBackfill,
+    ))?;
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }

@@ -358,6 +358,11 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     is_snapshot_paused,
                     "start cdc backfill split"
                 );
+                let finished_split_bounds = current_actor_bounds.clone();
+                let current_split_bounds = Some((
+                    split.left_bound_inclusive.clone(),
+                    split.right_bound_exclusive.clone(),
+                ));
                 extends_current_actor_bound(&mut current_actor_bounds, split);
 
                 let split_cdc_offset_low = {
@@ -496,14 +501,23 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     // }
 
                                     let chunk = mapping_chunk(chunk, &self.output_indices);
-                                    if let Some(filtered_chunk) = filter_stream_chunk(
-                                        chunk,
-                                        &current_actor_bounds,
-                                        snapshot_split_column_index,
-                                    ) && filtered_chunk.cardinality() > 0
+                                    let (finished_chunk, current_chunk) =
+                                        split_finished_and_current_chunk(
+                                            chunk,
+                                            &finished_split_bounds,
+                                            &current_split_bounds,
+                                            snapshot_split_column_index,
+                                        );
+                                    if let Some(finished_chunk) = finished_chunk
+                                        && finished_chunk.cardinality() > 0
                                     {
-                                        // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(filtered_chunk.compact_vis());
+                                        yield Message::Chunk(finished_chunk);
+                                    }
+                                    if let Some(filtered_chunk) = current_chunk
+                                        && filtered_chunk.cardinality() > 0
+                                    {
+                                        // Buffer only rows that overlap the split currently being backfilled.
+                                        upstream_chunk_buffer.push(filtered_chunk);
                                     }
                                 }
                                 Message::Watermark(_) => {
@@ -689,6 +703,24 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
     }
 }
 
+fn split_finished_and_current_chunk(
+    chunk: StreamChunk,
+    finished_split_bounds: &Option<(OwnedRow, OwnedRow)>,
+    current_split_bounds: &Option<(OwnedRow, OwnedRow)>,
+    snapshot_split_column_index: usize,
+) -> (Option<StreamChunk>, Option<StreamChunk>) {
+    let finished_chunk = filter_stream_chunk(
+        chunk.clone(),
+        finished_split_bounds,
+        snapshot_split_column_index,
+    )
+    .map(StreamChunk::compact_vis);
+    let current_chunk =
+        filter_stream_chunk(chunk, current_split_bounds, snapshot_split_column_index)
+            .map(StreamChunk::compact_vis);
+    (finished_chunk, current_chunk)
+}
+
 fn filter_stream_chunk(
     chunk: StreamChunk,
     bound: &Option<(OwnedRow, OwnedRow)>,
@@ -814,7 +846,9 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
 
-    use crate::executor::backfill::cdc::cdc_backill_v2::filter_stream_chunk;
+    use crate::executor::backfill::cdc::cdc_backill_v2::{
+        filter_stream_chunk, split_finished_and_current_chunk,
+    };
 
     #[test]
     fn test_filter_stream_chunk() {
@@ -910,6 +944,48 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7",
+            )
+        );
+    }
+
+    #[test]
+    fn test_split_finished_and_current_chunk() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 11
+             + 6 10
+             + 199 40",
+        );
+        let finished_split_bounds = Some((
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(6))]),
+        ));
+        let current_split_bounds = Some((
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(6))]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(100))]),
+        ));
+
+        let (finished_chunk, current_chunk) = split_finished_and_current_chunk(
+            chunk,
+            &finished_split_bounds,
+            &current_split_bounds,
+            0,
+        );
+
+        assert_eq!(
+            finished_chunk.unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                 + 1 11",
+            )
+        );
+        assert_eq!(
+            current_chunk.unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                 + 6 10",
             )
         );
     }

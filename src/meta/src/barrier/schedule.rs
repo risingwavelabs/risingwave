@@ -946,6 +946,22 @@ mod tests {
         {
             unimplemented!()
         }
+
+        async fn pre_commit_iceberg_v3_sink_metadata(
+            &self,
+            _reports: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+            >,
+        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+            unimplemented!()
+        }
+
+        async fn commit_iceberg_v3_sink_metadata(
+            &self,
+            _sink_ids: Vec<risingwave_meta_model::SinkId>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test(start_paused = true)]

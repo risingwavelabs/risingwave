@@ -529,10 +529,8 @@ impl LogicalPlanRoot {
     pub(crate) fn derive_backfill_type(&self, allow_snapshot_backfill: bool) -> BackfillType {
         if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         }
     }
 
@@ -901,7 +899,15 @@ impl LogicalPlanRoot {
                 context.clone(),
                 None,
             )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            .and_then(|s| {
+                s.to_stream(&mut ToStreamContext::new_with_backfill_type(
+                    false,
+                    // Dummy DML source planning does not create stream table scans, so this
+                    // required context value is only a placeholder and is not used for backfill
+                    // selection.
+                    BackfillType::ArrangementBackfill,
+                ))
+            })?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -1171,7 +1177,7 @@ impl LogicalPlanRoot {
         allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
-            BackfillType::UpstreamOnly
+            BackfillType::UpstreamOnlySink
         } else if allow_snapshot_backfill
             && self.should_use_snapshot_backfill()
             && {
@@ -1189,10 +1195,8 @@ impl LogicalPlanRoot {
             );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         };
         if auto_refresh_schema_from_table.is_some()
             && backfill_type != BackfillType::ArrangementBackfill
@@ -1222,17 +1226,6 @@ impl LogicalPlanRoot {
             partition_info,
             auto_refresh_schema_from_table,
         )
-    }
-
-    pub fn should_use_arrangement_backfill(&self) -> bool {
-        let ctx = self.plan.ctx();
-        let session_ctx = ctx.session_ctx();
-        let arrangement_backfill_enabled = session_ctx
-            .env()
-            .streaming_config()
-            .developer
-            .enable_arrangement_backfill;
-        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {

@@ -1,5 +1,3 @@
-control substitution on
-
 statement ok
 create secret hosted_catalog_secret with (
   backend = 'meta'
@@ -49,7 +47,7 @@ where schema_name = 'public'
   and source_name = '__iceberg_source_t_v3'
   and file_format = 'puffin';
 ----
-t
+f
 
 query ?? retry 6 backoff 1s
 select count(*) = 0 from rw_iceberg_files

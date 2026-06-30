@@ -67,10 +67,23 @@ impl ClusterService for ClusterServiceImpl {
             ))
             .into());
         }
+        let start = std::time::Instant::now();
+        tracing::info!(
+            ?host,
+            ?worker_type,
+            "add_worker_node: received register request"
+        );
         let worker_id = self
             .metadata_manager
-            .add_worker_node(worker_type, host, property, resource)
+            .add_worker_node(worker_type, host.clone(), property, resource)
             .await?;
+        tracing::info!(
+            ?host,
+            ?worker_id,
+            ?worker_type,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "add_worker_node: registered"
+        );
         let cluster_id = self.metadata_manager.cluster_id().to_string();
 
         Ok(Response::new(AddWorkerNodeResponse {
