@@ -678,6 +678,8 @@ impl PartialGraphRecoverer<'_> {
                 subscriptions_to_add: Default::default(),
                 backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
 

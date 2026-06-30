@@ -146,6 +146,9 @@ pub struct CreateStreamingJobContext {
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
 
+    /// If set, this create command replaces an existing sink while creating the new sink job.
+    pub replace_sink: Option<SinkId>,
+
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
 
@@ -588,6 +591,7 @@ impl GlobalStreamManager {
             is_serverless_backfill,
             resource_type,
             mut streaming_job_model,
+            replace_sink,
             refresh_interval_sec,
             since_timestamp_epoch,
             ..
@@ -638,6 +642,7 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
+            replace_sink,
             refresh_interval_sec,
         };
 
