@@ -47,9 +47,7 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
-use crate::hummock::{
-    HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
-};
+use crate::hummock::{HummockManager, commit_multi_var_with_provided_txn};
 
 pub struct NewTableFragmentInfo {
     pub table_ids: HashSet<TableId>,
@@ -83,8 +81,10 @@ impl HummockManager {
             tables_to_commit,
             truncate_tables,
         } = commit_info;
-        let mut versioning_guard = self.versioning.write().await;
-        let _timer = start_measure_real_process_timer!(self, "commit_epoch");
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("commit_epoch")
+            .await;
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
             return Ok(());
