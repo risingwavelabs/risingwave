@@ -17,10 +17,11 @@
 Mock HTTP server for testing the RisingWave HTTP sink.
 
 Usage:
-    python3 http_sink_mock_server.py <body_output_file> <port> [<header_output_file>]
+    python3 http_sink_mock_server.py <body_output_file> <port> [<header_output_file>] [<path_output_file>]
 
 Each POST request body is appended as a line to the body output file.
 If a header output file is given, received headers are appended as a JSON line per request.
+If a path output file is given, each request path is appended as a line per request.
 Responds 200 OK to every POST, 400 to anything else.
 """
 
@@ -34,6 +35,7 @@ def main():
     body_output_file = sys.argv[1] if len(sys.argv) > 1 else "/tmp/http_sink_test_body.txt"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 18081
     header_output_file = sys.argv[3] if len(sys.argv) > 3 else None
+    path_output_file = sys.argv[4] if len(sys.argv) > 4 else None
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -41,6 +43,9 @@ def main():
             body = self.rfile.read(length).decode("utf-8")
             with open(body_output_file, "a") as f:
                 f.write(body + "\n")
+            if path_output_file is not None:
+                with open(path_output_file, "a") as f:
+                    f.write(self.path + "\n")
             if header_output_file is not None:
                 headers = {k.lower(): v for k, v in self.headers.items()}
                 with open(header_output_file, "a") as f:

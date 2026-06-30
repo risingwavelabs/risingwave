@@ -1,0 +1,65 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+create table t_native_sqlserver_sink_rw (
+  "EntityId" varchar,
+  "EventDate" date,
+  metric_value numeric,
+  event_ts_offset timestamptz,
+  event_ts_micros timestamptz,
+  event_ts_int timestamptz,
+  event_ts_smallint timestamptz,
+  event_ts_tinyint timestamptz
+);
+
+statement error lacks required write permission
+create sink s_native_sqlserver_sink_readonly from t_native_sqlserver_sink_rw with (
+  connector = 'sqlserver',
+  type = 'upsert',
+  sqlserver.host = 'sqlserver-server',
+  sqlserver.port = '1433',
+  sqlserver.user = 'rw_sqlserver_readonly_login',
+  sqlserver.password = 'ReadOnlyOnly123!',
+  sqlserver.database = 'SinkTest',
+  sqlserver.schema = 'test_schema',
+  sqlserver.table = 't_native_sink_pk_and_timestamptz',
+  primary_key = 'EntityId,EventDate'
+);
+
+statement ok
+create sink s_native_sqlserver_sink from t_native_sqlserver_sink_rw with (
+  connector = 'sqlserver',
+  type = 'upsert',
+  sqlserver.host = 'sqlserver-server',
+  sqlserver.port = '1433',
+  sqlserver.user = 'SA',
+  sqlserver.password = 'SomeTestOnly@SA',
+  sqlserver.database = 'SinkTest',
+  sqlserver.schema = 'test_schema',
+  sqlserver.table = 't_native_sink_pk_and_timestamptz',
+  primary_key = 'EntityId,EventDate'
+);
+
+statement ok
+insert into t_native_sqlserver_sink_rw values
+(
+  'entity-1',
+  date '2024-03-10',
+  123.45,
+  '2024-03-09 16:00:00Z'::timestamptz,
+  '2024-03-09 16:00:00Z'::timestamptz,
+  '1970-01-01 00:00:00.000123Z'::timestamptz,
+  '1970-01-01 00:00:00.000123Z'::timestamptz,
+  '1970-01-01 00:00:00.000123Z'::timestamptz
+);
+flush;
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_native_sqlserver_sink;
+
+statement ok
+DROP TABLE t_native_sqlserver_sink_rw;

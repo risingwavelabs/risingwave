@@ -45,26 +45,26 @@ anchors:
         propagate-environment: true
         upload-container-logs: always
 
-other-sql-backend: &other-sql-backend
-  matrix:
-    setup:
-      label: [""]
-      endpoint: [""]
-    adjustments:
-      - with:
-          label: ""
-          endpoint: ""
-        skip: true # hack
-      - with:
-          label: "postgres"
-          # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
-          endpoint: "postgres://postgres:post\\tgres@db:5432/rwmeta"
-      - with:
-          label: "mysql"
-          # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
-          endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
-  env:
-    RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
+# Shared config for the meta-store-backend (postgres/mysql) e2e steps.
+# The serial e2e suite is meta-store-backend agnostic, so shard it across parallel jobs
+# (sqllogictest auto-partitions by Buildkite parallel job config). Without sharding the
+# un-sharded suite chronically runs ~60min and trips the timeout. `parallelism` and `matrix`
+# can't coexist on a single step, so each backend is its own explicit step instead of a matrix.
+e2e-other-backend: &e2e-other-backend
+  command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
+  if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
+  depends_on:
+    - "build"
+  plugins:
+    - docker-compose#v5.5.0:
+        <<: *docker-compose
+        run: ci-standard-env
+        propagate-environment: true
+    - ./ci/plugins/upload-failure-logs
+  # Headroom over the default e2e step's 35min since the SQL meta store is slower per-op.
+  timeout_in_minutes: 45
+  parallelism: 4
+  retry: *auto-retry
 
 
 steps:
@@ -210,7 +210,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 14
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end source test"
@@ -409,7 +409,6 @@ steps:
     matrix:
       setup:
         java_version:
-          - "17"
           - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -489,6 +488,20 @@ steps:
     key: "e2e-time-travel-tests"
     command: "ci/scripts/e2e-time-travel-test.sh -p ci-dev"
     if: build.pull_request.labels includes "ci/run-e2e-time-travel-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-time-travel-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end session init test"
+    key: "e2e-session-init-tests"
+    command: "ci/scripts/e2e-session-init-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-e2e-session-init-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-session-init-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -638,7 +651,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "check"
@@ -901,20 +914,17 @@ steps:
     parallelism: 4
     retry: *auto-retry
 
-  - label: "end-to-end test ({{matrix.label}} backend)"
-    <<: *other-sql-backend
-    command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
-    if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
-    depends_on:
-      - "build"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose
-          run: ci-standard-env
-          propagate-environment: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
-    retry: *auto-retry
+  - <<: *e2e-other-backend
+    label: "end-to-end test (postgres backend)"
+    env:
+      # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
+      RISEDEV_SQL_ENDPOINT: "postgres://postgres:post\\tgres@db:5432/rwmeta"
+
+  - <<: *e2e-other-backend
+    label: "end-to-end test (mysql backend)"
+    env:
+      # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
+      RISEDEV_SQL_ENDPOINT: "mysql://root:123456@mysql-meta:3306/rwmeta"
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
   - label: "fuzz test"

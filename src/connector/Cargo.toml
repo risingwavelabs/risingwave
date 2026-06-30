@@ -12,6 +12,7 @@ ignored = []
 
 [features]
 default = []
+test = []
 all-sinks = [
     "sink-bigquery",
     "sink-deltalake",
@@ -42,7 +43,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.46", features = ["websockets"] }
+async-nats = { version = "0.47", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -64,6 +65,7 @@ bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
 chrono = { workspace = true, features = ["clock", "std"] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
@@ -79,7 +81,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
     "auth",
 ], optional = true }
 google-cloud-gax = { package = "gcloud-gax", version = "1" }
@@ -113,7 +115,7 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
 ] }
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10.72"
+openssl = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { version = "58", features = ["async"] }
 paste = "1"
@@ -180,7 +182,7 @@ thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
-tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "59350b92775a61611cf1fc3a5d0ff38bf264e6ac", default-features = false, features = [
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "cd69774fb1a4e08c0a3ea3b2041de7cc09662464", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
     "rustls",
@@ -225,11 +227,6 @@ tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
-
-[build-dependencies]
-# Workaround for datafusion. Feel free to remove it if you can.
-# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [[bench]]
 name = "debezium_json_parser"

@@ -16,6 +16,7 @@ use anyhow::Context;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -23,9 +24,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::stream::prelude::*;
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{
-    Distill, IndicesDisplay, TableCatalogBuilder, childless_record,
-};
+use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
@@ -58,7 +57,7 @@ impl StreamIcebergWithPkIndexWriter {
         let base = PlanBase::new_stream(
             sink.ctx(),
             output_schema,
-            Some(vec![]),
+            sink.stream_key().map(|v| v.to_vec()),
             fd_set,
             dist,
             StreamKind::AppendOnly,
@@ -88,25 +87,19 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
 
     let downstream_pk = sink_desc
         .downstream_pk
-        .as_ref()
+        .as_deref()
         .context("Missing downstream PK in Iceberg sink desc")?;
     for &idx in downstream_pk {
-        let order = &sink_desc.plan_pk[idx];
-        builder.add_column(&Field::from(
-            &sink_desc.columns[order.column_index].column_desc,
-        ));
+        builder.add_column(&Field::from(&sink_desc.columns[idx].column_desc));
     }
     builder.add_column(&Field::with_name(DataType::Varchar, "file_path"));
     builder.add_column(&Field::with_name(DataType::Int64, "position"));
 
-    for (idx, order) in sink_desc.plan_pk.iter().enumerate() {
-        builder.add_order_column(idx, order.order_type);
+    for idx in 0..downstream_pk.len() {
+        builder.add_order_column(idx, OrderType::ascending());
     }
 
-    let res = builder.build(
-        (0..sink_desc.plan_pk.len()).collect(),
-        sink_desc.plan_pk.len(),
-    );
+    let res = builder.build((0..downstream_pk.len()).collect(), downstream_pk.len());
     Ok(res)
 }
 
@@ -123,11 +116,13 @@ impl Distill for StreamIcebergWithPkIndexWriter {
         let mut vec = Vec::with_capacity(2);
         vec.push(("columns", column_names));
         if let Some(pk) = &self.sink_desc.downstream_pk {
-            let sink_pk = IndicesDisplay {
-                indices: pk,
-                schema: self.input.schema(),
-            };
-            vec.push(("downstream_pk", sink_pk.distill()));
+            let column_names = pk
+                .iter()
+                .map(|&idx| self.sink_desc.columns[idx].name_with_hidden().to_string())
+                .map(Pretty::from)
+                .collect();
+            let column_names = Pretty::Array(column_names);
+            vec.push(("downstream_pk", column_names));
         }
 
         childless_record("StreamIcebergWithPkIndexWriter", vec)
@@ -168,3 +163,120 @@ impl StreamNode for StreamIcebergWithPkIndexWriter {
 impl ExprRewritable<Stream> for StreamIcebergWithPkIndexWriter {}
 
 impl ExprVisitable for StreamIcebergWithPkIndexWriter {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ColumnId, CreateType, DEFAULT_SUPER_USER_ID, StreamJobStatus,
+    };
+    use risingwave_common::util::sort_util::ColumnOrder;
+    use risingwave_connector::sink::catalog::{SinkId, SinkType};
+
+    use super::*;
+
+    fn test_sink_desc() -> SinkDesc {
+        SinkDesc {
+            id: SinkId::placeholder(),
+            name: "s".to_owned(),
+            definition: "".to_owned(),
+            columns: vec![
+                ColumnCatalog::visible(ColumnDesc::named("id", ColumnId::new(0), DataType::Int32)),
+                ColumnCatalog::visible(ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32)),
+                ColumnCatalog::hidden(ColumnDesc::named(
+                    "_row_id",
+                    ColumnId::new(2),
+                    DataType::Serial,
+                )),
+            ],
+            plan_pk: vec![ColumnOrder::new(2, OrderType::ascending())],
+            downstream_pk: Some(vec![1]),
+            distribution_key: vec![1],
+            properties: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            sink_type: SinkType::Upsert,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "dev".to_owned(),
+            sink_from_name: "t".to_owned(),
+            target_table: None,
+            extra_partition_col_idx: None,
+            create_type: CreateType::Foreground,
+            is_exactly_once: None,
+            auto_refresh_schema_from_table: None,
+        }
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_uses_downstream_pk_columns() {
+        let table = build_iceberg_pk_state_table(&test_sink_desc()).unwrap();
+
+        assert_eq!(table.columns()[0].name(), "v1");
+        assert_eq!(table.columns()[1].name(), "file_path");
+        assert_eq!(table.columns()[2].name(), "position");
+        assert_eq!(table.pk().len(), 1);
+        assert_eq!(table.pk()[0].column_index, 0);
+        assert_eq!(table.distribution_key(), &[0]);
+        assert_eq!(table.read_prefix_len_hint, 1);
+        assert_eq!(table.owner, DEFAULT_SUPER_USER_ID);
+        assert_eq!(table.stream_job_status, StreamJobStatus::Creating);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_with_multi_column_pk() {
+        // Simulate planner output where the derived pk spans several stream-key columns, e.g. a
+        // hidden upstream column (`order_id`) promoted to visible and carried in verbatim.
+        let mut desc = test_sink_desc();
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "order_id",
+            ColumnId::new(3),
+            DataType::Int64,
+        )));
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "shard_id",
+            ColumnId::new(4),
+            DataType::Int64,
+        )));
+        desc.downstream_pk = Some(vec![1, 3, 4]); // v1, order_id, shard_id
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+
+        let names: Vec<_> = table
+            .columns()
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["v1", "order_id", "shard_id", "file_path", "position"]
+        );
+        assert_eq!(table.pk().len(), 3);
+        assert_eq!(table.distribution_key(), &[0, 1, 2]);
+        assert_eq!(table.read_prefix_len_hint, 3);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_with_visible_extra_only() {
+        // Simulate planner output: downstream_pk = [user_pk, visible_extra].
+        let mut desc = test_sink_desc();
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "order_id",
+            ColumnId::new(3),
+            DataType::Int64,
+        )));
+        desc.downstream_pk = Some(vec![1, 3]); // v1, order_id
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+
+        let names: Vec<_> = table
+            .columns()
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        assert_eq!(names, vec!["v1", "order_id", "file_path", "position"]);
+        assert_eq!(table.pk().len(), 2);
+        assert_eq!(table.distribution_key(), &[0, 1]);
+        assert_eq!(table.read_prefix_len_hint, 2);
+    }
+}

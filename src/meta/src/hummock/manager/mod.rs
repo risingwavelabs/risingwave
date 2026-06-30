@@ -19,6 +19,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::lock_api::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -36,8 +37,7 @@ use risingwave_meta_model::{
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
-    HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
-    SubscribeCompactionEventRequest,
+    HummockVersionStats, PbCompactionGroupInfo, SubscribeCompactionEventRequest,
 };
 use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -52,7 +52,7 @@ use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
 use crate::hummock::manager::sequence::PrefetchedSequence;
-use crate::hummock::model::ext::to_table_change_log;
+use crate::hummock::model::ext::{compaction_task_model_to_assignment, to_table_change_log};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -113,7 +113,7 @@ impl TableCommittedEpochNotifiers {
 #[derive(Clone, Debug)]
 struct CompactionTaskReportResult {
     task_id: HummockCompactionTaskId,
-    #[allow(dead_code)]
+
     task_status: TaskStatus,
     reported: bool,
 }
@@ -174,6 +174,7 @@ pub struct HummockManager {
         parking_lot::RwLock<TableWriteThroughputStatisticManager>,
     table_committed_epoch_notifiers: parking_lot::Mutex<TableCommittedEpochNotifiers>,
     compaction_task_report_notifiers: parking_lot::Mutex<CompactionTaskReportNotifiers>,
+    version_stat_tx: UnboundedSender<Arc<HummockVersion>>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -198,17 +199,6 @@ pub type HummockManagerRef = Arc<HummockManager>;
 
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
-
-macro_rules! start_measure_real_process_timer {
-    ($hummock_mgr:expr, $func_name:literal) => {
-        $hummock_mgr
-            .metrics
-            .hummock_manager_real_process_time
-            .with_label_values(&[$func_name])
-            .start_timer()
-    };
-}
-pub(crate) use start_measure_real_process_timer;
 
 use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
@@ -324,6 +314,7 @@ impl HummockManager {
         let version_checkpoint_path = version_checkpoint_path(state_store_dir);
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (version_stat_tx, mut version_stat_rx) = tokio::sync::mpsc::unbounded_channel();
         let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
         let gc_manager = GcManager::new(
             object_store.clone(),
@@ -342,21 +333,25 @@ impl HummockManager {
             env,
             versioning: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::versioning",
             ),
             compaction: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::compaction",
             ),
             compaction_group_manager: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 compaction_group_manager,
                 "hummock_manager::compaction_group_manager",
             ),
             context_info: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::context_info",
             ),
@@ -382,6 +377,7 @@ impl HummockManager {
                     txs: Default::default(),
                 },
             ),
+            version_stat_tx,
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new().into(),
@@ -392,11 +388,20 @@ impl HummockManager {
             table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
+        let version_stat_metrics = instance.metrics.clone();
+        tokio::spawn(async move {
+            while let Some(mut version) = version_stat_rx.recv().await {
+                while let Some(Some(next_version)) = version_stat_rx.recv().now_or_never() {
+                    version = next_version;
+                }
+                transaction::trigger_version_stat(&version_stat_metrics, version.as_ref());
+            }
+        });
         instance.init_time_travel_state().await?;
-        instance.may_fill_backward_table_change_logs().await?;
-
-        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
+        // may_fill_backward_table_change_logs MUST execute after load_meta_store_state
+        instance.may_fill_backward_table_change_logs().await?;
+        instance.start_worker(rx);
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
         instance.release_meta_context().await?;
@@ -452,7 +457,7 @@ impl HummockManager {
             .map(|m| {
                 (
                     m.id as HummockCompactionTaskId,
-                    PbCompactTaskAssignment::from(m),
+                    compaction_task_model_to_assignment(m),
                 )
             })
             .collect();
@@ -474,7 +479,7 @@ impl HummockManager {
         let checkpoint = self.try_read_checkpoint().await?;
         let mut redo_state = if let Some(c) = checkpoint {
             versioning_guard.checkpoint = c;
-            versioning_guard.checkpoint.version.clone()
+            versioning_guard.checkpoint.version.as_ref().clone()
         } else {
             let default_compaction_config = self
                 .compaction_group_manager
@@ -484,7 +489,7 @@ impl HummockManager {
             let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
             tracing::info!("init hummock version checkpoint");
             versioning_guard.checkpoint = HummockVersionCheckpoint {
-                version: checkpoint_version.clone(),
+                version: Arc::new(checkpoint_version.clone()),
                 stale_objects: Default::default(),
             };
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
@@ -507,12 +512,22 @@ impl HummockManager {
                 version_delta.prev_id, redo_state.id
             );
             redo_state.apply_version_delta(version_delta);
+            // backward compatibility: migrate table change log to meta store.
+            redo_state.apply_table_change_log_delta_backward_compatibility(version_delta);
             applied_delta_count += 1;
             if applied_delta_count % 1000 == 0 {
                 tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
             }
         }
         tracing::info!("Finish redo Hummock version.");
+        let pruned_stale_table_id_count = redo_state.prune_stale_table_ids_from_ssts();
+        if pruned_stale_table_id_count > 0 {
+            tracing::warn!(
+                pruned_stale_table_id_count,
+                version_id = ?redo_state.id,
+                "Pruned stale table ids from recovered Hummock SST metadata."
+            );
+        }
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await
@@ -524,7 +539,7 @@ impl HummockManager {
                 ..Default::default()
             });
 
-        versioning_guard.current_version = redo_state;
+        versioning_guard.current_version = Arc::new(redo_state);
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
         versioning_guard.table_change_log =
             risingwave_meta_model::hummock_table_change_log::Entity::find()
@@ -575,6 +590,7 @@ impl HummockManager {
     /// Replay a version delta to current hummock version.
     /// Returns the `version_id`, `max_committed_epoch` of the new version and the modified
     /// compaction groups
+    #[cfg(any(test, feature = "test"))]
     pub async fn replay_version_delta(
         &self,
         mut version_delta: HummockVersionDelta,
@@ -583,16 +599,15 @@ impl HummockManager {
         // ensure the version id is ascending after replay
         version_delta.id = versioning_guard.current_version.next_version_id();
         version_delta.prev_id = versioning_guard.current_version.id;
-        versioning_guard
-            .current_version
-            .apply_version_delta(&version_delta);
+        let mut version_new = versioning_guard.current_version.as_ref().clone();
+        version_new.apply_version_delta(&version_delta);
 
-        let version_new = versioning_guard.current_version.clone();
-        let compaction_group_ids = version_delta.group_deltas.keys().cloned().collect_vec();
+        let compaction_group_ids = version_delta.group_deltas.keys().cloned().collect();
+        versioning_guard.current_version = Arc::new(version_new.clone());
         Ok((version_new, compaction_group_ids))
     }
 
-    pub async fn disable_commit_epoch(&self) -> HummockVersion {
+    pub async fn disable_commit_epoch(&self) -> Arc<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
         versioning_guard.disable_commit_epochs = true;
         versioning_guard.current_version.clone()

@@ -20,6 +20,8 @@ use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
+impl_stream_node_body!(HopWindow(HopWindowNode) => HopWindowExecutorBuilder);
+
 impl ExecutorBuilder for HopWindowExecutorBuilder {
     type Node = HopWindowNode;
 

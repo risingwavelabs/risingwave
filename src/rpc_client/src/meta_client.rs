@@ -38,6 +38,7 @@ use risingwave_common::id::{
     ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -427,6 +428,7 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -436,6 +438,7 @@ impl MetaClient {
             }),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            refresh_interval_sec,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -480,13 +483,19 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
+            since_timestamp_epoch,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -657,13 +666,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -674,13 +685,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterBackfillParallelismRequest {
             table_id: job_id,
             parallelism,
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_backfill_parallelism(request).await?;
@@ -734,18 +747,36 @@ impl MetaClient {
 
     pub async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterResourceGroupRequest {
-            table_id,
+            job_id,
             resource_group,
             deferred,
         };
 
         self.inner.alter_resource_group(request).await?;
         Ok(())
+    }
+
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<WaitVersion> {
+        let request = AlterDatabaseResourceGroupRequest {
+            database_id,
+            resource_group,
+            deferred,
+        };
+
+        let resp = self.inner.alter_database_resource_group(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_swap_rename(
@@ -831,6 +862,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
@@ -838,6 +870,9 @@ impl MetaClient {
             index_table: Some(table),
             fragment_graph: Some(graph),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
@@ -2083,6 +2118,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
+        target_level: Option<u32>,
         sst_ids: Vec<HummockSstableId>,
         exclusive: bool,
     ) -> Result<bool> {
@@ -2093,6 +2129,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            target_level,
             sst_ids,
             exclusive: Some(exclusive),
             ..Default::default()
@@ -2361,7 +2398,8 @@ impl MetaMemberManagement {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
                                     .await
-                                    .context("failed to create client")?;
+                                    .context("failed to create client")
+                                    .map_err(RpcError::from)?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
@@ -2373,7 +2411,8 @@ impl MetaMemberManagement {
                         let resp = client
                             .members(MembersRequest {})
                             .await
-                            .context("failed to fetch members")?;
+                            .context("failed to fetch members")
+                            .map_err(RpcError::from)?;
 
                         resp.into_inner().members
                     };
@@ -2674,6 +2713,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_resource_group, AlterDatabaseResourceGroupRequest, AlterDatabaseResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }

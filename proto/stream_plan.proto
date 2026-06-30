@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "batch_plan.proto";
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
@@ -772,14 +773,14 @@ message ExchangeNode {
 enum StreamScanType {
   STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
-  // ChainExecutor
-  STREAM_SCAN_TYPE_CHAIN = 1;
+  // ChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_CHAIN = 1 [deprecated = true];
 
-  // RearrangedChainExecutor
-  STREAM_SCAN_TYPE_REARRANGE = 2;
+  // RearrangedChainExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_REARRANGE = 2 [deprecated = true];
 
-  // BackfillExecutor
-  STREAM_SCAN_TYPE_BACKFILL = 3;
+  // BackfillExecutor. Deprecated: only for existing persisted legacy jobs.
+  STREAM_SCAN_TYPE_BACKFILL = 3 [deprecated = true];
 
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
@@ -835,6 +836,9 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
+
+  // Full scan range pushdown (eq_conds + range bounds on PK).
+  batch_plan.ScanRange pk_scan_range = 13;
 }
 
 // Config options for CDC backfill
@@ -1113,8 +1117,10 @@ message EowcGapFillNode {
   expr.ExprNode interval = 2;
   repeated uint32 fill_columns = 3;
   repeated string fill_strategies = 4;
-  catalog.Table buffer_table = 5;
+  reserved 5;
+  reserved "buffer_table";
   catalog.Table prev_row_table = 6;
+  repeated uint32 partition_by_indices = 7;
 }
 
 message GapFillNode {
@@ -1123,6 +1129,8 @@ message GapFillNode {
   repeated uint32 fill_columns = 3;
   repeated string fill_strategies = 4;
   catalog.Table state_table = 5;
+  repeated uint32 partition_by_indices = 6;
+  repeated uint32 pointer_key_indices = 7;
 }
 
 message StreamNode {
@@ -1302,10 +1310,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
-  // The adaptive parallelism strategy for this streaming job, if explicitly set.
-  string adaptive_parallelism_strategy = 3;
-  // The adaptive parallelism strategy for the backfill override, if explicitly set.
-  string backfill_adaptive_parallelism_strategy = 4;
+  reserved 3, 4;
+  reserved "adaptive_parallelism_strategy", "backfill_adaptive_parallelism_strategy";
 }
 
 message BackfillOrder {
@@ -1363,6 +1369,10 @@ message StreamFragmentGraph {
   Parallelism parallelism = 6;
   // Parallelism to use during backfill. Falls back to `parallelism` if unset.
   Parallelism backfill_parallelism = 9;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 10;
+  // The adaptive parallelism strategy for the backfill override, if explicitly set.
+  string backfill_adaptive_parallelism_strategy = 11;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //

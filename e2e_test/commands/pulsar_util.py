@@ -149,18 +149,23 @@ class PulsarCat:
             print(f"Failed to drop topic: {response.status_code} - {response.text}")
             sys.exit(1)
 
-    def produce(self, topic: str, key_delimiter: str = None):
+    def produce(self, topic: str, key_delimiter: str = None, properties=None):
         """Produce messages from stdin, each line with UTF-8 encoding
 
         Args:
             topic: Topic name to produce to
             key_delimiter: If specified, split each line by this delimiter (first occurrence only).
                           The front part becomes the message key, the later part becomes the payload.
+            properties: User properties to attach to each produced message.
         """
         topic = self._normalize_topic(topic)
         print(f"Producing to topic: {topic}")
         if key_delimiter:
             print(f"Key delimiter: '{key_delimiter}' (first occurrence splits key from payload)")
+        properties = properties or {}
+        if properties:
+            print(f"Properties: {properties}")
+        send_kwargs = {'properties': properties} if properties else {}
         print("Type messages (Ctrl+C to stop):")
 
         client = self.get_client()
@@ -178,12 +183,13 @@ class PulsarCat:
                         message_payload = parts[1] if len(parts) > 1 else ''
                         producer.send(
                             message_payload.encode('utf-8'),
-                            partition_key=message_key
+                            partition_key=message_key,
+                            **send_kwargs,
                         )
                         line_count += 1
                         print(f"Sent message {line_count}: key='{message_key}', payload='{message_payload}'")
                     else:
-                        producer.send(line.encode('utf-8'))
+                        producer.send(line.encode('utf-8'), **send_kwargs)
                         line_count += 1
                         print(f"Sent message {line_count}: {line}")
         except KeyboardInterrupt:
@@ -388,6 +394,20 @@ class PulsarCat:
             print(f"Error checking unacked messages: {e}")
 
 
+def parse_properties(raw_properties):
+    properties = {}
+    for raw_property in raw_properties or []:
+        if '=' not in raw_property:
+            print(f"Invalid property '{raw_property}'. Expected key=value.")
+            sys.exit(1)
+        key, value = raw_property.split('=', 1)
+        if not key:
+            print(f"Invalid property '{raw_property}'. Property key cannot be empty.")
+            sys.exit(1)
+        properties[key] = value
+    return properties
+
+
 def main():
     parser = argparse.ArgumentParser(description='Pulsar Util - Command-line tool for Apache Pulsar')
     parser.add_argument('--broker', '-b',
@@ -414,6 +434,13 @@ def main():
     produce_parser = subparsers.add_parser('produce', help='Produce messages from stdin')
     produce_parser.add_argument('--topic', '-t', required=True, help='Topic name')
     produce_parser.add_argument('--key', '-k', default=None, help='Key split delimiter for the message')
+    produce_parser.add_argument(
+        '--property',
+        '-P',
+        action='append',
+        default=[],
+        help='Message property in key=value form. Can be specified multiple times.',
+    )
 
     # Consume command
     consume_parser = subparsers.add_parser('consume', help='Consume messages from a topic')
@@ -451,7 +478,7 @@ def main():
         elif args.command == 'drop-topic':
             pulsar_cat.drop_topic(args.topic, args.force)
         elif args.command == 'produce':
-            pulsar_cat.produce(args.topic, args.key)
+            pulsar_cat.produce(args.topic, args.key, parse_properties(args.property))
         elif args.command == 'consume':
             pulsar_cat.consume(args.topic, args.subscription, args.position, args.exit_on_end)
         elif args.command == 'unacked':

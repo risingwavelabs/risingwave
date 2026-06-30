@@ -286,7 +286,7 @@ impl CatalogController {
                         if let Some(NodeBody::Union(_)) = node.node_body {
                             node.input.retain_mut(|input| match &mut input.node_body {
                                 Some(NodeBody::Project(_)) => {
-                                    let body = input.input.iter().exactly_one().unwrap();
+                                    let body = Itertools::exactly_one(input.input.iter()).unwrap();
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
@@ -394,8 +394,8 @@ impl CatalogController {
 
         let mut job_mapping: HashMap<JobKey, ObjectId> = creating_tables
             .into_iter()
-            .chain(creating_sinks.into_iter())
-            .chain(creating_subscriptions.into_iter())
+            .chain(creating_sinks)
+            .chain(creating_subscriptions)
             .map(|(id, name, database_id, schema_id)| ((database_id, schema_id, name), id))
             .collect();
 

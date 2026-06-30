@@ -4,6 +4,7 @@ create table cf (v int);
 statement ok
 alter table cf set config (
     streaming.developer.chunk_size = 511,
+    streaming.developer.disable_sync_log_store_dispatcher = TrUe,
     streaming.developer.join_encoding_type = "cpu_optimized",
     streaming.developer.enable_executor_row_count = TrUe
 );
@@ -12,6 +13,7 @@ query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
 cf	streaming.developer.chunk_size	511
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
 
@@ -25,6 +27,7 @@ query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
 cf	streaming.developer.chunk_size	1023
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
 
@@ -37,6 +40,7 @@ alter table cf set config (
 query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
 
@@ -44,6 +48,7 @@ cf	streaming.developer.join_encoding_type	"cpu_optimized"
 statement ok
 alter table cf reset config (
     streaming.developer.join_encoding_type,
+    streaming.developer.disable_sync_log_store_dispatcher,
     streaming.developer.enable_executor_row_count
 );
 

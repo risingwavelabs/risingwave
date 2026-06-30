@@ -106,7 +106,7 @@ async fn diff_stream_and_batch_with_sqls(
         return Ok(());
     }
 
-    let select = format!("SELECT * FROM {}", &mview_name);
+    let select = format!("SELECT * FROM {}", mview_name);
     tracing::info!("[RUN SELECT * FROM MVIEW id={}]: {}", i, select);
     let (skip_count, stream_result) = run_query_inner(12, client, &select, true).await?;
     if skip_count > 0 {

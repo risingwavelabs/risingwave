@@ -48,7 +48,6 @@ pub struct MergeSortExchangeExecutorImpl<CS> {
 }
 
 impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         context: Arc<dyn BatchTaskContext>,
         column_orders: Arc<Vec<ColumnOrder>>,
@@ -110,7 +109,7 @@ impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
             sources,
             self.column_orders.clone(),
             self.schema,
-            format!("MergeSortExecutor{}", &self.task_id.task_id),
+            format!("MergeSortExecutor{}", self.task_id.task_id),
             self.chunk_size,
             self.mem_ctx,
         ));

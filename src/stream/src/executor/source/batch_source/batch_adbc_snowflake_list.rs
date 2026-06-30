@@ -18,7 +18,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_57 as arrow;
+use risingwave_common::array::arrow::arrow_array_58 as arrow;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{DataType, JsonbRef, JsonbVal, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;

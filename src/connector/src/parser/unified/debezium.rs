@@ -30,6 +30,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 /// JDBC type constants found in Debezium schema change events.
 mod debezium_sql_types {
     pub const STRUCT: i32 = 2002;
+    pub const ARRAY: i32 = 2003;
 }
 use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::parser::TransactionControl;
@@ -41,31 +42,6 @@ use crate::source::cdc::external::mysql::{
 };
 use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
-
-/// Checks if a given default value expression is a BIGSERIAL default.
-///
-/// Normally, all unsupported expressions should fail in `from_text` parsing.
-/// However, we make a special exception for `nextval()` function because:
-/// 1. When users set a column as BIGSERIAL (usually as primary key), PostgreSQL automatically generates
-///    a default value expression like `nextval('sequence_name'::regclass)`
-/// 2. This is a very common scenario in real-world usage
-/// 3. For existing columns with `nextval()` default, we skip parsing the default value
-///    to avoid schema change failures
-///
-/// TODO: In the future, if we can distinguish between newly added columns and existing columns,
-/// we should modify this logic to:
-/// - Skip default value parsing for existing columns with `nextval()`
-/// - Report error for newly added columns with `nextval()` (since they should be handled differently)
-fn is_bigserial_default(default_value_expression: &str) -> bool {
-    if default_value_expression.trim().is_empty() {
-        return false;
-    }
-
-    let expr = default_value_expression.trim();
-
-    // Return true if it is a `nextval()` function (bigserial default).
-    expr.starts_with("nextval(")
-}
 
 /// Parse Debezium `tableChanges[].id` into `(schema_name, table_name)`.
 ///
@@ -135,6 +111,58 @@ async fn fetch_pgvector_dimensions_for_table(
                 err.as_report()
             ),
         })
+}
+
+/// Decide whether an unknown array column type (one not resolved by
+/// `type_name_to_pg_type`) can be represented as `varchar[]` in RW. This is the
+/// single question this function answers; the criteria behind it may grow over
+/// time.
+///
+/// Right now the answer is "yes iff the array's element type is a user-defined
+/// enum". Debezium does not expose element enum metadata on the array column
+/// (the `enumValues` field is only set for scalar enum columns), so we ask the
+/// upstream catalog directly: follow the array type's `typelem` to its element
+/// type and check `typtype = 'e'`. Enum values are plain text, hence `varchar[]`.
+///
+/// TODO(composite): arrays of composite types (`typtype = 'c'`) should likewise
+/// map to `varchar[]`. That is deferred to a follow-up PR — the snapshot/streaming
+/// side for composite arrays is handled in #25818, and this predicate should be
+/// extended to `typtype IN ('e', 'c')` once that lands.
+async fn can_fallback_array_to_varchar(
+    connector_props: &ConnectorProperties,
+    array_type_name: &str,
+) -> AccessResult<bool> {
+    let ConnectorProperties::PostgresCdc(cdc_props) = connector_props else {
+        return Ok(false);
+    };
+
+    let client = create_pg_client_from_properties(&cdc_props.properties, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    let row = client
+        .query_opt(
+            "SELECT t_elem.typtype = 'e' \
+             FROM pg_type t \
+             JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+             WHERE t.typname = $1 \
+             LIMIT 1",
+            &[&array_type_name],
+        )
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres for array element type of `{array_type_name}`: {}",
+                err.as_report()
+            ),
+        })?;
+
+    Ok(row.map(|r| r.get::<_, bool>(0)).unwrap_or(false))
 }
 
 // Example of Debezium JSON value:
@@ -318,11 +346,11 @@ pub async fn parse_schema_change(
                     // Both are mapped to Varchar — enum values are plain strings, and
                     // composite values are converted to text by our CustomConverter.
                     let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
-                    let is_composite = col
+                    let jdbc_type = col
                         .access_object_field("jdbcType")
                         .and_then(|v| v.as_number().ok())
-                        .map(|n| n.0 as i32)
-                        == Some(debezium_sql_types::STRUCT);
+                        .map(|n| n.0 as i32);
+                    let is_composite = jdbc_type == Some(debezium_sql_types::STRUCT);
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
@@ -371,6 +399,12 @@ pub async fn parse_schema_change(
                                     }
                                 }
                             } else {
+                                // Resolve builtin types first, so arrays of builtin element
+                                // types keep their proper element type (e.g. `_int4` -> int[],
+                                // `_text` -> text[]). `type_name_to_pg_type` only covers PG
+                                // builtins (the `PgType` it returns carries a static OID);
+                                // user-defined and extension types are not representable here
+                                // and fall through to the catalog lookup below.
                                 let ty = type_name_to_pg_type(type_name.as_str());
                                 match ty {
                                     Some(ty) => match pg_type_to_rw_type(&ty) {
@@ -386,6 +420,23 @@ pub async fn parse_schema_change(
                                             });
                                         }
                                     },
+                                    // An unrecognized ARRAY type may be an array of a
+                                    // user-defined enum (e.g. `_mood_enum`). Debezium carries
+                                    // no enum metadata on the array column, so ask upstream
+                                    // whether the element is an enum; if so, map to
+                                    // `varchar[]` (enum values are plain text).
+                                    None if jdbc_type == Some(debezium_sql_types::ARRAY)
+                                        && can_fallback_array_to_varchar(
+                                            connector_props,
+                                            type_name.as_str(),
+                                        )
+                                        .await? =>
+                                    {
+                                        tracing::debug!(target: "auto_schema_change",
+                                            "Fall back PostgreSQL array type '{}' to VARCHAR[]",
+                                            type_name);
+                                        DataType::Varchar.list()
+                                    }
                                     None => {
                                         return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
@@ -421,107 +472,89 @@ pub async fn parse_schema_change(
                         }
                     };
 
-                    // handle default value expression, currently we only support constant expression
+                    // Handle default value expression. Non-constant defaults (`now()`,
+                    // `gen_random_uuid()`, `nextval('seq'::regclass)` for BIGSERIAL, etc.)
+                    // will fail `ScalarImpl::from_text` and fall through to the fail-open
+                    // branch below — the column is added without a default and a warning is
+                    // logged, rather than aborting the whole auto schema change.
+                    //
+                    // TODO: the schema change event carries the **full** set of columns of
+                    // the table, so here we cannot tell "columns newly added by this ALTER"
+                    // from "columns that already existed". A better approach would be to
+                    // only process the delta columns that actually changed in this event,
+                    // which would let us precisely tell the user: which columns have
+                    // existing rows filled with NULL (needs attention), and which ones are
+                    // pre-existing columns merely surfaced by the event (harmless, can be
+                    // ignored silently).
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
                             let default_val_expr_str = default_val_expr_str.as_str().unwrap();
-                            // Only process constant default values
-                            if is_bigserial_default(default_val_expr_str) {
-                                tracing::warn!(target: "auto_schema_change",
-                                    "Ignoring unsupported BIGSERIAL default value expression: {}", default_val_expr_str);
+                            let value_text: Option<String>;
+                            match *connector_props {
+                                ConnectorProperties::PostgresCdc(_) => {
+                                    // default value of non-number data type will be stored as
+                                    // "'value'::type"
+                                    match default_val_expr_str
+                                        .split("::")
+                                        .map(|s| s.trim_matches('\''))
+                                        .next()
+                                    {
+                                        None => {
+                                            value_text = None;
+                                        }
+                                        Some(val_text) => {
+                                            value_text = Some(val_text.to_owned());
+                                        }
+                                    }
+                                }
+                                ConnectorProperties::MysqlCdc(_) => {
+                                    // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                                    // interpret its value
+                                    if data_type == DataType::Timestamptz {
+                                        value_text = Some(timestamp_val_to_timestamptz(default_val_expr_str).map_err(|err| {
+                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                                            AccessError::TypeError {
+                                                expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                                                got: data_type.to_string(),
+                                                value: default_val_expr_str.to_owned(),
+                                            }
+                                        })?);
+                                    } else {
+                                        value_text = Some(default_val_expr_str.to_owned());
+                                    }
+                                }
+                                _ => {
+                                    unreachable!("connector doesn't support schema change")
+                                }
+                            }
+
+                            let snapshot_value: Datum = value_text.and_then(|value_text| {
+                                ScalarImpl::from_text(value_text.as_str(), &data_type)
+                                    .inspect_err(|err| {
+                                        tracing::warn!(
+                                            target: "auto_schema_change",
+                                            error = %err.as_report(),
+                                            column = %name,
+                                            data_type = %data_type,
+                                            default_value_expression = default_val_expr_str,
+                                            upstream_ddl = %upstream_ddl,
+                                            "non-constant default expression, column added without default. \
+                                             If this column is not newly added by this schema change, it is safe to ignore this warning. \
+                                             If this column is newly added by this schema change, existing rows will be NULL in this column — consider using COALESCE in queries to provide a fallback value."
+                                        );
+                                    })
+                                    .ok()
+                            });
+
+                            if snapshot_value.is_none() {
                                 ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                             } else {
-                                let value_text: Option<String>;
-                                match *connector_props {
-                                    ConnectorProperties::PostgresCdc(_) => {
-                                        // default value of non-number data type will be stored as
-                                        // "'value'::type"
-                                        match default_val_expr_str
-                                            .split("::")
-                                            .map(|s| s.trim_matches('\''))
-                                            .next()
-                                        {
-                                            None => {
-                                                value_text = None;
-                                            }
-                                            Some(val_text) => {
-                                                value_text = Some(val_text.to_owned());
-                                            }
-                                        }
-                                    }
-                                    ConnectorProperties::MysqlCdc(_) => {
-                                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                                        // interpret its value
-                                        if data_type == DataType::Timestamptz {
-                                            value_text = Some(timestamp_val_to_timestamptz(default_val_expr_str).map_err(|err| {
-                                                tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
-                                                AccessError::TypeError {
-                                                    expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
-                                                    got: data_type.to_string(),
-                                                    value: default_val_expr_str.to_owned(),
-                                                }
-                                            })?);
-                                        } else {
-                                            value_text = Some(default_val_expr_str.to_owned());
-                                        }
-                                    }
-                                    _ => {
-                                        unreachable!("connector doesn't support schema change")
-                                    }
-                                }
-
-                                // Handling default values during auto schema change is hard to get
-                                // completely right. The fundamental challenge is that we need to
-                                // accurately distinguish "literal constants" from "real expressions"
-                                // and evaluate each correctly. However, PostgreSQL / MySQL literal
-                                // grammar is quite complex (bit / hex / escape strings, arrays,
-                                // literals with casts, etc.), and `ScalarImpl::from_text` only
-                                // recognizes simple literals. Any function call (`now()`,
-                                // `gen_random_uuid()`) or unsupported literal form will fail here.
-                                //
-                                // Current strategy is fail-open: on parse failure we only emit a
-                                // warn log and add the column without a default, rather than
-                                // aborting the whole auto schema change. This is strictly better
-                                // than the previous hard-crash behavior — the pipeline stays
-                                // available, and the worst case is that existing rows are NULL in a
-                                // newly-added column (see the warn message below for details).
-                                //
-                                // TODO: the schema change event carries the **full** set of columns
-                                // of the table, so here we cannot tell "columns newly added by this
-                                // ALTER" from "columns that already existed". A better approach
-                                // would be to only process the delta columns that actually changed
-                                // in this event, which would let us precisely tell the user: which
-                                // columns have existing rows filled with NULL (needs attention),
-                                // and which ones are pre-existing columns merely surfaced by the
-                                // event (harmless, can be ignored silently).
-                                let snapshot_value: Datum = value_text.and_then(|value_text| {
-                                    ScalarImpl::from_text(value_text.as_str(), &data_type)
-                                        .inspect_err(|err| {
-                                            tracing::warn!(
-                                                target: "auto_schema_change",
-                                                error = %err.as_report(),
-                                                column = %name,
-                                                data_type = %data_type,
-                                                default_value_expression = default_val_expr_str,
-                                                upstream_ddl = %upstream_ddl,
-                                                "non-constant default expression, column added without default. \
-                                                 If this column is not newly added by this schema change, it is safe to ignore this warning. \
-                                                 If this column is newly added by this schema change, existing rows will be NULL in this column — consider using COALESCE in queries to provide a fallback value."
-                                            );
-                                        })
-                                        .ok()
-                                });
-
-                                if snapshot_value.is_none() {
-                                    ColumnDesc::named(name, ColumnId::placeholder(), data_type)
-                                } else {
-                                    ColumnDesc::named_with_default_value(
-                                        name,
-                                        ColumnId::placeholder(),
-                                        data_type,
-                                        snapshot_value,
-                                    )
-                                }
+                                ColumnDesc::named_with_default_value(
+                                    name,
+                                    ColumnId::placeholder(),
+                                    data_type,
+                                    snapshot_value,
+                                )
                             }
                         }
                         _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),

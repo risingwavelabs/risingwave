@@ -25,6 +25,8 @@ use crate::executor::{AsOfCpuEncoding, AsOfDesc, AsOfJoinType, AsOfMemoryEncodin
 
 pub struct AsOfJoinExecutorBuilder;
 
+impl_stream_node_body!(AsOfJoin(AsOfJoinNode) => AsOfJoinExecutorBuilder);
+
 impl ExecutorBuilder for AsOfJoinExecutorBuilder {
     type Node = AsOfJoinNode;
 
@@ -88,7 +90,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
 
         // Previously, the `join_encoding_type` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let join_encoding_type = node
             .get_join_encoding_type()
             .map_or(params.config.developer.join_encoding_type, Into::into);

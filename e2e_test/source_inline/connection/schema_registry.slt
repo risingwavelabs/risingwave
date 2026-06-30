@@ -53,4 +53,95 @@ drop table t;
 statement ok
 drop connection schema_registry_conn;
 
+# Verify connection SHOW visibility and secret-ref redaction in the schema-registry docker environment.
+statement ok
+CREATE USER show_acl_conn_user WITH PASSWORD 'password';
 
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO show_acl_conn_user"'
+
+statement ok
+CREATE SCHEMA show_acl_conn;
+
+statement ok
+GRANT USAGE ON SCHEMA show_acl_conn TO show_acl_conn_user;
+
+statement ok
+CREATE SECRET show_acl_conn.hidden_registry WITH (backend = 'meta') AS '${RISEDEV_SCHEMA_REGISTRY_URL}';
+
+statement ok
+CREATE CONNECTION show_acl_conn.visible_conn WITH (
+    type = 'schema_registry',
+    schema.registry = secret show_acl_conn.hidden_registry
+);
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); ! grep -q "visible_conn" <<<"$out"'
+
+statement ok
+GRANT USAGE ON CONNECTION show_acl_conn.visible_conn TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "visible_conn" <<<"$out"; grep -q "<redacted>" <<<"$out"; ! grep -q "hidden_registry" <<<"$out"'
+
+statement ok
+GRANT USAGE ON SECRET show_acl_conn.hidden_registry TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "hidden_registry" <<<"$out"'
+
+
+# Cross-schema referenced secrets should stay redacted until the user can also use the secret schema.
+statement ok
+CREATE SCHEMA show_acl_secret;
+
+statement ok
+CREATE SECRET show_acl_secret.cross_registry WITH (backend = 'meta') AS '${RISEDEV_SCHEMA_REGISTRY_URL}';
+
+statement ok
+CREATE CONNECTION show_acl_conn.cross_schema_conn WITH (
+    type = 'schema_registry',
+    schema.registry = secret show_acl_secret.cross_registry
+);
+
+statement ok
+GRANT USAGE ON CONNECTION show_acl_conn.cross_schema_conn TO show_acl_conn_user;
+
+statement ok
+GRANT USAGE ON SECRET show_acl_secret.cross_registry TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "cross_schema_conn" <<<"$out"; grep -q "cross_schema_conn.*SECRET <redacted>" <<<"$out"; ! grep -q "cross_registry" <<<"$out"; ! grep -q "show_acl_secret" <<<"$out"'
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SELECT c.connection_params FROM rw_catalog.rw_connections c JOIN rw_catalog.rw_schemas s ON c.schema_id = s.id WHERE s.name = '\''show_acl_conn'\'' AND c.name = '\''cross_schema_conn'\'' ORDER BY c.name;"); grep -q "SECRET <redacted>" <<<"$out"; ! grep -q "cross_registry" <<<"$out"; ! grep -q "show_acl_secret" <<<"$out"'
+
+statement ok
+GRANT USAGE ON SCHEMA show_acl_secret TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "cross_schema_conn.*show_acl_secret.cross_registry" <<<"$out"'
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SELECT c.connection_params FROM rw_catalog.rw_connections c JOIN rw_catalog.rw_schemas s ON c.schema_id = s.id WHERE s.name = '\''show_acl_conn'\'' AND c.name = '\''cross_schema_conn'\'' ORDER BY c.name;"); grep -q "show_acl_secret.cross_registry" <<<"$out"'
+
+statement ok
+DROP CONNECTION show_acl_conn.cross_schema_conn;
+
+statement ok
+DROP SECRET show_acl_secret.cross_registry;
+
+statement ok
+DROP SCHEMA show_acl_secret;
+
+statement ok
+DROP CONNECTION show_acl_conn.visible_conn;
+
+statement ok
+DROP SECRET show_acl_conn.hidden_registry;
+
+statement ok
+DROP SCHEMA show_acl_conn;
+
+statement ok
+DROP USER show_acl_conn_user;

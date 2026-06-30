@@ -130,6 +130,8 @@ pub fn create_source_desc_builder(
     )
 }
 
+impl_stream_node_body!(Source(SourceNode) => SourceExecutorBuilder);
+
 impl ExecutorBuilder for SourceExecutorBuilder {
     type Node = SourceNode;
 
