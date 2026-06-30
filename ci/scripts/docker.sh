@@ -9,6 +9,7 @@ arch="$(uname -m)"
 CARGO_PROFILE=${CARGO_PROFILE:-production}
 ENABLE_DOCKER_SCCACHE=${ENABLE_DOCKER_SCCACHE:-false}
 DOCKER_SCCACHE_REGION=${DOCKER_SCCACHE_REGION:-us-east-2}
+PUSH_DOCKERHUB=${PUSH_DOCKERHUB:-true}
 
 sanitize_cache_component() {
   local value="$1"
@@ -39,8 +40,10 @@ trap cleanup_docker_sccache_credentials EXIT
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-echo "--- dockerhub login"
-echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
+if [[ "${PUSH_DOCKERHUB}" == "true" ]]; then
+  echo "--- dockerhub login"
+  echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
+fi
 
 if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   echo "--- retag docker image"
@@ -108,8 +111,8 @@ if [[ "${ENABLE_DOCKER_SCCACHE}" == "true" ]]; then
   } >"${docker_sccache_credentials_dir}/config"
 
   cache_branch="$(sanitize_cache_component "${BUILDKITE_BRANCH:-unknown}")"
-  DOCKER_SCCACHE_S3_KEY_PREFIX=${DOCKER_SCCACHE_S3_KEY_PREFIX:-"docker/${cache_branch}/${arch}/${CARGO_PROFILE}"}
-  echo "Docker sccache prefix: ${DOCKER_SCCACHE_S3_KEY_PREFIX}"
+  DOCKER_SCCACHE_PREFIX=${DOCKER_SCCACHE_PREFIX:-${DOCKER_SCCACHE_S3_KEY_PREFIX:-"docker/${cache_branch}/${arch}/${CARGO_PROFILE}"}}
+  echo "Docker sccache prefix: ${DOCKER_SCCACHE_PREFIX}"
 
   build_secret_args+=(
     --secret "id=aws_credentials,src=${docker_sccache_credentials_dir}/credentials"
@@ -118,7 +121,7 @@ if [[ "${ENABLE_DOCKER_SCCACHE}" == "true" ]]; then
   docker_build_args+=(
     --build-arg "DOCKER_SCCACHE_BUCKET=${DOCKER_SCCACHE_BUCKET}"
     --build-arg "DOCKER_SCCACHE_REGION=${DOCKER_SCCACHE_REGION}"
-    --build-arg "DOCKER_SCCACHE_S3_KEY_PREFIX=${DOCKER_SCCACHE_S3_KEY_PREFIX}"
+    --build-arg "DOCKER_SCCACHE_PREFIX=${DOCKER_SCCACHE_PREFIX}"
   )
 fi
 
@@ -152,5 +155,9 @@ echo "--- docker push to ghcr"
 docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
 
 echo "--- docker push to dockerhub"
-docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
-docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+if [[ "${PUSH_DOCKERHUB}" == "true" ]]; then
+  docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+  docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+else
+  echo "Skipped because PUSH_DOCKERHUB=${PUSH_DOCKERHUB}"
+fi
