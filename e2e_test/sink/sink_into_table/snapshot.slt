@@ -28,6 +28,49 @@ select * from t;
 2	22
 
 statement ok
+create table snapshot_free_src (id int primary key, v int);
+
+statement ok
+insert into snapshot_free_src values (1, 10), (20, 20);
+
+statement ok
+create table snapshot_free_target (id int primary key, projected_v int);
+
+statement ok
+create sink snapshot_free_sink into snapshot_free_target as
+select id, v + 100 as projected_v
+from snapshot_free_src
+where id >= 10
+with (snapshot = 'false');
+
+query II
+select * from snapshot_free_target order by id;
+----
+
+statement ok
+insert into snapshot_free_src values (2, 200), (10, 10), (11, 11);
+
+statement ok
+update snapshot_free_src set v = 15 where id = 10;
+
+statement ok
+delete from snapshot_free_src where id in (11, 20);
+
+query II
+select * from snapshot_free_target order by id;
+----
+10	115
+
+statement ok
+drop sink snapshot_free_sink;
+
+statement ok
+drop table snapshot_free_target;
+
+statement ok
+drop table snapshot_free_src;
+
+statement ok
 drop sink s1;
 
 statement ok

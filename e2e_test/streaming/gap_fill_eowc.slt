@@ -160,3 +160,68 @@ DROP MATERIALIZED VIEW gap_filled_mixed;
 
 statement ok
 DROP TABLE gap_multi_column_table;
+
+# Test PARTITION BY with EOWC gap fill.
+# This specifically checks that:
+# 1. gap filling is partition-local
+# 2. filled rows preserve partition columns
+# 3. interleaved partitions do not corrupt each other's prev-row state
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE gap_table_partitioned (
+    device_id INT,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (device_id, ts),
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+set streaming_parallelism = 0;
+
+statement ok
+INSERT INTO gap_table_partitioned VALUES
+    (1, '2024-05-21 10:00:00', 10.0),
+    (1, '2024-05-21 10:03:00', 40.0),
+    (2, '2024-05-21 10:00:00', 100.0),
+    (2, '2024-05-21 10:02:00', 120.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_partitioned_eowc AS
+SELECT device_id, ts, value
+FROM GAP_FILL(
+    gap_table_partitioned,
+    ts,
+    INTERVAL '1' MINUTE,
+    LOCF(value),
+    PARTITION_BY(device_id)
+)
+EMIT ON WINDOW CLOSE;
+
+# Advance watermark enough to release all rows up through 10:03:00.
+# Watermark = 10:10:00 - 5s = 10:09:55, so all rows <= 10:09:55 are released.
+statement ok
+INSERT INTO gap_table_partitioned VALUES
+    (1, '2024-05-21 10:10:00', 1000.0),
+    (2, '2024-05-21 10:10:00', 2000.0);
+
+query ITR
+SELECT device_id, ts, value
+FROM gap_filled_partitioned_eowc
+ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 40
+2 2024-05-21 10:00:00 100
+2 2024-05-21 10:01:00 100
+2 2024-05-21 10:02:00 120
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled_partitioned_eowc;
+
+statement ok
+DROP TABLE gap_table_partitioned;

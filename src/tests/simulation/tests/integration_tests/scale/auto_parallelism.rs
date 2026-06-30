@@ -68,7 +68,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
     let used_worker_slots = single_agg_fragment.used_worker_count();
 
     let (single_used_worker_id, should_be_one) =
-        used_worker_slots.into_iter().exactly_one().unwrap();
+        Itertools::exactly_one(used_worker_slots.into_iter()).unwrap();
 
     assert_eq!(should_be_one, 1);
 
@@ -126,7 +126,8 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     let used_worker_slots = single_agg_fragment.used_worker_count();
 
-    let (curr_used_worker_id, should_be_one) = used_worker_slots.into_iter().exactly_one().unwrap();
+    let (curr_used_worker_id, should_be_one) =
+        Itertools::exactly_one(used_worker_slots.into_iter()).unwrap();
     assert_eq!(should_be_one, 1);
     assert_ne!(single_used_worker_id, curr_used_worker_id);
     session
@@ -299,10 +300,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let mut session = cluster.start_session();
     session
-        .run("alter system set adaptive_parallelism_strategy to AUTO")
-        .await?;
-    session
-        .run("set streaming_parallelism_for_table = adaptive")
+        .run("set streaming_parallelism_for_table = default")
         .await?;
 
     session.run("create table t (v1 int);").await?;
@@ -310,7 +308,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("ADAPTIVE");
+        .assert_result_eq("bounded(4)");
 
     async fn locate_table_fragment(cluster: &mut Cluster) -> Result<Fragment> {
         cluster
@@ -334,7 +332,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("FIXED(3)");
+        .assert_result_eq("3");
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
@@ -402,7 +400,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     session
         .run("select parallelism from rw_table_fragments")
         .await?
-        .assert_result_eq("ADAPTIVE");
+        .assert_result_eq("adaptive");
 
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 

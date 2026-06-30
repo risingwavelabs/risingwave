@@ -192,9 +192,10 @@ pub struct Word {
 impl fmt::Display for Word {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
-            Some(s) if s == '"' || s == '[' || s == '`' => {
+            Some(s) if s == '[' || s == '`' => {
                 write!(f, "{}{}{}", s, self.value, Word::matching_end_quote(s))
             }
+            Some('"') => write!(f, "\"{}\"", self.value.replace('"', "\"\"")),
             None => f.write_str(&self.value),
             _ => panic!("Unexpected quote_style!"),
         }
@@ -484,17 +485,8 @@ impl<'a> Tokenizer<'a> {
                 }
                 // delimited (quoted) identifier
                 quote_start if is_delimited_identifier_start(quote_start) => {
-                    self.next(); // consume the opening quote
-                    let quote_end = Word::matching_end_quote(quote_start);
-                    let s = self.peeking_take_while(|ch| ch != quote_end);
-                    if self.next() == Some(quote_end) {
-                        Ok(Some(Token::make_word(&s, Some(quote_start))))
-                    } else {
-                        self.error(format!(
-                            "Expected close delimiter '{}' before EOF.",
-                            quote_end
-                        ))
-                    }
+                    let s = self.tokenize_delimited_identifier(quote_start)?;
+                    Ok(Some(Token::make_word(&s, Some(quote_start))))
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
@@ -655,6 +647,36 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    fn tokenize_delimited_identifier(
+        &mut self,
+        quote_start: char,
+    ) -> Result<String, TokenizerError> {
+        let quote_end = Word::matching_end_quote(quote_start);
+        let mut s = String::new();
+
+        self.next(); // consume opening quote
+
+        while let Some(ch) = self.peek() {
+            self.next(); // consume ch
+
+            if ch == quote_end {
+                if self.peek() == Some(quote_end) {
+                    self.next(); // consume escaped quote
+                    s.push(quote_end);
+                } else {
+                    return Ok(s);
+                }
+            } else {
+                s.push(ch);
+            }
+        }
+
+        self.error(format!(
+            "Expected close delimiter '{}' before EOF.",
+            quote_end
+        ))
+    }
+
     /// Tokenize dollar preceded value (i.e: a string/placeholder)
     fn tokenize_dollar_preceded_value(&mut self) -> Result<Token, TokenizerError> {
         let mut s = String::new();
@@ -663,76 +685,57 @@ impl<'a> Tokenizer<'a> {
         self.next();
 
         if let Some('$') = self.peek() {
+            // syntax: $$......$$
             self.next();
 
-            let mut is_terminated = false;
-            let mut prev: Option<char> = None;
-
-            while let Some(ch) = self.peek() {
-                if prev == Some('$') {
-                    if ch == '$' {
+            let delimiter = "$$";
+            while self.peek().is_some() {
+                if self.starts_with(delimiter) {
+                    for _ in delimiter.chars() {
                         self.next();
-                        is_terminated = true;
-                        break;
-                    } else {
-                        s.push('$');
-                        s.push(ch);
                     }
-                } else if ch != '$' {
-                    s.push(ch);
+                    return Ok(Token::DollarQuotedString(DollarQuotedString {
+                        value: s,
+                        tag: None,
+                    }));
                 }
-
-                prev = Some(ch);
-                self.next();
+                s.push(self.next().unwrap());
             }
 
-            return if self.peek().is_none() && !is_terminated {
-                self.error("Unterminated dollar-quoted string")
-            } else {
-                Ok(Token::DollarQuotedString(DollarQuotedString {
-                    value: s,
-                    tag: None,
-                }))
-            };
+            self.error("Unterminated dollar-quoted string")
         } else {
-            value.push_str(&self.peeking_take_while(|ch| ch.is_alphanumeric() || ch == '_'));
+            // syntax: $SomeTag$.....$SomeTag$
+            value.push_str(&self.peeking_take_while(|ch| ch.is_ascii_alphanumeric() || ch == '_'));
 
             if let Some('$') = self.peek() {
-                self.next();
-                s.push_str(&self.peeking_take_while(|ch| ch != '$'));
-
-                match self.peek() {
-                    Some('$') => {
-                        self.next();
-                        for c in value.chars() {
-                            let next_char = self.next();
-                            if Some(c) != next_char {
-                                return self.error(format!(
-                                    "Unterminated dollar-quoted string at or near \"{}\"",
-                                    value
-                                ));
-                            }
-                        }
-
-                        if let Some('$') = self.peek() {
-                            self.next();
-                        } else {
-                            return self.error("Unterminated dollar-quoted string, expected $");
-                        }
-                    }
-                    _ => {
-                        return self.error("Unterminated dollar-quoted, expected $");
-                    }
+                if !is_valid_dollar_quote_tag(&value) {
+                    return self.error(format!("Invalid dollar-quoted string tag \"{}\"", value));
                 }
+
+                self.next();
+
+                let delimiter = format!("${}$", value);
+                while self.peek().is_some() {
+                    if self.starts_with(&delimiter) {
+                        for _ in delimiter.chars() {
+                            self.next();
+                        }
+                        return Ok(Token::DollarQuotedString(DollarQuotedString {
+                            value: s,
+                            tag: Some(value),
+                        }));
+                    }
+                    s.push(self.next().unwrap());
+                }
+
+                self.error(format!(
+                    "Unterminated dollar-quoted string at or near \"{}\"",
+                    value
+                ))
             } else {
-                return Ok(Token::Parameter(value));
+                Ok(Token::Parameter(value))
             }
         }
-
-        Ok(Token::DollarQuotedString(DollarQuotedString {
-            value: s,
-            tag: if value.is_empty() { None } else { Some(value) },
-        }))
     }
 
     fn error<R>(&self, message: impl Into<String>) -> Result<R, TokenizerError> {
@@ -996,10 +999,20 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps)]
     fn consume_and_return(&mut self, t: Token) -> Result<Option<Token>, TokenizerError> {
         self.next();
         Ok(Some(t))
+    }
+
+    fn starts_with(&self, expected: &str) -> bool {
+        let mut chars = self.chars.clone();
+        for expected_char in expected.chars() {
+            if chars.next() != Some(expected_char) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Read from `self` until `predicate` returns `false` or EOF is hit.
@@ -1039,6 +1052,12 @@ fn is_identifier_start(ch: char) -> bool {
 /// Determine if a character is a valid unquoted identifier character
 fn is_identifier_part(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
+}
+
+fn is_valid_dollar_quote_tag(tag: &str) -> bool {
+    let mut chars = tag.chars();
+    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 #[cfg(test)]
@@ -1128,6 +1147,36 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("a\"b", Some('"')),
+            Token::Comma,
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("x\"\"y", Some('"')),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn display_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        assert_eq!(
+            tokens.iter().map(ToString::to_string).collect::<String>(),
+            sql
+        );
+    }
+
+    #[test]
     fn tokenize_bitwise_op() {
         let sql = String::from("SELECT one | two ^ three");
         let mut tokenizer = Tokenizer::new(&sql);
@@ -1146,6 +1195,74 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::make_word("three", None),
         ];
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_with_inner_different_tag() {
+        let sql = String::from("SELECT $foo$the content with $bar$nested$bar$ usage$foo$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("foo".into()),
+                value: "the content with $bar$nested$bar$ usage".into(),
+            }),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_with_identifier_tag() {
+        let sql = String::from("SELECT $_tag_1$hello$_tag_1$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("_tag_1".into()),
+                value: "hello".into(),
+            }),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_dollar_quoted_string_with_invalid_tag() {
+        let sql = String::from("SELECT $1tag$hello$1tag$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let error = tokenizer.tokenize_with_whitespace().unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid dollar-quoted string tag \"1tag\"")
+        );
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_followed_by_alias_with_dollar() {
+        let sql = String::from("SELECT $go$o$not nesting just $ sign$go$o$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("go".into()),
+                value: "o$not nesting just $ sign".into(),
+            }),
+            Token::make_word("o$", None),
+        ];
+
         compare(expected, tokens);
     }
 

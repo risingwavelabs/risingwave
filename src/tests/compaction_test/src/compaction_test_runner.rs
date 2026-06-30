@@ -418,7 +418,7 @@ async fn start_replay(
             // pop the latest epoch
             replayed_epochs.pop();
             let mut epochs = vec![committed_epoch];
-            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1).into_iter());
+            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1));
             tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, table_to_check).await?;

@@ -14,17 +14,12 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
-#![feature(negative_impls)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(if_let_guard)]
-#![feature(assert_matches)]
 #![feature(box_patterns)]
-#![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
-#![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
@@ -238,6 +233,7 @@ pub fn start(
         let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
+        let tls_config = TlsConfig::new_default().unwrap();
 
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());
@@ -257,14 +253,15 @@ pub fn start(
             frontend_config.max_single_query_size_bytes,
         ));
 
-        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
+        let webhook_service =
+            crate::webhook::WebhookService::new(webhook_listen_addr, tls_config.clone());
         let _task = tokio::spawn(webhook_service.serve());
         pg_serve(
             &listen_addr,
             tcp_keepalive,
             session_mgr.clone(),
             ConnectionContext {
-                tls_config: TlsConfig::new_default(),
+                tls_config,
                 redact_sql_option_keywords: Some(redact_sql_option_keywords),
                 message_memory_manager,
             },

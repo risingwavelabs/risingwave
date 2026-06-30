@@ -68,11 +68,11 @@ impl Schedule {
         })
     }
 
-    async fn do_init(self) -> anyhow::Result<Self> {
+    fn do_init(self) -> anyhow::Result<Self> {
         init_env();
 
         self.file_manager.init()?;
-        self.psql.init().await?;
+        self.psql.init()?;
 
         Ok(self)
     }
@@ -89,12 +89,7 @@ impl Schedule {
         for line in reader.lines() {
             let line = line?;
             if line.starts_with("test: ") {
-                schedules.push(
-                    line[5..]
-                        .split_whitespace()
-                        .map(ToString::to_string)
-                        .collect(),
-                );
+                schedules.push(line[5..].split_whitespace().map(str::to_owned).collect());
                 debug!("Add one parallel schedule: {:?}", schedules.last().unwrap());
             }
         }
@@ -109,7 +104,7 @@ impl Schedule {
     /// `Ok` If no error happens and all outputs are expected,
     /// `Err` If any error happens, or some outputs are unexpected. Details are logged in log file.
     pub(crate) async fn run(self) -> anyhow::Result<()> {
-        let s = self.do_init().await?;
+        let s = self.do_init()?;
         s.do_run().await
     }
 

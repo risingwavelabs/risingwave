@@ -564,6 +564,7 @@ impl stream_plan::PbStreamScanType {
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
             PbStreamScanType::SnapshotBackfill => !is_online,
+            #[expect(deprecated)]
             PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
                 false
             }

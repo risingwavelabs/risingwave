@@ -21,17 +21,36 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile" false 0
+sink_test_env_setup "$profile" --sleep-duration 0
 
-echo "--- create doris table"
-sleep 10 # Wait for doris to start. TODO: shall we use `service_healthy` condition in docker-compose.yml?
-mysql -uroot -P 9030 -h doris-server -e "CREATE database demo;use demo;
-CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean,v10 json) UNIQUE KEY(\`v1\`)
+create_doris_table() {
+  local ddl
+
+  ddl="CREATE DATABASE IF NOT EXISTS demo;
+USE demo;
+DROP TABLE IF EXISTS demo_bhv_table;
+CREATE TABLE demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean,v10 json) UNIQUE KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) BUCKETS 1
 PROPERTIES (
     \"replication_allocation\" = \"tag.location.default: 1\"
-);
-CREATE USER 'users'@'%' IDENTIFIED BY '123456';
+);"
+
+  echo "--- create doris table"
+  for _ in $(seq 1 60); do
+    if mysql -uroot -P 9030 -h doris-server -e "$ddl"; then
+      return
+    fi
+    mysql -uroot -P 9030 -h doris-server -e "SHOW BACKENDS;" || true
+    sleep 2
+  done
+
+  echo "Doris backend did not become ready for table creation in time"
+  mysql -uroot -P 9030 -h doris-server -e "SHOW BACKENDS;" || true
+  exit 1
+}
+
+create_doris_table
+mysql -uroot -P 9030 -h doris-server -e "CREATE USER 'users'@'%' IDENTIFIED BY '123456';
 GRANT ALL ON *.* TO 'users'@'%';"
 sleep 2
 

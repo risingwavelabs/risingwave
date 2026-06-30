@@ -25,6 +25,21 @@ const KEYWORD_ADAPTIVE: &str = "adaptive";
 const KEYWORD_AUTO: &str = "auto";
 const KEYWORD_DEFAULT_STRATEGY: &str = "default";
 
+const fn non_zero_u64(parallelism: u64) -> NonZeroU64 {
+    match NonZeroU64::new(parallelism) {
+        Some(parallelism) => parallelism,
+        None => panic!("parallelism must be non-zero"),
+    }
+}
+
+const fn bounded_parallelism(parallelism: u64) -> ConfigParallelism {
+    ConfigParallelism::Bounded(non_zero_u64(parallelism))
+}
+
+pub const DEFAULT_GLOBAL_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(64);
+pub const DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(4);
+pub const DEFAULT_SINK_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(8);
+
 #[derive(Copy, Debug, Clone, PartialEq, Default)]
 pub enum ConfigParallelism {
     #[default]
@@ -331,6 +346,22 @@ mod tests {
         assert_eq!(
             parallelism,
             ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parallelism_default_constants() {
+        assert_eq!(
+            DEFAULT_GLOBAL_STREAMING_PARALLELISM,
+            ConfigParallelism::Bounded(NonZeroU64::new(64).unwrap())
+        );
+        assert_eq!(
+            DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
+            ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap())
+        );
+        assert_eq!(
+            DEFAULT_SINK_STREAMING_PARALLELISM,
+            ConfigParallelism::Bounded(NonZeroU64::new(8).unwrap())
         );
     }
 

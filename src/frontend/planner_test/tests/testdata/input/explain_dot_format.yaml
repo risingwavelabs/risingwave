@@ -48,3 +48,11 @@
     explain (distsql, format dot) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
   expected_outputs:
     - explain_output
+- name: test dot output format (distsql, unaligned join)
+  sql: |
+    set streaming_enable_unaligned_join = true;
+    create table t1(v1 int primary key);
+    create table t2(v2 int primary key);
+    explain (distsql, format dot) create materialized view m1 as select * from t1 join t2 on t1.v1 = t2.v2;
+  expected_outputs:
+    - explain_output

@@ -105,11 +105,9 @@ impl MinOverlappingPicker {
                     }
                     target_level_overlap_range.end = range.end;
                 }
-                let score = if select_file_size == 0 {
-                    total_file_size
-                } else {
-                    total_file_size * 100 / select_file_size
-                };
+                let score = (total_file_size * 100)
+                    .checked_div(select_file_size)
+                    .unwrap_or(total_file_size);
                 end_idx = idx + 1;
                 if score < min_score
                     || (score == min_score && select_file_size < min_score_select_file_size)

@@ -1326,4 +1326,20 @@ BEGIN
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
+
+    #[test]
+    fn test_build_create_pipe_sql_stage_has_trailing_slash() {
+        let sql = build_create_pipe_sql(
+            "reservations_intermediate",
+            "test_db",
+            "test_schema",
+            "RW_S3_STAGE",
+            "reservations_pipe",
+            "reservations",
+        );
+        assert!(
+            sql.contains(r#"FROM @"test_db"."test_schema"."RW_S3_STAGE"/reservations/ "#),
+            "unexpected pipe sql: {sql}"
+        );
+    }
 }
