@@ -593,21 +593,23 @@ impl MetaMetrics {
         );
         let version_checkpoint_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let hummock_manager_lock_time = register_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
-            &["lock_name", "lock_type"],
-            registry
-        )
-        .unwrap();
+            exponential_buckets(0.02, 2.5, 10).unwrap() // max 76s
+        );
+        let hummock_manager_lock_time =
+            register_histogram_vec_with_registry!(opts, &["lock_name", "lock_type"], registry)
+                .unwrap();
 
-        let hummock_manager_real_process_time = register_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "meta_hummock_manager_real_process_time",
             "latency for hummock manager to really process the request",
-            &["method"],
-            registry
-        )
-        .unwrap();
+            exponential_buckets(0.02, 2.5, 10).unwrap() // max 76s
+        );
+        let hummock_manager_real_process_time =
+            register_histogram_vec_with_registry!(opts, &["method", "lock_name"], registry)
+                .unwrap();
 
         let worker_num = register_int_gauge_vec_with_registry!(
             "worker_num",
