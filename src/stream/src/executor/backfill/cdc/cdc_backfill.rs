@@ -580,7 +580,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
-                                    if can_start_new_snapshot {
+                                    //
+                                    // We check !needs_rebuild_snapshot to maintain the legacy behavior of continuing the 'backfill_loop upon receiving a Mutation::Throttle.
+                                    if !needs_rebuild_snapshot && can_start_new_snapshot {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
