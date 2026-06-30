@@ -1,3 +1,28 @@
+//! Meta-store schema migrations.
+//!
+//! # Atomicity on SQLite and MySQL
+//!
+//! `sea-orm-migration` 1.x only wraps migration execution in a database transaction on
+//! **Postgres** (see `exec_with_connection` in the upstream migrator).  On SQLite and MySQL
+//! every migration's `up()` / `down()` steps run on the raw connection with no surrounding
+//! transaction.
+//!
+//! **Consequence**: a multi-step migration that crashes mid-way is not recorded in
+//! `seaql_migrations`, so it re-runs from the top on the next start.  If the steps are not
+//! idempotent or atomic the meta store can end up in an unrecoverable state.
+//!
+//! **Convention** (see also: <https://github.com/risingwavelabs/risingwave/issues/26046>)
+//!
+//! - A migration that performs **only one** DDL/DML step on SQLite is safe by default.
+//! - A migration that performs **two or more** steps on SQLite (e.g. copy data → drop →
+//!   rename) **must** wrap its SQLite branch in a transaction using [`utils::sqlite_txn`].
+//! - MySQL does not support transactional DDL (every DDL implicitly commits), so MySQL
+//!   migrations must instead be written to be **idempotent and re-runnable** (use
+//!   `IF EXISTS` / `IF NOT EXISTS`, check before altering, etc.).
+//!
+//! TODO: when we upgrade to `sea-orm-migration` ≥ 2.0, migrate to the per-migration
+//! `MigrationTrait::use_transaction()` API and remove the manual `sqlite_txn` calls.
+
 #![allow(clippy::enum_variant_names)]
 
 pub use sea_orm_migration::MigrationStatus;

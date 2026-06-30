@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::*;
 
+use crate::utils::sqlite_txn;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -56,10 +58,12 @@ impl MigrationTrait for Migration {
                     .await?;
             }
             sea_orm::DatabaseBackend::Sqlite => {
-                // sqlite is not for prod usage, so recreating the table is fine.
-                manager
-                    .drop_table(
-                        sea_orm_migration::prelude::Table::drop()
+                // SQLite can't ALTER TABLE to change a PK, so recreate the table.
+                // Wrap in a transaction so a crash between drop and create doesn't leave
+                // the table missing on restart. See sqlite_txn docs for details.
+                sqlite_txn(manager, |txn| async move {
+                    txn.drop_table(
+                        Table::drop()
                             .table(HummockEpochToVersion::Table)
                             .if_exists()
                             .cascade()
@@ -67,8 +71,7 @@ impl MigrationTrait for Migration {
                     )
                     .await?;
 
-                manager
-                    .create_table(
+                    txn.create_table(
                         Table::create()
                             .table(HummockEpochToVersion::Table)
                             .if_not_exists()
@@ -95,6 +98,10 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
+
+                    Ok(())
+                })
+                .await?;
             }
         }
         Ok(())
@@ -152,9 +159,9 @@ impl MigrationTrait for Migration {
                     .await?;
             }
             sea_orm::DatabaseBackend::Sqlite => {
-                manager
-                    .drop_table(
-                        sea_orm_migration::prelude::Table::drop()
+                sqlite_txn(manager, |txn| async move {
+                    txn.drop_table(
+                        Table::drop()
                             .table(HummockEpochToVersion::Table)
                             .if_exists()
                             .cascade()
@@ -162,8 +169,7 @@ impl MigrationTrait for Migration {
                     )
                     .await?;
 
-                manager
-                    .create_table(
+                    txn.create_table(
                         Table::create()
                             .table(HummockEpochToVersion::Table)
                             .if_not_exists()
@@ -181,6 +187,10 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
+
+                    Ok(())
+                })
+                .await?;
             }
         }
 
