@@ -51,7 +51,7 @@ fn fetch_schema_info(
     let reader = session.env().catalog_reader().read_guard();
 
     let (table_def, schema_name) =
-        reader.get_any_table_by_name(db_name.as_str(), schema_path, &real_table_name)?;
+        reader.get_created_table_by_name(db_name.as_str(), schema_path, &real_table_name)?;
     session.check_privilege_for_drop_alter(schema_name, &**table_def)?;
 
     let Some(source_id) = table_def.associated_source_id else {
