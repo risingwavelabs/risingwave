@@ -126,6 +126,30 @@ WHERE n.nspname = 'comment_on_schema'
 database-qualified column comment
 
 statement ok
+create materialized view dev.comment_on_schema.commented_mv as
+select col from dev.comment_on_schema.commented_table;
+
+statement error cross-database references are not implemented
+comment on column another_database.comment_on_schema.commented_mv.col is 'cross-database materialized view column comment';
+
+statement ok
+comment on column dev.comment_on_schema.commented_mv.col is 'materialized view column comment';
+
+query T
+SELECT d.description
+FROM pg_catalog.pg_description d
+JOIN pg_catalog.pg_class c ON d.objoid = c.oid
+JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+WHERE n.nspname = 'comment_on_schema'
+    AND c.relname = 'commented_mv'
+    AND d.objsubid = 1;
+----
+materialized view column comment
+
+statement ok
+drop materialized view dev.comment_on_schema.commented_mv;
+
+statement ok
 drop table dev.comment_on_schema.commented_table;
 
 statement ok
