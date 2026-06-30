@@ -1097,7 +1097,7 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+            if ctx.backfill_type().is_snapshot_backfill() {
                 return Err(RwError::from(ErrorCode::NotSupported(
                     "Temporal join with snapshot backfill not supported".into(),
                     "Please use arrangement backfill".into(),

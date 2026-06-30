@@ -410,12 +410,22 @@ impl StreamJobFragments {
     }
 }
 
+pub type TableLogEpochs = Vec<(Vec<u64>, u64)>;
+pub type UpstreamTableLogEpochs = HashMap<TableId, TableLogEpochs>;
+pub type SinceTimestampResolvedEpoch = (u64, TableLogEpochs);
+
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
     /// `table_id` -> `Some(snapshot_backfill_epoch)`
     /// The `snapshot_backfill_epoch` should be None at the beginning, and be filled
     /// by global barrier worker when handling the command.
     pub upstream_mv_table_id_to_backfill_epoch: HashMap<TableId, Option<u64>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SinceEpochInfo {
+    pub provided_since_epoch: u64,
+    pub resolved: Option<SinceTimestampResolvedEpoch>,
 }
 
 #[derive(Debug, Clone)]
@@ -428,7 +438,10 @@ pub struct BatchRefreshInfo {
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
-    SnapshotBackfill(SnapshotBackfillInfo),
+    SnapshotBackfill {
+        snapshot_backfill_info: SnapshotBackfillInfo,
+        since_epoch: Option<SinceEpochInfo>,
+    },
     BatchRefresh(BatchRefreshInfo),
 }
 
@@ -847,7 +860,7 @@ impl Command {
             PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
                 assert!(!matches!(
                     job_type,
-                    CreateStreamingJobType::SnapshotBackfill(_)
+                    CreateStreamingJobType::SnapshotBackfill { .. }
                         | CreateStreamingJobType::BatchRefresh(_)
                 ));
                 let table_fragments = &info.stream_job_fragments;
@@ -1043,8 +1056,11 @@ impl Command {
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
-                let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+                let subscriptions_to_add = {
+                    if let CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    }
                     | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
                         snapshot_backfill_info,
                         ..
@@ -1062,7 +1078,8 @@ impl Command {
                             .collect()
                     } else {
                         Default::default()
-                    };
+                    }
+                };
                 let backfill_nodes_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()

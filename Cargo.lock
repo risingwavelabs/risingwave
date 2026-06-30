@@ -12807,6 +12807,7 @@ dependencies = [
  "paste",
  "risingwave_expr_impl",
  "risingwave_frontend",
+ "risingwave_license",
  "risingwave_sqlparser",
  "serde",
  "serde_with",

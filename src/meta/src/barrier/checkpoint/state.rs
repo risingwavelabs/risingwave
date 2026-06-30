@@ -38,7 +38,6 @@ use risingwave_pb::stream_plan::{
 };
 use tracing::warn;
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
@@ -69,6 +68,7 @@ use crate::stream::{
     GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
+use crate::{MetaError, MetaResult};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -491,7 +491,11 @@ impl DatabaseCheckpointControl {
             None => self.apply_simple_command(None, "barrier"),
             Some(Command::CreateStreamingJob {
                 mut info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(mut snapshot_backfill_info),
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        mut snapshot_backfill_info,
+                        since_epoch,
+                    },
                 cross_db_snapshot_backfill_info,
             }) => {
                 let ensembles = resolve_no_shuffle_ensembles(
@@ -514,7 +518,25 @@ impl DatabaseCheckpointControl {
                 )?;
                 {
                     assert!(!self.state.is_paused());
-                    let snapshot_epoch = barrier_info.prev_epoch();
+                    let (snapshot_epoch, since_timestamp_upstream_log_epochs) =
+                        if let Some(since_epoch) = &since_epoch {
+                            let (snapshot_epoch, log_epochs) =
+                                since_epoch.resolved.as_ref().ok_or_else(|| {
+                            MetaError::from(anyhow::anyhow!(
+                                "since_timestamp epoch has not been resolved for snapshot backfill"
+                            ))
+                        })?;
+                            (
+                                *snapshot_epoch,
+                                Some((
+                                    log_epochs,
+                                    to_partial_graph_id(self.database_id, None),
+                                    barrier_info.prev_epoch(),
+                                )),
+                            )
+                        } else {
+                            (barrier_info.prev_epoch(), None)
+                        };
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -539,7 +561,6 @@ impl DatabaseCheckpointControl {
                         .keys()
                         .cloned()
                         .collect();
-
                     // Build edges first (needed for no-shuffle mapping used in split resolution)
                     let mut edges = self.database_info.build_edge(
                         Some((&info, true)),
@@ -575,6 +596,7 @@ impl DatabaseCheckpointControl {
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         partial_graph_manager,
                         &mut edges,
@@ -602,7 +624,10 @@ impl DatabaseCheckpointControl {
 
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
-                        &CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                        &CreateStreamingJobType::SnapshotBackfill {
+                            snapshot_backfill_info,
+                            since_epoch,
+                        },
                         [],
                         self.state.is_paused(),
                         &mut edges,
@@ -845,7 +870,7 @@ impl DatabaseCheckpointControl {
                 if old_sink_job_id.is_some()
                     && matches!(
                         job_type,
-                        CreateStreamingJobType::SnapshotBackfill(_)
+                        CreateStreamingJobType::SnapshotBackfill { .. }
                             | CreateStreamingJobType::BatchRefresh(_)
                     )
                 {

@@ -15,17 +15,18 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::Op;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::gap_fill::{
     FillStrategy, apply_interpolation_step, calculate_interpolation_step,
 };
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::must_match;
+use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{CheckedAdd, Interval, ToOwnedDatum};
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
 use tracing::warn;
 
-use super::sort_buffer::SortBuffer;
 use crate::executor::prelude::*;
 
 pub struct EowcGapFillExecutor<S: StateStore> {
@@ -39,13 +40,13 @@ pub struct EowcGapFillExecutorArgs<S: StateStore> {
     pub input: Executor,
 
     pub schema: Schema,
-    pub buffer_table: StateTable<S>,
     pub prev_row_table: StateTable<S>,
     pub chunk_size: usize,
     pub time_column_index: usize,
     pub fill_columns: HashMap<usize, FillStrategy>,
     pub gap_interval: NonStrictExpression,
     pub high_gap_fill_amplification_threshold: usize,
+    pub partition_by_indices: Vec<usize>,
 }
 
 pub struct GapFillMetrics {
@@ -62,20 +63,21 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     schema: Schema,
-    buffer_table: StateTable<S>,
     prev_row_table: StateTable<S>,
     chunk_size: usize,
     time_column_index: usize,
     fill_columns: HashMap<usize, FillStrategy>,
     gap_interval: NonStrictExpression,
     high_gap_fill_amplification_threshold: usize,
+    partition_by_indices: Vec<usize>,
+    partition_col_mask: Vec<bool>,
 
     // Metrics
     metrics: GapFillMetrics,
 }
 
-struct ExecutionVars<S: StateStore> {
-    buffer: SortBuffer<S>,
+struct ExecutionVars {
+    staging_prev_rows: HashMap<OwnedRow, OwnedRow>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -83,6 +85,7 @@ impl<S: StateStore> ExecutorInner<S> {
         prev_row: &OwnedRow,
         curr_row: &OwnedRow,
         time_column_index: usize,
+        partition_col_mask: &[bool],
         fill_columns: &HashMap<usize, FillStrategy>,
         interval: risingwave_common::types::Interval,
         generation_context: &GapFillGenerationContext<'_>,
@@ -201,6 +204,8 @@ impl<S: StateStore> ExecutorInner<S> {
                         _ => unreachable!("Time column should be Timestamp or Timestamptz"),
                     };
                     Some(fill_time_scalar)
+                } else if partition_col_mask[col_idx] {
+                    prev_row.datum_at(col_idx).to_owned_datum()
                 } else if let Some(strategy) = fill_columns.get(&col_idx) {
                     // Apply the fill strategy for this column
                     match strategy {
@@ -277,6 +282,10 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                 .gap_fill_generated_rows_count
                 .with_guarded_label_values(&[&actor_id, &fragment_id]),
         };
+        let mut partition_col_mask = vec![false; args.schema.len()];
+        for &idx in &args.partition_by_indices {
+            partition_col_mask[idx] = true;
+        }
 
         Self {
             input: args.input,
@@ -284,16 +293,55 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
                 schema: args.schema,
-                buffer_table: args.buffer_table,
                 prev_row_table: args.prev_row_table,
                 chunk_size: args.chunk_size,
                 time_column_index: args.time_column_index,
                 fill_columns: args.fill_columns,
                 gap_interval: args.gap_interval,
                 high_gap_fill_amplification_threshold: args.high_gap_fill_amplification_threshold,
+                partition_by_indices: args.partition_by_indices,
+                partition_col_mask,
                 metrics: gap_fill_metrics,
             },
         }
+    }
+
+    async fn load_prev_row_for_partition(
+        partition_by_indices: &[usize],
+        partition_key: &OwnedRow,
+        prev_row_table: &StateTable<S>,
+        staging_prev_rows: &mut HashMap<OwnedRow, OwnedRow>,
+    ) -> StreamExecutorResult<Option<OwnedRow>> {
+        if let Some(row) = staging_prev_rows.get(partition_key) {
+            return Ok(Some(row.clone()));
+        }
+
+        let row = if partition_by_indices.is_empty() {
+            prev_row_table.get_from_one_row_table().await?
+        } else {
+            prev_row_table.get_row(partition_key).await?
+        };
+
+        if let Some(row) = row {
+            staging_prev_rows.insert(partition_key.clone(), row.clone());
+            Ok(Some(row))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn store_prev_row_for_partition(
+        partition_key: OwnedRow,
+        prev_row: Option<&OwnedRow>,
+        current_row: OwnedRow,
+        prev_row_table: &mut StateTable<S>,
+        staging_prev_rows: &mut HashMap<OwnedRow, OwnedRow>,
+    ) {
+        if let Some(old_row) = prev_row {
+            prev_row_table.delete(old_row);
+        }
+        prev_row_table.insert(&current_row);
+        staging_prev_rows.insert(partition_key, current_row);
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -308,7 +356,6 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
-        this.buffer_table.init_epoch(first_epoch).await?;
         this.prev_row_table.init_epoch(first_epoch).await?;
 
         // Calculate and validate gap interval once at initialization
@@ -324,30 +371,39 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
         }
 
         let mut vars = ExecutionVars {
-            buffer: SortBuffer::new(this.time_column_index, &this.buffer_table),
+            staging_prev_rows: HashMap::new(),
         };
-        let mut committed_prev_row: Option<OwnedRow> =
-            this.prev_row_table.get_from_one_row_table().await?;
-        let mut staging_prev_row = committed_prev_row.clone();
-
-        vars.buffer.refill_cache(None, &this.buffer_table).await?;
 
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(watermark @ Watermark { col_idx, .. })
-                    if col_idx == this.time_column_index =>
+                // Drop the time watermark: a late anchor makes gap fill back-fill below it.
+                // PARTITION BY column watermarks (if any) pass through unchanged.
+                Message::Watermark(watermark)
+                    if this.partition_by_indices.contains(&watermark.col_idx) =>
                 {
+                    yield Message::Watermark(watermark);
+                }
+                Message::Watermark(_) => continue,
+                Message::Chunk(chunk) => {
                     let mut chunk_builder =
                         StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
-                    #[for_await]
-                    for row in vars
-                        .buffer
-                        .consume(watermark.val.clone(), &mut this.buffer_table)
-                    {
-                        let current_row = row?;
-                        if let Some(p_row) = &staging_prev_row {
+                    for record in chunk.records() {
+                        let current_row =
+                            must_match!(record, Record::Insert { new_row } => new_row)
+                                .into_owned_row();
+                        let partition_key = (&current_row)
+                            .project(&this.partition_by_indices)
+                            .into_owned_row();
+                        let prev_row = Self::load_prev_row_for_partition(
+                            &this.partition_by_indices,
+                            &partition_key,
+                            &this.prev_row_table,
+                            &mut vars.staging_prev_rows,
+                        )
+                        .await?;
+                        if let Some(p_row) = &prev_row {
                             let generation_context = GapFillGenerationContext {
                                 metrics: &this.metrics,
                                 high_amplification_threshold: this
@@ -358,6 +414,7 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                                 p_row,
                                 &current_row,
                                 this.time_column_index,
+                                &this.partition_col_mask,
                                 &this.fill_columns,
                                 interval,
                                 &generation_context,
@@ -373,49 +430,37 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                         if let Some(chunk) = chunk_builder.append_row(Op::Insert, &current_row) {
                             yield Message::Chunk(chunk);
                         }
-                        staging_prev_row = Some(current_row);
+                        Self::store_prev_row_for_partition(
+                            partition_key,
+                            prev_row.as_ref(),
+                            current_row,
+                            &mut this.prev_row_table,
+                            &mut vars.staging_prev_rows,
+                        );
                     }
                     if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
-
-                    yield Message::Watermark(watermark);
-                }
-                Message::Watermark(_) => continue,
-                Message::Chunk(chunk) => {
-                    vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
-                    this.buffer_table.try_flush().await?;
+                    this.prev_row_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    if committed_prev_row != staging_prev_row {
-                        if let Some(old_row) = &committed_prev_row {
-                            this.prev_row_table.delete(old_row);
-                        }
-                        if let Some(new_row) = &staging_prev_row {
-                            this.prev_row_table.insert(new_row);
-                        }
-                    }
-
-                    let post_commit = this.buffer_table.commit(barrier.epoch).await?;
-                    this.prev_row_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
-
-                    committed_prev_row.clone_from(&staging_prev_row);
+                    let prev_row_post_commit = this.prev_row_table.commit(barrier.epoch).await?;
+                    // The prev-row state table is the source of truth after commit. Drop the
+                    // per-epoch cache so high-cardinality historical partitions do not remain
+                    // resident forever; the next active partition will be loaded on demand.
+                    vars.staging_prev_rows.clear();
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
                     yield Message::Barrier(barrier);
 
-                    if post_commit
+                    if prev_row_post_commit
                         .post_yield_barrier(update_vnode_bitmap)
                         .await?
                         .is_some()
                     {
-                        // `SortBuffer` may output data directly from its in-memory cache without
-                        // checking current vnode ownership. Therefore, we must rebuild the cache
-                        // whenever the vnode bitmap is updated to avoid emitting rows that no
-                        // longer belong to this actor.
-                        vars.buffer.refill_cache(None, &this.buffer_table).await?;
+                        // Vnode ownership changed. The cache is already cleared after commit, so
+                        // subsequent rows reload only partitions owned by the current actor.
+                        vars.staging_prev_rows.clear();
                     }
                 }
             }
@@ -426,7 +471,9 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::types::Interval;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
@@ -461,22 +508,6 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(4), DataType::Float64),
         ];
 
-        let table_pk_indices = vec![time_column_index];
-        let table_order_types = vec![OrderType::ascending()];
-        let buffer_table = StateTable::from_table_catalog(
-            &gen_pbtable_with_dist_key(
-                TableId::new(0),
-                table_columns.clone(),
-                table_order_types,
-                table_pk_indices,
-                0,
-                vec![],
-            ),
-            store.clone(),
-            None,
-        )
-        .await;
-
         let prev_row_pk_indices = vec![0];
         let prev_row_order_types = vec![OrderType::ascending()];
         let prev_row_table = StateTable::from_table_catalog(
@@ -499,13 +530,64 @@ mod tests {
             actor_ctx: ActorContext::for_test(123),
             schema: source.schema().clone(),
             input: source,
-            buffer_table,
             prev_row_table,
             chunk_size: 1024,
             time_column_index,
             fill_columns,
             gap_interval,
             high_gap_fill_amplification_threshold: 2048,
+            partition_by_indices: vec![],
+        });
+
+        (tx, gap_fill_executor.boxed().execute())
+    }
+
+    async fn create_partitioned_executor<S: StateStore>(
+        store: S,
+    ) -> (MessageSender, BoxedMessageStream) {
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Timestamp),
+            Field::unnamed(DataType::Int64),
+        ]);
+        let input_stream_key = vec![0, 1];
+
+        let table_columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Timestamp),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+        ];
+
+        let prev_row_table = StateTable::from_table_catalog(
+            &gen_pbtable_with_dist_key(
+                TableId::new(11),
+                table_columns,
+                vec![OrderType::ascending()],
+                vec![0],
+                0,
+                vec![0],
+            ),
+            store,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+        )
+        .await;
+
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(input_schema, input_stream_key);
+        let gap_fill_executor = EowcGapFillExecutor::new(EowcGapFillExecutorArgs {
+            actor_ctx: ActorContext::for_test(123),
+            schema: source.schema().clone(),
+            input: source,
+            prev_row_table,
+            chunk_size: 1024,
+            time_column_index: 1,
+            fill_columns: HashMap::from([(2, FillStrategy::Locf)]),
+            gap_interval: NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Interval,
+                Some(Interval::from_days(1).into()),
+            )),
+            high_gap_fill_amplification_threshold: 2048,
+            partition_by_indices: vec![0],
         });
 
         (tx, gap_fill_executor.boxed().execute())
@@ -545,8 +627,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -575,7 +655,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -612,8 +691,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -642,7 +719,119 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
+    }
+
+    #[tokio::test]
+    async fn test_gap_fill_prev_row_reloaded_after_barrier() {
+        let store = MemoryStateStore::new();
+        let (mut tx, mut gap_fill_executor) = create_partitioned_executor(store).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        gap_fill_executor.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-01T00:00:00 10
+            + 1 2023-04-03T00:00:00 30",
+        ));
+        tx.push_watermark(
+            1,
+            DataType::Timestamp,
+            "2023-04-04 00:00:00"
+                .parse::<risingwave_common::types::Timestamp>()
+                .unwrap()
+                .into(),
+        );
+
+        let chunk = gap_fill_executor.expect_chunk().await;
+        let expected = StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-01T00:00:00 10
+            + 1 2023-04-02T00:00:00 10
+            + 1 2023-04-03T00:00:00 30",
+        );
+        assert_eq!(
+            chunk,
+            expected,
+            "\nactual:\n{}\nexpected:\n{}",
+            chunk.to_pretty(),
+            expected.to_pretty()
+        );
+        tx.push_barrier(test_epoch(2), false);
+        gap_fill_executor.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-05T00:00:00 50",
+        ));
+        tx.push_watermark(
+            1,
+            DataType::Timestamp,
+            "2023-04-06 00:00:00"
+                .parse::<risingwave_common::types::Timestamp>()
+                .unwrap()
+                .into(),
+        );
+
+        let chunk = gap_fill_executor.expect_chunk().await;
+        let expected = StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-04T00:00:00 30
+            + 1 2023-04-05T00:00:00 50",
+        );
+        assert_eq!(
+            chunk,
+            expected,
+            "\nactual:\n{}\nexpected:\n{}",
+            chunk.to_pretty(),
+            expected.to_pretty()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gap_fill_locf_partition_by() {
+        let store = MemoryStateStore::new();
+        let (mut tx, mut gap_fill_executor) = create_partitioned_executor(store).await;
+
+        tx.push_barrier(test_epoch(1), false);
+        gap_fill_executor.expect_barrier().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-01T00:00:00 10
+            + 2 2023-04-01T00:00:00 100
+            + 1 2023-04-03T00:00:00 30
+            + 2 2023-04-04T00:00:00 400",
+        ));
+
+        tx.push_int64_watermark(2, 0_i64);
+        tx.push_watermark(
+            1,
+            DataType::Timestamp,
+            "2023-04-05 00:00:00"
+                .parse::<risingwave_common::types::Timestamp>()
+                .unwrap()
+                .into(),
+        );
+
+        let chunk = gap_fill_executor.expect_chunk().await;
+        let expected = StreamChunk::from_pretty(
+            " I TS                  I
+            + 1 2023-04-01T00:00:00 10
+            + 2 2023-04-01T00:00:00 100
+            + 1 2023-04-02T00:00:00 10
+            + 1 2023-04-03T00:00:00 30
+            + 2 2023-04-02T00:00:00 100
+            + 2 2023-04-03T00:00:00 100
+            + 2 2023-04-04T00:00:00 400",
+        );
+        assert_eq!(
+            chunk,
+            expected,
+            "\nactual:\n{}\nexpected:\n{}",
+            chunk.to_pretty(),
+            expected.to_pretty()
+        );
     }
 
     #[tokio::test]
@@ -679,8 +868,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -709,7 +896,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -746,8 +932,6 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        gap_fill_executor.expect_watermark().await;
-
         tx.push_chunk(StreamChunk::from_pretty(
             " TS                  i   I    f     F
             + 2023-04-01T10:00:00 10 100 1.0 100.0
@@ -776,7 +960,6 @@ mod tests {
                 + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-        gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
@@ -810,6 +993,19 @@ mod tests {
             + 2023-04-05T10:00:00 50 200 5.0 200.0",
         ));
 
+        let chunk = gap_fill_executor.expect_chunk().await;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " TS                  i   I    f     F
+                + 2023-04-01T10:00:00 10 100 1.0 100.0
+                + 2023-04-02T10:00:00 10 125 1.0 100.0
+                + 2023-04-03T10:00:00 10 150 1.0 100.0
+                + 2023-04-04T10:00:00 10 175 1.0 100.0
+                + 2023-04-05T10:00:00 50 200 5.0 200.0",
+            )
+        );
+
         tx.push_barrier(test_epoch(2), false);
         gap_fill_executor.expect_barrier().await;
 
@@ -835,26 +1031,21 @@ mod tests {
                 .unwrap()
                 .into(),
         );
+        recovered_tx.push_chunk(StreamChunk::from_pretty(
+            " TS                  i   I    f     F
+            + 2023-04-08T10:00:00 80 500 8.0 500.0",
+        ));
 
         let chunk = recovered_gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
                 " TS                  i   I    f     F
-                + 2023-04-01T10:00:00 10 100 1.0 100.0
-                + 2023-04-02T10:00:00 10 125 1.0 100.0
-                + 2023-04-03T10:00:00 10 150 1.0 100.0
-                + 2023-04-04T10:00:00 10 175 1.0 100.0
-                + 2023-04-05T10:00:00 50 200 5.0 200.0"
+                + 2023-04-06T10:00:00 50 300 5.0 200.0
+                + 2023-04-07T10:00:00 50 400 5.0 200.0
+                + 2023-04-08T10:00:00 80 500 8.0 500.0"
             )
         );
-
-        recovered_gap_fill_executor.expect_watermark().await;
-
-        recovered_tx.push_chunk(StreamChunk::from_pretty(
-            " TS                  i   I    f     F
-            + 2023-04-08T10:00:00 80 500 8.0 500.0",
-        ));
 
         recovered_tx.push_barrier(test_epoch(3), false);
         recovered_gap_fill_executor.expect_barrier().await;
@@ -873,26 +1064,19 @@ mod tests {
         final_recovered_tx.push_barrier(test_epoch(3), false);
         final_recovered_gap_fill_executor.expect_barrier().await;
 
-        final_recovered_tx.push_watermark(
-            0,
-            DataType::Timestamp,
-            "2023-04-09T10:00:00"
-                .parse::<risingwave_common::types::Timestamp>()
-                .unwrap()
-                .into(),
-        );
+        final_recovered_tx.push_chunk(StreamChunk::from_pretty(
+            " TS                   i   I    f     F
+            + 2023-04-10T10:00:00 100 700 10.0 700.0",
+        ));
 
         let chunk = final_recovered_gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " TS                  i   I    f     F
-                + 2023-04-06T10:00:00 50 300 5.0 200.0
-                + 2023-04-07T10:00:00 50 400 5.0 200.0
-                + 2023-04-08T10:00:00 80 500 8.0 500.0"
+                " TS                   i   I    f     F
+                + 2023-04-09T10:00:00  80 600  8.0 500.0
+                + 2023-04-10T10:00:00 100 700 10.0 700.0"
             )
         );
-
-        final_recovered_gap_fill_executor.expect_watermark().await;
     }
 }

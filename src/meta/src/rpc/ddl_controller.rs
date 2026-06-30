@@ -169,6 +169,7 @@ pub enum DdlCommand {
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
         replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -463,6 +464,7 @@ impl DdlController {
                     if_not_exists,
                     refresh_interval_sec,
                     replace_sink,
+                    since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -472,6 +474,7 @@ impl DdlController {
                         if_not_exists,
                         refresh_interval_sec,
                         replace_sink,
+                        since_timestamp_epoch,
                     )
                     .await
                 }
@@ -1078,6 +1081,7 @@ impl DdlController {
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
         replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         let replace_sink_info = if let Some(old_sink_id) = replace_sink {
             let StreamingJob::Sink(sink) = &streaming_job else {
@@ -1191,6 +1195,7 @@ impl DdlController {
                 resource_type,
                 streaming_job_model,
                 replace_sink_info,
+                since_timestamp_epoch,
             )
             .await
         {
@@ -1245,6 +1250,7 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
         replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1271,6 +1277,7 @@ impl DdlController {
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
+                since_timestamp_epoch,
             )
             .await?;
         ctx.replace_sink = replace_sink;
@@ -1857,6 +1864,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
@@ -2033,6 +2041,7 @@ impl DdlController {
             streaming_job_model: streaming_job_model.clone(),
             replace_sink: None,
             refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
+            since_timestamp_epoch,
         };
 
         Ok((
