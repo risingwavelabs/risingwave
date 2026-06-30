@@ -1342,4 +1342,12 @@ END;"#;
             "unexpected pipe sql: {sql}"
         );
     }
+
+    #[test]
+    fn test_convert_snowflake_decimal_data_type() {
+        assert_eq!(
+            convert_snowflake_data_type(&DataType::Decimal).unwrap(),
+            "DECIMAL(38, 10)"
+        );
+    }
 }

@@ -996,3 +996,16 @@ fn build_copy_into_sql(
         credentials = credentials
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_redshift_decimal_data_type() {
+        assert_eq!(
+            convert_redshift_data_type(&DataType::Decimal).unwrap(),
+            "DECIMAL(38, 10)"
+        );
+    }
+}
