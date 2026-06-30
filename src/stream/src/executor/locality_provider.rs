@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::{Either as FutureEither, select};
-use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -37,12 +36,6 @@ use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
-type SnapshotStream = BoxStream<'static, StreamExecutorResult<Option<(VirtualNode, OwnedRow)>>>;
-
-enum BackfillInput {
-    Upstream(Option<StreamExecutorResult<Message>>),
-    Snapshot(Option<StreamExecutorResult<Option<(VirtualNode, OwnedRow)>>>),
-}
 
 /// Progress state for tracking backfill per vnode
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -225,16 +218,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     }
 
     /// Creates a snapshot stream that reads from state table in locality order
-    #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
+    #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
     async fn make_snapshot_stream(
         reader: FlushedStateTableReader<S>,
         backfill_state: LocalityBackfillState,
-    ) where
-        S: 'static,
-    {
+    ) {
         // Read from state table per vnode in locality order
-        let vnodes = reader.vnodes().iter_vnodes().collect_vec();
-        for vnode in vnodes {
+        for vnode in reader.vnodes().iter_vnodes() {
             let progress = backfill_state.get_progress(&vnode);
 
             let current_pos = match progress {
@@ -270,12 +260,9 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             pin_mut!(iter);
 
             while let Some(row) = iter.try_next().await? {
-                yield Some((vnode, row));
+                yield (vnode, row);
             }
         }
-
-        // Signal end of stream
-        yield None;
     }
 
     /// Persist backfill state to progress table
@@ -438,13 +425,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     }
 }
 
-impl<S: StateStore + 'static> Execute for LocalityProviderExecutor<S> {
+impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 
-impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
+impl<S: StateStore> LocalityProviderExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
@@ -511,12 +498,15 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                         }
 
                         // Commit state tables
-                        let post_commit1 = state_table.commit(epoch).await?;
-                        let post_commit2 = progress_table.commit(epoch).await?;
+                        barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(epoch)
+                            .await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(epoch)
+                            .await?;
 
                         yield Message::Barrier(barrier);
-                        post_commit1.post_yield_barrier(None).await?;
-                        post_commit2.post_yield_barrier(None).await?;
 
                         // Start backfill when StartFragmentBackfill mutation is received
                         if start_backfill {
@@ -576,9 +566,9 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                 .collect();
 
             let snapshot_reader = state_table.flushed_snapshot_reader();
-            let mut snapshot_stream: SnapshotStream =
-                Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone()).boxed();
-            let mut upstream_finished = false;
+            let snapshot_stream =
+                Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone());
+            pin_mut!(snapshot_stream);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -587,22 +577,14 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                 // Prefer upstream so a ready barrier can pause snapshot output promptly, while
                 // keeping the snapshot stream itself alive across barriers with no upstream data.
                 let barrier = loop {
-                    let input = if upstream_finished {
-                        BackfillInput::Snapshot(snapshot_stream.next().await)
-                    } else {
-                        let upstream_next = upstream.next();
-                        let snapshot_next = snapshot_stream.next();
-                        pin_mut!(upstream_next);
-                        pin_mut!(snapshot_next);
+                    let upstream_next = upstream.next();
+                    let mut snapshot_stream_ref = snapshot_stream.as_mut();
+                    let snapshot_next = snapshot_stream_ref.next();
+                    pin_mut!(upstream_next);
+                    pin_mut!(snapshot_next);
 
-                        match select(upstream_next, snapshot_next).await {
-                            FutureEither::Left((msg, _)) => BackfillInput::Upstream(msg),
-                            FutureEither::Right((msg, _)) => BackfillInput::Snapshot(msg),
-                        }
-                    };
-
-                    match input {
-                        BackfillInput::Upstream(msg) => match msg.transpose()? {
+                    match select(upstream_next, snapshot_next).await {
+                        FutureEither::Left((msg, _)) => match msg.transpose()? {
                             Some(Message::Barrier(barrier)) => {
                                 // Process the barrier after draining the snapshot builders.
                                 break barrier;
@@ -615,11 +597,14 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                                 // Ignore watermark during backfill.
                             }
                             None => {
-                                upstream_finished = true;
+                                return Err(anyhow::anyhow!(
+                                    "locality provider upstream ended unexpectedly during backfill"
+                                )
+                                .into());
                             }
                         },
-                        BackfillInput::Snapshot(msg) => match msg.transpose()? {
-                            Some(Some((vnode, row))) => {
+                        FutureEither::Right((msg, _)) => match msg.transpose()? {
+                            Some((vnode, row)) => {
                                 // Use builder to batch rows efficiently
                                 let builder = builders.get_mut(&vnode).unwrap();
                                 if let Some(data_chunk) = builder.append_one_row(row) {
@@ -636,7 +621,7 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                                 // If append_one_row returns None, row is buffered but no chunk is produced yet
                                 // Progress will be updated when the builder is consumed later
                             }
-                            Some(None) | None => {
+                            None => {
                                 // End of the snapshot read stream.
                                 // Consume remaining rows in the builders.
                                 for (vnode, builder) in &mut builders {
@@ -702,7 +687,10 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                 }
 
                 let barrier_epoch = barrier.epoch;
-                let post_commit1 = state_table.commit(barrier_epoch).await?;
+                barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+                state_table
+                    .commit_assert_no_update_vnode_bitmap(barrier_epoch)
+                    .await?;
 
                 // Update progress with current epoch and snapshot read count
                 // Report both consumed rows and buffered rows separately for precise progress
@@ -726,7 +714,9 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
 
                 // Persist backfill progress
                 Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
-                let post_commit2 = progress_table.commit(barrier_epoch).await?;
+                progress_table
+                    .commit_assert_no_update_vnode_bitmap(barrier_epoch)
+                    .await?;
 
                 metrics
                     .backfill_snapshot_read_row_count
@@ -736,13 +726,12 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 yield Message::Barrier(barrier);
-                post_commit1.post_yield_barrier(None).await?;
-                post_commit2.post_yield_barrier(None).await?;
 
                 if should_refresh_snapshot {
-                    snapshot_stream =
-                        Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone())
-                            .boxed();
+                    snapshot_stream.set(Self::make_snapshot_stream(
+                        snapshot_reader.clone(),
+                        backfill_state.clone(),
+                    ));
                 }
             }
         }
@@ -754,6 +743,8 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
             while let Some(Ok(msg)) = upstream.next().await {
                 match msg {
                     Message::Barrier(barrier) => {
+                        barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+
                         // no-op commit state table
                         state_table
                             .commit_assert_no_update_vnode_bitmap(barrier.epoch)
@@ -788,10 +779,11 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
 
                         // Persist final state
                         Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
-                        let post_commit = progress_table.commit(barrier.epoch).await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
 
                         yield Message::Barrier(barrier);
-                        post_commit.post_yield_barrier(None).await?;
                         break; // Exit the loop after processing the barrier
                     }
                     Message::Chunk(chunk) => {
@@ -813,6 +805,8 @@ impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
 
             match msg {
                 Message::Barrier(barrier) => {
+                    barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+
                     // Commit state tables but don't modify them
                     state_table
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)

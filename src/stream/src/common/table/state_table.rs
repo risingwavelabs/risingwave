@@ -21,6 +21,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use educe::Educe;
 use either::Either;
 use foyer::Hint;
 use futures::future::{ready, try_join_all};
@@ -263,6 +264,8 @@ pub type FlushedStateTableReader<S, SD = BasicSerde> = StateTableFlushedSnapshot
     SD,
 >;
 
+#[derive(Educe)]
+#[educe(Clone)]
 pub struct StateTableFlushedSnapshotReader<R, SD = BasicSerde>
 where
     R: StateStoreRead,
@@ -273,22 +276,6 @@ where
     vnodes: Arc<Bitmap>,
     row_serde: Arc<SD>,
     metrics: Option<StateTableMetrics>,
-}
-
-impl<R, SD> Clone for StateTableFlushedSnapshotReader<R, SD>
-where
-    R: StateStoreRead,
-    SD: ValueRowSerde,
-{
-    fn clone(&self) -> Self {
-        Self {
-            reader: self.reader.clone(),
-            pk_serde: self.pk_serde.clone(),
-            vnodes: self.vnodes.clone(),
-            row_serde: self.row_serde.clone(),
-            metrics: self.metrics.clone(),
-        }
-    }
 }
 
 // initialize
@@ -1882,7 +1869,7 @@ where
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<BoxedRowStream<'static>> {
+    ) -> StreamExecutorResult<impl RowStream<'static>> {
         if let Some(m) = &self.metrics {
             m.iter_count.inc();
         }
@@ -1899,11 +1886,10 @@ where
                 },
             )
             .await?;
-        Ok(
-            deserialize_keyed_row_stream_owned::<(), _>(iter, self.row_serde.clone())
-                .map_ok(|(_, row)| row)
-                .boxed(),
-        )
+        let row_serde = self.row_serde.clone();
+        Ok(iter
+            .into_stream(move |(_key, value)| Ok(OwnedRow::new(row_serde.deserialize(value)?)))
+            .map_err(Into::into))
     }
 }
 
@@ -2424,23 +2410,6 @@ fn deserialize_keyed_row_stream<'a, K: CopyFromSlice>(
     iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl PkRowStream<'a, K> {
-    iter.into_stream(move |(key, value)| {
-        Ok((
-            K::copy_from_slice(key.user_key.table_key.as_ref()),
-            deserializer.deserialize(value).map(OwnedRow::new)?,
-        ))
-    })
-    .map_err(Into::into)
-}
-
-fn deserialize_keyed_row_stream_owned<K, SD>(
-    iter: impl StateStoreIter + 'static,
-    deserializer: Arc<SD>,
-) -> impl PkRowStream<'static, K> + Send
-where
-    K: CopyFromSlice + Send + 'static,
-    SD: ValueRowSerde,
-{
     iter.into_stream(move |(key, value)| {
         Ok((
             K::copy_from_slice(key.user_key.table_key.as_ref()),
