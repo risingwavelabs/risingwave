@@ -74,7 +74,7 @@ ENV CARGO_PROFILE=$CARGO_PROFILE
 ARG ENABLE_DOCKER_SCCACHE=false
 ARG DOCKER_SCCACHE_BUCKET
 ARG DOCKER_SCCACHE_REGION
-ARG DOCKER_SCCACHE_S3_KEY_PREFIX
+ARG DOCKER_SCCACHE_PREFIX
 ARG SCCACHE_VERSION=0.10.0
 
 COPY ./ /risingwave
@@ -94,7 +94,7 @@ RUN --mount=type=secret,id=aws_credentials,target=/root/.aws/credentials,require
     export RUSTC_WRAPPER=sccache; \
     export SCCACHE_BUCKET="${DOCKER_SCCACHE_BUCKET}"; \
     export SCCACHE_REGION="${DOCKER_SCCACHE_REGION}"; \
-    export SCCACHE_S3_KEY_PREFIX="${DOCKER_SCCACHE_S3_KEY_PREFIX}"; \
+    export SCCACHE_S3_KEY_PREFIX="${DOCKER_SCCACHE_PREFIX}"; \
     export SCCACHE_IDLE_TIMEOUT=0; \
     sccache --start-server; \
   fi && \
