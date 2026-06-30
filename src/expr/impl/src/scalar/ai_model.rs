@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use async_openai::Client;
-use async_openai::config::OpenAIConfig;
+use async_openai::config::{Config, OpenAIConfig};
 use async_openai::types::embeddings::{CreateEmbeddingRequestArgs, Embedding, EmbeddingInput};
 use prometheus::{Registry, exponential_buckets};
 use risingwave_common::array::{
@@ -41,6 +41,7 @@ const OPENAI_EMBEDDING_SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(60
 pub struct OpenAiEmbeddingContext {
     pub client: Client<OpenAIConfig>,
     pub model: String,
+    pub api_base: String,
 }
 
 #[derive(Deserialize)]
@@ -74,9 +75,11 @@ impl OpenAiEmbeddingContext {
         }
 
         let client = Client::with_config(config);
+        let api_base = client.config().api_base().to_owned();
         Ok(Self {
             client,
             model: param.model,
+            api_base,
         })
     }
 }
@@ -378,7 +381,8 @@ fn build_openai_embedding_expr(
 
     Ok(Box::new(OpenAiEmbedding {
         text_expr: children.pop().unwrap(), // Take the second expression
-        metrics: GLOBAL_OPENAI_EMBEDDING_METRICS.with_label_values(&context.model),
+        metrics: GLOBAL_OPENAI_EMBEDDING_METRICS
+            .with_label_values(&context.model, &context.api_base),
         context,
     }))
 }
@@ -427,7 +431,7 @@ static GLOBAL_OPENAI_EMBEDDING_METRICS: LazyLock<OpenAiEmbeddingMetricsVec> =
 
 impl OpenAiEmbeddingMetricsVec {
     fn new(registry: &Registry) -> Self {
-        let labels = &["model"];
+        let labels = &["model", "api_base"];
         let success_count = register_guarded_int_counter_vec_with_registry!(
             "openai_embedding_success_count",
             "Total number of successful OpenAI embedding requests",
@@ -491,8 +495,8 @@ impl OpenAiEmbeddingMetricsVec {
         }
     }
 
-    fn with_label_values(&self, model: &str) -> OpenAiEmbeddingMetrics {
-        let labels = &[model];
+    fn with_label_values(&self, model: &str, api_base: &str) -> OpenAiEmbeddingMetrics {
+        let labels = &[model, api_base];
 
         OpenAiEmbeddingMetrics {
             success_count: self.success_count.with_guarded_label_values(labels),
