@@ -32,7 +32,9 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
-use sea_orm::{ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, ModelTrait, Statement};
+use sea_orm::{
+    ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, ModelTrait, Statement,
+};
 
 use crate::{MetaError, MetaResult, MetaStoreBackend};
 
