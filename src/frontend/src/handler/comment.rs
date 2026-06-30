@@ -87,9 +87,7 @@ pub async fn handle_comment(
                     ))
                     .into());
                 }
-                binder.bind_columns_to_context(col.real_value(), &table.table_catalog.columns)?;
-
-                let column = binder.bind_column(object_name.0.as_slice())?;
+                let column = binder.bind_column(std::slice::from_ref(col))?;
 
                 build_comment(
                     table.table_id.as_raw_id(),
