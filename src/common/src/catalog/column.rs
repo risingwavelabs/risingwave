@@ -35,6 +35,15 @@ use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 use crate::util::value_encoding::DatumToProtoExt;
 
+/// Derive the catalog column name used by internal table builders.
+///
+/// This mirrors the frontend internal-table column derivation: output `Field`
+/// names may contain dots from qualified columns, but internal table column
+/// names normalize them to underscores.
+pub fn derive_internal_table_column_name(field_name: &str) -> String {
+    field_name.replace('.', "_")
+}
+
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

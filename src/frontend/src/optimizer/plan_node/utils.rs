@@ -24,7 +24,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
-    StreamJobStatus,
+    StreamJobStatus, derive_internal_table_column_name,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -76,8 +76,7 @@ impl TableCatalogBuilder {
         // Add column desc.
         let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
 
-        // Replace dot of the internal table column name with underline.
-        column_desc.name = column_desc.name.replace('.', "_");
+        column_desc.name = derive_internal_table_column_name(&column_desc.name);
         // Avoid column name duplicate.
         self.avoid_duplicate_col_name(&mut column_desc);
 
