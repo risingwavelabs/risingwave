@@ -133,7 +133,7 @@ RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
 
 # 1. copy only poms
-COPY --from=java-planner /risingwave/poms /risingwave/java/
+COPY --from=java-planner /risingwave/poms /risingwave/
 
 # 2. start downloading dependencies
 RUN mvn dependency:go-offline --fail-never
