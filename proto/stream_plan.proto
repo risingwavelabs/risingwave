@@ -1117,7 +1117,8 @@ message EowcGapFillNode {
   expr.ExprNode interval = 2;
   repeated uint32 fill_columns = 3;
   repeated string fill_strategies = 4;
-  catalog.Table buffer_table = 5;
+  reserved 5;
+  reserved "buffer_table";
   catalog.Table prev_row_table = 6;
   repeated uint32 partition_by_indices = 7;
 }
