@@ -91,7 +91,7 @@ pub async fn create_parquet_stream_builder(
     props.insert(S3_SECRET_ACCESS_KEY, s3_secret_key.clone());
 
     let file_io_builder = FileIOBuilder::new("s3");
-    let file_io = file_io_builder.with_props(props.into_iter()).build()?;
+    let file_io = file_io_builder.with_props(props).build()?;
     let parquet_file = file_io.new_input(&location)?;
 
     let parquet_metadata = parquet_file.metadata().await?;

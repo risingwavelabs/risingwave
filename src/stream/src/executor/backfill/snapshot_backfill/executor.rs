@@ -27,13 +27,14 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_common_rate_limit::RateLimit;
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::batch_plan::ScanRange;
 use risingwave_pb::common::PbThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::ChangeLogRow;
-use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::table::batch_table::{BatchTable, PkScanRange};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::sleep;
@@ -43,7 +44,9 @@ use crate::executor::backfill::snapshot_backfill::state::{
     BackfillState, EpochBackfillProgress, VnodeBackfillProgress,
 };
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
-use crate::executor::backfill::utils::{create_builder, mapping_message};
+use crate::executor::backfill::utils::{
+    UpstreamStreamKeyUpdateNormalizer, create_builder, mapping_message,
+};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
@@ -66,10 +69,13 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
+    /// Current executor stream-key indices in the output schema.
+    stream_key: Vec<usize>,
+
     progress: CreateMviewProgressReporter,
 
     chunk_size: usize,
-    rate_limit: RateLimit,
+    rate_limiter: MonitoredRateLimiter,
 
     barrier_rx: UnboundedReceiver<Barrier>,
 
@@ -77,15 +83,32 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     snapshot_epoch: Option<u64>,
+    /// (`eq_prefix`, `range_bounds`) for pk scan range pushdown.
+    pk_scan_range: PkScanRange,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
+    fn build_pk_scan_range(
+        pb_scan_range: Option<&ScanRange>,
+        upstream_table: &BatchTable<S>,
+    ) -> StreamExecutorResult<PkScanRange> {
+        match pb_scan_range {
+            Some(scan_range) => Ok(PkScanRange::new(
+                scan_range.clone(),
+                upstream_table.pk_serializer().get_data_types().to_vec(),
+            )?),
+            None => Ok(PkScanRange::full()),
+        }
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         upstream_table: BatchTable<S>,
         progress_state_table: StateTable<S>,
         upstream: Option<MergeExecutorInput>,
+        pb_pk_scan_range: Option<&ScanRange>,
         output_indices: Vec<usize>,
+        stream_key: Vec<usize>,
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
         chunk_size: usize,
@@ -93,7 +116,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         if let Some(upstream) = &upstream {
             assert_eq!(&upstream.info.schema, upstream_table.schema());
         }
@@ -105,25 +128,35 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 upstream_table.schema()
             )
         };
+        assert!(
+            stream_key.iter().all(|idx| *idx < output_indices.len()),
+            "stream key indices should refer to output schema: stream_key: {:?}, output_indices: {:?}",
+            stream_key,
+            output_indices
+        );
+        let pk_scan_range = Self::build_pk_scan_range(pb_pk_scan_range, &upstream_table)?;
         if !matches!(rate_limit, RateLimit::Disabled) {
             trace!(
                 ?rate_limit,
                 "create snapshot backfill executor with rate limit"
             );
         }
-        Self {
+        let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table.table_id());
+        Ok(Self {
             upstream_table,
             progress_state_table,
             upstream,
             output_indices,
+            stream_key,
             progress,
             chunk_size,
-            rate_limit,
+            rate_limiter,
             barrier_rx,
             actor_ctx,
             metrics,
             snapshot_epoch,
-        }
+            pk_scan_range,
+        })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -228,13 +261,14 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &self.upstream_table,
                             snapshot_epoch,
                             self.chunk_size,
-                            &mut self.rate_limit,
+                            &self.rate_limiter,
                             &mut self.barrier_rx,
                             &mut self.progress,
                             &mut backfill_state,
                             first_recv_barrier_epoch,
                             initial_backfill_paused,
                             &self.actor_ctx,
+                            &self.pk_scan_range,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -457,10 +491,22 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 (first_upstream_barrier.epoch, true, upstream)
             }
         };
+        let current_stream_key_indices = self
+            .stream_key
+            .iter()
+            .map(|idx| self.output_indices[*idx])
+            .collect();
+        let update_normalizer = UpstreamStreamKeyUpdateNormalizer::new(
+            &upstream.info.stream_key,
+            current_stream_key_indices,
+        );
         let mut upstream = upstream.into_executor(self.barrier_rx).execute();
         let mut epoch_row_count = 0;
         // Phase 3: consume upstream
         while let Some(msg) = upstream.try_next().await? {
+            let Some(msg) = update_normalizer.normalize_message(msg) else {
+                continue;
+            };
             match msg {
                 Message::Barrier(barrier) => {
                     assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
@@ -920,6 +966,7 @@ async fn make_snapshot_stream(
     rate_limit: RateLimit,
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
+    pk_scan_range: &PkScanRange,
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
@@ -938,9 +985,11 @@ async fn make_snapshot_stream(
             };
             start_pk.map(|(start_pk, row_count)| {
                 upstream_table
-                    .batch_iter_vnode(
+                    .batch_iter_vnode_with_pk_range(
                         HummockReadEpoch::Committed(snapshot_epoch),
                         start_pk,
+                        &pk_scan_range.pk_prefix,
+                        &pk_scan_range.range_bounds,
                         vnode,
                         PrefetchOptions::prefetch_for_large_range_scan(),
                         snapshot_rebuild_interval,
@@ -967,13 +1016,14 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     upstream_table: &'a BatchTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
-    rate_limit: &'a mut RateLimit,
+    rate_limiter: &'a MonitoredRateLimiter,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
+    pk_scan_range: &'a PkScanRange,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -982,9 +1032,10 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         upstream_table,
         snapshot_epoch,
         &*backfill_state,
-        *rate_limit,
+        rate_limiter.rate_limit(),
         chunk_size,
         actor_ctx.config.developer.snapshot_iter_rebuild_interval(),
+        pk_scan_range,
     )
     .await?;
 
@@ -1004,11 +1055,9 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         )
     }
 
-    let mut count = 0;
-    let mut epoch_row_count = 0;
     let mut backfill_paused = initial_backfill_paused;
     loop {
-        let throttle_snapshot_stream = epoch_row_count as u64 >= rate_limit.to_u64();
+        let throttle_snapshot_stream = matches!(rate_limiter.rate_limit(), RateLimit::Pause);
         match select_barrier_and_snapshot_stream(
             barrier_rx,
             &mut snapshot_stream,
@@ -1028,8 +1077,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                     backfill_paused = false;
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
-                    count += chunk.cardinality();
-                    epoch_row_count += chunk.cardinality();
+                    rate_limiter.wait(chunk.cardinality() as _).await;
                     yield Message::Chunk(chunk);
                 }
                 snapshot_stream
@@ -1046,10 +1094,10 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                         }
                     })
                     .await?;
+                let count = backfill_state.total_row_count();
                 let post_commit = backfill_state.commit(barrier.epoch).await?;
-                trace!(?barrier_epoch, count, epoch_row_count, "update progress");
+                trace!(?barrier_epoch, count, "update progress");
                 progress.update(barrier_epoch, barrier_epoch.prev, count as _);
-                epoch_row_count = 0;
 
                 let new_rate_limit = barrier.mutation.as_ref().and_then(|m| {
                     if let Mutation::Throttle(config) = &**m
@@ -1066,7 +1114,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
                 if let Some(new_rate_limit) = new_rate_limit {
                     let new_rate_limit = new_rate_limit.into();
-                    *rate_limit = new_rate_limit;
+                    rate_limiter.update(new_rate_limit);
                     snapshot_stream.update_rate_limiter(new_rate_limit, chunk_size);
                 }
             }
@@ -1076,8 +1124,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                         anyhow!("snapshot backfill paused, but received snapshot chunk").into(),
                     );
                 }
-                count += chunk.cardinality();
-                epoch_row_count += chunk.cardinality();
+                rate_limiter.wait(chunk.cardinality() as _).await;
                 yield Message::Chunk(chunk);
             }
             Either::Right(None) => {
@@ -1090,13 +1137,14 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let barrier_to_report_finish = receive_next_barrier(barrier_rx).await?;
     assert_eq!(barrier_to_report_finish.epoch.prev, barrier_epoch.curr);
     barrier_epoch = barrier_to_report_finish.epoch;
-    trace!(?barrier_epoch, count, "report finish");
     snapshot_stream
         .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
             assert_eq!(pk_progress, None);
             backfill_state.finish_epoch(vnode, snapshot_epoch, row_count);
         })
         .await?;
+    let count = backfill_state.total_row_count();
+    trace!(?barrier_epoch, count, "report finish");
     let post_commit = backfill_state.commit(barrier_epoch).await?;
     progress.finish(barrier_epoch, count as _);
     yield Message::Barrier(barrier_to_report_finish);
@@ -1359,6 +1407,8 @@ mod tests {
             source_table,
             progress_state_table,
             None,
+            None,
+            vec![0],
             vec![0],
             actor_ctx,
             progress,
@@ -1368,6 +1418,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
+        .expect("snapshot backfill executor should be created")
         .boxed()
         .execute();
 
@@ -1509,6 +1560,8 @@ mod tests {
                 actor_ctx.clone(),
                 upstream_rx,
             )),
+            None,
+            vec![0],
             vec![0],
             actor_ctx,
             progress,
@@ -1518,6 +1571,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
+        .expect("snapshot backfill executor should be created")
         .boxed()
         .execute();
 

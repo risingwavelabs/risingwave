@@ -35,7 +35,7 @@ pub struct HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,

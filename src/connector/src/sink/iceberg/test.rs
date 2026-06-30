@@ -14,7 +14,10 @@
 
 use std::collections::BTreeMap;
 
-use iceberg::spec::{FormatVersion, NullOrder, SortDirection};
+use iceberg::spec::{
+    FormatVersion, NestedField, NullOrder, PrimitiveType, Schema as IcebergSchema, SortDirection,
+    Type,
+};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
@@ -25,15 +28,55 @@ use risingwave_common::types::{DataType, MapType, StructType};
 use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
-    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergOrderKeyField,
+    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType,
+    DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
     IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
+
+#[test]
+fn test_resolve_equality_delete_field_ids_from_iceberg_schema() {
+    let iceberg_schema = IcebergSchema::builder()
+        .with_fields(vec![
+            NestedField::new(42, "k", Type::Primitive(PrimitiveType::Int), true).into(),
+            NestedField::new(99, "b", Type::Primitive(PrimitiveType::Int), true).into(),
+        ])
+        .build()
+        .unwrap();
+
+    let field_ids =
+        super::writer::resolve_equality_delete_field_ids(&["k".to_owned()], &iceberg_schema)
+            .unwrap();
+
+    assert_eq!(field_ids, vec![42]);
+}
+
+#[test]
+fn test_resolve_equality_delete_field_ids_case_sensitive() {
+    let iceberg_schema = IcebergSchema::builder()
+        .with_fields(vec![
+            NestedField::new(42, "Key", Type::Primitive(PrimitiveType::Int), true).into(),
+            NestedField::new(99, "Value", Type::Primitive(PrimitiveType::Int), true).into(),
+        ])
+        .build()
+        .unwrap();
+
+    let field_ids =
+        super::writer::resolve_equality_delete_field_ids(&["Key".to_owned()], &iceberg_schema)
+            .unwrap();
+
+    assert_eq!(field_ids, vec![42]);
+
+    assert!(
+        super::writer::resolve_equality_delete_field_ids(&["key".to_owned()], &iceberg_schema)
+            .is_err()
+    );
+}
 
 #[test]
 fn test_compatible_arrow_schema() {
@@ -58,10 +101,10 @@ fn test_compatible_arrow_schema() {
         Field::with_name(DataType::Int32, "b"),
     ]);
     let arrow_schema = ArrowSchema::new(vec![
-        ArrowField::new("a", ArrowDataType::Int32, false),
-        ArrowField::new("b", ArrowDataType::Int32, false),
         ArrowField::new("d", ArrowDataType::Int32, false),
         ArrowField::new("c", ArrowDataType::Int32, false),
+        ArrowField::new("a", ArrowDataType::Int32, false),
+        ArrowField::new("b", ArrowDataType::Int32, false),
     ]);
     try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
@@ -189,6 +232,25 @@ fn test_compatible_arrow_schema() {
 }
 
 #[test]
+fn test_arrow_schema_column_order_mismatch() {
+    use super::*;
+    // Same names and types but a different column order must be rejected.
+    let risingwave_schema = Schema::new(vec![
+        Field::with_name(DataType::Int32, "col_a"),
+        Field::with_name(DataType::Int32, "col_b"),
+    ]);
+    let arrow_schema = ArrowSchema::new(vec![
+        ArrowField::new("col_b", ArrowDataType::Int32, false),
+        ArrowField::new("col_a", ArrowDataType::Int32, false),
+    ]);
+    let err = try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap_err();
+    assert!(
+        err.to_string().contains("Column order mismatch"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn test_parse_order_key_exprs() {
     let parsed =
         parse_order_key_exprs("v1, v2 desc nulls first, v3 asc nulls last".to_owned()).unwrap();
@@ -312,9 +374,6 @@ fn test_parse_iceberg_config() {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
-            commit_checkpoint_size_threshold_mb: Some(
-                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
-            ),
             create_table_if_not_exists: false,
             is_exactly_once: Some(true),
             commit_retry_num: 8,
@@ -327,7 +386,7 @@ fn test_parse_iceberg_config() {
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
-            max_snapshots_num_before_compaction: None,
+            max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
             trigger_snapshot_count: None,
@@ -335,6 +394,8 @@ fn test_parse_iceberg_config() {
             compaction_type: None,
             write_parquet_compression: None,
             write_parquet_max_row_group_rows: None,
+            write_parquet_max_row_group_bytes: None,
+            enable_pk_index: false,
         };
 
     assert_eq!(iceberg_config, expected_iceberg_config);
@@ -342,82 +403,6 @@ fn test_parse_iceberg_config() {
     assert_eq!(
         &iceberg_config.full_table_name().unwrap().to_string(),
         "demo_db.demo_table"
-    );
-}
-
-#[test]
-fn test_parse_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-        ("commit_checkpoint_size_threshold_mb", "128"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let config = IcebergConfig::from_btreemap(values).unwrap();
-    assert_eq!(config.commit_checkpoint_size_threshold_mb, Some(128));
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_bytes(),
-        Some(128 * 1024 * 1024)
-    );
-}
-
-#[test]
-fn test_default_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let config = IcebergConfig::from_btreemap(values).unwrap();
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_mb,
-        Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-    );
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_bytes(),
-        Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB * 1024 * 1024)
-    );
-}
-
-#[test]
-fn test_reject_zero_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-        ("commit_checkpoint_size_threshold_mb", "0"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let err = IcebergConfig::from_btreemap(values).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("`commit_checkpoint_size_threshold_mb` must be greater than 0")
     );
 }
 
@@ -532,14 +517,14 @@ async fn test_hive_catalog() {
     test_create_catalog(values).await;
 }
 
-/// Test parsing Google/BigLake authentication configuration.
+/// Test parsing Google Lakehouse Iceberg REST authentication configuration.
 #[test]
 fn test_parse_google_auth_config() {
     let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
             ("force_append_only", "true"),
-            ("catalog.name", "biglake-catalog"),
+            ("catalog.name", "lakehouse-catalog"),
             ("catalog.type", "rest"),
             ("catalog.uri", "https://biglake.googleapis.com/iceberg/v1/restcatalog"),
             ("warehouse.path", "bq://projects/my-gcp-project"),
@@ -705,10 +690,6 @@ fn test_config_constants_consistency() {
     assert_eq!(ENABLE_SNAPSHOT_EXPIRATION, "enable_snapshot_expiration");
     assert_eq!(WRITE_MODE, "write_mode");
     assert_eq!(
-        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
-        "commit_checkpoint_size_threshold_mb"
-    );
-    assert_eq!(
         SNAPSHOT_EXPIRATION_RETAIN_LAST,
         "snapshot_expiration_retain_last"
     );
@@ -725,6 +706,10 @@ fn test_config_constants_consistency() {
         "snapshot_expiration_clear_expired_meta_data"
     );
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    assert_eq!(
+        COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+        "compaction.write_parquet_max_row_group_bytes"
+    );
     assert_eq!(ORDER_KEY, "order_key");
 }
 
@@ -754,6 +739,7 @@ fn test_parse_compaction_config() {
         ("compaction.type", "full"),
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
+        ("compaction.write_parquet_max_row_group_bytes", "67108864"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -769,7 +755,8 @@ fn test_parse_compaction_config() {
     assert_eq!(config.compaction_type, Some(CompactionType::Full));
     assert_eq!(config.target_file_size_mb(), 256);
     assert_eq!(config.write_parquet_compression(), "zstd");
-    assert_eq!(config.write_parquet_max_row_group_rows(), 50000);
+    assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
+    assert_eq!(config.write_parquet_max_row_group_bytes(), Some(67_108_864));
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -787,9 +774,85 @@ fn test_parse_compaction_config() {
     .collect();
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(!config.enable_compaction);
+    assert!(config.enable_snapshot_expiration);
+    assert_eq!(config.snapshot_expiration_max_age_millis, None);
+    assert_eq!(config.snapshot_expiration_retain_last, None);
+    assert_eq!(config.max_snapshots_num_before_compaction, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
-    assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
+    assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default
+    assert_eq!(
+        config.write_parquet_max_row_group_bytes(),
+        Some(ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    );
+
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.max_snapshots_num", "1000"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(!config.enable_compaction);
+    assert_eq!(config.max_snapshots_num_before_compaction, Some(1000));
+}
+
+#[test]
+fn test_reject_zero_trigger_snapshot_count() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.trigger_snapshot_count", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`compaction.trigger_snapshot_count` must be greater than 0")
+    );
+}
+
+#[test]
+fn test_reject_zero_max_snapshots_num() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.max_snapshots_num", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`compaction.max_snapshots_num` must be greater than 0")
+    );
 }
 
 /// Test parquet compression parsing.
@@ -949,4 +1012,61 @@ fn test_upsert_accepts_copy_on_write() {
     assert!(result.is_ok());
     let config = result.unwrap();
     assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
+}
+
+// Regression: an upsert sink whose pk column has upper-case letters must resolve.
+// `primary_key` is lower-cased on deserialization, so re-matching it against the
+// (case-sensitive) column names would fail. The connector must instead use the pk
+// indices resolved by the frontend (`SinkParam::downstream_pk`).
+#[test]
+fn test_iceberg_sink_upper_case_primary_key() {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::id::SinkId;
+
+    use crate::sink::SinkParam;
+    use crate::sink::catalog::SinkType;
+    use crate::sink::iceberg::IcebergSink;
+
+    let values = [
+        ("connector", "iceberg"),
+        ("type", "upsert"),
+        ("primary_key", "Key"),
+        ("warehouse.path", "s3://iceberg"),
+        ("s3.endpoint", "http://127.0.0.1:9301"),
+        ("s3.access.key", "hummockadmin"),
+        ("s3.secret.key", "hummockadmin"),
+        ("s3.region", "us-east-1"),
+        ("catalog.type", "storage"),
+        ("catalog.name", "demo"),
+        ("database.name", "demo_db"),
+        ("table.name", "demo_table"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+    let config = IcebergConfig::from_btreemap(values).unwrap();
+
+    let param = SinkParam {
+        sink_id: SinkId::from(1u32),
+        sink_name: "test_sink".to_owned(),
+        properties: BTreeMap::new(),
+        columns: vec![
+            ColumnDesc::named("Key", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("Value", ColumnId::new(2), DataType::Int32),
+        ],
+        downstream_pk: Some(vec![0]),
+        sink_type: SinkType::Upsert,
+        ignore_delete: false,
+        format_desc: None,
+        db_name: "demo_db".to_owned(),
+        sink_from_name: "test_sink".to_owned(),
+    };
+
+    let sink = IcebergSink::new(config, param).unwrap();
+    // Keep the case-preserving column name selected by the frontend so the writer can
+    // resolve the actual Iceberg field id after loading table metadata.
+    assert_eq!(
+        sink.upsert_primary_key_column_names,
+        Some(vec!["Key".to_owned()])
+    );
 }

@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use chrono_tz::Tz;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 
@@ -99,6 +100,8 @@ pub enum DateHandlingMode {
 pub enum TimestampHandlingMode {
     Milli,
     String,
+    /// ISO 8601 string without a timezone suffix.
+    Iso8601String,
 }
 
 #[derive(Clone, Copy)]
@@ -112,6 +115,7 @@ pub enum TimestamptzHandlingMode {
     #[default]
     UtcString,
     UtcWithoutSuffix,
+    SpecifiedTimezoneWithoutSuffix(Tz),
     Micro,
     Milli,
 }
@@ -154,6 +158,8 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
+    // turbopuffer expects serial and decimal attributes to match `int` and `float` schema types.
+    Turbopuffer,
     None,
 }
 

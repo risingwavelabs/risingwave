@@ -16,8 +16,11 @@
 mod test;
 
 mod commit;
+pub mod commit_retry;
 mod config;
 mod create_table;
+#[cfg(any(test, madsim))]
+pub mod mock_v3_catalog_registry;
 mod prometheus;
 mod writer;
 
@@ -48,8 +51,8 @@ pub const ICEBERG_SINK: &str = "iceberg";
 pub struct IcebergSink {
     pub config: IcebergConfig,
     param: SinkParam,
-    // In upsert mode, it never be None and empty.
-    unique_column_ids: Option<Vec<usize>>,
+    // In upsert mode, it is never None or empty.
+    upsert_primary_key_column_names: Option<Vec<String>>,
 }
 
 impl EnforceSecret for IcebergSink {
@@ -99,35 +102,41 @@ impl IcebergSink {
             .map_err(SinkError::Config)?;
         }
 
-        let unique_column_ids = if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
-            if let Some(pk) = &config.primary_key {
-                let mut unique_column_ids = Vec::with_capacity(pk.len());
-                for col_name in pk {
-                    let id = param
-                        .columns
+        let upsert_primary_key_column_names =
+            if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
+                let pk_indices = param
+                    .downstream_pk
+                    .as_ref()
+                    .filter(|pk| !pk.is_empty())
+                    .ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "primary key must be specified for upsert iceberg sink"
+                        ))
+                    })?;
+                Some(
+                    pk_indices
                         .iter()
-                        .find(|col| col.name.as_str() == col_name)
-                        .ok_or_else(|| {
-                            SinkError::Config(anyhow!(
-                                "Primary key column {} not found in sink schema",
-                                col_name
-                            ))
-                        })?
-                        .column_id
-                        .get_id() as usize;
-                    unique_column_ids.push(id);
-                }
-                Some(unique_column_ids)
+                        .map(|&idx| {
+                            param
+                                .columns
+                                .get(idx)
+                                .map(|column| column.name.clone())
+                                .ok_or_else(|| {
+                                    SinkError::Config(anyhow!(
+                                        "primary key column index {} out of range in sink schema",
+                                        idx
+                                    ))
+                                })
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                )
             } else {
-                unreachable!()
-            }
-        } else {
-            None
-        };
+                None
+            };
         Ok(Self {
             config,
             param,
-            unique_column_ids,
+            upsert_primary_key_column_names,
         })
     }
 }
@@ -246,7 +255,7 @@ impl Sink for IcebergSink {
             && max_snapshots < 1
         {
             bail!(
-                "`compaction.max-snapshots-num` must be greater than 0, got: {}",
+                "`compaction.max_snapshots_num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }
@@ -263,6 +272,13 @@ impl Sink for IcebergSink {
             && max_row_group_rows == 0
         {
             bail!("`compaction.write_parquet_max_row_group_rows` must be greater than 0");
+        }
+
+        // Validate parquet max row group bytes
+        if let Some(max_row_group_bytes) = iceberg_config.write_parquet_max_row_group_bytes
+            && max_row_group_bytes == 0
+        {
+            bail!("`compaction.write_parquet_max_row_group_bytes` must be greater than 0");
         }
 
         // Validate parquet compression codec
@@ -293,7 +309,7 @@ impl Sink for IcebergSink {
             self.config.clone(),
             self.param.clone(),
             writer_param.clone(),
-            self.unique_column_ids.clone(),
+            self.upsert_primary_key_column_names.clone(),
         );
 
         let commit_checkpoint_interval =

@@ -341,6 +341,13 @@ profile:
       - use: compute-node
       - use: frontend
 
+  ci-session-init:
+    config-path: src/config/ci-session-init.toml
+    steps:
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+
   ci-iceberg-test:
     config-path: src/config/ci.toml
     steps:
@@ -799,6 +806,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: localhost
+        port: 8900
         persist-data: true
       - use: kafka
         persist-data: true
@@ -916,6 +926,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: pubsub-emulator
+        port: 8900
         persist-data: true
 
   ci-sink-kafka-test:
@@ -975,6 +988,36 @@ profile:
         address: db
         user: postgres
         password: post\tgres
+        user-managed: true
+
+  ci-source-nats-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: nats
+        address: nats-server
+        port: 4222
+        monitor-port: 8222
+        user-managed: true
+
+  ci-sink-mqtt-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mqtt
+        address: mqtt-server
+        port: 1883
         user-managed: true
 
   # Minimal configuration for cron_only source tests (Kafka + direct CDC)
@@ -1212,6 +1255,50 @@ profile:
         password: 123456
         database: risedev
         user-managed: true
+
+  local-nats-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+        id: minio-local-nats-test
+      - use: sqlite
+        id: sqlite-local-nats-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: nats
+
+  local-mqtt-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-mqtt-test
+      - use: sqlite
+        id: sqlite-local-mqtt-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mqtt
+
+  deltalake-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-deltalake-sink-test
+      - use: sqlite
+        id: sqlite-deltalake-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
 
   postgres-with-latency:
     steps:
@@ -1742,6 +1829,25 @@ template:
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # NATS service backed by docker.
+  nats:
+    id: nats-${port}
+    address: "127.0.0.1"
+    port: 4222
+    monitor-port: 8222
+    image: "nats:2.11.3"
+    persist-data: true
+    user-managed: false
+
+  # MQTT service backed by docker.
+  mqtt:
+    id: mqtt-${port}
+    address: "127.0.0.1"
+    port: 1883
+    image: "eclipse-mosquitto:2.0.21"
+    persist-data: true
     user-managed: false
 
   # Lakekeeper Apache Iceberg REST Catalog service backed by binary.

@@ -23,6 +23,8 @@ periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
+iceberg_compaction_report_timeout_sec = 1800
+iceberg_compaction_config_refresh_interval_sec = 60
 hummock_version_checkpoint_interval_sec = 30
 checkpoint_compression_algorithm = "zstd"
 checkpoint_read_chunk_size = 134217728
@@ -106,8 +108,10 @@ emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 5000
 level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
-max_kv_count_for_xor16 = 262144
+blocked_xor_filter_kv_count_threshold = 262144
 max_vnode_key_range_bytes = ""
+sstable_filter_type = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor8", "xor8"]
+sstable_filter_layout = ["auto", "blocked", "blocked", "blocked", "blocked", "blocked", "blocked"]
 
 [meta.developer]
 cached_traces_num = 256
@@ -183,6 +187,8 @@ pool_setup_concurrency = 0
 max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
+webhook_auth_max_clock_skew_ms = 300000
+unsafe_enable_local_fs_connector = false
 
 [[frontend.hba_config.entries]]
 connection_type = "Local"
@@ -228,6 +234,7 @@ memory_controller_sequence_tls_lag = 32
 enable_arrangement_backfill = true
 enable_snapshot_backfill = true
 high_join_amplification_threshold = 2048
+high_gap_fill_amplification_threshold = 2048
 enable_actor_tokio_metrics = true
 exchange_connection_pool_size = 1
 enable_auto_schema_change = true
@@ -252,6 +259,7 @@ refresh_scheduler_interval_sec = 60
 join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
+disable_sync_log_store_dispatcher = false
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
 enable_vnode_key_stats_for_materialize = false
@@ -316,6 +324,8 @@ iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
+iceberg_compaction_pull_interval_ms = 5000
+iceberg_compaction_enable_prefetch = false
 iceberg_compaction_target_binpack_group_size_mb = 102400
 iceberg_compaction_min_group_size_mb = ""
 iceberg_compaction_min_group_file_count = ""
@@ -469,7 +479,6 @@ enable_tracing = false
 use_new_object_prefix_strategy = ""
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "BOUNDED(64)"
 per_database_isolation = true
 enforce_secret = false
 
@@ -477,3 +486,12 @@ enforce_secret = false
 enable_embedded_python_udf = false
 enable_embedded_javascript_udf = true
 enable_embedded_wasm_udf = true
+
+[session_init]
+streaming_parallelism = ""
+streaming_parallelism_for_backfill = ""
+streaming_parallelism_for_table = ""
+streaming_parallelism_for_sink = ""
+streaming_parallelism_for_index = ""
+streaming_parallelism_for_source = ""
+streaming_parallelism_for_materialized_view = ""

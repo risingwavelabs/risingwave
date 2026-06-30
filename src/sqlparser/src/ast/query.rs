@@ -115,7 +115,7 @@ impl fmt::Display for Query {
 
 /// A node in a tree, representing a "query body" expression, roughly:
 /// `SELECT ... [ {UNION|EXCEPT|INTERSECT} SELECT ...]`
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SetExpr {
     /// Restricted SELECT .. FROM .. HAVING (no ORDER BY or set operations)
@@ -238,7 +238,7 @@ pub struct Select {
 
 impl fmt::Display for Select {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SELECT{}", &self.distinct)?;
+        write!(f, "SELECT{}", self.distinct)?;
         write!(f, " {}", display_comma_separated(&self.projection))?;
         if !self.from.is_empty() {
             write!(f, " FROM {}", display_comma_separated(&self.from))?;

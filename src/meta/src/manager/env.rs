@@ -19,9 +19,8 @@ use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
-    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig, SessionInitConfig,
 };
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
@@ -123,6 +122,10 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
+    /// Maximum time to wait for an iceberg compaction task report before the lease expires.
+    pub iceberg_compaction_report_timeout_sec: u64,
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -327,6 +330,8 @@ impl MetaOpts {
             time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
+            iceberg_compaction_report_timeout_sec: 30 * 60,
+            iceberg_compaction_config_refresh_interval_sec: 60,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:
@@ -421,7 +426,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         mut init_system_params: SystemParams,
-        init_session_config: SessionConfig,
+        session_init: SessionInitConfig,
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -484,7 +489,7 @@ impl MetaSrvEnv {
             SessionParamsController::new(
                 meta_store_impl.clone(),
                 notification_manager.clone(),
-                init_session_config,
+                session_init,
             )
             .await?,
         );

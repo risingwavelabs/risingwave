@@ -376,12 +376,16 @@ impl Catalog {
             let mut database = self.database_by_name.remove(&old_database_name).unwrap();
             database.name.clone_from(&name);
             database.owner = proto.owner;
+            database.resource_group.clone_from(&proto.resource_group);
+            database.barrier_interval_ms = proto.barrier_interval_ms;
+            database.checkpoint_frequency = proto.checkpoint_frequency;
             self.database_by_name.insert(name.clone(), database);
             self.db_name_by_id.insert(id, name);
         } else {
             let database = self.get_database_mut(id).unwrap();
             database.name = name;
             database.owner = proto.owner;
+            database.resource_group = proto.resource_group.clone();
             database.barrier_interval_ms = proto.barrier_interval_ms;
             database.checkpoint_frequency = proto.checkpoint_frequency;
         }
@@ -1235,7 +1239,7 @@ impl Catalog {
         schema_path
             .try_find(|schema_name| -> CatalogResult<_> {
                 let schema = self.get_schema_by_name(db_name, schema_name)?;
-                #[allow(clippy::manual_map)]
+
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Ok(Some(item.id().as_object_id()))
                 } else if let Some(item) = schema.get_any_table_by_name(class_name) {

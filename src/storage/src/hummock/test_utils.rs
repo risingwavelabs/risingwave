@@ -48,8 +48,9 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, FilterBuilder, LruCache, Sstable, SstableBuilder,
-    SstableBuilderOptions, SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
+    BlockedXor16FilterBuilder, CachePolicy, DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+    FilterBuilder, FilterBuilderOptions, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -208,12 +209,16 @@ pub async fn put_sst(
 
     // dummy
     let bloom_filter = {
-        let mut filter_builder = BlockedXor16FilterBuilder::new(100);
+        let mut filter_builder = BlockedXor16FilterBuilder::create(FilterBuilderOptions {
+            estimated_key_count: 0,
+            estimated_block_count: meta.block_metas.len(),
+            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        });
         for _ in &meta.block_metas {
             filter_builder.switch_block(None);
         }
 
-        filter_builder.finish(None)
+        filter_builder.finish(None).unwrap_or_default()
     };
 
     meta.meta_offset = writer.data_len() as u64;
@@ -273,7 +278,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let mut b = SstableBuilder::<_, F>::new(
         object_id,
         writer,
-        F::create(opts.bloom_false_positive, opts.capacity / 16),
+        F::create(opts.filter_builder_options()),
         opts,
         compaction_catalog_agent_ref,
         None,
@@ -549,7 +554,7 @@ pub trait StateStoreReadTestExt: StateStore {
     }
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `prefix_hint` will be used for checking the SST filter and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on a snapshot
     /// corresponding to the given `epoch`.

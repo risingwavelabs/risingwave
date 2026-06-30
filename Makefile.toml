@@ -598,7 +598,6 @@ dependencies = [
     "download-minio",
     "download-lakekeeper",
     "download-prometheus",
-    "download-pubsub",
     "download-redis",
     "download-moat"
 ]
@@ -797,6 +796,7 @@ script = '''
 #!/usr/bin/env bash
 
 set -e
+profile="${1:-default}"
 if [[ $ENABLE_COREDUMP == "true" ]]; then
   echo "+ ulimit -c unlimited"
   ulimit -c unlimited
@@ -804,6 +804,9 @@ fi
 
 set -x
 target/debug/risedev-dev ${@}
+if [[ "${profile}" == "deltalake-sink-test" ]]; then
+  ./e2e_test/commands/deltalake_prepare
+fi
 '''
 
 [tasks.kill-risedev]

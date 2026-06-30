@@ -19,6 +19,8 @@ use crate::executor::UnionExecutor;
 
 pub struct UnionExecutorBuilder;
 
+impl_stream_node_body!(Union(UnionNode) => UnionExecutorBuilder);
+
 impl ExecutorBuilder for UnionExecutorBuilder {
     type Node = UnionNode;
 

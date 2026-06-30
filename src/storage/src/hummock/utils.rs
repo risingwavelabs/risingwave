@@ -129,7 +129,7 @@ where
 
 /// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
 /// with a specific table id. Returns the sst ids after pruning.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
     user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),

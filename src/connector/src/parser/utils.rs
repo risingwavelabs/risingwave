@@ -146,6 +146,7 @@ pub fn extract_cdc_meta_column<'a>(
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
         _ => None,
     }
 }
@@ -167,6 +168,7 @@ pub fn extract_header_inner_from_meta<'a>(
 ) -> Option<DatumCow<'a>> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_header_inner(inner_field, data_type), /* expect output of type `bytea` or `varchar` */
+        SourceMeta::Pulsar(pulsar_meta) => pulsar_meta.extract_header_inner(inner_field, data_type),
         _ => None,
     }
 }

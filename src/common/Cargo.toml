@@ -12,18 +12,10 @@ ahash = "0.8"
 allocator-api2 = "0.2"
 anyhow = "1"
 arc-swap = { workspace = true }
-arrow-54-array = { package = "arrow-array", version = "54" }
-arrow-54-buffer = { package = "arrow-buffer", version = "54" }
-arrow-54-cast = { package = "arrow-cast", version = "54" }
-arrow-54-schema = { package = "arrow-schema", version = "54" }
-arrow-56-array = { package = "arrow-array", version = "56" }
-arrow-56-buffer = { package = "arrow-buffer", version = "56" }
-arrow-56-cast = { package = "arrow-cast", version = "56" }
-arrow-56-schema = { package = "arrow-schema", version = "56" }
-arrow-57-array = { package = "arrow-array", version = "57" }
-arrow-57-buffer = { package = "arrow-buffer", version = "57" }
-arrow-57-cast = { package = "arrow-cast", version = "57" }
-arrow-57-schema = { package = "arrow-schema", version = "57" }
+arrow-58-array = { package = "arrow-array", version = "58" }
+arrow-58-buffer = { package = "arrow-buffer", version = "58" }
+arrow-58-cast = { package = "arrow-cast", version = "58" }
+arrow-58-schema = { package = "arrow-schema", version = "58" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -50,7 +42,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hashbrown0_14 = { workspace = true }
-hashbrown0_15 = { workspace = true }
+hashbrown0_16 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.3"
@@ -67,7 +59,7 @@ num-traits = "0.2"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 parking_lot = { workspace = true }
-parse-display = "0.10"
+parse-display = "0.11"
 paste = "1"
 pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6", features = [
@@ -99,7 +91,9 @@ serde = { workspace = true }
 serde-content = "0.1.2"
 serde_bytes = "0.11"
 serde_default = "0.2"
-serde_json = "1"
+# serde_json 1.0.147 switched from ryu to zmij
+# The former outputs `e` while the latter outputs `e+`
+serde_json = ">= 1.0.145, < 1.0.147"
 serde_with = "3"
 smallbitset = "0.7.1"
 smallvec = { workspace = true }

@@ -28,6 +28,8 @@ use crate::task::ExecutorParams;
 
 pub struct NowExecutorBuilder;
 
+impl_stream_node_body!(Now(NowNode) => NowExecutorBuilder);
+
 impl ExecutorBuilder for NowExecutorBuilder {
     type Node = NowNode;
 

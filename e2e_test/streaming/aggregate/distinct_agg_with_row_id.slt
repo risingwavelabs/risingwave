@@ -1,0 +1,49 @@
+# Regression coverage for split distinct aggregation when one distinct argument is `_row_id`.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (foo int, bar int);
+
+statement ok
+insert into t values (1, 1), (2, 2), (1, 1);
+
+# Baseline without `_row_id`.
+query II
+select count(foo), count(distinct foo) from t;
+----
+3 2
+
+# `_row_id` must not affect deduplication for the other distinct aggregate.
+query III
+select count(foo), count(distinct foo), count(distinct _row_id) from t;
+----
+3 2 3
+
+statement ok
+create materialized view mv_distinct_agg_with_row_id as select count(foo) as c1, count(distinct foo) as c2, count(distinct _row_id) as c3 from t;
+
+query III
+select * from mv_distinct_agg_with_row_id;
+----
+3 2 3
+
+# Another distinct aggregate on a user column should still work correctly.
+query III
+select count(foo), count(distinct foo), count(distinct bar) from t;
+----
+3 2 2
+
+# Test with GROUP BY to exercise group_keys in the deduplication logic
+query IIII rowsort
+select bar, count(foo), count(distinct foo), count(distinct _row_id) from t group by bar;
+----
+1 2 1 2
+2 1 1 1
+
+statement ok
+drop materialized view mv_distinct_agg_with_row_id;
+
+statement ok
+drop table t;

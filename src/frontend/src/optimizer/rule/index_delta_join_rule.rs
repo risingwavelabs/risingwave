@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::StreamScanType;
 
 use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, *};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -48,14 +47,22 @@ impl Rule<Stream> for IndexDeltaJoinRule {
         let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
+        let left_backfill_type = input_left.backfill_type();
+        if left_backfill_type != BackfillType::ArrangementBackfill {
+            plan.ctx().session_ctx().notice_to_user(format!(
+                "Delta join requires ArrangementBackfill on the backfilled side, but got {:?}. Fall back to regular join.",
+                left_backfill_type
+            ));
+            return None;
+        }
 
         fn match_indexes(
             join_indices: &[usize],
             table_scan: &StreamTableScan,
-            stream_scan_type: StreamScanType,
+            backfill_type: BackfillType,
         ) -> Option<PlanRef> {
             if table_scan.core().cross_database()
-                && stream_scan_type == StreamScanType::UpstreamOnly
+                && matches!(backfill_type, BackfillType::Replicated)
             {
                 // We currently do not support cross database index scan in upstream only mode.
                 return None;
@@ -102,7 +109,7 @@ impl Rule<Stream> for IndexDeltaJoinRule {
                             index.index_table.clone(),
                             p2s_mapping,
                             index.function_mapping(),
-                            stream_scan_type,
+                            backfill_type,
                         )
                         .into(),
                 );
@@ -126,11 +133,11 @@ impl Rule<Stream> for IndexDeltaJoinRule {
                     return None;
                 }
 
-                if stream_scan_type != table_scan.stream_scan_type() {
+                if backfill_type != table_scan.backfill_type() {
                     Some(
-                        StreamTableScan::new_with_stream_scan_type(
+                        StreamTableScan::new_with_backfill_type(
                             table_scan.core().clone(),
-                            stream_scan_type,
+                            backfill_type,
                         )
                         .into(),
                     )
@@ -145,9 +152,9 @@ impl Rule<Stream> for IndexDeltaJoinRule {
         // Delta join only needs to backfill one stream flow and others should be upstream only
         // chain. Here we choose the left one to backfill and right one to upstream only
         // chain.
-        if let Some(left) = match_indexes(&left_indices, input_left, StreamScanType::Backfill) {
+        if let Some(left) = match_indexes(&left_indices, input_left, left_backfill_type) {
             if let Some(right) =
-                match_indexes(&right_indices, input_right, StreamScanType::UpstreamOnly)
+                match_indexes(&right_indices, input_right, BackfillType::Replicated)
             {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
