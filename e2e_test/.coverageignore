@@ -15,3 +15,7 @@ e2e_test/source_legacy/pulsar/**/*.slt*
 
 # Manually executed in `e2e_test/subscription/main.py`
 e2e_test/subscription/**/*.slt*
+
+# Local/manual OpenSearch sink test. The current Buildkite sink test
+# container does not start an OpenSearch service.
+e2e_test/sink/opensearch_sink.slt
