@@ -578,7 +578,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
-                                    if can_start_new_snapshot {
+                                    if can_start_new_snapshot || needs_rebuild_snapshot {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
@@ -634,10 +634,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
-
-                                        if needs_rebuild_snapshot {
-                                            continue 'backfill_loop;
-                                        }
                                     }
                                 }
                                 Message::Chunk(chunk) => {
