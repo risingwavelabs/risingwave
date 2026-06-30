@@ -40,10 +40,8 @@ trap cleanup_docker_sccache_credentials EXIT
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-if [[ "${PUSH_DOCKERHUB}" == "true" ]]; then
-  echo "--- dockerhub login"
-  echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
-fi
+echo "--- dockerhub login"
+echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
 if [[ -n "${ORIGINAL_IMAGE_TAG+x}" ]] && [[ -n "${NEW_IMAGE_TAG+x}" ]]; then
   echo "--- retag docker image"
@@ -82,7 +80,7 @@ if [[ "${ENABLE_DOCKER_SCCACHE}" == "true" ]]; then
       aws sts assume-role \
         --role-arn "${DOCKER_SCCACHE_ROLE_ARN}" \
         --role-session-name "${DOCKER_SCCACHE_ROLE_SESSION_NAME:-docker-sccache-${BUILDKITE_BUILD_NUMBER:-local}}" \
-        --duration-seconds "${DOCKER_SCCACHE_SESSION_DURATION_SECONDS:-14400}" \
+        --duration-seconds "${DOCKER_SCCACHE_SESSION_DURATION_SECONDS:-3600}" \
         --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
         --output text
     )
