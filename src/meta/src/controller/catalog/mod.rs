@@ -76,7 +76,7 @@ use tracing::info;
 
 use super::utils::{
     check_subscription_name_duplicate, get_internal_tables_by_id, load_streaming_jobs_by_ids,
-    rename_relation, rename_relation_refer,
+    rename_relation, rename_relation_refer, rename_schema_definitions,
 };
 use crate::controller::ObjectModel;
 use crate::controller::catalog::util::update_internal_tables;

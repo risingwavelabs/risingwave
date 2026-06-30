@@ -35,10 +35,10 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, CreateType, DataTypeArray, DatabaseId, DispatcherType, FragmentId,
-    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
-    TableId, TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation,
-    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
-    subscription, table, user, user_default_privilege, user_privilege, view,
+    IndexId, JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode,
+    StreamSourceInfo, TableId, TableIdArray, UserId, WorkerId, connection, database, fragment,
+    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
+    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -1928,6 +1928,156 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
     }
 }
 
+/// Updates definitions owned by or referring to relations in a renamed schema.
+pub async fn rename_schema_definitions(
+    txn: &DatabaseTransaction,
+    schema_id: SchemaId,
+    old_schema_name: &str,
+    new_schema_name: &str,
+) -> MetaResult<Vec<PbObject>> {
+    use sea_orm::ActiveModelTrait;
+
+    use crate::controller::rename::{
+        RenameOperation, alter_relation_rename, alter_relation_rename_refs,
+    };
+
+    let schema_relations: Vec<PartialObject> = Object::find()
+        .filter(object::Column::SchemaId.eq(schema_id))
+        .filter(object::Column::ObjType.is_in([
+            ObjectType::Table,
+            ObjectType::Source,
+            ObjectType::Sink,
+            ObjectType::View,
+            ObjectType::Subscription,
+        ]))
+        .into_partial_model()
+        .all(txn)
+        .await?;
+
+    let mut relations = HashMap::new();
+    let mut indexes = HashSet::<IndexId>::new();
+    for relation in schema_relations {
+        relations.insert(relation.oid, relation.obj_type);
+        for referring_relation in get_referring_objects(relation.oid, txn).await? {
+            match referring_relation.obj_type {
+                ObjectType::Table
+                | ObjectType::Source
+                | ObjectType::Sink
+                | ObjectType::View
+                | ObjectType::Subscription => {
+                    relations.insert(referring_relation.oid, referring_relation.obj_type);
+                }
+                ObjectType::Index => {
+                    let index_id = referring_relation.oid.as_index_id();
+                    let index_table_id: Option<TableId> = Index::find_by_id(index_id)
+                        .select_only()
+                        .column(index::Column::IndexTableId)
+                        .into_tuple()
+                        .one(txn)
+                        .await?;
+                    if let Some(index_table_id) = index_table_id {
+                        relations.insert(index_table_id.as_object_id(), ObjectType::Table);
+                        indexes.insert(index_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if relation.obj_type == ObjectType::Table {
+            let incoming_sinks: Vec<SinkId> = Sink::find()
+                .select_only()
+                .column(sink::Column::SinkId)
+                .filter(sink::Column::TargetTable.eq(relation.oid))
+                .into_tuple()
+                .all(txn)
+                .await?;
+            relations.extend(
+                incoming_sinks
+                    .into_iter()
+                    .map(|sink_id| (sink_id.as_object_id(), ObjectType::Sink)),
+            );
+        }
+    }
+
+    let operation = RenameOperation::SchemaName {
+        from: old_schema_name,
+        to: new_schema_name,
+    };
+    let mut updated_relations = vec![];
+    macro_rules! rewrite_definition {
+        ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
+            let (mut relation, obj) = $entity::find_by_id($object_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+                .unwrap();
+            let definition = alter_relation_rename(&relation.definition, operation);
+            let definition = alter_relation_rename_refs(&definition, operation);
+            if definition != relation.definition {
+                relation.definition = definition;
+                let active_model = $table::ActiveModel {
+                    $identity: Set(relation.$identity),
+                    definition: Set(relation.definition.clone()),
+                    ..Default::default()
+                };
+                active_model.update(txn).await?;
+                let streaming_job = streaming_job::Entity::find_by_id($object_id.as_raw_id())
+                    .one(txn)
+                    .await?;
+                updated_relations.push(PbObject {
+                    object_info: Some(PbObjectInfo::$entity(
+                        ObjectModel(relation, obj.unwrap(), streaming_job).into(),
+                    )),
+                });
+            }
+        }};
+    }
+
+    for (object_id, object_type) in relations {
+        match object_type {
+            ObjectType::Table => {
+                rewrite_definition!(Table, table, table_id, object_id.as_table_id())
+            }
+            ObjectType::Source => {
+                rewrite_definition!(Source, source, source_id, object_id.as_source_id())
+            }
+            ObjectType::Sink => {
+                rewrite_definition!(Sink, sink, sink_id, object_id.as_sink_id())
+            }
+            ObjectType::View => {
+                rewrite_definition!(View, view, view_id, object_id.as_view_id())
+            }
+            ObjectType::Subscription => rewrite_definition!(
+                Subscription,
+                subscription,
+                subscription_id,
+                object_id.as_subscription_id()
+            ),
+            _ => unreachable!(),
+        }
+    }
+
+    // Rebuild frontend IndexCatalogs after their backing tables have been updated.
+    for index_id in indexes {
+        let (index, obj) = Index::find_by_id(index_id)
+            .find_also_related(Object)
+            .one(txn)
+            .await?
+            .unwrap();
+        let streaming_job = streaming_job::Entity::find_by_id(index_id.as_job_id())
+            .one(txn)
+            .await?;
+        updated_relations.push(PbObject {
+            object_info: Some(PbObjectInfo::Index(
+                ObjectModel(index, obj.unwrap(), streaming_job).into(),
+            )),
+        });
+    }
+
+    Ok(updated_relations)
+}
+
 /// `rename_relation` renames the target relation and its definition,
 /// it commits the changes to the transaction and returns the updated relations and the old name.
 pub async fn rename_relation(
@@ -1938,7 +2088,7 @@ pub async fn rename_relation(
 ) -> MetaResult<(Vec<PbObject>, String)> {
     use sea_orm::ActiveModelTrait;
 
-    use crate::controller::rename::alter_relation_rename;
+    use crate::controller::rename::{RenameOperation, alter_relation_rename};
 
     let mut to_update_relations = vec![];
     // rename relation.
@@ -1953,7 +2103,14 @@ pub async fn rename_relation(
             let old_name = relation.name.clone();
             relation.name = object_name.into();
             if obj.obj_type != ObjectType::View {
-                relation.definition = alter_relation_rename(&relation.definition, object_name);
+                relation.definition = alter_relation_rename(
+                    &relation.definition,
+                    RenameOperation::RelationName {
+                        from_schema: None,
+                        from: &old_name,
+                        to: object_name,
+                    },
+                );
             }
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
@@ -2100,7 +2257,24 @@ pub async fn rename_relation_refer(
 ) -> MetaResult<Vec<PbObject>> {
     use sea_orm::ActiveModelTrait;
 
-    use crate::controller::rename::alter_relation_rename_refs;
+    use crate::controller::rename::{RenameOperation, alter_relation_rename_refs};
+
+    let schema_id: Option<SchemaId> = Object::find_by_id(object_id)
+        .select_only()
+        .column(object::Column::SchemaId)
+        .into_tuple::<Option<SchemaId>>()
+        .one(txn)
+        .await?
+        .flatten();
+    let schema_id = schema_id
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema of relation", object_id))?;
+    let schema_name: String = Schema::find_by_id(schema_id)
+        .select_only()
+        .column(schema::Column::Name)
+        .into_tuple()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
 
     let mut to_update_relations = vec![];
     macro_rules! rename_relation_ref {
@@ -2110,8 +2284,14 @@ pub async fn rename_relation_refer(
                 .one(txn)
                 .await?
                 .unwrap();
-            relation.definition =
-                alter_relation_rename_refs(&relation.definition, old_name, object_name);
+            relation.definition = alter_relation_rename_refs(
+                &relation.definition,
+                RenameOperation::RelationName {
+                    from_schema: Some(&schema_name),
+                    from: old_name,
+                    to: object_name,
+                },
+            );
             let active_model = $table::ActiveModel {
                 $identity: Set(relation.$identity),
                 definition: Set(relation.definition.clone()),

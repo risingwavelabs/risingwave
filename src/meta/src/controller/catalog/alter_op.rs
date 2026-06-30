@@ -67,7 +67,7 @@ impl CatalogController {
     async fn alter_schema_name(
         &self,
         schema_id: SchemaId,
-        name: &str,
+        new_schema_name: &str,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -76,20 +76,37 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
-        check_schema_name_duplicate(name, obj.database_id.unwrap(), &txn).await?;
+        check_schema_name_duplicate(new_schema_name, obj.database_id.unwrap(), &txn).await?;
+
+        let old_schema_name: String = Schema::find_by_id(schema_id)
+            .select_only()
+            .column(schema::Column::Name)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+
+        let mut updated_objects =
+            rename_schema_definitions(&txn, schema_id, &old_schema_name, new_schema_name).await?;
 
         let active_model = schema::ActiveModel {
             schema_id: Set(schema_id),
-            name: Set(name.to_owned()),
+            name: Set(new_schema_name.to_owned()),
         };
         let schema = active_model.update(&txn).await?;
+        updated_objects.push(PbObject {
+            object_info: Some(PbObjectInfo::Schema(ObjectModel(schema, obj, None).into())),
+        });
 
         txn.commit().await?;
 
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Schema(ObjectModel(schema, obj, None).into()),
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                    dependencies: vec![],
+                }),
             )
             .await;
         Ok(version)
