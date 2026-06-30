@@ -207,7 +207,7 @@ pub struct StreamingDeveloperConfig {
     pub hash_join_entry_state_max_rows: usize,
 
     /// Number of processed rows between periodic join cache evictions.
-    /// Values smaller than 1 will be clamped to 1 by the executor.
+    /// Set to `0` to disable periodic eviction entirely.
     #[serde(default = "default::developer::streaming_join_hash_map_evict_interval_rows")]
     pub join_hash_map_evict_interval_rows: u32,
 

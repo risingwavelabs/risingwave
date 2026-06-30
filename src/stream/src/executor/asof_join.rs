@@ -191,8 +191,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         let join_cache_evict_interval_rows = ctx
             .config
             .developer
-            .join_hash_map_evict_interval_rows
-            .max(1);
+            .join_hash_map_evict_interval_rows;
         let cache_epoch = if use_cache {
             Some(watermark_epoch)
         } else {
@@ -313,7 +312,9 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         join_cache_evict_interval_rows: u32,
     ) {
         *cnt_rows_received += 1;
-        if *cnt_rows_received >= join_cache_evict_interval_rows {
+        if join_cache_evict_interval_rows > 0
+            && *cnt_rows_received >= join_cache_evict_interval_rows
+        {
             side_l.ht.evict_cache();
             side_r.ht.evict_cache();
             *cnt_rows_received = 0;
