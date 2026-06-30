@@ -92,6 +92,7 @@ pub enum StatementType {
     ALTER_SYSTEM,
     ALTER_SECRET,
     ALTER_FRAGMENT,
+    ALTER_COMPACTION_GROUP,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
@@ -294,6 +295,7 @@ impl StatementType {
             Statement::AlterTable { .. } => Ok(StatementType::ALTER_TABLE),
             Statement::AlterSystem { .. } => Ok(StatementType::ALTER_SYSTEM),
             Statement::AlterFragment { .. } => Ok(StatementType::ALTER_FRAGMENT),
+            Statement::AlterCompactionGroup { .. } => Ok(StatementType::ALTER_COMPACTION_GROUP),
             Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
             Statement::Discard(..) => Ok(StatementType::DISCARD),
             Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
@@ -334,7 +336,7 @@ impl StatementType {
             Statement::FetchCursor { .. } => Ok(StatementType::FETCH_CURSOR),
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
-            Statement::Wait => Ok(StatementType::WAIT),
+            Statement::Wait(_) => Ok(StatementType::WAIT),
             Statement::Backup => Ok(StatementType::BACKUP),
             Statement::DeleteMetaSnapshots { .. } => Ok(StatementType::DELETE_META_SNAPSHOTS),
             Statement::Recover => Ok(StatementType::RECOVER),

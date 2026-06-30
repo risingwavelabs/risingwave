@@ -14,7 +14,10 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanWindowFunction};
@@ -113,6 +116,59 @@ impl StreamEowcOverWindow {
         let in_dist_key = self.core.input.distribution().dist_column_indices();
         tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
+
+    /// Returns true if any window function requires intermediate state persistence.
+    /// Currently this includes numbering functions (`row_number`, `rank`, `dense_rank`).
+    fn needs_intermediate_state_table(&self) -> bool {
+        self.window_functions().iter().any(|f| {
+            matches!(
+                f.kind,
+                WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank
+            )
+        })
+    }
+
+    /// Infer the intermediate state table for persisting window function states.
+    ///
+    /// Schema: partition key columns + `state_0..state_{n-1}` (Bytea, one per window function call).
+    /// PK: partition key columns (ascending) only.
+    fn infer_intermediate_state_table(&self) -> TableCatalog {
+        let in_fields = self.core.input.schema().fields();
+        let mut tbl_builder = TableCatalogBuilder::default();
+
+        // Add partition key columns
+        let partition_key_indices = self.partition_key_indices();
+        for &idx in &partition_key_indices {
+            tbl_builder.add_column(&in_fields[idx]);
+        }
+
+        // Add state columns: one per window function call (state_0, state_1, ..., state_{n-1})
+        let num_calls = self.window_functions().len();
+        for i in 0..num_calls {
+            tbl_builder.add_column(&Field::with_name(DataType::Bytea, format!("state_{}", i)));
+        }
+
+        // PK = partition key columns only (ascending)
+        for i in 0..partition_key_indices.len() {
+            tbl_builder.add_order_column(i, OrderType::ascending());
+        }
+        let read_prefix_len_hint = tbl_builder.get_current_pk_len();
+
+        // Distribution key: same as partition key distribution
+        let in_dist_key = self.core.input.distribution().dist_column_indices();
+        // Map input distribution key indices to intermediate state table column indices.
+        // The partition key columns are added first at indices 0..partition_key_indices.len().
+        let dist_key: Vec<usize> = in_dist_key
+            .iter()
+            .filter_map(|&idx| {
+                partition_key_indices
+                    .iter()
+                    .position(|&pk_idx| pk_idx == idx)
+            })
+            .collect();
+
+        tbl_builder.build(dist_key, read_prefix_len_hint)
+    }
 }
 
 impl_distill_by_unit!(StreamEowcOverWindow, core, "StreamEowcOverWindow");
@@ -154,11 +210,23 @@ impl StreamNode for StreamEowcOverWindow {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
+        // Build intermediate state table if needed
+        let intermediate_state_table = if self.needs_intermediate_state_table() {
+            Some(
+                self.infer_intermediate_state_table()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            )
+        } else {
+            None
+        };
+
         PbNodeBody::EowcOverWindow(Box::new(EowcOverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
+            intermediate_state_table,
         }))
     }
 }

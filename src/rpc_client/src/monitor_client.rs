@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::monitor::EndpointExt as _;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
@@ -43,14 +44,14 @@ pub struct MonitorClient {
 
 impl MonitorClient {
     pub async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
             .monitored_connect("grpc-monitor-client", Default::default())
             .await?
             .wrapped();
 
         Ok(Self {
-            monitor_client: MonitorServiceClient::new(channel),
+            monitor_client: configured_monitor_service_client(MonitorServiceClient::new(channel)),
         })
     }
 

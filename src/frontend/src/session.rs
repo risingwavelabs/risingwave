@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
+use std::iter;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -74,6 +75,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -298,6 +300,10 @@ impl FrontendEnv {
         }
     }
 
+    pub(crate) fn set_frontend_config_for_test(&mut self, frontend_config: FrontendConfig) {
+        self.frontend_config = frontend_config;
+    }
+
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
         let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");
@@ -452,7 +458,9 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
-                .add_service(MonitorServiceServer::new(monitor_srv))
+                .add_service(configured_monitor_service_server(
+                    MonitorServiceServer::new(monitor_srv),
+                ))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -1331,17 +1339,43 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub fn list_change_log_epochs(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        Ok(self
+        let Some(max_epoch) = self
             .env
             .hummock_snapshot_manager()
             .acquire()
-            .list_change_log_epochs(table_id, min_epoch, max_count))
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|s| s.committed_epoch)
+        else {
+            return Ok(vec![]);
+        };
+        let ret = self
+            .env
+            .meta_client_ref()
+            .get_hummock_table_change_log(
+                Some(min_epoch),
+                Some(max_epoch),
+                Some(iter::once(table_id).collect()),
+                true,
+                Some(max_count),
+            )
+            .await?;
+        let Some(e) = ret.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        Ok(e.iter()
+            .flat_map(|l| l.epochs())
+            .filter(|e| *e >= min_epoch && *e <= max_epoch)
+            .take(max_count as usize)
+            .collect())
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1356,6 +1390,11 @@ impl SessionImpl {
         shutdown_rx
     }
 
+    pub fn set_cancel_query_flag(&self, shutdown_tx: ShutdownSender) {
+        let mut flag = self.current_query_cancel_flag.lock();
+        *flag = Some(shutdown_tx);
+    }
+
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock();
         if let Some(sender) = flag_guard.take() {
@@ -1363,10 +1402,9 @@ impl SessionImpl {
             // Current running query is in local mode
             sender.cancel();
             info!("Cancel query request sent.");
-        } else {
-            info!("Trying to cancel query in distributed mode.");
-            self.env.query_manager().cancel_queries_in_session(self.id)
         }
+        info!("Trying to cancel query in distributed mode.");
+        self.env.query_manager().cancel_queries_in_session(self.id)
     }
 
     pub fn cancel_current_creating_job(&self) {
@@ -1902,6 +1940,10 @@ impl Session for SessionImpl {
             }
         }
         Ok(())
+    }
+
+    fn user(&self) -> String {
+        self.user_name()
     }
 }
 

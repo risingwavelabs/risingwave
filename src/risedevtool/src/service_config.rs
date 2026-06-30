@@ -309,6 +309,8 @@ pub struct PubsubConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+    #[serde(default)]
+    pub user_managed: bool,
     #[serde(with = "string")]
     pub port: u16,
     pub address: String,
@@ -421,6 +423,39 @@ pub struct SqlServerConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct NatsConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+    pub monitor_port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MqttConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct LakekeeperConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -474,6 +509,8 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    Nats(NatsConfig),
+    Mqtt(MqttConfig),
     Lakekeeper(LakekeeperConfig),
     Moat(MoatConfig),
 }
@@ -488,6 +525,8 @@ pub enum TaskGroup {
     MySql,
     Postgres,
     SqlServer,
+    Nats,
+    Mqtt,
     Redis,
     Lakekeeper,
     Moat,
@@ -514,6 +553,8 @@ impl ServiceConfig {
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
+            Self::Nats(c) => &c.id,
+            Self::Mqtt(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
             Self::Moat(c) => &c.id,
@@ -541,6 +582,8 @@ impl ServiceConfig {
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
+            Self::Nats(c) => Some(c.port),
+            Self::Mqtt(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
             Self::Moat(c) => Some(c.port),
@@ -560,13 +603,15 @@ impl ServiceConfig {
             Self::Tempo(_c) => false,
             Self::AwsS3(_c) => false,
             Self::Kafka(c) => c.user_managed,
-            Self::Pubsub(_c) => false,
+            Self::Pubsub(c) => c.user_managed,
             Self::Pulsar(c) => c.user_managed,
             Self::Redis(_c) => false,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
+            Self::Nats(c) => c.user_managed,
+            Self::Mqtt(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
             Self::Moat(_c) => false,
@@ -605,6 +650,8 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::Nats(_) => Nats,
+            ServiceConfig::Mqtt(_) => Mqtt,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
             ServiceConfig::Moat(_) => Moat,
         }

@@ -196,6 +196,9 @@ for_all_wrapped_id_fields! (
         AlterDatabaseParamRequest {
             database_id: DatabaseId,
         }
+        AlterDatabaseResourceGroupRequest {
+            database_id: DatabaseId,
+        }
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
@@ -226,7 +229,7 @@ for_all_wrapped_id_fields! (
             table_id: JobId,
         }
         AlterResourceGroupRequest {
-            table_id: TableId,
+            job_id: JobId,
         }
         AlterSecretRequest {
             database_id: DatabaseId,
@@ -334,6 +337,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        WaitRequest {
+            job_id: JobId,
+        }
         WaitVersion {
             hummock_version_id: HummockVersionId,
         }
@@ -388,10 +394,12 @@ for_all_wrapped_id_fields! (
             start_id: HummockRawObjectId,
             end_id: HummockRawObjectId,
         }
+        GetTableChangeLogsRequest.TableFilter {
+            table_ids: TableId,
+        }
         GetVersionByEpochRequest {
             table_id: TableId,
         }
-
         GroupConstruct {
             new_sst_start_id: HummockSstableId,
             parent_group_id: CompactionGroupId,
@@ -905,6 +913,10 @@ for_all_wrapped_id_fields! (
             load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
         }
+        BarrierCompleteResponse.CdcSourceOffsetUpdated {
+            reporter_actor_id: ActorId,
+            source_id: SourceId,
+        }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
             actor_id: ActorId,
@@ -912,6 +924,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
+        }
+        BarrierCompleteResponse.IcebergV3SinkMetadata {
+            reporter_actor_id: ActorId,
+            sink_id: SinkId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
@@ -968,6 +984,9 @@ for_all_wrapped_id_fields! (
             down_fragment_id: FragmentId,
             up_actor_id: ActorId,
             down_actor_id: ActorId,
+        }
+        IngestDmlInitRequest {
+            table_id: TableId,
         }
     }
     user {
@@ -1058,6 +1077,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "serverless_backfill_controller",
         "secret",
         "frontend_service",
+        "window_function",
     ];
     let protos: Vec<String> = proto_files
         .iter()
@@ -1105,6 +1125,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "node_body",
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
+        )
+        .type_attribute(
+            "stream_plan.StreamNode.node_body",
+            "#[derive(::prost_helpers::StreamNodeBodyVariants)]",
         )
         .type_attribute(
             "node_body",
@@ -1175,6 +1199,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.eowc_gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_writer")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_dv_merger")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.
@@ -1274,7 +1300,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs_err::write(
             &out_file,
             format!(
-                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                "#![allow(clippy::useless_conversion)]\n#![allow(clippy::useless_borrows_in_formatting)]\nuse crate::{}::*;\n{}",
                 module_path_id, file_content
             ),
         )?;

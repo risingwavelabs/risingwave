@@ -38,21 +38,25 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TruncateOffset {
     Chunk { epoch: u64, chunk_id: ChunkId },
     Barrier { epoch: u64 },
 }
 
-impl PartialOrd for TruncateOffset {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl Ord for TruncateOffset {
+    fn cmp(&self, other: &Self) -> Ordering {
         let extract = |offset: &TruncateOffset| match offset {
             TruncateOffset::Chunk { epoch, chunk_id } => (*epoch, *chunk_id),
             TruncateOffset::Barrier { epoch } => (*epoch, usize::MAX),
         };
-        let this = extract(self);
-        let other = extract(other);
-        this.partial_cmp(&other)
+        extract(self).cmp(&extract(other))
+    }
+}
+
+impl PartialOrd for TruncateOffset {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -217,6 +221,20 @@ pub struct TransformChunkLogReader<F: Fn(StreamChunk) -> StreamChunk, R: LogRead
     inner: R,
 }
 
+pub struct TruncateBarrierLogReader<R: LogReader> {
+    inner: R,
+    pending_barriers: VecDeque<u64>,
+}
+
+impl<R: LogReader> TruncateBarrierLogReader<R> {
+    pub fn new(inner: R) -> Self {
+        Self {
+            inner,
+            pending_barriers: VecDeque::new(),
+        }
+    }
+}
+
 impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     for TransformChunkLogReader<F, R>
 {
@@ -249,6 +267,54 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         start_offset: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.start_from(start_offset)
+    }
+}
+
+impl<R: LogReader> LogReader for TruncateBarrierLogReader<R> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        self.pending_barriers.clear();
+        self.inner.init().await
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        let (epoch, item) = self.inner.next_item().await?;
+        if matches!(item, LogStoreReadItem::Barrier { .. }) {
+            self.pending_barriers.push_back(epoch);
+        }
+        Ok((epoch, item))
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        while let Some(front_epoch) = self.pending_barriers.front().copied() {
+            match (TruncateOffset::Barrier { epoch: front_epoch }).cmp(&offset) {
+                Ordering::Less => {
+                    self.inner
+                        .truncate(TruncateOffset::Barrier { epoch: front_epoch })?;
+                    self.pending_barriers.pop_front();
+                }
+                Ordering::Equal => {
+                    self.inner.truncate(offset)?;
+                    self.pending_barriers.pop_front();
+                    return Ok(());
+                }
+                Ordering::Greater => {
+                    self.inner.truncate(offset)?;
+                    return Ok(());
+                }
+            }
+        }
+        self.inner.truncate(offset)?;
+        Ok(())
+    }
+
+    async fn rewind(&mut self) -> LogStoreResult<()> {
+        self.pending_barriers.clear();
+        self.inner.rewind().await
+    }
+
+    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        self.pending_barriers.clear();
+        self.inner.start_from(start_offset).await
     }
 }
 
@@ -886,17 +952,58 @@ impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManager<F> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::task::Poll;
 
     use futures::{FutureExt, TryFuture};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
-    use super::LogStoreResult;
+    use super::{LogReader, LogStoreReadItem, LogStoreResult, TruncateBarrierLogReader};
     use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
+
+    struct MockLogReader {
+        items: VecDeque<(u64, LogStoreReadItem)>,
+        truncate_calls: Vec<TruncateOffset>,
+    }
+
+    impl MockLogReader {
+        fn new(items: impl IntoIterator<Item = (u64, LogStoreReadItem)>) -> Self {
+            Self {
+                items: items.into_iter().collect(),
+                truncate_calls: Vec::new(),
+            }
+        }
+    }
+
+    impl LogReader for MockLogReader {
+        async fn init(&mut self) -> LogStoreResult<()> {
+            Ok(())
+        }
+
+        async fn start_from(&mut self, _start_offset: Option<u64>) -> LogStoreResult<()> {
+            Ok(())
+        }
+
+        async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+            self.items
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("no item"))
+        }
+
+        fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+            self.truncate_calls.push(offset);
+            Ok(())
+        }
+
+        async fn rewind(&mut self) -> LogStoreResult<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_truncate_offset_cmp() {
@@ -1188,5 +1295,116 @@ mod tests {
         }
 
         assert_eq!(0, manager.future_count);
+    }
+
+    #[tokio::test]
+    async fn test_truncate_barrier_reader_truncates_previous_barriers_first() {
+        let inner = MockLogReader::new([
+            (
+                1,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint: false,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: None,
+                },
+            ),
+            (
+                2,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint: false,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: None,
+                },
+            ),
+        ]);
+        let mut reader = TruncateBarrierLogReader::new(inner);
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        reader.next_item().await.unwrap();
+        reader.next_item().await.unwrap();
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: 2 })
+            .unwrap();
+
+        assert_eq!(
+            reader.inner.truncate_calls,
+            vec![
+                TruncateOffset::Barrier { epoch: 1 },
+                TruncateOffset::Barrier { epoch: 2 },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_truncate_barrier_reader_keeps_later_barrier_pending() {
+        let inner = MockLogReader::new([
+            (
+                1,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint: false,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: None,
+                },
+            ),
+            (
+                2,
+                LogStoreReadItem::StreamChunk {
+                    chunk: StreamChunk::default(),
+                    chunk_id: 0,
+                },
+            ),
+            (
+                2,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint: false,
+                    new_vnode_bitmap: None,
+                    is_stop: false,
+                    schema_change: None,
+                },
+            ),
+        ]);
+        let mut reader = TruncateBarrierLogReader::new(inner);
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        reader.next_item().await.unwrap();
+        reader.next_item().await.unwrap();
+        reader.next_item().await.unwrap();
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: 2,
+                chunk_id: 0,
+            })
+            .unwrap();
+
+        assert_eq!(
+            reader.inner.truncate_calls,
+            vec![
+                TruncateOffset::Barrier { epoch: 1 },
+                TruncateOffset::Chunk {
+                    epoch: 2,
+                    chunk_id: 0,
+                },
+            ]
+        );
+
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: 2 })
+            .unwrap();
+        assert_eq!(
+            reader.inner.truncate_calls,
+            vec![
+                TruncateOffset::Barrier { epoch: 1 },
+                TruncateOffset::Chunk {
+                    epoch: 2,
+                    chunk_id: 0,
+                },
+                TruncateOffset::Barrier { epoch: 2 },
+            ]
+        );
     }
 }

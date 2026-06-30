@@ -26,12 +26,13 @@ use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
-use risingwave_common::id::SourceId;
+use risingwave_common::id::{SinkId, SourceId};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbListFinishedSource, PbLoadFinishedSource,
+    IcebergV3SinkMetadata as PbIcebergV3SinkMetadata, PbCdcSourceOffsetUpdated,
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -75,6 +76,7 @@ enum ManagedBarrierStateInner {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+        iceberg_v3_sink_metadata: Vec<PbIcebergV3SinkMetadata>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     },
@@ -90,10 +92,9 @@ struct BarrierState {
 
 use risingwave_common::must_match;
 use risingwave_pb::id::FragmentId;
-use risingwave_pb::stream_service::InjectBarrierRequest;
+use risingwave_pb::stream_service::{InjectBarrierRequest, PbIcebergV3SinkRole};
 
 use crate::executor::exchange::permit;
-use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
 use crate::task::cdc_progress::CdcTableBackfillState;
@@ -321,6 +322,9 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// Used to track when CDC sources have updated their offset at least once.
     pub(crate) cdc_source_offset_updated: HashMap<u64, Vec<PbCdcSourceOffsetUpdated>>,
 
+    /// Record Iceberg V3 sink metadata reports per epoch for concurrent checkpoints.
+    pub(crate) iceberg_v3_sink_metadata: HashMap<u64, Vec<PbIcebergV3SinkMetadata>>,
+
     /// Record the tables to truncate for each epoch of concurrent checkpoints.
     pub(crate) truncate_tables: HashMap<u64, HashSet<TableId>>,
     /// Record the tables that have finished refresh for each epoch of concurrent checkpoints.
@@ -349,6 +353,7 @@ impl PartialGraphManagedBarrierState {
             load_finished_source_ids: Default::default(),
             cdc_table_backfill_progress: Default::default(),
             cdc_source_offset_updated: Default::default(),
+            iceberg_v3_sink_metadata: Default::default(),
             truncate_tables: Default::default(),
             refresh_finished_tables: Default::default(),
             state_store,
@@ -413,8 +418,8 @@ impl PartialGraphStatus {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
+                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
+                        let _ = result_sender.send(Err(anyhow!("partial graph aborted").into()));
                     }
                 }
             }
@@ -484,8 +489,8 @@ impl PartialGraphStatus {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("partial graph reset").into()));
+                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
+                        let _ = result_sender.send(Err(anyhow!("partial graph reset").into()));
                     }
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
@@ -806,8 +811,24 @@ impl PartialGraphState {
         request: TakeReceiverRequest,
     ) {
         let request = match request {
-            TakeReceiverRequest::Remote(result_sender) => {
-                let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
+            TakeReceiverRequest::Remote {
+                result_sender,
+                upstream_fragment_id,
+            } => {
+                let upstream_fragment_id_str = upstream_fragment_id.to_string();
+                let fragment_channel_buffered_bytes = self
+                    .actor_manager
+                    .streaming_metrics
+                    .fragment_channel_buffered_bytes
+                    .with_guarded_label_values(&[&upstream_fragment_id_str]);
+                let (tx, rx) = permit::channel_from_config_with_metrics(
+                    self.local_barrier_manager.env.global_config(),
+                    permit::ChannelMetrics {
+                        sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes
+                            .clone(),
+                        receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
+                    },
+                );
                 let _ = result_sender.send(Ok(rx));
                 NewOutputRequest::Remote(tx)
             }
@@ -936,6 +957,15 @@ impl PartialGraphState {
                 } => {
                     self.report_cdc_source_offset_updated(epoch, actor_id, source_id);
                 }
+                LocalBarrierEvent::ReportIcebergV3SinkMetadata {
+                    epoch,
+                    sink_id,
+                    actor_id,
+                    role,
+                    metadata,
+                } => {
+                    self.report_iceberg_v3_sink_metadata(epoch, sink_id, actor_id, role, metadata);
+                }
             }
         }
 
@@ -992,7 +1022,7 @@ impl PartialGraphState {
         first_failure
             .into_iter()
             .map(|(_, err)| err)
-            .chain(later_errs.into_iter())
+            .chain(later_errs)
             .map(|e| e.with_score())
             .max_by_key(|e| e.score)
     }
@@ -1070,13 +1100,47 @@ impl PartialGraphState {
                 .entry(epoch.curr)
                 .or_default()
                 .push(PbCdcSourceOffsetUpdated {
-                    reporter_actor_id: actor_id.as_raw_id(),
-                    source_id: source_id.as_raw_id(),
+                    reporter_actor_id: actor_id,
+                    source_id,
                 });
         } else {
             warn!(
                 ?epoch,
                 %actor_id, %source_id, "ignore cdc source offset updated"
+            );
+        }
+    }
+
+    /// Record a Iceberg V3 sink metadata report.
+    pub(super) fn report_iceberg_v3_sink_metadata(
+        &mut self,
+        epoch: EpochPair,
+        sink_id: SinkId,
+        actor_id: ActorId,
+        role: PbIcebergV3SinkRole,
+        metadata: Option<SinkMetadata>,
+    ) {
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
+        {
+            self.graph_state
+                .iceberg_v3_sink_metadata
+                .entry(epoch.curr)
+                .or_default()
+                .push(PbIcebergV3SinkMetadata {
+                    sink_id,
+                    reporter_actor_id: actor_id,
+                    prev_epoch: epoch.prev,
+                    role: role as i32,
+                    metadata,
+                });
+        } else {
+            tracing::warn!(
+                ?epoch,
+                %actor_id,
+                %sink_id,
+                ?role,
+                "ignore iceberg v3 sink metadata report from non-inflight actor"
             );
         }
     }
@@ -1121,9 +1185,8 @@ impl PartialGraphState {
 }
 
 impl PartialGraphManagedBarrierState {
-    /// This method is called when barrier state is modified in either `Issued` or `Stashed`
-    /// to transform the state to `AllCollected` and start state store `sync` when the barrier
-    /// has been collected from all actors for an `Issued` barrier.
+    /// Check whether any `Issued` barrier has been collected by all actors and, if so,
+    /// transition it to `AllCollected`.
     fn may_have_collected_all(&mut self) -> Option<Barrier> {
         for barrier_state in self.epoch_barrier_state_map.values_mut() {
             match &barrier_state.inner {
@@ -1171,6 +1234,11 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default();
 
+            let iceberg_v3_sink_metadata = self
+                .iceberg_v3_sink_metadata
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default();
+
             let truncate_tables = self
                 .truncate_tables
                 .remove(&barrier_state.barrier.epoch.curr)
@@ -1194,6 +1262,7 @@ impl PartialGraphManagedBarrierState {
                     refresh_finished_tables,
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
+                    iceberg_v3_sink_metadata,
                 },
             );
 
@@ -1223,6 +1292,7 @@ impl PartialGraphManagedBarrierState {
             load_finished_source_ids,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
+            iceberg_v3_sink_metadata,
             truncate_tables,
             refresh_finished_tables,
         ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
@@ -1233,8 +1303,9 @@ impl PartialGraphManagedBarrierState {
             refresh_finished_tables,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
+            iceberg_v3_sink_metadata,
         } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, truncate_tables, refresh_finished_tables)
+            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, iceberg_v3_sink_metadata, truncate_tables, refresh_finished_tables)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1246,6 +1317,7 @@ impl PartialGraphManagedBarrierState {
             refresh_finished_tables,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
+            iceberg_v3_sink_metadata,
         }
     }
 }
@@ -1260,6 +1332,7 @@ pub(crate) struct BarrierToComplete {
     pub refresh_finished_tables: Vec<TableId>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
     pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+    pub iceberg_v3_sink_metadata: Vec<PbIcebergV3SinkMetadata>,
 }
 
 impl PartialGraphManagedBarrierState {

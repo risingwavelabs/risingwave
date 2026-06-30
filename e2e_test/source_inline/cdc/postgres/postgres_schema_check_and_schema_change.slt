@@ -4,6 +4,7 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t;
     CREATE EXTENSION IF NOT EXISTS citext;
+    DROP TYPE IF EXISTS mood_enum;
     CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
     CREATE TABLE t (
         v1 bigserial PRIMARY KEY,

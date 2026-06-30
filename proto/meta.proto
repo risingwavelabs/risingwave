@@ -106,7 +106,8 @@ message TableFragments {
 
   stream_plan.StreamContext ctx = 6;
 
-  TableParallelism parallelism = 7;
+  reserved 7;
+  reserved "parallelism";
   // The max parallelism specified when the streaming job was created, i.e., expected vnode count.
   //
   // The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
@@ -270,6 +271,7 @@ message ListStreamingJobStatesResponse {
     string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
+    optional string adaptive_parallelism_strategy = 10;
   }
   repeated StreamingJobState states = 1;
 }
@@ -475,6 +477,7 @@ message ListIcebergCompactionStatusResponse {
     uint64 trigger_snapshot_count = 4;
     string schedule_state = 5;
     optional uint64 next_compaction_after_sec = 6;
+    // V1 approximates pending snapshot backlog with in-memory sink commit backlog.
     optional uint64 pending_snapshot_count = 7;
     bool is_triggerable = 8;
   }
@@ -818,7 +821,9 @@ message SystemParams {
   optional uint64 checkpoint_frequency = 2;
   optional uint32 sstable_size_mb = 3;
   optional uint32 block_size_kb = 4;
-  optional double bloom_false_positive = 5;
+  // Deprecated. Bloom filter is no longer a supported SST filter implementation; the field is
+  // kept for backward compatibility and no longer controls whether SST filters are emitted.
+  optional double bloom_false_positive = 5 [deprecated = true];
   optional string state_store = 6;
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
@@ -918,6 +923,7 @@ message EventLog {
     double duration_sec = 3;
     string command = 4;
     string barrier_kind = 5;
+    uint32 database_id = 6;
   }
   message EventInjectBarrierFail {
     uint64 prev_epoch = 1;

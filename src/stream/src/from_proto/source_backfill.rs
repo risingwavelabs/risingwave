@@ -23,6 +23,8 @@ use crate::executor::source::{
 
 pub struct SourceBackfillExecutorBuilder;
 
+impl_stream_node_body!(SourceBackfill(SourceBackfillNode) => SourceBackfillExecutorBuilder);
+
 impl ExecutorBuilder for SourceBackfillExecutorBuilder {
     type Node = SourceBackfillNode;
 

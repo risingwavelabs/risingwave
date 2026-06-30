@@ -17,14 +17,14 @@ use std::time::Duration;
 
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::config::SessionInitConfig;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_common_service::{AwaitTreeMiddlewareLayer, MetricsManager, TracingExtractLayer};
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -60,6 +60,7 @@ use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -89,6 +90,7 @@ use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
 use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
@@ -128,7 +130,7 @@ pub async fn rpc_serve(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
@@ -168,7 +170,7 @@ pub async fn rpc_serve(
         server_config,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         shutdown,
     ))
     .await
@@ -187,7 +189,7 @@ pub async fn rpc_serve_with_store(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     // TODO(shutdown): directly use cancellation token
@@ -251,7 +253,7 @@ pub async fn rpc_serve_with_store(
         max_cluster_heartbeat_interval,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         server_config,
         election_client,
         shutdown,
@@ -314,7 +316,7 @@ pub async fn start_service_as_election_leader(
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
@@ -324,7 +326,7 @@ pub async fn start_service_as_election_leader(
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
-        init_session_config,
+        session_init,
         meta_store_impl,
     )
     .await?;
@@ -463,6 +465,9 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    let iceberg_v3_sink_manager = IcebergV3SinkManager::new(env.meta_store_ref().conn.clone());
+    tracing::info!("IcebergV3SinkManager started");
+
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
@@ -506,6 +511,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
+        iceberg_v3_sink_manager.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
         refresh_manager.clone(),
@@ -526,7 +532,9 @@ pub async fn start_service_as_election_leader(
             env.clone(),
             metadata_manager.clone(),
             barrier_scheduler.clone(),
+            hummock_manager.clone(),
             source_manager.clone(),
+            refresh_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -547,6 +555,7 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
         barrier_scheduler.clone(),
+        iceberg_v3_sink_manager.clone(),
     )
     .await;
 
@@ -761,6 +770,7 @@ pub async fn start_service_as_election_leader(
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
+        .layer(AwaitTreeMiddlewareLayer::new(env.await_tree_reg().clone()))
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
@@ -790,7 +800,9 @@ pub async fn start_service_as_election_leader(
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
         ))
-        .add_service(MonitorServiceServer::new(monitor_srv));
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));

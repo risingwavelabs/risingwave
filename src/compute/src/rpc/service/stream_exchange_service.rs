@@ -75,7 +75,12 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver(up_partial_graph_id, term_id, (up_actor_id, down_actor_id))
+            .take_receiver(
+                up_partial_graph_id,
+                term_id,
+                (up_actor_id, down_actor_id),
+                up_fragment_id,
+            )
             .await?;
 
         // Map the remaining stream to add-permits.

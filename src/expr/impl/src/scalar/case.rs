@@ -232,7 +232,7 @@ fn build_constant_lookup_expr(
         arms.insert(s, then);
     }
 
-    let fallback = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
+    let fallback = if let Some(else_clause) = iter.into_remainder().next() {
         if else_clause.return_type() != return_type {
             bail!("Type mismatched between else and case.");
         }
@@ -267,7 +267,7 @@ fn build_case_expr(
         }
         when_clauses.push(WhenClause { when, then });
     }
-    let else_clause = if let Some(else_clause) = iter.into_remainder().unwrap().next() {
+    let else_clause = if let Some(else_clause) = iter.into_remainder().next() {
         if else_clause.return_type() != return_type {
             bail!("Type mismatched between else and case.");
         }

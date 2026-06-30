@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use either::Either;
 use iceberg::arrow::type_to_arrow_type;
 use iceberg::spec::Transform;
@@ -24,11 +25,15 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    Schema,
+};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Timestamptz};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
@@ -47,8 +52,9 @@ use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
-    ObjectName, Query,
+    ObjectName, Query, Statement,
 };
+use risingwave_sqlparser::parser::Parser;
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
@@ -60,15 +66,19 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
-use crate::handler::create_mv::parse_column_names;
+use crate::handler::create_mv::{
+    extract_streaming_job_resource_options, parse_column_names, resolve_streaming_job_resource_type,
+};
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
-    ensure_connection_type_allowed, execute_with_long_running_notification,
+    ensure_connection_type_allowed, ensure_local_fs_connector_allowed,
+    execute_with_long_running_notification, get_table_catalog_by_table_name,
+    reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
-    StreamProject, generic,
+    StreamProject, ensure_sync_log_store_fragment_root, generic,
 };
 use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -96,6 +106,8 @@ static SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionTyp
         }
     });
 
+const SINK_SINCE_TIMESTAMP_OPTION: &str = "since_timestamp";
+
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
     pub query: Box<Query>,
@@ -103,6 +115,7 @@ pub struct SinkPlanContext {
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 pub async fn gen_sink_plan(
@@ -119,6 +132,9 @@ pub async fn gen_sink_plan(
         Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
+    // These are frontend-level streaming job options. They must not be passed to connector
+    // property validation.
+    extract_streaming_job_resource_options(&mut with_options);
 
     if session
         .env()
@@ -138,6 +154,25 @@ pub async fn gen_sink_plan(
             session,
             Some(TelemetryDatabaseObject::Sink),
         )?;
+
+    let since_timestamp_epoch = resolved_with_options
+        .remove(SINK_SINCE_TIMESTAMP_OPTION)
+        .map(|value| {
+            let timestamp = value.parse::<Timestamptz>().map_err(|err| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value {value:?} of '{SINK_SINCE_TIMESTAMP_OPTION}' option: {err}; \
+                     expected a timestamptz string with an explicit time zone, \
+                     for example '2024-01-01 00:00:00Z'"
+                ))
+            })?;
+            let timestamp_millis = u64::try_from(timestamp.timestamp_millis()).unwrap_or(0);
+            Ok::<_, RwError>(Epoch::from_unix_millis_or_earliest(timestamp_millis).0)
+        })
+        .transpose()?;
+    if since_timestamp_epoch.is_some() {
+        Feature::SinkSinceTimestamp.check_available()?;
+    }
+
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -190,13 +225,14 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+    ensure_local_fs_connector_allowed(session, &connector)?;
 
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
     // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
     let direct_sink_from_name: Option<(ObjectName, bool)>;
-    let query = match stmt.sink_from {
+    let mut query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
@@ -248,10 +284,61 @@ pub async fn gen_sink_plan(
         }
     };
 
+    if is_iceberg_engine_internal && let Some((from_name, _)) = &direct_sink_from_name {
+        let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+        let pk_names = table.pk_column_names();
+        if pk_names.len() == 1 && pk_names[0].eq(ROW_ID_COLUMN_NAME) {
+            let [stmt]: [_; 1] = Parser::parse_sql(&format!(
+                "select {} as {}, * from {}",
+                ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, from_name
+            ))
+            .context("unable to parse query")?
+            .try_into()
+            .unwrap();
+            let Statement::Query(parsed_query) = stmt else {
+                panic!("unexpected statement: {:?}", stmt);
+            };
+            query = parsed_query;
+        }
+    }
+
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
+    if since_timestamp_epoch.is_some() {
+        if sink_into_table_name.is_some() {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support `CREATE SINK INTO TABLE`"
+            ))
+            .into());
+        }
+        if is_iceberg_engine_internal {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support iceberg engine internal sinks"
+            ))
+            .into());
+        }
+        if let Some((from_name, _)) = &direct_sink_from_name {
+            let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+            if table.database_id != sink_database_id {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support cross-database sinks"
+                    ),
+                    "Please create the sink in the same database as the upstream table.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
+    let (
+        dependent_relations,
+        dependent_udfs,
+        dependent_secrets,
+        bound,
+        auto_refresh_schema_from_table,
+    ) = {
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
@@ -291,10 +378,13 @@ pub async fn gen_sink_plan(
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound,
             auto_refresh_schema_from_table,
         )
     };
+
+    reject_internal_table_dependencies(session, &dependent_relations, "CREATE SINK")?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
@@ -341,19 +431,17 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
-        Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink_from_name.is_some() || is_iceberg_engine_internal {
-                true
-            } else {
-                return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
-                )
-                .into());
-            }
-        }
-        _ => false,
-    };
+    let without_snapshot = matches!(
+        resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
+        Some(flag) if flag.eq_ignore_ascii_case("false")
+    );
+
+    if since_timestamp_epoch.is_some() && !without_snapshot {
+        return Err(ErrorCode::BindError(format!(
+            "`{SINK_SINCE_TIMESTAMP_OPTION}` requires `snapshot = false`"
+        ))
+        .into());
+    }
 
     let target_table_catalog = stmt
         .into_table_name
@@ -390,8 +478,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -400,17 +486,19 @@ pub async fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
-        without_backfill,
+        without_snapshot,
+        since_timestamp_epoch.is_some(),
+        is_iceberg_engine_internal,
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
-        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let mut sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
+    sink_plan = ensure_sync_log_store_fragment_root(sink_plan);
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -426,6 +514,12 @@ pub async fn gen_sink_plan(
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
             .chain(dependent_udfs.iter().copied().map_into())
+            .chain(
+                dependent_secrets
+                    .iter()
+                    .copied()
+                    .map(|id| id.as_object_id()),
+            )
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
@@ -472,6 +566,7 @@ pub async fn gen_sink_plan(
         sink_catalog,
         target_table_catalog,
         dependencies,
+        since_timestamp_epoch,
     })
 }
 
@@ -496,7 +591,6 @@ pub async fn get_partition_compute_info(
     }
 }
 
-#[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
@@ -565,7 +659,7 @@ async fn get_partition_compute_info_for_iceberg(
 }
 
 pub async fn handle_create_sink(
-    handle_args: HandlerArgs,
+    mut handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
     is_iceberg_engine_internal: bool,
 ) -> Result<RwPgResponse> {
@@ -589,7 +683,11 @@ pub async fn handle_create_sink(
         ))));
     }
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let resource_type =
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
+            .await?;
+
+    let (mut sink, graph, target_table_catalog, dependencies, since_timestamp_epoch) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
 
         let SinkPlanContext {
@@ -598,6 +696,7 @@ pub async fn handle_create_sink(
             sink_catalog: sink,
             target_table_catalog,
             dependencies,
+            since_timestamp_epoch,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -614,7 +713,13 @@ pub async fn handle_create_sink(
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (
+            sink,
+            graph,
+            target_table_catalog,
+            dependencies,
+            since_timestamp_epoch,
+        )
     };
 
     if let Some(table_catalog) = target_table_catalog {
@@ -634,7 +739,14 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        catalog_writer.create_sink(
+            sink.to_proto(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+            since_timestamp_epoch,
+        ),
         &session,
         "CREATE SINK",
         LongRunningNotificationAction::MonitorBackfillJob,
@@ -727,7 +839,6 @@ pub(crate) fn derive_default_column_project_for_sink(
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
         // The missing columns will be filled with default value (`null` if not explicitly defined).
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
-        #[allow(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);
@@ -920,6 +1031,7 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::config::FrontendConfig;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
@@ -966,5 +1078,42 @@ pub mod tests {
             .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
             .unwrap();
         assert_eq!(sink.name, "snk1");
+    }
+
+    #[tokio::test]
+    async fn test_create_fs_sink_requires_frontend_config() {
+        let frontend = LocalFrontend::with_frontend_config(
+            Default::default(),
+            FrontendConfig {
+                unsafe_enable_local_fs_connector: false,
+                ..Default::default()
+            },
+        )
+        .await;
+        frontend.run_sql("CREATE TABLE t(v int);").await.unwrap();
+        frontend
+            .run_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;")
+            .await
+            .unwrap();
+
+        let err = frontend
+            .run_sql(
+                r#"CREATE SINK local_sink FROM mv
+                    WITH (
+                        connector = 'fs',
+                        fs.path = '/tmp/rw-local-sink',
+                        type = 'append-only',
+                        force_append_only = 'true'
+                    ) FORMAT PLAIN ENCODE JSON (force_append_only = 'true');"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_local_fs_connector = true"),
+            "{err:?}"
+        );
     }
 }

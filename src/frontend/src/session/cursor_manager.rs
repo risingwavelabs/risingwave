@@ -26,6 +26,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
+use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
@@ -49,7 +50,7 @@ use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot, SchedulerError};
 use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
@@ -57,6 +58,33 @@ pub enum CursorDataChunkStream {
     LocalDataChunk(Option<LocalQueryStream>),
     DistributedDataChunk(Option<DistributedQueryStream>),
     PgResponse(PgResponseStream),
+}
+
+pub struct FetchCursorCancelHandle {
+    cancel_tx: ShutdownSender,
+    cancel_rx: ShutdownToken,
+}
+
+impl FetchCursorCancelHandle {
+    pub fn new() -> Self {
+        let (cancel_tx, cancel_rx) = ShutdownToken::new();
+        Self {
+            cancel_tx,
+            cancel_rx,
+        }
+    }
+
+    fn register(&self, session: &SessionImpl) {
+        session.set_cancel_query_flag(self.cancel_tx.clone());
+    }
+
+    async fn cancelled(&mut self) {
+        self.cancel_rx.cancelled().await;
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_rx.is_cancelled()
+    }
 }
 
 impl CursorDataChunkStream {
@@ -113,10 +141,11 @@ impl Cursor {
         handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
+        cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         match self {
             Cursor::Subscription(cursor) => cursor
-                .next(count, handler_args, formats, timeout_seconds)
+                .next(count, handler_args, formats, timeout_seconds, cancel_handle)
                 .await
                 .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
             Cursor::Query(cursor) => {
@@ -488,7 +517,9 @@ impl SubscriptionCursor {
                         *expected_timestamp,
                         handler_args.clone(),
                         &self.subscription,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
                             let (mut chunk_stream, init_query_timer, catalog) =
                                 Self::initiate_query(
@@ -605,6 +636,7 @@ impl SubscriptionCursor {
         handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
+        cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         if Instant::now() > self.cursor_need_drop_time {
@@ -629,6 +661,9 @@ impl SubscriptionCursor {
             chunk_stream.init_row_stream(&fields, &fotmats, session.clone());
         }
         while cur < count {
+            if cancel_handle.is_cancelled() {
+                return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+            }
             let fetch_cursor_timer = Instant::now();
             let row = self.next_row(&handler_args, formats).await?;
             self.cursor_metrics
@@ -645,22 +680,43 @@ impl SubscriptionCursor {
                     if cur > 0 || timeout_seconds == 0 {
                         break;
                     }
-                    // It's only blocked when there's no data
-                    // This method will only be called once, either to trigger a timeout or to get the return value in the next loop via `next_row`.
-                    match tokio::time::timeout(
-                        Duration::from_secs(timeout_seconds),
-                        session
+                    let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state else {
+                        // Triggered when previous next_row returns None while self.state is State::Fetch.
+                        continue;
+                    };
+                    // This is the only point where subscription cursor fetch waits without an
+                    // inner query. Register the FETCH-level cancel token so CancelRequest can
+                    // interrupt this wait. The token also marks the whole FETCH as cancelled, so
+                    // we won't start another inner query after a cancellation.
+                    cancel_handle.register(session);
+                    let timeout = tokio::time::sleep(Duration::from_secs(timeout_seconds));
+                    tokio::pin!(timeout);
+                    tokio::select! {
+                        biased;
+                        _ = cancel_handle.cancelled() => {
+                            return Err(SchedulerError::QueryCancelled(
+                                "Cancelled by user".to_owned(),
+                            )
+                            .into());
+                        }
+                        result = session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(self.dependent_table_id),
-                    )
-                    .await
-                    {
-                        Ok(result) => result?,
-                        Err(_) => {
+                            .wait_table_change_log_notification(
+                                self.dependent_table_id,
+                                *seek_timestamp,
+                            ) => {
+                            result?;
+                        }
+                        _ = &mut timeout => {
                             tracing::debug!("Cursor wait next epoch timeout");
                             break;
                         }
+                    }
+                    if cancel_handle.is_cancelled() {
+                        return Err(
+                            SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into(),
+                        );
                     }
                 }
             }
@@ -686,7 +742,7 @@ impl SubscriptionCursor {
         Ok((rows, desc))
     }
 
-    fn get_next_rw_timestamp(
+    async fn get_next_rw_timestamp(
         seek_timestamp: u64,
         table_id: TableId,
         expected_timestamp: Option<u64>,
@@ -701,7 +757,9 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session.list_change_log_epochs(table_id, seek_timestamp, 2)?;
+        let new_epochs = session
+            .list_change_log_epochs(table_id, seek_timestamp, 2)
+            .await?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -1007,6 +1065,7 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: vec![],
+            dependent_secrets: vec![],
         })
     }
 
@@ -1130,10 +1189,11 @@ impl CursorManager {
         handler_args: HandlerArgs,
         formats: &Vec<Format>,
         timeout_seconds: Option<u64>,
+        cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(cursor_name) {
             cursor
-                .next(count, handler_args, formats, timeout_seconds)
+                .next(count, handler_args, formats, timeout_seconds, cancel_handle)
                 .await
         } else {
             Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
@@ -1152,7 +1212,7 @@ impl CursorManager {
         let mut subscription_cursor_nums = 0;
         let mut invalid_subscription_cursor_nums = 0;
         let mut subscription_cursor_last_fetch_duration = HashMap::new();
-        for (_, cursor) in self.cursor_map.lock().await.iter() {
+        for cursor in self.cursor_map.lock().await.values() {
             if let Cursor::Subscription(subscription_cursor) = cursor {
                 subscription_cursor_nums += 1;
                 if matches!(subscription_cursor.state, State::Invalid) {

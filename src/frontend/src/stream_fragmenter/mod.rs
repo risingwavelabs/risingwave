@@ -17,7 +17,6 @@ use anyhow::Context;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -29,9 +28,7 @@ use std::rc::Rc;
 use educe::Educe;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
-use risingwave_common::session_config::parallelism::{
-    ConfigAdaptiveParallelismStrategy, ConfigParallelism,
-};
+use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
@@ -48,7 +45,9 @@ use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
-use crate::stream_fragmenter::parallelism::{derive_parallelism, derive_parallelism_strategy};
+use crate::stream_fragmenter::parallelism::{
+    ResolvedParallelism, derive_backfill_parallelism, derive_parallelism,
+};
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -79,7 +78,6 @@ pub struct BuildFragmentGraphState {
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
     has_any_backfill: bool,
-    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -143,6 +141,7 @@ impl BuildFragmentGraphState {
 }
 
 // The type of streaming job. It is used to determine the parallelism of the job during `build_graph`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphJobType {
     Table,
     MaterializedView,
@@ -152,28 +151,13 @@ pub enum GraphJobType {
 }
 
 impl GraphJobType {
-    pub fn to_parallelism(&self, config: &SessionConfig) -> ConfigParallelism {
+    pub fn to_parallelism(self, config: &SessionConfig) -> ConfigParallelism {
         match self {
             GraphJobType::Table => config.streaming_parallelism_for_table(),
             GraphJobType::MaterializedView => config.streaming_parallelism_for_materialized_view(),
             GraphJobType::Source => config.streaming_parallelism_for_source(),
             GraphJobType::Sink => config.streaming_parallelism_for_sink(),
             GraphJobType::Index => config.streaming_parallelism_for_index(),
-        }
-    }
-
-    pub fn to_parallelism_strategy(
-        &self,
-        config: &SessionConfig,
-    ) -> ConfigAdaptiveParallelismStrategy {
-        match self {
-            GraphJobType::Table => config.streaming_parallelism_strategy_for_table(),
-            GraphJobType::MaterializedView => {
-                config.streaming_parallelism_strategy_for_materialized_view()
-            }
-            GraphJobType::Source => config.streaming_parallelism_strategy_for_source(),
-            GraphJobType::Sink => config.streaming_parallelism_strategy_for_sink(),
-            GraphJobType::Index => config.streaming_parallelism_strategy_for_index(),
         }
     }
 }
@@ -214,58 +198,72 @@ pub fn build_graph_with_strategy(
         )));
     }
 
-    let mut fragment_graph = state.fragment_graph.to_protobuf();
-
-    // Set table ids.
-    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
-    fragment_graph.table_ids_cnt = state.next_table_id;
-
-    // Set parallelism and vnode count.
-    let parallelism_strategy = {
+    let (
+        normal_parallelism,
+        backfill_parallelism,
+        adaptive_parallelism_strategy,
+        backfill_adaptive_parallelism_strategy,
+        max_parallelism,
+    ) = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
-        let job_parallelism = job_type.as_ref().map(|t| t.to_parallelism(config.deref()));
-        let normal_parallelism = derive_parallelism(job_parallelism, streaming_parallelism);
+        let job_parallelism = job_type.map(|t| t.to_parallelism(config.deref()));
+        let normal_parallelism =
+            derive_parallelism(job_type, job_parallelism, streaming_parallelism);
         let backfill_parallelism = if state.has_any_backfill {
-            match config.streaming_parallelism_for_backfill() {
-                ConfigParallelism::Default => None,
-                override_parallelism => {
-                    derive_parallelism(Some(override_parallelism), streaming_parallelism)
-                        .or(normal_parallelism)
-                }
-            }
+            derive_backfill_parallelism(config.streaming_parallelism_for_backfill())
         } else {
-            None
+            ResolvedParallelism {
+                parallelism: None,
+                adaptive_strategy: None,
+            }
         };
-        fragment_graph.parallelism = normal_parallelism;
-        fragment_graph.backfill_parallelism = backfill_parallelism;
-        fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
-
-        let job_strategy = job_type
-            .as_ref()
-            .map(|t| t.to_parallelism_strategy(config.deref()));
-        derive_parallelism_strategy(job_strategy, config.streaming_parallelism_strategy())
+        (
+            normal_parallelism.parallelism,
+            backfill_parallelism.parallelism,
+            normal_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            backfill_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            config.streaming_max_parallelism() as _,
+        )
     };
 
-    // Set context for this streaming job.
     let config_override = ctx
         .session_ctx()
         .config()
         .to_initial_streaming_config_override()
         .context("invalid initial streaming config override")?;
-    let adaptive_parallelism_strategy = parallelism_strategy
-        .as_ref()
-        .map(AdaptiveParallelismStrategy::to_string)
-        .unwrap_or_default();
-    fragment_graph.ctx = Some(StreamContext {
-        timezone: ctx.get_session_timezone(),
-        config_override,
+    let fragments = state
+        .fragment_graph
+        .fragments
+        .into_iter()
+        .map(|(k, v)| (k, v.to_protobuf()))
+        .collect();
+    let edges = state.fragment_graph.edges.into_values().collect();
+
+    Ok(StreamFragmentGraphProto {
+        fragments,
+        edges,
+        dependent_table_ids: state.dependent_table_ids.into_iter().collect(),
+        table_ids_cnt: state.next_table_id,
+        ctx: Some(StreamContext {
+            timezone: ctx.get_session_timezone(),
+            config_override,
+        }),
+        parallelism: normal_parallelism,
+        backfill_parallelism,
         adaptive_parallelism_strategy,
-    });
-
-    fragment_graph.backfill_order = backfill_order;
-
-    Ok(fragment_graph)
+        backfill_adaptive_parallelism_strategy,
+        max_parallelism,
+        backfill_order,
+    })
 }
 
 #[cfg(any())]
@@ -431,22 +429,11 @@ fn build_fragment(
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-            NodeBody::EowcGapFill(node) => {
-                let table = node.buffer_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-                let table = node.prev_row_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-            }
-
-            NodeBody::GapFill(node) => {
-                let table = node.state_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-            }
-
             NodeBody::StreamScan(node) => {
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
+                #[expect(deprecated)]
                 match node.stream_scan_type() {
                     StreamScanType::SnapshotBackfill => {
                         current_fragment
@@ -473,12 +460,6 @@ fn build_fragment(
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
                 state.dependent_table_ids.insert(node.table_id);
-
-                // Add state table if present
-                if let Some(state_table) = &node.state_table {
-                    let table = state_table.clone();
-                    state.tables.insert(table.id, table);
-                }
             }
 
             NodeBody::StreamCdcScan(node) => {

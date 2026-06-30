@@ -123,7 +123,7 @@ fn inner<S>(state_store: &Monitored<S>) -> &S {
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum StateStoreImpl {
     /// The Hummock state store, which operates on an S3-like service. URLs beginning with
     /// `hummock` will be automatically recognized as Hummock state store.
@@ -681,7 +681,6 @@ pub mod verify {
 
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-    #[allow(clippy::too_many_arguments)]
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,
@@ -705,7 +704,8 @@ impl StateStoreImpl {
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
+                    std::mem::size_of::<HummockSstableObjectId>()
+                        + value.estimated_meta_cache_memory_weight()
                 })
                 .storage();
 
@@ -754,8 +754,7 @@ impl StateStoreImpl {
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                    // FIXME(MrCroxx): Calculate block weight more accurately.
-                    u64::BITS as usize * 2 / 8 + value.raw().len()
+                    std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
                 })
                 .storage();
 

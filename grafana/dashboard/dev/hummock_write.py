@@ -129,13 +129,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Materialized View Write Size",
+                    "Streaming Relation Write Size",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
-                                f"write p{legend} - materialized view {{{{materialized_view_id}}}}",
+                                f"write p{legend} - relation {{{{materialized_view_id}}}}",
                             ),
                             [50, 99, "max"],
                         ),

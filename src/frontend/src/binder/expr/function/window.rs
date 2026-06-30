@@ -142,11 +142,8 @@ impl Binder {
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
-                    let order_by_expr = order_by
-                        .sort_exprs
-                        .iter()
-                        // for `RANGE | SESSION` frame, there should be exactly one `ORDER BY` column
-                        .exactly_one()
+                    // for `RANGE | SESSION` frame, there should be exactly one `ORDER BY` column
+                    let order_by_expr = Itertools::exactly_one(order_by.sort_exprs.iter())
                         .map_err(|_| {
                             ErrorCode::InvalidInputSyntax(format!(
                                 "there should be exactly one ordering column for `{}` frame",

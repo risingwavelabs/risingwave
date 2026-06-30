@@ -4,7 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-export CONNECTOR_LIBS_PATH="./connector-node/libs"
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -21,16 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- download connector node package"
-buildkite-agent artifact download risingwave-connector.tar.gz ./
-mkdir ./connector-node
-tar xf ./risingwave-connector.tar.gz -C ./connector-node
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
-sleep 1
+sink_test_env_setup "$profile" --need-connector
 
 echo "--- create SQL Server table"
 curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
@@ -82,6 +73,71 @@ if [[ ${#actual[@]} -eq ${#expected[@]} && ${actual[@]} == ${expected[@]} ]]; th
 else
   cat ./query_result.txt
   echo "The output is not as expected."
+  exit 1
+fi
+
+echo "--- create native SQL Server sink table"
+sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -Q "
+USE SinkTest;
+GO
+DROP USER IF EXISTS rw_sqlserver_readonly_user;
+GO
+USE master;
+GO
+IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = N'rw_sqlserver_readonly_login')
+  DROP LOGIN rw_sqlserver_readonly_login;
+GO
+CREATE LOGIN rw_sqlserver_readonly_login WITH PASSWORD = 'ReadOnlyOnly123!';
+GO
+USE SinkTest;
+GO
+DROP TABLE IF EXISTS test_schema.t_native_sink_pk_and_timestamptz;
+GO
+CREATE TABLE test_schema.t_native_sink_pk_and_timestamptz (
+  EntityId nvarchar(100) NOT NULL,
+  EventDate date NOT NULL,
+  metric_value numeric(20,5) NULL,
+  event_ts_offset datetimeoffset(7) NULL,
+  event_ts_micros bigint NULL,
+  event_ts_int int NULL,
+  event_ts_smallint smallint NULL,
+  event_ts_tinyint tinyint NULL,
+  CONSTRAINT PK_t_native_sink_pk_and_timestamptz PRIMARY KEY CLUSTERED (EntityId, EventDate)
+);
+GO
+CREATE INDEX IX_t_native_sink_pk_and_timestamptz_EventDate
+ON test_schema.t_native_sink_pk_and_timestamptz (EventDate);
+GO
+CREATE USER rw_sqlserver_readonly_user FOR LOGIN rw_sqlserver_readonly_login;
+GO
+GRANT SELECT ON OBJECT::test_schema.t_native_sink_pk_and_timestamptz TO rw_sqlserver_readonly_user;
+GO"
+
+echo "--- testing native SQL Server sink"
+sqllogictest -p 4566 -d dev './e2e_test/sink/sqlserver_native_sink.slt'
+
+native_check=$(
+  sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -h -1 -W -Q "
+SET NOCOUNT ON;
+SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM SinkTest.test_schema.t_native_sink_pk_and_timestamptz
+  WHERE EntityId = N'entity-1'
+    AND EventDate = CONVERT(date, '2024-03-10')
+    AND metric_value = CONVERT(numeric(20,5), 123.45)
+    AND SWITCHOFFSET(event_ts_offset, '+00:00') = CONVERT(datetimeoffset(7), '2024-03-09T16:00:00+00:00')
+    AND event_ts_micros = 1710000000000000
+    AND event_ts_int = 123
+    AND event_ts_smallint = 123
+    AND event_ts_tinyint = 123
+) THEN 'ok' ELSE 'missing' END;
+GO" | tr -d '\r' | awk 'NF {print $1; exit}'
+)
+
+if [[ "$native_check" == "ok" ]]; then
+  echo "Native SQL Server sink check passed"
+else
+  echo "Native SQL Server sink check failed: $native_check"
   exit 1
 fi
 

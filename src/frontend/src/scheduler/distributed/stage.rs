@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::HashMap;
-use std::mem;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{assert_matches, mem};
 
 use StageEvent::Failed;
 use anyhow::anyhow;
@@ -92,7 +91,7 @@ pub enum StageEvent {
         reason: SchedulerError,
     },
     /// All tasks in stage finished.
-    Completed(#[allow(dead_code)] StageId),
+    Completed(#[expect(dead_code)] StageId),
 }
 
 #[derive(Clone)]

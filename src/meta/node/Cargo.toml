@@ -10,6 +10,9 @@ repository = { workspace = true }
 [lib]
 test = false
 
+[features]
+test = ["risingwave_meta/test", "risingwave_meta_service/test"]
+
 [dependencies]
 clap = { workspace = true }
 educe = "0.6"
@@ -28,14 +31,7 @@ risingwave_rpc_client = { workspace = true }
 sea-orm = { workspace = true }
 serde_json = "1"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

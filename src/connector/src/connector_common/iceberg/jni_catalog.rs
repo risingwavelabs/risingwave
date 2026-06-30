@@ -34,7 +34,6 @@ use iceberg::{
 };
 use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
-use risingwave_common::bail;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
@@ -109,6 +108,10 @@ impl From<&TableCreation> for CreateTableRequest {
     }
 }
 
+fn namespace_to_string(namespace: &NamespaceIdent) -> String {
+    namespace.iter().join(".")
+}
+
 #[derive(Debug)]
 pub struct JniCatalog {
     java_catalog: GlobalRef,
@@ -150,14 +153,8 @@ impl Catalog for JniCatalog {
         _properties: HashMap<String, String>,
     ) -> iceberg::Result<iceberg::Namespace> {
         execute_with_jni_env(self.jvm, |env| {
-            let namespace_jstr = if namespace.is_empty() {
-                env.new_string("").unwrap()
-            } else {
-                if namespace.len() > 1 {
-                    bail!("Namespace with more than one level is not supported!")
-                }
-                env.new_string(&namespace[0]).unwrap()
-            };
+            let namespace_str = namespace_to_string(namespace);
+            let namespace_jstr = env.new_string(&namespace_str).unwrap();
 
             call_method!(env, self.java_catalog.as_obj(), {void createNamespace(String)},
                 &namespace_jstr)
@@ -182,14 +179,8 @@ impl Catalog for JniCatalog {
     /// Check if namespace exists in catalog.
     async fn namespace_exists(&self, namespace: &NamespaceIdent) -> iceberg::Result<bool> {
         execute_with_jni_env(self.jvm, |env| {
-            let namespace_jstr = if namespace.is_empty() {
-                env.new_string("").unwrap()
-            } else {
-                if namespace.len() > 1 {
-                    bail!("Namespace with more than one level is not supported!")
-                }
-                env.new_string(&namespace[0]).unwrap()
-            };
+            let namespace_str = namespace_to_string(namespace);
+            let namespace_jstr = env.new_string(&namespace_str).unwrap();
 
             let exists =
                 call_method!(env, self.java_catalog.as_obj(), {boolean namespaceExists(String)},
@@ -215,14 +206,8 @@ impl Catalog for JniCatalog {
     /// List tables from namespace.
     async fn list_tables(&self, namespace: &NamespaceIdent) -> iceberg::Result<Vec<TableIdent>> {
         execute_with_jni_env(self.jvm, |env| {
-            let namespace_jstr = if namespace.is_empty() {
-                env.new_string("").unwrap()
-            } else {
-                if namespace.len() > 1 {
-                    bail!("Namespace with more than one level is not supported!")
-                }
-                env.new_string(&namespace[0]).unwrap()
-            };
+            let namespace_str = namespace_to_string(namespace);
+            let namespace_jstr = env.new_string(&namespace_str).unwrap();
 
             let result_json =
                 call_method!(env, self.java_catalog.as_obj(), {String listTables(String)},
@@ -261,14 +246,8 @@ impl Catalog for JniCatalog {
         creation: TableCreation,
     ) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
-            let namespace_jstr = if namespace.is_empty() {
-                env.new_string("").unwrap()
-            } else {
-                if namespace.len() > 1 {
-                    bail!("Namespace with more than one level is not supported!")
-                }
-                env.new_string(&namespace[0]).unwrap()
-            };
+            let namespace_str = namespace_to_string(namespace);
+            let namespace_jstr = env.new_string(&namespace_str).unwrap();
 
             let creation_str = serde_json::to_string(&CreateTableRequest::from(&creation))?;
 
@@ -314,11 +293,7 @@ impl Catalog for JniCatalog {
     /// Load table from the catalog.
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         execute_with_jni_env(self.jvm, |env| {
-            let table_name_str = format!(
-                "{}.{}",
-                table.namespace().clone().inner().into_iter().join("."),
-                table.name()
-            );
+            let table_name_str = table.to_string();
 
             let table_name_jstr = env.new_string(&table_name_str).unwrap();
 
@@ -369,11 +344,7 @@ impl Catalog for JniCatalog {
         // spawn blocking the drop table task, since dropping a table by default would purge the data which may take a long time.
         tokio::task::spawn_blocking(move || -> iceberg::Result<()> {
             execute_with_jni_env(jvm, |env| {
-                let table_name_str = format!(
-                    "{}.{}",
-                    table.namespace().clone().inner().into_iter().join("."),
-                    table.name()
-                );
+                let table_name_str = table.to_string();
 
                 let table_name_jstr = env.new_string(&table_name_str).unwrap();
 
@@ -415,11 +386,7 @@ impl Catalog for JniCatalog {
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
         execute_with_jni_env(self.jvm, |env| {
-            let table_name_str = format!(
-                "{}.{}",
-                table.namespace().clone().inner().into_iter().join("."),
-                table.name()
-            );
+            let table_name_str = table.to_string();
 
             let table_name_jstr = env.new_string(&table_name_str).unwrap();
 

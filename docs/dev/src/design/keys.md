@@ -23,6 +23,25 @@ The record corresponding to key `(0, 1)` has been inserted with `(0, 1, 2, 3)`.
 It may not be the minimal set of columns required to identify a record,
 for instance `group key` could be part of the stream key, to specify the distribution of records.
 
+For a stream key defined on a streaming plan node, the records yielded by the node must have
+consistent operations for each stream key value. In other words, the stream must not contain
+two inserts for the same stream key without a delete between them, and must not contain two
+deletes for the same stream key without an insert between them.
+
+For updates, the delete side of the update must match the previously yielded value for the
+same stream key. For example, if the previous value for stream key `(1, 2)` is
+`(1, 2, 1, 1)`, then an update to `(1, 2, 3, 4)` should be represented as:
+
+```text
+| op | k1 | k2 | v1 | v2 |
+|----|----|----|----|----|
+| -  | 1  | 2  | 1  | 1  |
+| +  | 1  | 2  | 3  | 4  |
+```
+
+It is invalid to delete a different old value for the same stream key, because downstream
+operators use the stream key to maintain their per-record state.
+
 ## Primary Key (Storage)
 
 This discusses the internal primary key (pk) which we often see in streaming operators.
