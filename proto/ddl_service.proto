@@ -151,7 +151,7 @@ message StreamingJobResourceType {
     bool regular = 1;
     // The specific resource group to use for the streaming job. If not set, the database resource group is used.
     string specific_resource_group = 2;
-    string serverless_backfill_resource_group = 3;
+    bool serverless_backfill = 3;
   }
 }
 
