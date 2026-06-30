@@ -22,6 +22,26 @@ use crate::Binder;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 
+/// Builds a comment request using the current object-based wire format.
+///
+/// Deprecated table-specific fields are deliberately left unset. Mixed-version `COMMENT ON`
+/// requests may fail during a rolling upgrade, but they cannot be misinterpreted as another object
+/// type or column.
+fn build_comment(
+    object_id: u32,
+    object_type: ObjectType,
+    column_index: Option<u32>,
+    description: Option<String>,
+) -> PbComment {
+    PbComment {
+        column_index,
+        description,
+        object_id,
+        object_type: object_type as i32,
+        ..Default::default()
+    }
+}
+
 pub async fn handle_comment(
     handler_args: HandlerArgs,
     object_type: CommentObject,
@@ -71,12 +91,12 @@ pub async fn handle_comment(
 
                 let column = binder.bind_column(object_name.0.as_slice())?;
 
-                PbComment {
-                    object_id: table.table_id.as_raw_id(),
-                    object_type: comment_object_type as i32,
-                    column_index: column.as_input_ref().map(|input_ref| input_ref.index as _),
-                    description: comment,
-                }
+                build_comment(
+                    table.table_id.as_raw_id(),
+                    comment_object_type,
+                    column.as_input_ref().map(|input_ref| input_ref.index as _),
+                    comment,
+                )
             }
             CommentObject::Table | CommentObject::MaterializedView => {
                 let (schema, table) =
@@ -109,12 +129,12 @@ pub async fn handle_comment(
                     .into());
                 }
 
-                PbComment {
-                    object_id: table.table_id.as_raw_id(),
-                    object_type: comment_object_type as i32,
-                    column_index: None,
-                    description: comment,
-                }
+                build_comment(
+                    table.table_id.as_raw_id(),
+                    comment_object_type,
+                    None,
+                    comment,
+                )
             }
         }
     };
