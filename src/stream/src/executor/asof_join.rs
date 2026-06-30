@@ -188,10 +188,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         use_cache: bool,
         high_join_amplification_threshold: usize,
     ) -> Self {
-        let join_cache_evict_interval_rows = ctx
-            .config
-            .developer
-            .join_hash_map_evict_interval_rows;
+        let join_cache_evict_interval_rows = ctx.config.developer.join_hash_map_evict_interval_rows;
         let cache_epoch = if use_cache {
             Some(watermark_epoch)
         } else {

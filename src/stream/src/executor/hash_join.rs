@@ -329,10 +329,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             None => ctx.config.developer.hash_join_entry_state_max_rows,
             Some(entry_state_max_rows) => entry_state_max_rows,
         };
-        let join_cache_evict_interval_rows = ctx
-            .config
-            .developer
-            .join_hash_map_evict_interval_rows;
+        let join_cache_evict_interval_rows = ctx.config.developer.join_hash_map_evict_interval_rows;
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
