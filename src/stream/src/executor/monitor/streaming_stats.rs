@@ -68,7 +68,7 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
     pub fragment_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
-    pub project_expr_inflight_window_size: RelabeledGuardedIntGaugeVec,
+    pub project_expr_inflight_window_size: LabelGuardedIntGaugeVec,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec,
@@ -507,8 +507,7 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap()
-        .relabel_debug_1(level);
+        .unwrap();
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
