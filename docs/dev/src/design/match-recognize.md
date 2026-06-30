@@ -127,28 +127,32 @@ to keep the factorial bounded).
 - **Buffering.** Each input row is written through to the state table; nothing is held in memory
   between watermarks. Rows may arrive out of order.
 - **Matching on watermark.** When the watermark on the leading `ORDER BY` column advances to `w`,
-  the executor walks each owned vnode in key order — `(partition, order_key, seq)` — with a *single
-  continuous iterator*. Partitions are contiguous runs, so it accumulates the current partition's rows
-  and processes them (match / emit / evict) when the scan crosses into the next partition or the vnode
-  ends. Because the buffer is already in `ORDER BY` order (the PK order) there is no in-memory sort.
-  Every row with `order_key <= w` is final; the matcher runs over the safe prefix, a match is emitted
-  once a later safe row follows it (so the greedy match is known maximal), and `AFTER MATCH SKIP`
-  decides where the scan resumes. Matches stream straight into a `StreamChunkBuilder`, flushed a chunk
-  at a time, so no output rows accumulate across the vnode. The per-watermark working set is bounded by
-  the largest single partition's live rows, plus one output chunk, plus the vnode's pending delete keys
-  — not by a whole vnode of buffered output — and nothing is retained between watermarks.
+  the executor visits only the partitions that need attention, found via the **wakeup frontier** (see
+  [The wakeup frontier](#the-wakeup-frontier)): per owned vnode it range-scans `frontier_index_table`
+  for entries with `next_wakeup <= w` (the index is PK-ordered by `next_wakeup`, so it stops at the
+  first entry past `w`), then for each candidate partition reads just that partition from the buffer
+  table with `iter_with_prefix`, in PK order — `(partition, order_key, seq)`, already `ORDER BY`
+  ordered, so no in-memory sort. Every row with `order_key <= w` is final; the matcher runs over the
+  safe prefix, a match is emitted once a later safe row follows it (so the greedy match is known
+  maximal), and `AFTER MATCH SKIP` decides where the scan resumes. Matches stream straight into a
+  `StreamChunkBuilder`, flushed a chunk at a time. After processing, the partition's frontier entry is
+  recomputed (next future row) or dropped. Work per watermark is therefore proportional to the
+  partitions that need attention, not to the number of live partitions; the working set is the largest
+  single candidate partition's live rows plus one output chunk.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
   known only once the match and its per-row variable labels are found, so each measure's synthetic
   row is built from the matched rows and the expression evaluated then. `WITHIN` is enforced during
   matching, pruning candidates that would push the span past the bound.
-- **Eviction.** Rows before the earliest position that could still *begin* a match are evicted. A
-  state-table delete cannot interleave with an open iterator over the same table, and the vnode is
-  scanned with one continuous iterator, so the rows to delete are buffered as the scan proceeds and
-  applied after the iterator is dropped — a delete-key buffer, far lighter than buffering output rows.
-  Because every watermark visits all live partitions, expired rows are released even from partitions
-  that receive no new input — an idle partition does not retain dead rows. Together with the watermark
-  this bounds state to the live (unfinalized) window (see
-  [State bound and `WITHIN`](#state-bound-and-within)).
+- **Eviction.** Rows before the earliest position that could still *begin* a match are evicted. Each
+  candidate partition is read with its own `iter_with_prefix` scan, which is dropped before the
+  evicting deletes run (a state-table delete cannot interleave with an open iterator over the same
+  table), so deletes apply in place per partition. Together with the watermark this bounds state to
+  the live (unfinalized) window (see [State bound and `WITHIN`](#state-bound-and-within)).
+
+  > Eviction currently fires only for partitions the frontier wakes — i.e. those gaining a newly-safe
+  > row. A partition that is idle (no new input) but holds a retained partial match that expires by
+  > `WITHIN` is not yet woken to evict it; folding the earliest `WITHIN` deadline into `next_wakeup`
+  > is the remaining step.
 
 Matching is **not incremental**: each advancing watermark re-runs the matcher from the start of the
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
@@ -157,14 +161,15 @@ future work.
 
 ## State and fault tolerance
 
-The operator declares one internal state table, layout `[ seq (i64), <input columns…> ]`, keyed by
+The operator declares three internal state tables: the **buffer table** plus the two **wakeup
+frontier** tables (below). The buffer table has layout `[ seq (i64), <input columns…> ]`, keyed by
 `(partition columns, ORDER BY columns, seq)` and distributed by the partition key. Keying by the
-order columns keeps the buffer physically sorted by `(partition, order key)`, so the watermark pass
-scans it in key order and processes one partition at a time without an in-memory sort. `seq` is a
-per-actor monotonic id that breaks ties between rows with equal `ORDER BY` keys. Only the raw
-buffered rows are persisted — the NFA is recompiled from the pattern at startup and
-`DEFINE`/`MEASURES` are evaluated at match time, so neither is stored. (This is less state than
-Flink's CEP, which persists the partial-match SharedBuffer.)
+order columns keeps the buffer physically sorted by `(partition, order key)`, so a partition can be
+read back in key order and processed without an in-memory sort. `seq` is a per-actor monotonic id
+that breaks ties between rows with equal `ORDER BY` keys. Only the raw buffered rows are persisted —
+the NFA is recompiled from the pattern at startup and `DEFINE`/`MEASURES` are evaluated at match
+time, so neither is stored. (This is less state than Flink's CEP, which persists the partial-match
+SharedBuffer.)
 
 - **Recovery.** The state table is authoritative, so there is no in-memory buffer to rebuild: after
   recovery the next watermark simply scans the (restored) state table per owned vnode (an empty-prefix
@@ -174,6 +179,33 @@ Flink's CEP, which persists the partial-match SharedBuffer.)
   in-memory cache to reload or drop.
 - **Parallelism.** Matching is independent per partition, so the input is hash-sharded by the
   `PARTITION BY` key and each actor owns its partitions' state.
+
+### The wakeup frontier
+
+A watermark only needs to touch partitions that have a newly-safe row (or, eventually, a retained
+partial expiring by `WITHIN`). Without help, finding them means scanning every live partition each
+watermark — `O(#live partitions)`, which dominates for high-cardinality `PARTITION BY` (per-player,
+per-session, …). The frontier makes the work proportional to the partitions that actually need
+attention. It is two internal tables, for two access patterns:
+
+- `frontier_meta_table` — pk `(partition…)` → `next_wakeup_order_key`. Point-looked-up by partition
+  on the insert path, so a chunk can re-point a partition's wakeup in one lookup.
+- `frontier_index_table` — pk `(next_wakeup_order_key, partition…)`, **distributed by partition**.
+  Range-scanned per owned vnode for `next_wakeup <= watermark`. The PK leads with the wakeup so the
+  scan is a key-prefix scan that stops at the first entry past the watermark, while distributing by
+  the partition keeps a partition's index entry on the same vnode as its buffered rows (so they
+  re-shard together on rescale).
+
+`next_wakeup_order_key` is the earliest `order_key` at which the partition next needs attention. On
+insert it is moved earlier when a chunk brings an earlier row (aggregated once per partition per
+chunk, not per row). On watermark it is recomputed to the partition's next future row after
+processing, or the entry is dropped when nothing remains to wake for (a later insert re-schedules
+it). Both tables are committed with the buffer table at each barrier, so the frontier and the buffer
+stay consistent across recovery and rescale.
+
+> Today `next_wakeup` tracks only the next *row*. Folding in the earliest `WITHIN` expiry of a
+> partition's retained partials — so idle partitions are woken to evict timed-out partials — is the
+> remaining step.
 
 ### State bound and `WITHIN`
 
