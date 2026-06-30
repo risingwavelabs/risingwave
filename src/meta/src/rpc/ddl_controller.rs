@@ -167,6 +167,7 @@ pub enum DdlCommand {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -415,6 +416,7 @@ impl DdlController {
                     dependencies,
                     resource_type,
                     if_not_exists,
+                    since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -422,6 +424,7 @@ impl DdlController {
                         dependencies,
                         resource_type,
                         if_not_exists,
+                        since_timestamp_epoch,
                     )
                     .await
                 }
@@ -942,6 +945,7 @@ impl DdlController {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         if let StreamingJob::Sink(sink) = &streaming_job
             && let Some(target_table) = sink.target_table
@@ -1007,7 +1011,13 @@ impl DdlController {
         // Generate streaming job metadata and issue the create command in two steps, so that the
         // error phase is classified at the barrier command boundary.
         let create_result = match self
-            .generate_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
+            .generate_streaming_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                resource_type,
+                since_timestamp_epoch,
+            )
             .await
         {
             Ok((stream_job_fragments, ctx)) => self
@@ -1059,6 +1069,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1079,7 +1090,13 @@ impl DdlController {
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
         let (ctx, stream_job_fragments) = self
-            .build_stream_job(ctx, streaming_job, fragment_graph, resource_type)
+            .build_stream_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                resource_type,
+                since_timestamp_epoch,
+            )
             .await?;
 
         let streaming_job = &ctx.streaming_job;
@@ -1702,6 +1719,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
@@ -1933,6 +1951,7 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            since_timestamp_epoch,
         };
 
         Ok((

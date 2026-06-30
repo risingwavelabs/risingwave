@@ -388,6 +388,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }

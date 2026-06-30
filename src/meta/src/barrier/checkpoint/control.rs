@@ -39,7 +39,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -730,6 +730,12 @@ impl DatabaseCheckpointControl {
         );
     }
 
+    pub(super) fn pending_barrier_infos(&self) -> impl Iterator<Item = &BarrierInfo> {
+        self.command_ctx_queue
+            .values()
+            .map(|node| &node.command_ctx.barrier_info)
+    }
+
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
     /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
     fn barrier_collected(
@@ -1149,7 +1155,7 @@ impl DatabaseCheckpointControl {
         };
 
         if let Some(Command::CreateStreamingJob {
-            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            job_type: CreateStreamingJobType::SnapshotBackfill { .. },
             ..
         }) = &command
             && self.state.is_paused()

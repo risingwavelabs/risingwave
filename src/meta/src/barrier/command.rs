@@ -266,6 +266,10 @@ impl StreamJobFragments {
     }
 }
 
+pub type TableLogEpochs = Vec<(Vec<u64>, u64)>;
+pub type UpstreamTableLogEpochs = HashMap<TableId, TableLogEpochs>;
+pub type SinceTimestampResolvedEpoch = (u64, TableLogEpochs);
+
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
     /// `table_id` -> `Some(snapshot_backfill_epoch)`
@@ -275,10 +279,19 @@ pub struct SnapshotBackfillInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct SinceEpochInfo {
+    pub provided_since_epoch: u64,
+    pub resolved: Option<SinceTimestampResolvedEpoch>,
+}
+
+#[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
-    SnapshotBackfill(SnapshotBackfillInfo),
+    SnapshotBackfill {
+        snapshot_backfill_info: SnapshotBackfillInfo,
+        since_epoch: Option<SinceEpochInfo>,
+    },
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
@@ -538,7 +551,7 @@ impl Command {
             }
             Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
-                    !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)),
+                    !matches!(job_type, CreateStreamingJobType::SnapshotBackfill { .. }),
                     "should handle fragment changes separately for snapshot backfill"
                 );
                 let mut changes: HashMap<_, _> = info
@@ -728,7 +741,7 @@ impl Command {
                 job_type,
                 cross_db_snapshot_backfill_info,
             } => match job_type {
-                CreateStreamingJobType::SnapshotBackfill(_) => PostCollectCommand::barrier(),
+                CreateStreamingJobType::SnapshotBackfill { .. } => PostCollectCommand::barrier(),
                 job_type => PostCollectCommand::CreateStreamingJob {
                     info,
                     job_type,
@@ -880,7 +893,7 @@ impl CommandContext {
             if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = &self.command {
                 assert!(!matches!(
                     job_type,
-                    CreateStreamingJobType::SnapshotBackfill(_)
+                    CreateStreamingJobType::SnapshotBackfill { .. }
                 ));
                 let table_fragments = &info.stream_job_fragments;
                 let mut table_ids: HashSet<_> =
@@ -1045,9 +1058,11 @@ impl Command {
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
-                let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
-                        job_type
+                let subscriptions_to_add = {
+                    if let CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    } = job_type
                     {
                         snapshot_backfill_info
                             .upstream_mv_table_id_to_backfill_epoch
@@ -1061,7 +1076,8 @@ impl Command {
                             .collect()
                     } else {
                         Default::default()
-                    };
+                    }
+                };
                 let backfill_nodes_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
@@ -1105,7 +1121,7 @@ impl Command {
                     };
 
                 let actor_cdc_table_snapshot_splits =
-                    if !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)) {
+                    if !matches!(job_type, CreateStreamingJobType::SnapshotBackfill { .. }) {
                         database_info
                             .assign_cdc_backfill_splits(stream_job_fragments.stream_job_id)?
                             .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits })
@@ -1472,7 +1488,7 @@ impl Command {
     ) -> Option<StreamJobActorsToCreate> {
         match self {
             Command::CreateStreamingJob { info, job_type, .. } => {
-                if let CreateStreamingJobType::SnapshotBackfill(_) = job_type {
+                if let CreateStreamingJobType::SnapshotBackfill { .. } = job_type {
                     // for snapshot backfill, the actors to create is measured separately
                     return None;
                 }

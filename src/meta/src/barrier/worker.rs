@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,8 +46,8 @@ use crate::barrier::rpc::{
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
-    UpdateDatabaseBarrierRequest, schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
+    CreateStreamingJobType, RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -262,6 +262,68 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 false
             } else {
                 true
+            }
+        }
+    }
+
+    async fn resolve_since_timestamp_snapshot_backfill(
+        &mut self,
+        new_barrier: &mut schedule::NewBarrier,
+    ) -> MetaResult<bool> {
+        let Some((
+            Command::CreateStreamingJob {
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        since_epoch: Some(since_epoch),
+                    },
+                ..
+            },
+            notifiers,
+        )) = &mut new_barrier.command
+        else {
+            return Ok(true);
+        };
+        let since_timestamp_epoch = since_epoch.provided_since_epoch;
+
+        // Complete any inflight command first so the committed upstream epoch and
+        // table changelog view used for since_timestamp resolution cannot be stale.
+        match self.completing_task.wait_completing_task().await {
+            Ok(Some(output)) => self.checkpoint_control.ack_completed(output),
+            Ok(None) => {}
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to wait completing task before resolving since_timestamp"
+                );
+                return Err(err);
+            }
+        }
+
+        match self
+            .context
+            .resolve_log_store_epoch(
+                snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                    .copied(),
+                since_timestamp_epoch,
+            )
+            .await
+        {
+            Ok(upstream_log_epochs) => {
+                since_epoch.resolved = Some(upstream_log_epochs);
+                Ok(true)
+            }
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to resolve log store epoch for since_timestamp"
+                );
+                for notifier in take(notifiers) {
+                    notifier.notify_start_failed(err.clone());
+                }
+                Ok(false)
             }
         }
     }
@@ -534,8 +596,19 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
+                mut new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
+                    match self
+                        .resolve_since_timestamp_snapshot_backfill(&mut new_barrier)
+                        .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(err) => {
+                            self.failure_recovery(err).await;
+                            continue;
+                        }
+                    }
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
                             panic!(

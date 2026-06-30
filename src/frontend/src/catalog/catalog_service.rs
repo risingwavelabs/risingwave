@@ -144,6 +144,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -446,10 +447,17 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, dependencies, if_not_exists)
+            .create_sink(
+                sink,
+                graph,
+                dependencies,
+                if_not_exists,
+                since_timestamp_epoch,
+            )
             .await?;
         self.wait_version(version).await
     }

@@ -103,6 +103,7 @@ message CreateSinkRequest {
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
+  optional uint64 since_timestamp_epoch = 6;
 }
 
 message CreateSinkResponse {

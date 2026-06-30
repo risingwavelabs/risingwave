@@ -475,12 +475,14 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            since_timestamp_epoch,
         };
 
         let resp = self.inner.create_sink(request).await?;

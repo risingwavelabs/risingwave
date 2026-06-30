@@ -869,6 +869,14 @@ mod tests {
             unimplemented!()
         }
 
+        async fn resolve_log_store_epoch<'a>(
+            &'a self,
+            _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+            _since_epoch: u64,
+        ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+            Ok(Default::default())
+        }
+
         async fn post_collect_command(
             &self,
             _command: crate::barrier::command::PostCollectCommand,

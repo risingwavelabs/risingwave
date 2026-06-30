@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use tokio::time::sleep;
 
 use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
@@ -154,6 +151,78 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
         source_parallelism,
         test_source.create_stream_count.load(Relaxed)
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_since_timestamp_starts_from_changelog() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::SinkWriter);
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("set sink_decouple = false").await?;
+    session
+        .run("create table t_since_sink (id int primary key, name varchar)")
+        .await?;
+    session
+        .run("create subscription sub_since_sink from t_since_sink with(retention = '1D')")
+        .await?;
+    session.flush().await?;
+
+    session
+        .run("insert into t_since_sink values (1, 'name-1')")
+        .await?;
+    session.flush().await?;
+    let since_timestamp = session.run("select now()::varchar").await?;
+
+    session
+        .run("insert into t_since_sink values (2, 'name-2')")
+        .await?;
+    session.flush().await?;
+
+    session
+        .run(format!(
+            "create sink test_sink from t_since_sink with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
+    test_sink.wait_initial_parallelism(1).await?;
+    session.flush().await?;
+    test_sink.store.wait_for_count(1).await?;
+    test_sink.store.check_result_rows(&[(2, "name-2")])?;
+
+    session.run("drop sink test_sink").await?;
+    drop(test_sink);
+
+    let test_sink_as_select = SimulationTestSink::register_new(TestSinkType::SinkWriter);
+    session
+        .run(format!(
+            "create sink test_sink as \
+             select id, name from t_since_sink \
+             with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
+    test_sink_as_select.wait_initial_parallelism(1).await?;
+    session.flush().await?;
+    test_sink_as_select.store.wait_for_count(1).await?;
+    test_sink_as_select
+        .store
+        .check_result_rows(&[(2, "name-2")])?;
+
+    session.run("drop sink test_sink").await?;
+    session.run("drop subscription sub_since_sink").await?;
+    session.run("drop table t_since_sink").await?;
 
     Ok(())
 }

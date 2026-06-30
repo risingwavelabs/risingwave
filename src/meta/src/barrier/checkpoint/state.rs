@@ -28,7 +28,6 @@ use risingwave_pb::stream_plan::{
 };
 use tracing::warn;
 
-use crate::MetaResult;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
@@ -42,6 +41,7 @@ use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::stream::{GlobalActorIdGen, fill_snapshot_backfill_epoch};
+use crate::{MetaError, MetaResult};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -164,9 +164,30 @@ impl DatabaseCheckpointControl {
                         )?;
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                CreateStreamingJobType::SnapshotBackfill {
+                    snapshot_backfill_info,
+                    since_epoch,
+                } => {
                     assert!(!self.state.is_paused());
-                    let snapshot_epoch = barrier_info.prev_epoch();
+                    let (snapshot_epoch, since_timestamp_upstream_log_epochs) =
+                        if let Some(since_epoch) = &since_epoch {
+                            let (snapshot_epoch, log_epochs) =
+                                since_epoch.resolved.as_ref().ok_or_else(|| {
+                            MetaError::from(anyhow::anyhow!(
+                                "since_timestamp epoch has not been resolved for snapshot backfill"
+                            ))
+                        })?;
+                            (
+                                *snapshot_epoch,
+                                Some((
+                                    log_epochs,
+                                    self.pending_barrier_infos().collect(),
+                                    barrier_info.prev_epoch(),
+                                )),
+                            )
+                        } else {
+                            (barrier_info.prev_epoch(), None)
+                        };
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -202,6 +223,7 @@ impl DatabaseCheckpointControl {
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         control_stream_manager,
                         edges.as_mut().expect("should exist"),
@@ -218,7 +240,7 @@ impl DatabaseCheckpointControl {
 
         // update the fragment_infos outside pre_apply
         let post_apply_changes = if let Some(Command::CreateStreamingJob {
-            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            job_type: CreateStreamingJobType::SnapshotBackfill { .. },
             ..
         }) = command
         {
@@ -245,7 +267,11 @@ impl DatabaseCheckpointControl {
             }
             Some(Command::CreateStreamingJob {
                 info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    },
                 ..
             }) => {
                 for upstream_mv_table_id in snapshot_backfill_info

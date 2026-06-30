@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::mem;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
@@ -114,6 +115,28 @@ impl<T> CloneOptimizedVecDeque<T> {
             .or_else(|| self.front.back())
     }
 
+    fn len(&self) -> usize {
+        self.front.len()
+            + self.middle.len() * CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE
+            + self.back.len()
+    }
+
+    fn get(&self, index: usize) -> Option<&T> {
+        if index < self.front.len() {
+            return self.front.get(index);
+        }
+        let index = index - self.front.len();
+
+        let middle_len = self.middle.len() * CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+        if index < middle_len {
+            let chunk_index = index / CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+            let item_index = index % CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE;
+            return self.middle[chunk_index].get(item_index);
+        }
+
+        self.back.get(index - middle_len)
+    }
+
     fn iter(&self) -> impl Iterator<Item = &T> {
         self.front
             .iter()
@@ -170,6 +193,39 @@ impl<T> CloneOptimizedVecDeque<T> {
             + self.back.partition_point(|item| pred(item))
     }
 
+    fn binary_search_by_key<B, F>(&self, key: &B, mut f: F) -> Result<usize, usize>
+    where
+        B: Ord,
+        F: FnMut(&T) -> B,
+    {
+        let index = self.partition_point(|item| f(item).cmp(key).is_lt());
+        if let Some(item) = self.get(index)
+            && f(item).cmp(key).is_eq()
+        {
+            Ok(index)
+        } else {
+            Err(index)
+        }
+    }
+
+    fn range(&self, range: impl RangeBounds<usize>) -> impl Iterator<Item = &T> {
+        let len = self.len();
+        let start = match range.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => start.checked_add(1).expect("range start overflow"),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(end) => end.checked_add(1).expect("range end overflow"),
+            Bound::Excluded(end) => *end,
+            Bound::Unbounded => len,
+        };
+        assert!(start <= end, "range start should not exceed range end");
+        assert!(end <= len, "range end should not exceed deque length");
+
+        self.iter_from(start).take(end - start)
+    }
+
     fn refill_front_if_needed(&mut self)
     where
         T: Clone,
@@ -200,6 +256,30 @@ impl<T> TableChangeLogCommon<T> {
 
     pub fn iter(&self) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> {
         self.0.iter()
+    }
+
+    pub fn first(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.front()
+    }
+
+    pub fn last(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.back()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.get(index)
+    }
+
+    pub fn binary_search_by_checkpoint_epoch(&self, epoch: u64) -> Result<usize, usize> {
+        self.0
+            .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
+    }
+
+    pub fn range<'a>(
+        &'a self,
+        range: impl RangeBounds<usize> + 'a,
+    ) -> impl Iterator<Item = &'a EpochNewChangeLogCommon<T>> + 'a {
+        self.0.range(range)
     }
 
     pub fn add_change_log(&mut self, new_change_log: EpochNewChangeLogCommon<T>) {
@@ -521,7 +601,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::iter::once;
+    use std::ops::RangeBounds;
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -533,6 +615,7 @@ mod tests {
     fn test_clone_optimized_vec_deque_basic_operations() {
         for len in [0, 1, 255, 256, 257, 600] {
             let mut deque = (0..len).collect::<CloneOptimizedVecDeque<_>>();
+            assert_eq!(len, deque.len());
             assert_eq!(len, deque.iter().count());
             assert_eq!((len > 0).then_some(&0), deque.front());
             assert_eq!(len.checked_sub(1).as_ref(), deque.back());
@@ -553,6 +636,104 @@ mod tests {
                 assert_eq!(Some(expected), deque.pop_front());
             }
             assert_eq!(None, deque.pop_front());
+        }
+    }
+
+    #[test]
+    fn test_clone_optimized_vec_deque_index_range_and_search() {
+        fn assert_range<R>(
+            deque: &CloneOptimizedVecDeque<usize>,
+            normal: &VecDeque<usize>,
+            range: R,
+        ) where
+            R: RangeBounds<usize> + Clone,
+        {
+            assert_eq!(
+                normal.range(range.clone()).copied().collect_vec(),
+                deque.range(range).copied().collect_vec()
+            );
+        }
+
+        fn assert_same_api(deque: &CloneOptimizedVecDeque<usize>, normal: &VecDeque<usize>) {
+            assert_eq!(normal.len(), deque.len());
+            assert_eq!(normal.front(), deque.front());
+            assert_eq!(normal.back(), deque.back());
+            assert_eq!(
+                normal.iter().copied().collect_vec(),
+                deque.iter().copied().collect_vec()
+            );
+
+            for index in 0..=normal.len() {
+                assert_eq!(normal.get(index), deque.get(index));
+            }
+
+            assert_range(deque, normal, ..);
+            assert_range(deque, normal, 0..0);
+            assert_range(deque, normal, 0..normal.len());
+
+            if !normal.is_empty() {
+                let first = 0;
+                let middle = normal.len() / 2;
+                let last = normal.len() - 1;
+                for (start, end) in [
+                    (first, first),
+                    (first, middle),
+                    (middle, middle),
+                    (middle, last),
+                    (last, last),
+                    (first, last),
+                ] {
+                    assert_range(deque, normal, start..end);
+                    assert_range(deque, normal, start..=end);
+                }
+                assert_range(deque, normal, middle..);
+                assert_range(deque, normal, ..middle);
+                assert_range(deque, normal, ..=middle);
+            }
+
+            let first_value = normal.front().copied().unwrap_or(0);
+            let last_value = normal.back().copied().unwrap_or(0);
+            for key in [
+                0,
+                first_value,
+                first_value.saturating_add(1),
+                255,
+                256,
+                257,
+                last_value,
+                last_value.saturating_add(1),
+            ] {
+                let expected_index = normal
+                    .iter()
+                    .position(|value| *value >= key)
+                    .unwrap_or(normal.len());
+                let expected = normal
+                    .get(expected_index)
+                    .is_some_and(|value| *value == key)
+                    .then_some(expected_index)
+                    .ok_or(expected_index);
+                assert_eq!(expected, deque.binary_search_by_key(&key, |value| *value));
+            }
+        }
+
+        for len in [0, 1, 2, 255, 256, 257, 511, 512, 513, 600] {
+            for pop_count in [0, 1, 10, 255, 256, len] {
+                let pop_count = pop_count.min(len);
+                for append_count in [0, 1, 10, 256, 257] {
+                    let mut deque = (0..len).collect::<CloneOptimizedVecDeque<_>>();
+                    let mut normal = (0..len).collect::<VecDeque<_>>();
+
+                    for _ in 0..pop_count {
+                        assert_eq!(normal.pop_front(), deque.pop_front());
+                    }
+                    for value in len..len + append_count {
+                        normal.push_back(value);
+                        deque.push_back(value);
+                    }
+
+                    assert_same_api(&deque, &normal);
+                }
+            }
         }
     }
 

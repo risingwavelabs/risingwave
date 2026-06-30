@@ -28,7 +28,8 @@ use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, S
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Timestamptz};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
@@ -64,6 +65,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
+    get_table_catalog_by_table_name,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -96,6 +98,8 @@ static SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionTyp
         }
     });
 
+const SINK_SINCE_TIMESTAMP_OPTION: &str = "since_timestamp";
+
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
     pub query: Box<Query>,
@@ -103,6 +107,7 @@ pub struct SinkPlanContext {
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 pub async fn gen_sink_plan(
@@ -138,6 +143,25 @@ pub async fn gen_sink_plan(
             session,
             Some(TelemetryDatabaseObject::Sink),
         )?;
+
+    let since_timestamp_epoch = resolved_with_options
+        .remove(SINK_SINCE_TIMESTAMP_OPTION)
+        .map(|value| {
+            let timestamp = value.parse::<Timestamptz>().map_err(|err| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value {value:?} of '{SINK_SINCE_TIMESTAMP_OPTION}' option: {err}; \
+                     expected a timestamptz string with an explicit time zone, \
+                     for example '2024-01-01 00:00:00Z'"
+                ))
+            })?;
+            let timestamp_millis = u64::try_from(timestamp.timestamp_millis()).unwrap_or(0);
+            Ok::<_, RwError>(Epoch::from_unix_millis_or_earliest(timestamp_millis).0)
+        })
+        .transpose()?;
+    if since_timestamp_epoch.is_some() {
+        Feature::SinkSinceTimestamp.check_available()?;
+    }
+
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -251,6 +275,33 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
+    if since_timestamp_epoch.is_some() {
+        if sink_into_table_name.is_some() {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support `CREATE SINK INTO TABLE`"
+            ))
+            .into());
+        }
+        if is_iceberg_engine_internal {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support iceberg engine internal sinks"
+            ))
+            .into());
+        }
+        if let Some((from_name, _)) = &direct_sink_from_name {
+            let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+            if table.database_id != sink_database_id {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support cross-database sinks"
+                    ),
+                    "Please create the sink in the same database as the upstream table.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
     let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
@@ -341,10 +392,17 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = matches!(
+    let without_snapshot = matches!(
         resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
         Some(flag) if flag.eq_ignore_ascii_case("false")
     );
+
+    if since_timestamp_epoch.is_some() && !without_snapshot {
+        return Err(ErrorCode::BindError(format!(
+            "`{SINK_SINCE_TIMESTAMP_OPTION}` requires `snapshot = false`"
+        ))
+        .into());
+    }
 
     let target_table_catalog = stmt
         .into_table_name
@@ -381,8 +439,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -391,12 +447,13 @@ pub async fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
-        without_backfill,
+        without_snapshot,
+        since_timestamp_epoch.is_some(),
+        is_iceberg_engine_internal,
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
-        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -463,6 +520,7 @@ pub async fn gen_sink_plan(
         sink_catalog,
         target_table_catalog,
         dependencies,
+        since_timestamp_epoch,
     })
 }
 
@@ -580,7 +638,7 @@ pub async fn handle_create_sink(
         ))));
     }
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let (mut sink, graph, target_table_catalog, dependencies, since_timestamp_epoch) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
 
         let SinkPlanContext {
@@ -589,6 +647,7 @@ pub async fn handle_create_sink(
             sink_catalog: sink,
             target_table_catalog,
             dependencies,
+            since_timestamp_epoch,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -605,7 +664,13 @@ pub async fn handle_create_sink(
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (
+            sink,
+            graph,
+            target_table_catalog,
+            dependencies,
+            since_timestamp_epoch,
+        )
     };
 
     if let Some(table_catalog) = target_table_catalog {
@@ -625,7 +690,13 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        catalog_writer.create_sink(
+            sink.to_proto(),
+            graph,
+            dependencies,
+            if_not_exists,
+            since_timestamp_epoch,
+        ),
         &session,
         "CREATE SINK",
         LongRunningNotificationAction::MonitorBackfillJob,

@@ -19,7 +19,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -30,7 +30,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
@@ -54,7 +54,12 @@ impl CreateSnapshotBackfillJobCommandInfo {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
-            job_type: CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info),
+            job_type: CreateStreamingJobType::SnapshotBackfill {
+                snapshot_backfill_info: self.snapshot_backfill_info,
+                // `since_epoch` is only used before job creation barriers are injected, and
+                // post-collect snapshot backfill does not go through that path.
+                since_epoch: None,
+            },
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
         }
     }
@@ -73,13 +78,22 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         recovery_reason: RecoveryReason,
     );
     fn mark_ready(&self, options: MarkReadyOptions);
+    fn resolve_log_store_epoch<'a>(
+        &'a self,
+        upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
+        since_epoch: u64,
+    ) -> impl Future<Output = MetaResult<SinceTimestampResolvedEpoch>> + Send + 'a;
 
     fn post_collect_command(
         &self,
         command: PostCollectCommand,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String);
+    fn notify_creating_job_failed(
+        &self,
+        database_id: Option<DatabaseId>,
+        err: String,
+    ) -> impl Future<Output = ()> + Send + '_;
 
     fn finish_creating_job(
         &self,
@@ -97,7 +111,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         init_request: &'a PbInitRequest,
     ) -> impl Future<Output = MetaResult<StreamingControlHandle>> + Send + 'a;
 
-    async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
+    fn reload_runtime_info(
+        &self,
+    ) -> impl Future<Output = MetaResult<BarrierWorkerRuntimeInfoSnapshot>> + Send + '_;
 
     async fn reload_database_runtime_info(
         &self,

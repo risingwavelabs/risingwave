@@ -636,8 +636,8 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill { .. } => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -1145,7 +1145,7 @@ impl InflightDatabaseInfo {
                         None
                     };
                     let is_snapshot_backfill =
-                        matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_));
+                        matches!(job_type, CreateStreamingJobType::SnapshotBackfill { .. });
                     (Some((info, is_snapshot_backfill)), None, new_upstream_sink)
                 }
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),

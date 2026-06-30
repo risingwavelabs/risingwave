@@ -40,7 +40,7 @@ use super::{
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -138,6 +138,8 @@ pub struct CreateStreamingJobContext {
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 
     pub is_serverless_backfill: bool,
+
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -515,6 +517,7 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            since_timestamp_epoch,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -575,8 +578,17 @@ impl GlobalStreamManager {
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+            CreateStreamingJobType::SnapshotBackfill {
+                snapshot_backfill_info,
+                since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                    provided_since_epoch,
+                    resolved: None,
+                }),
+            }
         } else {
+            if since_timestamp_epoch.is_some() {
+                bail!("since_timestamp should not be specified when no snapshot backfill");
+            }
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(new_upstream_sink) = new_upstream_sink {
                 CreateStreamingJobType::SinkIntoTable(new_upstream_sink)
