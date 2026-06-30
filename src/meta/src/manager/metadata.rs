@@ -23,7 +23,9 @@ use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
-use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, ThrottleType, WorkerNode, WorkerType};
+use risingwave_pb::common::{
+    HostAddress, PbWorkerNode, PbWorkerType, ThrottleType, WorkerNode, WorkerType,
+};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use sea_orm::TransactionTrait;
