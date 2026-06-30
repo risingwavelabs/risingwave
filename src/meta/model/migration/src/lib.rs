@@ -15,13 +15,15 @@
 //!
 //! - A migration that performs **only one** DDL/DML step on SQLite is safe by default.
 //! - A migration that performs **two or more** steps on SQLite (e.g. copy data → drop →
-//!   rename) **must** wrap its SQLite branch in a transaction using [`utils::sqlite_txn`].
+//!   rename) **must** wrap its SQLite branch in an explicit transaction:
+//!   `let txn = manager.get_connection().begin().await?; let txn_mgr = SchemaManager::new(&txn);
+//!   /* steps */; txn.commit().await?;`
 //! - MySQL does not support transactional DDL (every DDL implicitly commits), so MySQL
 //!   migrations must instead be written to be **idempotent and re-runnable** (use
 //!   `IF EXISTS` / `IF NOT EXISTS`, check before altering, etc.).
 //!
 //! TODO: when we upgrade to `sea-orm-migration` ≥ 2.0, migrate to the per-migration
-//! `MigrationTrait::use_transaction()` API and remove the manual `sqlite_txn` calls.
+//! `MigrationTrait::use_transaction()` API instead of manual transaction management.
 
 #![allow(clippy::enum_variant_names)]
 

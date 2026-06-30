@@ -1,6 +1,5 @@
+use sea_orm::TransactionTrait;
 use sea_orm_migration::prelude::*;
-
-use crate::utils::sqlite_txn;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -59,10 +58,13 @@ impl MigrationTrait for Migration {
             }
             sea_orm::DatabaseBackend::Sqlite => {
                 // SQLite can't ALTER TABLE to change a PK, so recreate the table.
-                // Wrap in a transaction so a crash between drop and create doesn't leave
-                // the table missing on restart. See sqlite_txn docs for details.
-                sqlite_txn(manager, |txn| async move {
-                    txn.drop_table(
+                // Wrap in an explicit transaction: sea-orm-migration 1.x only adds an
+                // implicit transaction for Postgres, so without this a crash between
+                // DROP and CREATE would leave the table permanently missing.
+                let txn = manager.get_connection().begin().await?;
+                let txn_mgr = SchemaManager::new(&txn);
+                txn_mgr
+                    .drop_table(
                         Table::drop()
                             .table(HummockEpochToVersion::Table)
                             .if_exists()
@@ -70,8 +72,8 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
-
-                    txn.create_table(
+                txn_mgr
+                    .create_table(
                         Table::create()
                             .table(HummockEpochToVersion::Table)
                             .if_not_exists()
@@ -98,10 +100,7 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
-
-                    Ok(())
-                })
-                .await?;
+                txn.commit().await?;
             }
         }
         Ok(())
@@ -159,8 +158,10 @@ impl MigrationTrait for Migration {
                     .await?;
             }
             sea_orm::DatabaseBackend::Sqlite => {
-                sqlite_txn(manager, |txn| async move {
-                    txn.drop_table(
+                let txn = manager.get_connection().begin().await?;
+                let txn_mgr = SchemaManager::new(&txn);
+                txn_mgr
+                    .drop_table(
                         Table::drop()
                             .table(HummockEpochToVersion::Table)
                             .if_exists()
@@ -168,8 +169,8 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
-
-                    txn.create_table(
+                txn_mgr
+                    .create_table(
                         Table::create()
                             .table(HummockEpochToVersion::Table)
                             .if_not_exists()
@@ -187,10 +188,7 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
-
-                    Ok(())
-                })
-                .await?;
+                txn.commit().await?;
             }
         }
 
