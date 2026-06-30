@@ -33,7 +33,9 @@ use risingwave_pb::secret::PbSecretRef;
 use serde::{Deserialize, Serialize};
 
 use crate::WithPropertiesExt;
-use crate::connector_common::{PostgresExternalTable, SslMode};
+use crate::connector_common::{
+    PostgresExternalTable, PostgresExternalTableConnectOptions, SslMode,
+};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::CdcTableSnapshotSplit;
@@ -480,7 +482,10 @@ impl ExternalTableImpl {
                     &config.table,
                     &config.ssl_mode,
                     &config.ssl_root_cert,
-                    false,
+                    PostgresExternalTableConnectOptions {
+                        is_append_only: false,
+                        required_table_privilege: Some("SELECT"),
+                    },
                 )
                 .await?,
             )),
