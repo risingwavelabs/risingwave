@@ -32,6 +32,8 @@ pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
 pub use server::{HeapProfilingConfig, ServerConfig};
+
+pub use crate::session_config::SessionInitConfig;
 pub mod udf;
 pub use udf::UdfConfig;
 pub mod storage;
@@ -108,6 +110,10 @@ pub struct RwConfig {
     #[serde(default)]
     #[config_doc(nested)]
     pub udf: UdfConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub session_init: SessionInitConfig,
 
     #[serde(flatten)]
     #[config_doc(omitted)]
@@ -230,6 +236,14 @@ pub mod default {
             0
         }
 
+        pub fn stream_project_expr_concurrency() -> usize {
+            1
+        }
+
+        pub fn stream_project_expr_inflight_request_concurrency() -> usize {
+            0
+        }
+
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }
@@ -284,6 +298,10 @@ pub mod default {
 
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
             1000
+        }
+
+        pub fn hummock_time_travel_delta_fetch_batch_size() -> usize {
+            100
         }
 
         pub fn hummock_gc_history_insert_batch_size() -> usize {
@@ -358,6 +376,10 @@ pub mod default {
             2048
         }
 
+        pub fn stream_high_gap_fill_amplification_threshold() -> usize {
+            2048
+        }
+
         /// Default to 1 to be compatible with the behavior before this config is introduced.
         pub fn stream_exchange_connection_pool_size() -> Option<u16> {
             Some(1)
@@ -378,6 +400,10 @@ pub mod default {
         pub fn streaming_hash_join_entry_state_max_rows() -> usize {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
+        }
+
+        pub fn streaming_join_hash_map_evict_interval_rows() -> u32 {
+            16
         }
 
         pub fn streaming_now_progress_ratio() -> Option<f32> {
@@ -432,8 +458,28 @@ pub mod default {
             2048
         }
 
+        pub fn disable_sync_log_store_dispatcher() -> bool {
+            false
+        }
+
+        pub fn table_change_log_insert_batch_size() -> u64 {
+            1000
+        }
+
+        pub fn table_change_log_delete_batch_size() -> u64 {
+            1000
+        }
+
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn enable_vnode_key_stats_for_materialize() -> bool {
+            false
+        }
+
+        pub fn max_concurrent_kv_log_store_historical_read() -> usize {
+            0
         }
     }
 }
@@ -453,6 +499,8 @@ pub mod tests {
         let mut config = RwConfig::default();
         // Set `license_key` to empty in the docs to avoid any confusion.
         config.system.license_key = Some(LicenseKey::empty());
+        // Keep generated docs and example config aligned with the production-safe default.
+        config.frontend.unsafe_enable_local_fs_connector = false;
         config
     }
 
@@ -473,6 +521,60 @@ pub mod tests {
         let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../../config/docs.md"];
         actual.assert_eq(&expected);
+    }
+
+    #[test]
+    fn test_session_init_entries_distinguishes_omitted_from_default() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            streaming_parallelism_for_table = "default"
+            "#,
+        )
+        .unwrap();
+
+        // Omitted fields are `None`; an explicit `default` is `Some("default")`.
+        assert_eq!(
+            config.session_init.streaming_parallelism.as_deref(),
+            Some("bounded(8)")
+        );
+        assert_eq!(
+            config
+                .session_init
+                .streaming_parallelism_for_table
+                .as_deref(),
+            Some("default")
+        );
+        assert_eq!(config.session_init.streaming_parallelism_for_sink, None);
+
+        // Only explicitly-configured parameters are reported, by their session parameter name.
+        assert_eq!(
+            config.session_init.entries(),
+            vec![
+                ("streaming_parallelism", "bounded(8)"),
+                ("streaming_parallelism_for_table", "default"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_session_init_default_is_empty() {
+        assert!(SessionInitConfig::default().entries().is_empty());
+    }
+
+    #[test]
+    fn test_session_init_rejects_unrecognized_key() {
+        let err = toml::from_str::<RwConfig>(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            not_a_real_param = "oops"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `not_a_real_param`"));
     }
 
     #[derive(Debug)]
@@ -674,6 +776,26 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn test_meta_max_normalize_splits_per_round_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [meta]
+            max_normalize_splits_per_round = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 46
+              |
+            3 |             max_normalize_splits_per_round = 0
+              |                                              ^
+            meta.max_normalize_splits_per_round must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
     // Previously, we have prefixes like `stream_` for all configs under `streaming.developer`.
     // Later we removed the prefixes, but we still want to guarantee the backward compatibility.
     #[test]
@@ -746,6 +868,55 @@ pub mod tests {
             2 |             [streaming.developer.stream_compute_client_config]
               |                        ^^^^^^^^^
             duplicate field `compute_client_config`
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_storage_max_prefetch_block_number_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            max_prefetch_block_number = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 41
+              |
+            3 |             max_prefetch_block_number = 0
+              |                                         ^
+            storage.max_prefetch_block_number must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_iceberg_compaction_enable_prefetch_default_is_false() {
+        let config = StorageConfig::default();
+        assert!(
+            !config.iceberg_compaction_enable_prefetch,
+            "enable_prefetch must default to false to avoid unexpected memory usage in existing deployments"
+        );
+    }
+
+    #[test]
+    fn test_storage_iceberg_compaction_pull_interval_ms_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            iceberg_compaction_pull_interval_ms = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 51
+              |
+            3 |             iceberg_compaction_pull_interval_ms = 0
+              |                                                   ^
+            storage.iceberg_compaction_pull_interval_ms must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
     }

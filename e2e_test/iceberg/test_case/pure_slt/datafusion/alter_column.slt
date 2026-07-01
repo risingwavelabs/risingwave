@@ -1,0 +1,56 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t_alter (id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t_alter (id, name) values (1, 'a'), (2, 'b');
+
+statement ok
+FLUSH;
+
+statement ok
+alter table t_alter add column tmp varchar;
+
+statement ok
+insert into t_alter values (3, 'c', 'x');
+
+statement ok
+FLUSH;
+
+query ??? rowsort retry 5 backoff 1s
+select id, name, tmp from t_alter order by id;
+----
+1 a NULL
+2 b NULL
+3 c x
+
+statement ok
+DROP TABLE t_alter;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

@@ -14,7 +14,10 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{Registry, exponential_buckets, histogram_opts};
+use prometheus::{
+    IntCounterVec, Registry, exponential_buckets, histogram_opts,
+    register_int_counter_vec_with_registry,
+};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -25,6 +28,35 @@ use risingwave_common::{
 };
 
 use crate::source::kafka::stats::RdKafkaStats;
+
+/// Low-cardinality connector ack failure categories.
+///
+/// Keep this list bounded. Do not add raw connector error messages, topics,
+/// partitions, or split identifiers as metric label values.
+#[derive(Debug, Clone, Copy)]
+pub enum ConnectorAckFailureType {
+    Error,
+    Timeout,
+    EmptyMessageId,
+    ChannelMissing,
+    ChannelSendError,
+    DecodeError,
+    BrokerError,
+}
+
+impl ConnectorAckFailureType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Timeout => "timeout",
+            Self::EmptyMessageId => "empty_message_id",
+            Self::ChannelMissing => "channel_missing",
+            Self::ChannelSendError => "channel_send_error",
+            Self::DecodeError => "decode_error",
+            Self::BrokerError => "broker_error",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
@@ -37,6 +69,10 @@ pub struct EnumeratorMetrics {
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
     pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream minimum LSN
+    pub sqlserver_cdc_upstream_min_lsn: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream maximum LSN
+    pub sqlserver_cdc_upstream_max_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -84,12 +120,30 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_min_lsn",
+            "SQL Server CDC upstream minimum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_max_lsn",
+            "SQL Server CDC upstream maximum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         EnumeratorMetrics {
             high_watermark,
             pg_cdc_confirmed_flush_lsn,
             pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
+            sqlserver_cdc_upstream_min_lsn,
+            sqlserver_cdc_upstream_max_lsn,
         }
     }
 
@@ -113,6 +167,8 @@ pub struct SourceMetrics {
     pub partition_input_bytes: LabelGuardedIntCounterVec,
     /// Report latest message id
     pub latest_message_id: LabelGuardedIntGaugeVec,
+    pub partition_eof_count: LabelGuardedIntCounterVec,
+    pub partition_eof_offset: LabelGuardedIntGaugeVec,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
     pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec,
@@ -128,12 +184,34 @@ pub struct SourceMetrics {
     pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
+
+    /// Total connector ack failures after checkpoint commit by bounded failure category.
+    connector_ack_failure_count: IntCounterVec,
+    /// Total successful connector acks after checkpoint commit.
+    connector_ack_success_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
     LazyLock::new(|| SourceMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 impl SourceMetrics {
+    pub fn inc_connector_ack_failure_count(
+        &self,
+        source_name: &str,
+        connector_type: &'static str,
+        failure_type: ConnectorAckFailureType,
+    ) {
+        self.connector_ack_failure_count
+            .with_label_values(&[source_name, connector_type, failure_type.as_str()])
+            .inc();
+    }
+
+    pub fn inc_connector_ack_success_count(&self, source_name: &str, connector_type: &'static str) {
+        self.connector_ack_success_count
+            .with_label_values(&[source_name, connector_type])
+            .inc();
+    }
+
     fn new(registry: &Registry) -> Self {
         let partition_input_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_input_count",
@@ -166,6 +244,20 @@ impl SourceMetrics {
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
+        )
+        .unwrap();
+        let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
+            "source_partition_eof_count",
+            "Total number of EOF events received from specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let partition_eof_offset = register_guarded_int_gauge_vec_with_registry!(
+            "source_partition_eof_offset",
+            "Latest resolved EOF offset for specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
         )
         .unwrap();
 
@@ -250,10 +342,27 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let connector_ack_failure_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_failure_count",
+            "Total number of connector ack failures after checkpoint commit by bounded failure category",
+            &["source_name", "connector_type", "error_type"],
+            registry
+        )
+        .unwrap();
+        let connector_ack_success_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_success_count",
+            "Total number of successful connector acks after checkpoint commit",
+            &["source_name", "connector_type"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
             latest_message_id,
+            partition_eof_count,
+            partition_eof_offset,
             rdkafka_native_metric,
             direct_cdc_event_lag_latency,
             parquet_source_skip_row_count,
@@ -266,6 +375,9 @@ impl SourceMetrics {
             kinesis_rebuild_shard_iter_count,
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
+
+            connector_ack_failure_count,
+            connector_ack_success_count,
         }
     }
 }

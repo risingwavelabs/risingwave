@@ -14,10 +14,11 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::change_log::{ChangeLogDelta, TableChangeLog};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
@@ -26,15 +27,18 @@ use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersion
 use risingwave_hummock_sdk::{
     CompactionGroupId, FrontendHummockVersionDelta, HummockSstableId, HummockVersionId,
 };
+use risingwave_meta_model::Epoch;
 use risingwave_pb::hummock::{
     CompatibilityVersion, GroupConstruct, HummockVersionDeltas, HummockVersionStats,
     StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::TableCommittedEpochNotifiers;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::NotificationManager;
+use crate::hummock::model::ext::to_table_change_log_meta_store_model;
+use crate::manager::{MetaOpts, NotificationManager};
 use crate::model::{
     InMemValTransaction, MetadataModelResult, Transactional, ValTransaction, VarTransaction,
 };
@@ -44,7 +48,7 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
     metrics.delta_log_count.set(total_number as _);
 }
 
-fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
+pub(super) fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
@@ -54,32 +58,41 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
 }
 
 pub(super) struct HummockVersionTransaction<'a> {
-    orig_version: &'a mut HummockVersion,
+    orig_version: &'a mut Arc<HummockVersion>,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
+    orig_table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
     notification_manager: &'a NotificationManager,
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
+    version_stat_tx: &'a tokio::sync::mpsc::UnboundedSender<Arc<HummockVersion>>,
 
-    pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>)>,
+    pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>, HashSet<TableId>)>,
     disable_apply_to_txn: bool,
+    opts: &'a MetaOpts,
 }
 
 impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn new(
-        version: &'a mut HummockVersion,
+        version: &'a mut Arc<HummockVersion>,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
+        table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
         notification_manager: &'a NotificationManager,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
         meta_metrics: &'a MetaMetrics,
+        opts: &'a MetaOpts,
+        version_stat_tx: &'a tokio::sync::mpsc::UnboundedSender<Arc<HummockVersion>>,
     ) -> Self {
         Self {
             orig_version: version,
             orig_deltas: deltas,
+            orig_table_change_log: table_change_log,
             pre_applied_version: None,
             disable_apply_to_txn: false,
             notification_manager,
             table_committed_epoch_notifiers,
             meta_metrics,
+            opts,
+            version_stat_tx,
         }
     }
 
@@ -92,10 +105,10 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     pub(super) fn latest_version(&self) -> &HummockVersion {
-        if let Some((version, _)) = &self.pre_applied_version {
+        if let Some((version, _, _)) = &self.pre_applied_version {
             version
         } else {
-            self.orig_version
+            self.orig_version.as_ref()
         }
     }
 
@@ -108,10 +121,27 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 
     fn pre_apply(&mut self, delta: HummockVersionDelta) {
-        let (version, deltas) = self
-            .pre_applied_version
-            .get_or_insert_with(|| (self.orig_version.clone(), Vec::with_capacity(1)));
-        version.apply_version_delta(&delta);
+        let (version, deltas, gc_change_log_deltas) =
+            self.pre_applied_version.get_or_insert_with(|| {
+                (
+                    self.orig_version.as_ref().clone(),
+                    Vec::with_capacity(1),
+                    HashSet::new(),
+                )
+            });
+        let changed_table_info = version.apply_version_delta(&delta);
+        // Ideally, the first parameter should be the cumulative state (orig_table_change_log + all applied deltas).
+        // However, currently, we use orig_table_change_log directly because deltas are only applied after a successful metastore write in the end of the transaction.
+        // Consequently, some table eligible for GC are not returned by collect_gc_change_log_delta and are deferred to the next transaction.
+        // This delay is acceptable and does not impact system correctness.
+        let gc_change_log_delta = HummockVersion::collect_gc_change_log_delta(
+            self.orig_table_change_log.keys(),
+            &delta.change_log_delta,
+            &delta.removed_table_ids,
+            &delta.state_table_info_delta,
+            &changed_table_info,
+        );
+        gc_change_log_deltas.extend(gc_change_log_delta);
         deltas.push(delta);
     }
 
@@ -171,7 +201,9 @@ impl<'a> HummockVersionTransaction<'a> {
                 .or_default()
                 .group_deltas;
 
-            group_deltas.push(GroupDelta::TruncateTables(table_ids.into_iter().collect()));
+            group_deltas.push(GroupDelta::PruneTableIdsFromSsts(
+                table_ids.into_iter().collect(),
+            ));
         }
 
         // update state table info
@@ -220,8 +252,17 @@ impl<'a> HummockVersionTransaction<'a> {
 
 impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
-        if let Some((version, deltas)) = self.pre_applied_version {
-            *self.orig_version = version;
+        if let Some((version, deltas, gc_change_log_deltas)) = self.pre_applied_version {
+            *self.orig_version = Arc::new(version);
+            for delta in &deltas {
+                HummockVersion::apply_change_log_delta(
+                    self.orig_table_change_log,
+                    &delta.change_log_delta,
+                );
+            }
+            self.orig_table_change_log
+                .retain(|table_id, _| !gc_change_log_deltas.contains(table_id));
+
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
                 self.notification_manager.notify_hummock_without_version(
@@ -248,18 +289,20 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
                         .notify_deltas(&deltas);
                 }
             }
+
             for delta in deltas {
                 assert!(self.orig_deltas.insert(delta.id, delta.clone()).is_none());
             }
 
             trigger_delta_log_stats(self.meta_metrics, self.orig_deltas.len());
-            trigger_version_stat(self.meta_metrics, self.orig_version);
+            let _ = self.version_stat_tx.send(self.orig_version.clone());
         }
     }
 }
 
 impl<TXN> ValTransaction<TXN> for HummockVersionTransaction<'_>
 where
+    TXN: ConnectionTrait,
     HummockVersionDelta: Transactional<TXN>,
     HummockVersionStats: Transactional<TXN>,
 {
@@ -267,12 +310,59 @@ where
         if self.disable_apply_to_txn {
             return Ok(());
         }
-        for delta in self
-            .pre_applied_version
-            .iter()
-            .flat_map(|(_, deltas)| deltas.iter())
-        {
-            delta.upsert_in_transaction(txn).await?;
+        if let Some((_, deltas, gc_change_log_deltas)) = &self.pre_applied_version {
+            // These upsert_in_transaction can be batched. However, we know len(deltas) is always 1 currently.
+            for delta in deltas {
+                delta.upsert_in_transaction(txn).await?;
+            }
+
+            let insert_batch_size = self.opts.table_change_log_insert_batch_size as usize;
+            use futures::stream::{self, StreamExt};
+            use sea_orm::{ColumnTrait, Condition, QueryFilter};
+            let insert_iter = deltas
+                .iter()
+                .flat_map(|i| i.change_log_delta.iter())
+                .map(|(table_id, change_log_delta)| (*table_id, &change_log_delta.new_log));
+            let mut stream = stream::iter(insert_iter).chunks(insert_batch_size);
+            while let Some(change_log_batch) = stream.next().await {
+                let insert_many = change_log_batch
+                    .into_iter()
+                    .map(|(table_id, change_log)| {
+                        to_table_change_log_meta_store_model(table_id, change_log)
+                    })
+                    .collect::<Vec<_>>();
+                risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
+                    .on_empty_do_nothing()
+                    .exec(txn)
+                    .await?;
+            }
+
+            let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
+            let delete_iter = deltas
+                .iter()
+                .flat_map(|i| i.change_log_delta.iter())
+                .map(|(table_id, change_log_delta)| (*table_id, change_log_delta.truncate_epoch))
+                .chain(
+                    gc_change_log_deltas
+                        .iter()
+                        .map(|table_id| (*table_id, u64::MAX)),
+                );
+
+            let mut stream = stream::iter(delete_iter).chunks(delete_batch_size);
+            while let Some(change_log_batch) = stream.next().await {
+                let mut condition = Condition::any();
+                for (table_id, truncate_epoch) in change_log_batch {
+                    condition = condition.add(
+                        Condition::all()
+                            .add(risingwave_meta_model::hummock_table_change_log::Column::TableId.eq(table_id))
+                            .add(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch.lt(truncate_epoch as Epoch))
+                    );
+                }
+                risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
+                    .filter(condition)
+                    .exec(txn)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -355,6 +445,7 @@ impl InMemValTransaction for HummockVersionStatsTransaction<'_> {
 
 impl<TXN> ValTransaction<TXN> for HummockVersionStatsTransaction<'_>
 where
+    TXN: ConnectionTrait,
     HummockVersionStats: Transactional<TXN>,
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {

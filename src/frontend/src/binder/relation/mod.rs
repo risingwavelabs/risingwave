@@ -344,11 +344,14 @@ impl Binder {
         alias: Option<&TableAlias>,
     ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
-        let (table_name, column_aliases, table_alias) = match alias {
-            None => (table_name, &EMPTY[..], None),
-            Some(TableAlias { name, columns }) => {
-                (name.real_value(), columns.as_slice(), Some(table_name))
-            }
+        let (resolved_schema_name, table_name, column_aliases, table_alias) = match alias {
+            None => (schema_name.clone(), table_name, &EMPTY[..], None),
+            Some(TableAlias { name, columns }) => (
+                None,
+                name.real_value(),
+                columns.as_slice(),
+                Some(table_name),
+            ),
         };
 
         let num_col_aliases = column_aliases.len();
@@ -394,7 +397,7 @@ impl Binder {
         match self
             .context
             .range_of
-            .entry((schema_name, table_name.clone()))
+            .entry((resolved_schema_name, table_name.clone()))
         {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name while binding table to context: {}",
@@ -461,6 +464,10 @@ impl Binder {
                     .collect();
             }
 
+            let exposed_table_name = original_alias.name.real_value();
+            self.context
+                .check_relation_name_conflict(&exposed_table_name)?;
+
             match cte_state {
                 BindingCteState::Bound { query } => {
                     let input = BoundShareInput::Query(query);
@@ -470,6 +477,7 @@ impl Binder {
                         None,
                         Some(&original_alias),
                     )?;
+                    self.context.add_cte_name(exposed_table_name);
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
@@ -482,10 +490,15 @@ impl Binder {
                         None,
                         Some(&original_alias),
                     )?;
+                    self.context.add_cte_name(exposed_table_name);
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
             }
         } else {
+            let exposed_table_name = alias
+                .map(|alias| alias.name.real_value())
+                .unwrap_or_else(|| table_name.clone());
+            self.context.check_catalog_name(&exposed_table_name)?;
             self.bind_catalog_relation_by_name(
                 db_name.as_deref(),
                 schema_name.as_deref(),

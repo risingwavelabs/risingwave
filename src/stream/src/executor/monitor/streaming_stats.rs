@@ -68,6 +68,7 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
     pub fragment_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
+    pub project_expr_inflight_window_size: LabelGuardedIntGaugeVec,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec,
@@ -223,6 +224,11 @@ pub struct StreamingMetrics {
     pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
     pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
 
+    // SQL Server CDC LSN monitoring
+    pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_commit_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
@@ -340,6 +346,30 @@ impl StreamingMetrics {
         let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
             "stream_mysql_cdc_state_binlog_position",
             "Current binlog position stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_change_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_change_lsn",
+            "Current change_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_commit_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_commit_lsn",
+            "Current commit_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_jni_commit_offset_lsn",
+            "LSN value when JNI commit offset is called for SQL Server CDC",
             &["source_id"],
             registry,
         )
@@ -470,6 +500,14 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let project_expr_inflight_window_size = register_guarded_int_gauge_vec_with_registry!(
+            "stream_project_expr_inflight_window_size",
+            "Number of messages waiting in ProjectExecutor's ordered projection window",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
@@ -1293,6 +1331,7 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             fragment_channel_buffered_bytes,
             actor_current_epoch,
+            project_expr_inflight_window_size,
             source_output_row_count,
             source_split_change_count,
             source_backfill_row_count,
@@ -1398,6 +1437,9 @@ impl StreamingMetrics {
             pg_cdc_jni_commit_offset_lsn,
             mysql_cdc_state_binlog_file_seq,
             mysql_cdc_state_binlog_position,
+            sqlserver_cdc_state_change_lsn,
+            sqlserver_cdc_state_commit_lsn,
+            sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
             state_table_iter_count,
             state_table_get_count,

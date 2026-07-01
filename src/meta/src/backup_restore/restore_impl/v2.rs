@@ -101,6 +101,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
     async fn write(&self, target_snapshot: MetaSnapshot<MetadataV2>) -> BackupResult<()> {
         let metadata = target_snapshot.metadata;
         let db = &self.meta_store.conn;
+        ensure_all_meta_store_tables_are_empty(db).await?;
         insert_models(metadata.seaql_migrations.clone(), db).await?;
         insert_models(metadata.clusters.clone(), db).await?;
         insert_models(metadata.version_stats.clone(), db).await?;
@@ -163,6 +164,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.pending_sink_state.clone(), db).await?;
         insert_models(metadata.refresh_jobs.clone(), db).await?;
         insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
+        insert_models(metadata.hummock_table_change_logs.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
@@ -200,6 +202,28 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         }
         Ok(())
     }
+}
+
+async fn ensure_all_meta_store_tables_are_empty(
+    db: &impl sea_orm::ConnectionTrait,
+) -> BackupResult<()> {
+    macro_rules! ensure_entity_empty {
+        ($($entity_mod:ident),* $(,)?) => {
+            $(
+                if risingwave_meta_model::$entity_mod::Entity::find()
+                    .one(db)
+                    .await
+                    .map_err(map_db_err)?
+                    .is_some()
+                {
+                    return Err(BackupError::NonemptyMetaStorage);
+                }
+            )*
+        };
+    }
+
+    risingwave_meta_model::for_all_meta_model_entities!(ensure_entity_empty);
+    Ok(())
 }
 
 fn map_db_err(e: DbErr) -> BackupError {

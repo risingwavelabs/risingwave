@@ -110,7 +110,7 @@ impl ObjectStoreMetaSnapshotStorage {
         format!("{}/{}.snapshot", self.path, id)
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn get_snapshot_id_from_path(path: &str) -> MetaSnapshotId {
         let split = path.split(&['/', '.']).collect_vec();
         debug_assert!(split.len() > 2);
@@ -137,6 +137,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
                 snapshot.metadata.hummock_version_ref(),
                 snapshot.format_version,
                 remarks,
+                snapshot.metadata.table_change_log_object_ids().into_iter(),
             ));
             manifest
         })

@@ -82,10 +82,6 @@ impl ExternalCdcTableType {
         matches!(self, Self::MySql | Self::Postgres)
     }
 
-    pub fn shareable_only(&self) -> bool {
-        matches!(self, Self::SqlServer)
-    }
-
     pub async fn create_table_reader(
         &self,
         config: ExternalTableConfig,
@@ -239,7 +235,7 @@ pub trait ExternalTableReader: Sized {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
     // Currently, MySQL cdc uses a connection pool to manage connections to MySQL, and other CDC processes do not require the disconnect step for now.
-    #[allow(clippy::unused_async)]
+
     async fn disconnect(self) -> ConnectorResult<()> {
         Ok(())
     }

@@ -21,8 +21,8 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::hash::ActorMapping;
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::hash::{ActorMapping, VnodeBitmapExt};
+use risingwave_connector::source::{SplitId, SplitMetaData};
 use risingwave_meta_model::{
     StreamingParallelism, WorkerId, fragment, fragment_relation, object, streaming_job,
 };
@@ -52,7 +52,6 @@ pub struct WorkerReschedule {
 }
 
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
@@ -67,6 +66,101 @@ use crate::controller::utils::{
 };
 
 pub type ScaleControllerRef = Arc<ScaleController>;
+
+// Field order is intentional: derived `Ord` is used to canonicalize actor
+// layout for no-op detection, so new fields must preserve meaningful
+// comparison order.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NormalizedActor {
+    worker_id: WorkerId,
+    vnode_bitmap: Option<Vec<usize>>,
+    splits: Vec<SplitId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NormalizedFragmentLayout {
+    distribution_type: DistributionType,
+    actors: Vec<NormalizedActor>,
+}
+
+fn normalize_actor_info(info: &InflightActorInfo) -> NormalizedActor {
+    let vnode_bitmap = info.vnode_bitmap.as_ref().map(|bitmap| {
+        bitmap
+            .iter_vnodes()
+            .map(|vnode| vnode.to_index())
+            .collect_vec()
+    });
+    let mut splits = info.splits.iter().map(SplitMetaData::id).collect_vec();
+    splits.sort_unstable();
+    NormalizedActor {
+        worker_id: info.worker_id,
+        vnode_bitmap,
+        splits,
+    }
+}
+
+fn build_normalized_fragment_layout(
+    fragment_info: &InflightFragmentInfo,
+) -> NormalizedFragmentLayout {
+    // Actor ids are intentionally erased here. For no-op detection we only care
+    // about the semantic layout carried by worker placement, vnode ownership,
+    // and split assignment.
+    let mut actors = fragment_info
+        .actors
+        .values()
+        .map(normalize_actor_info)
+        .collect_vec();
+    actors.sort_unstable();
+
+    NormalizedFragmentLayout {
+        distribution_type: fragment_info.distribution_type,
+        actors,
+    }
+}
+
+/// Compare the rendered (preview) layout against the current in-flight layout
+/// to decide whether a reschedule is a no-op.
+///
+/// Dispatcher layout is intentionally not compared here. On the reschedule path
+/// it is a deterministic function of the fragment actor layout together with the
+/// stable fragment-relation metadata held in `RescheduleContext`, so fragment-level
+/// equality already implies dispatcher equality.
+///
+/// Only fragments present in `render_result` are compared. This is intentional:
+/// this function sits on the reschedule path, which only re-renders fragments
+/// that were loaded into the `RescheduleContext`. Fragment creation or deletion
+/// is handled by separate DDL / recovery paths, not by reschedule, so fragments
+/// outside the render set are irrelevant here. In other words, this is a subset
+/// check over the rendered fragments, not a full bidirectional equality check.
+pub(crate) fn rendered_layout_matches_current(
+    render_result: &FragmentRenderMap,
+    all_prev_fragments: &HashMap<FragmentId, &InflightFragmentInfo>,
+) -> MetaResult<bool> {
+    let all_rendered_fragments: HashMap<_, _> = render_result
+        .values()
+        .flat_map(|jobs| jobs.values())
+        .flatten()
+        .map(|(fragment_id, info)| (*fragment_id, info))
+        .collect();
+
+    for (fragment_id, rendered_fragment) in &all_rendered_fragments {
+        let Some(prev_fragment) = all_prev_fragments.get(fragment_id).copied() else {
+            return Err(MetaError::from(anyhow!(
+                "previous fragment info for {} not found",
+                fragment_id
+            )));
+        };
+
+        let rendered_layout = build_normalized_fragment_layout(rendered_fragment);
+        let current_layout = build_normalized_fragment_layout(prev_fragment);
+
+        if rendered_layout != current_layout {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
 
 pub struct ScaleController {
     pub metadata_manager: MetadataManager,
@@ -155,6 +249,12 @@ impl ScaleController {
                     }
 
                     streaming_job.parallelism = Set(p.parallelism.clone());
+                    if matches!(p.parallelism, StreamingParallelism::Fixed(_)) {
+                        streaming_job.adaptive_parallelism_strategy = Set(None);
+                    } else {
+                        streaming_job.adaptive_parallelism_strategy =
+                            Set(p.adaptive_parallelism_strategy.clone());
+                    }
                 }
                 _ => {}
             }
@@ -179,7 +279,7 @@ impl ScaleController {
 
     pub async fn reschedule_backfill_parallelism_inplace(
         &self,
-        policy: HashMap<JobId, Option<StreamingParallelism>>,
+        policy: HashMap<JobId, Option<ParallelismPolicy>>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
             return Ok(HashMap::new());
@@ -188,7 +288,7 @@ impl ScaleController {
         let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        for (table_id, parallelism) in &policy {
+        for (table_id, policy) in &policy {
             let streaming_job = StreamingJob::find_by_id(*table_id)
                 .one(&txn)
                 .await?
@@ -198,7 +298,10 @@ impl ScaleController {
 
             let mut streaming_job = streaming_job.into_active_model();
 
-            if let Some(StreamingParallelism::Fixed(n)) = parallelism
+            if let Some(ParallelismPolicy {
+                parallelism: StreamingParallelism::Fixed(n),
+                ..
+            }) = policy
                 && *n > max_parallelism as usize
             {
                 bail!(format!(
@@ -206,7 +309,18 @@ impl ScaleController {
                 ));
             }
 
-            streaming_job.backfill_parallelism = Set(parallelism.clone());
+            if let Some(policy) = policy {
+                streaming_job.backfill_parallelism = Set(Some(policy.parallelism.clone()));
+                if matches!(policy.parallelism, StreamingParallelism::Fixed(_)) {
+                    streaming_job.backfill_adaptive_parallelism_strategy = Set(None);
+                } else {
+                    streaming_job.backfill_adaptive_parallelism_strategy =
+                        Set(policy.adaptive_parallelism_strategy.clone());
+                }
+            } else {
+                streaming_job.backfill_parallelism = Set(None);
+                streaming_job.backfill_adaptive_parallelism_strategy = Set(None);
+            }
             streaming_job.update(&txn).await?;
         }
 
@@ -662,6 +776,10 @@ fn diff_fragment(
     Ok(reschedule)
 }
 
+/// Build executable reschedule plans from the rendered fragment layout.
+///
+/// Callers are expected to run the no-op layout check before invoking this
+/// function so command construction stays focused on plan materialization.
 pub(crate) fn build_reschedule_commands(
     render_result: FragmentRenderMap,
     context: RescheduleContext,
@@ -878,9 +996,252 @@ pub(crate) fn build_reschedule_commands(
     Ok(commands)
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_connector::source::SplitImpl;
+    use risingwave_connector::source::test_source::TestSourceSplit;
+
+    use super::*;
+
+    fn actor(worker_id: impl Into<WorkerId>, vnode_bitmap: Option<Bitmap>) -> InflightActorInfo {
+        InflightActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits: vec![],
+        }
+    }
+
+    fn actor_with_splits(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+        splits: Vec<SplitImpl>,
+    ) -> InflightActorInfo {
+        InflightActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits,
+        }
+    }
+
+    fn test_split(id: &str, offset: &str) -> SplitImpl {
+        SplitImpl::Test(TestSourceSplit {
+            id: id.into(),
+            properties: HashMap::new(),
+            offset: offset.to_owned(),
+        })
+    }
+
+    fn fragment(
+        fragment_id: FragmentId,
+        actors: impl IntoIterator<Item = (ActorId, InflightActorInfo)>,
+    ) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 8,
+            nodes: Default::default(),
+            actors: actors.into_iter().collect(),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    fn render_result(fragments: Vec<(FragmentId, InflightFragmentInfo)>) -> FragmentRenderMap {
+        HashMap::from([(
+            DatabaseId::new(1),
+            HashMap::from([(
+                JobId::new(1),
+                fragments.into_iter().collect::<HashMap<_, _>>(),
+            )]),
+        )])
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_ignores_actor_ids_across_fragments() {
+        let current_source = fragment(
+            FragmentId::new(1),
+            [
+                (
+                    ActorId::new(101),
+                    actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(102),
+                    actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                ),
+            ],
+        );
+        let current_target = fragment(
+            FragmentId::new(2),
+            [
+                (
+                    ActorId::new(201),
+                    actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(202),
+                    actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                ),
+            ],
+        );
+
+        let rendered = render_result(vec![
+            (
+                FragmentId::new(1),
+                fragment(
+                    FragmentId::new(1),
+                    [
+                        (
+                            ActorId::new(1001),
+                            actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(1002),
+                            actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+            (
+                FragmentId::new(2),
+                fragment(
+                    FragmentId::new(2),
+                    [
+                        (
+                            ActorId::new(2001),
+                            actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(2002),
+                            actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+        ]);
+
+        let prev = HashMap::from([
+            (FragmentId::new(1), &current_source),
+            (FragmentId::new(2), &current_target),
+        ]);
+
+        assert!(rendered_layout_matches_current(&rendered, &prev,).unwrap());
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_detects_target_fragment_layout_changes() {
+        let current_source = fragment(
+            FragmentId::new(1),
+            [
+                (
+                    ActorId::new(101),
+                    actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(102),
+                    actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                ),
+            ],
+        );
+        let current_target = fragment(
+            FragmentId::new(2),
+            [
+                (
+                    ActorId::new(201),
+                    actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                ),
+                (
+                    ActorId::new(202),
+                    actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                ),
+            ],
+        );
+
+        let rendered = render_result(vec![
+            (
+                FragmentId::new(1),
+                fragment(
+                    FragmentId::new(1),
+                    [
+                        (
+                            ActorId::new(1001),
+                            actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
+                        ),
+                        (
+                            ActorId::new(1002),
+                            actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+            (
+                FragmentId::new(2),
+                fragment(
+                    FragmentId::new(2),
+                    [
+                        (
+                            ActorId::new(2001),
+                            actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3, 4, 5]))),
+                        ),
+                        (
+                            ActorId::new(2002),
+                            actor(4, Some(Bitmap::from_indices(8, [6, 7]))),
+                        ),
+                    ],
+                ),
+            ),
+        ]);
+
+        let prev = HashMap::from([
+            (FragmentId::new(1), &current_source),
+            (FragmentId::new(2), &current_target),
+        ]);
+
+        assert!(!rendered_layout_matches_current(&rendered, &prev,).unwrap());
+    }
+
+    #[test]
+    fn rendered_layout_matches_current_ignores_split_offsets() {
+        let fragment_id = FragmentId::new(1);
+        let prev_fragment = fragment(
+            fragment_id,
+            [(
+                ActorId::new(101),
+                actor_with_splits(
+                    1,
+                    Some(Bitmap::from_indices(8, [0, 1, 2, 3])),
+                    vec![test_split("split-0", "100")],
+                ),
+            )],
+        );
+        let rendered = render_result(vec![(
+            fragment_id,
+            fragment(
+                fragment_id,
+                [(
+                    ActorId::new(1001),
+                    actor_with_splits(
+                        1,
+                        Some(Bitmap::from_indices(8, [0, 1, 2, 3])),
+                        vec![test_split("split-0", "200")],
+                    ),
+                )],
+            ),
+        )]);
+        let prev = HashMap::from([(fragment_id, &prev_fragment)]);
+
+        assert!(rendered_layout_matches_current(&rendered, &prev,).unwrap());
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParallelismPolicy {
     pub parallelism: StreamingParallelism,
+    pub adaptive_parallelism_strategy: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1038,8 +1399,6 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
-
         let mut should_trigger = false;
 
         loop {
@@ -1081,14 +1440,10 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
-                        LocalNotification::SystemParamsChange(reader) => {
-                            let new_strategy = reader.adaptive_parallelism_strategy();
-                            if new_strategy != previous_adaptive_parallelism_strategy {
-                                tracing::info!("adaptive parallelism strategy changed from {:?} to {:?}", previous_adaptive_parallelism_strategy, new_strategy);
-                                should_trigger = true;
-                                previous_adaptive_parallelism_strategy = new_strategy;
-                            }
-                        }
+                        // TODO(#25478): add a local notification path for relevant session
+                        // parameter updates and trigger a control round here when the cluster
+                        // defaults for stream/backfill parallelism change.
+                        LocalNotification::SystemParamsChange(_) => {}
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
                                 continue;
@@ -1153,7 +1508,12 @@ impl GlobalStreamManager {
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
         // Fetch both the target parallelism (final desired state) and the backfill parallelism
         // (temporary parallelism used during backfill phase) from the catalog.
-        let Some((target, backfill_parallelism)) = self
+        let Some((
+            target,
+            target_adaptive_parallelism_strategy,
+            backfill_parallelism,
+            backfill_adaptive_parallelism_strategy,
+        )) = self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
@@ -1170,7 +1530,11 @@ impl GlobalStreamManager {
 
         // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {
-            Some(backfill_parallelism) if backfill_parallelism == target => {
+            Some(backfill_parallelism)
+                if backfill_parallelism == target
+                    && backfill_adaptive_parallelism_strategy
+                        == target_adaptive_parallelism_strategy =>
+            {
                 // Backfill parallelism matches target - no reschedule needed since the job
                 // is already running at the desired parallelism.
                 tracing::debug!(
@@ -1205,6 +1569,7 @@ impl GlobalStreamManager {
         );
         let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
             parallelism: target,
+            adaptive_parallelism_strategy: target_adaptive_parallelism_strategy,
         });
         if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
             tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");

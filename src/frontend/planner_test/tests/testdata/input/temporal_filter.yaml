@@ -99,6 +99,12 @@
     select * from t1 where ts + interval '1 hour' > now() or ts > ' 2023-12-18 00:00:00+00:00';
   expected_outputs:
     - stream_plan
+- name: Temporal filter with nullable or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone, a int);
+    select * from t1 where ts + interval '1 hour' > now() or a > 0;
+  expected_outputs:
+    - stream_plan
 - name: Temporal filter with or is null
   sql: |
     create table t1 (ts timestamp with time zone);

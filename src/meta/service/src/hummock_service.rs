@@ -108,17 +108,27 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<ReplayVersionDeltaRequest>,
     ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
-        let req = request.into_inner();
-        let (version, compaction_groups) = self
-            .hummock_manager
-            .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
-                &req.version_delta.unwrap(),
+        #[cfg(any(test, feature = "test"))]
+        {
+            let req = request.into_inner();
+            let (version, compaction_groups) = self
+                .hummock_manager
+                .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
+                    &req.version_delta.unwrap(),
+                ))
+                .await?;
+            Ok(Response::new(ReplayVersionDeltaResponse {
+                version: Some(version.into()),
+                modified_compaction_groups: compaction_groups,
+            }))
+        }
+        #[cfg(not(any(test, feature = "test")))]
+        {
+            let _ = request;
+            Err(Status::unimplemented(
+                "replay_version_delta is only available in test builds",
             ))
-            .await?;
-        Ok(Response::new(ReplayVersionDeltaResponse {
-            version: Some(version.into()),
-            modified_compaction_groups: compaction_groups,
-        }))
+        }
     }
 
     async fn trigger_compaction_deterministic(
@@ -138,7 +148,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<DisableCommitEpochResponse>, Status> {
         let version = self.hummock_manager.disable_commit_epoch().await;
         Ok(Response::new(DisableCommitEpochResponse {
-            current_version: Some(version.into()),
+            current_version: Some(PbHummockVersion::from(&*version)),
         }))
     }
 
@@ -185,6 +195,9 @@ impl HummockManagerService for HummockServiceImpl {
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
+            target_level: request
+                .target_level
+                .map(|target_level| target_level as usize),
             sst_ids: request.sst_ids,
             exclusive: request.exclusive.unwrap_or(false),
             ..Default::default()
@@ -346,7 +359,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version = self.hummock_manager.pin_version(req.context_id).await?;
         Ok(Response::new(PinVersionResponse {
-            pinned_version: Some(version.into()),
+            pinned_version: Some(PbHummockVersion::from(&*version)),
         }))
     }
 
@@ -393,7 +406,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
         let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
         Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
-            checkpoint_version: Some(checkpoint_version.into()),
+            checkpoint_version: Some(PbHummockVersion::from(&*checkpoint_version)),
         }))
     }
 
@@ -564,6 +577,8 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
             periodic_scheduling_compaction_group_split_interval_sec,
+            enable_compaction_group_normalize,
+            max_normalize_splits_per_round,
             do_not_config_object_storage_lifecycle,
             partition_vnode_count,
             table_high_write_throughput_threshold,
@@ -667,6 +682,39 @@ impl HummockManagerService for HummockServiceImpl {
             .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        request: Request<GetTableChangeLogsRequest>,
+    ) -> Result<Response<GetTableChangeLogsResponse>, Status> {
+        let GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        } = request.into_inner();
+        let table_change_logs = self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids
+                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
+                    .clone(),
+                exclude_empty,
+                limit,
+            )
+            .await
+            .into_iter()
+            .map(|(i, l)| (i.as_raw_id(), l.to_protobuf()))
+            .collect();
+        Ok(Response::new(GetTableChangeLogsResponse {
+            table_change_logs,
+        }))
     }
 }
 

@@ -17,17 +17,18 @@ use risingwave_frontend_macro::system_catalog;
 
 /// Provides a mapping from `fragment_id` to its ddl info.
 #[system_catalog(
-view,
-"rw_catalog.rw_fragment_id_to_ddl",
-"with
-   job_id_to_mv as (select fragment_id, d.id as job_id, schema_id, 'mv' as ddl_type, name from rw_materialized_views d join rw_fragments f on d.id = f.table_id),
-   job_id_to_sink as (select fragment_id, d.id as job_id, schema_id, 'sink' as ddl_type, name from rw_sinks d join rw_fragments f on d.id = f.table_id),
-   job_id_to_source as (select fragment_id, d.id as job_id, schema_id, 'source' as ddl_type, name from rw_sources d join rw_fragments f on d.id = f.table_id),
-   job_id_to_table as (select fragment_id, d.id as job_id, schema_id, 'table' as ddl_type, name from rw_tables d join rw_fragments f on d.id = f.table_id)
-   select * from job_id_to_mv
-     union all select * from job_id_to_sink
-       union all select * from job_id_to_source
-         union all select * from job_id_to_table"
+    view,
+    "rw_catalog.rw_fragment_id_to_ddl",
+    "with
+   all_streaming_jobs as (
+     select id as job_id, schema_id, 'mv' as ddl_type, name from rw_materialized_views
+       union all select id as job_id, schema_id, 'sink' as ddl_type, name from rw_sinks
+         union all select id as job_id, schema_id, 'source' as ddl_type, name from rw_sources
+           union all select id as job_id, schema_id, 'table' as ddl_type, name from rw_tables
+             union all select id as job_id, schema_id, 'index' as ddl_type, name from rw_indexes
+   )
+   select f.fragment_id, job.job_id, job.schema_id, job.ddl_type, job.name
+   from all_streaming_jobs job join rw_fragments f on job.job_id = f.table_id"
 )]
 #[derive(Fields)]
 struct RwFragmentIdToDdl {

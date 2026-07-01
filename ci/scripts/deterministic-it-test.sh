@@ -43,6 +43,16 @@ export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target/sim"
 export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-madsim-it-test-%4m.profraw"
 export RW_COVERAGE_CARGO_PROFILE="ci-sim"
 
+# Pre-install the pinned toolchain serially before the parallel fan-out below.
+# `parallel -j 8` spawns 8 `cargo` processes at once; if the toolchain isn't
+# already present in the CI image (e.g. right after a toolchain bump, before the
+# image is rebuilt), each process triggers a concurrent `rustup` auto-install and
+# they race on ~/.rustup/downloads, failing with
+# "could not rename downloaded file ... No such file or directory".
+# Running cargo once up front forces a single serial install. No-op once the
+# image already bakes the pinned toolchain.
+cargo --version
+
 echo "--- Run integration tests in deterministic simulation mode"
 seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  cargo nextest run \

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 
@@ -132,7 +132,7 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
-    /// False positive probability of bloom filter.
+    /// Deprecated: Bloom filter is no longer a supported SST filter implementation.
     #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
@@ -199,6 +199,12 @@ pub struct MetaNodeOpts {
         default_value = "./secrets"
     )]
     pub temp_secret_file_dir: String,
+
+    /// Address of the serverless backfill controller.
+    /// Needed if meta receives a streaming job with serverless backfill enabled.
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -389,6 +395,12 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_compaction_report_timeout_sec: config
+                    .meta
+                    .iceberg_compaction_report_timeout_sec,
+                iceberg_compaction_config_refresh_interval_sec: config
+                    .meta
+                    .iceberg_compaction_config_refresh_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -413,6 +425,10 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_epoch_version_insert_batch_size,
+                hummock_time_travel_delta_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_delta_fetch_batch_size,
                 hummock_gc_history_insert_batch_size: config
                     .meta
                     .developer
@@ -465,6 +481,8 @@ pub fn start(
                 periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,
+                enable_compaction_group_normalize: config.meta.enable_compaction_group_normalize,
+                max_normalize_splits_per_round: config.meta.max_normalize_splits_per_round,
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
@@ -491,6 +509,7 @@ pub fn start(
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_task_max_progress_interval_secs,
+                compaction_task_id_refill_capacity: config.meta.compaction_task_id_refill_capacity,
                 compaction_config: Some(config.meta.compaction_config),
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
@@ -540,6 +559,14 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
+                table_change_log_insert_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_insert_batch_size,
+                table_change_log_delete_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_delete_batch_size,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
@@ -563,9 +590,10 @@ pub fn start(
 
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            config.session_init,
             shutdown,
         ))
         .await
@@ -594,6 +622,24 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
         let error_msg = "checkpoint read max in flight chunks should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.compaction_task_id_refill_capacity == 0 {
+        let error_msg = "compaction task id refill capacity should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_report_timeout_sec == 0 {
+        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
+        let error_msg = "iceberg compaction config refresh interval sec should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

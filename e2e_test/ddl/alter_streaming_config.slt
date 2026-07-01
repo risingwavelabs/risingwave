@@ -4,16 +4,20 @@ create table cf (v int);
 statement ok
 alter table cf set config (
     streaming.developer.chunk_size = 511,
+    streaming.developer.disable_sync_log_store_dispatcher = TrUe,
     streaming.developer.join_encoding_type = "cpu_optimized",
-    streaming.developer.enable_executor_row_count = TrUe
+    streaming.developer.enable_executor_row_count = TrUe,
+    streaming.developer.project_expr_concurrency = 2
 );
 
 query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
 cf	streaming.developer.chunk_size	511
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
+cf	streaming.developer.project_expr_concurrency	2
 
 # Update existing override
 statement ok
@@ -25,8 +29,10 @@ query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
 cf	streaming.developer.chunk_size	1023
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
+cf	streaming.developer.project_expr_concurrency	2
 
 # Reset to default with `NULL`
 statement ok
@@ -37,14 +43,18 @@ alter table cf set config (
 query TTT
 select name, key, value from rw_streaming_job_config where name = 'cf';
 ----
+cf	streaming.developer.disable_sync_log_store_dispatcher	true
 cf	streaming.developer.enable_executor_row_count	true
 cf	streaming.developer.join_encoding_type	"cpu_optimized"
+cf	streaming.developer.project_expr_concurrency	2
 
 # Reset to default with `reset`
 statement ok
 alter table cf reset config (
     streaming.developer.join_encoding_type,
-    streaming.developer.enable_executor_row_count
+    streaming.developer.disable_sync_log_store_dispatcher,
+    streaming.developer.enable_executor_row_count,
+    streaming.developer.project_expr_concurrency
 );
 
 query TTT

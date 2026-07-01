@@ -62,8 +62,9 @@ struct IcebergScanInner {
     scan_column_names: Vec<String>,
     need_seq_num: bool,
     need_file_path_and_pos: bool,
-    plan_properties: PlanProperties,
+    plan_properties: Arc<PlanProperties>,
     projection: Option<Vec<usize>>,
+    limit: Option<usize>,
 }
 
 impl DisplayAs for IcebergScan {
@@ -79,6 +80,11 @@ impl DisplayAs for IcebergScan {
 
         write!(f, "IcebergScan: ")?;
         write!(f, "table={}", self.inner.table.identifier())?;
+        write!(f, ", columns=")?;
+        pretty_write_vector(f, &self.inner.column_names())?;
+        if let Some(predicate) = self.inner.predicate() {
+            write!(f, ", predicate={}", predicate)?;
+        }
         if format_type == DisplayFormatType::Verbose {
             write!(f, ", scan_column_names={:?}", self.inner.scan_column_names)?;
             write!(f, ", need_seq_num={}", self.inner.need_seq_num)?;
@@ -89,6 +95,9 @@ impl DisplayAs for IcebergScan {
             )?;
             if let Some(projection) = &self.inner.projection {
                 write!(f, ", projection={:?}", projection)?;
+            }
+            if let Some(limit) = self.inner.limit {
+                write!(f, ", limit={}", limit)?;
             }
         }
         Ok(())
@@ -104,7 +113,7 @@ impl ExecutionPlan for IcebergScan {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.inner.plan_properties
     }
 
@@ -136,10 +145,6 @@ impl ExecutionPlan for IcebergScan {
         )))
     }
 
-    fn statistics(&self) -> DFResult<Statistics> {
-        self.partition_statistics(None)
-    }
-
     fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Statistics> {
         if let Some(partition) = partition {
             if partition >= self.inner.statistics.len() {
@@ -156,9 +161,9 @@ impl IcebergScan {
     pub async fn new(
         provider: &IcebergTableProvider,
         projection: Option<&Vec<usize>>,
-        // TODO: support filter pushdown and limit pushdown
+        // TODO: support filter pushdown
         _filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
         batch_parallelism: usize,
     ) -> DFResult<Self> {
         let mut arrow_schema = provider.schema();
@@ -197,7 +202,11 @@ impl IcebergScan {
         });
 
         let scan_tasks = provider.task.tasks();
-        let tasks = if scan_tasks.len() <= batch_parallelism {
+        let tasks = if limit.is_some() {
+            // A scan-local limit must be enforced globally. Keep the tasks in a single partition
+            // so execution can stop after enough rows without scanning all files.
+            vec![scan_tasks.to_vec()]
+        } else if scan_tasks.len() <= batch_parallelism {
             scan_tasks.iter().map(|task| vec![task.clone()]).collect()
         } else {
             IcebergSplitEnumerator::split_n_vecs(scan_tasks.to_vec(), batch_parallelism)
@@ -207,12 +216,12 @@ impl IcebergScan {
             .map(|tasks| calculate_statistics(tasks.iter(), &arrow_schema))
             .collect();
         let total_statistics = calculate_statistics(scan_tasks.iter(), &arrow_schema);
-        let plan_properties = PlanProperties::new(
+        let plan_properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(arrow_schema.clone()),
             Partitioning::UnknownPartitioning(tasks.len()),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             inner: Arc::new(IcebergScanInner {
@@ -226,6 +235,7 @@ impl IcebergScan {
                 need_file_path_and_pos,
                 plan_properties,
                 projection: projection.cloned(),
+                limit,
             }),
         })
     }
@@ -240,8 +250,13 @@ impl IcebergScanInner {
             .with_batch_size(chunk_size)
             .with_row_group_filtering_enabled(true)
             .build();
+        let mut remaining_limit = self.limit;
 
         for task in &self.tasks[partition] {
+            if matches!(remaining_limit, Some(0)) {
+                return Ok(());
+            }
+
             let stream = reader
                 .clone()
                 .read(tokio_stream::once(Ok(task.clone())).boxed())
@@ -264,10 +279,40 @@ impl IcebergScanInner {
                     batch = batch.project(projection).map_err(to_datafusion_error)?;
                 }
                 batch = cast_batch(self.arrow_schema.clone(), batch)?;
-                pos_start += i64::try_from(batch.num_rows()).unwrap();
-                yield batch;
+
+                if let Some(remaining) = &mut remaining_limit {
+                    if batch.num_rows() > *remaining {
+                        yield batch.slice(0, *remaining);
+                        return Ok(());
+                    }
+
+                    *remaining -= batch.num_rows();
+                    pos_start += i64::try_from(batch.num_rows()).unwrap();
+                    yield batch;
+
+                    if *remaining == 0 {
+                        return Ok(());
+                    }
+                } else {
+                    pos_start += i64::try_from(batch.num_rows()).unwrap();
+                    yield batch;
+                }
             }
         }
+    }
+
+    fn column_names(&self) -> Vec<String> {
+        self.arrow_schema
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect()
+    }
+
+    fn predicate(&self) -> Option<String> {
+        let task = self.tasks.iter().flatten().next()?;
+        let predicate = task.predicate()?;
+        Some(predicate.to_string())
     }
 }
 
@@ -367,4 +412,15 @@ fn calculate_statistics<'a>(
         total_byte_size: Precision::Exact(total_bytes),
         column_statistics: Statistics::unknown_column(schema),
     }
+}
+
+fn pretty_write_vector(f: &mut std::fmt::Formatter<'_>, vec: &[String]) -> std::fmt::Result {
+    write!(f, "[")?;
+    for (i, item) in vec.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{}", item)?;
+    }
+    write!(f, "]")
 }

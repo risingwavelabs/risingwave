@@ -93,6 +93,10 @@ impl ExprVisitor for ImpureAnalyzer {
         self.impure = Some("NOW or PROCTIME".into());
     }
 
+    fn visit_secret_ref(&mut self, secret_ref: &super::SecretRef) {
+        self.impure = Some(format!("secret reference `{}`", secret_ref.secret_name).into());
+    }
+
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
         let func_type = func_call.func_type();
         match func_type {
@@ -251,6 +255,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayOverlaps
             | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat

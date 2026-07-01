@@ -101,7 +101,7 @@ pub struct ExpandExec {
     input: Arc<dyn ExecutionPlan>,
     column_subsets: Vec<Vec<usize>>,
     schema: ArrowSchemaRef,
-    plan_properties: PlanProperties,
+    plan_properties: Arc<PlanProperties>,
 }
 
 impl ExpandExec {
@@ -122,13 +122,13 @@ impl ExpandExec {
     fn compute_properties(
         input: &Arc<dyn ExecutionPlan>,
         schema: ArrowSchemaRef,
-    ) -> PlanProperties {
-        PlanProperties::new(
+    ) -> Arc<PlanProperties> {
+        Arc::new(PlanProperties::new(
             EquivalenceProperties::new(schema),
             input.output_partitioning().to_owned(),
             input.pipeline_behavior(),
             input.boundedness(),
-        )
+        ))
     }
 }
 
@@ -155,7 +155,7 @@ impl ExecutionPlan for ExpandExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.plan_properties
     }
 

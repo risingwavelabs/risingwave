@@ -26,10 +26,12 @@ use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::{bail, ensure};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
+use crate::source::monitor::ConnectorAckFailureType;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
@@ -164,7 +166,11 @@ impl SplitReader for PulsarBrokerReader {
         let split = splits.into_iter().next().unwrap();
         let pulsar = props
             .common
-            .build_client(&props.oauth, &props.aws_auth_props)
+            .build_client(
+                &props.oauth,
+                &props.aws_auth_props,
+                props.operation_retry.to_pulsar_options(),
+            )
             .await?;
         let topic = split.topic.to_string();
 
@@ -267,6 +273,12 @@ impl PulsarBrokerReader {
     async fn into_data_stream(mut self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset.take();
+        let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
+            matches!(
+                col_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Headers(_) | AdditionalColumnType::HeaderInner(_))
+            )
+        });
         #[for_await]
         for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
             let msgs = msgs
@@ -303,7 +315,7 @@ impl PulsarBrokerReader {
                     }
                 }
 
-                let msg = SourceMessage::from(msg);
+                let msg = SourceMessage::from_pulsar_message(msg, require_message_header);
                 res.push(msg);
             }
             yield res;
@@ -337,11 +349,31 @@ struct PulsarConsumeStream {
 }
 
 impl PulsarConsumeStream {
+    fn inc_ack_failure_count(&self, failure_type: ConnectorAckFailureType) {
+        self.source_ctx.metrics.inc_connector_ack_failure_count(
+            self.source_ctx.source_name.as_str(),
+            "pulsar",
+            failure_type,
+        );
+    }
+
+    fn inc_ack_success_count(&self) {
+        self.source_ctx
+            .metrics
+            .inc_connector_ack_success_count(self.source_ctx.source_name.as_str(), "pulsar");
+    }
+
     fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
         let message_id = match MessageIdData::decode(message_id_bytes.as_slice()) {
             Ok(message_id) => message_id,
             Err(e) => {
+                self.inc_ack_failure_count(ConnectorAckFailureType::DecodeError);
                 tracing::warn!(
+                    source_id = %self.source_ctx.source_id,
+                    source_name = self.source_ctx.source_name.as_str(),
+                    actor_id = %self.source_ctx.actor_id,
+                    fragment_id = %self.source_ctx.fragment_id,
+                    split_id = %self.split_id,
                     error=%e.as_report(), "meet error when decode message id, skip ack"
                 );
                 return;
@@ -356,18 +388,32 @@ impl PulsarConsumeStream {
         #[cfg(not(madsim))]
         {
             // FIXME: madsim does not support block_on and block_in_place
-            let _ = tokio::task::block_in_place(move || {
-                tokio::runtime::Handle::current().block_on(async {
-                    self.pulsar_reader
-                        .cumulative_ack_with_id(&topic, message_id)
-                        .await
+            let ack_result = {
+                let pulsar_reader = &mut self.pulsar_reader;
+                tokio::task::block_in_place(move || {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        pulsar_reader
+                            .cumulative_ack_with_id(&topic, message_id)
+                            .await
+                    })
                 })
-            })
-            .map_err(|e| {
-                tracing::warn!(
-                    error=%e.as_report(), "meet error when ack message"
-                )
-            });
+            };
+            match ack_result {
+                Ok(()) => {
+                    self.inc_ack_success_count();
+                }
+                Err(e) => {
+                    self.inc_ack_failure_count(ConnectorAckFailureType::BrokerError);
+                    tracing::warn!(
+                        source_id = %self.source_ctx.source_id,
+                        source_name = self.source_ctx.source_name.as_str(),
+                        actor_id = %self.source_ctx.actor_id,
+                        fragment_id = %self.source_ctx.fragment_id,
+                        split_id = %self.split_id,
+                        error=%e.as_report(), "meet error when ack message"
+                    );
+                }
+            }
         }
     }
 }

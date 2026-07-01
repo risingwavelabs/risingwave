@@ -74,7 +74,7 @@ pub async fn generate(
     .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
+    let (tables, _mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
 
@@ -138,7 +138,7 @@ pub async fn generate(
     }
     tracing::info!("Generated {} stream queries", generated_queries);
 
-    drop_tables(&mviews, testdata, client).await;
+    drop_tables(testdata, client).await;
 }
 
 /// e2e test runner for sqlsmith
@@ -168,7 +168,7 @@ pub async fn run(
     .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
+    let (tables, _mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
     tracing::info!("Created tables");
@@ -227,6 +227,6 @@ pub async fn run(
         .unwrap();
     tracing::info!("Passed stream queries");
 
-    drop_tables(&mviews, testdata, client).await;
+    drop_tables(testdata, client).await;
     tracing::info!("[EXECUTION SUCCESS]");
 }

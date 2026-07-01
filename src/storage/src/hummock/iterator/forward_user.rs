@@ -269,7 +269,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound::*;
     use std::sync::Arc;
 
     use bytes::Bytes;

@@ -590,6 +590,64 @@ DROP SINK rw_types_to_pg_types;
 statement ok
 DROP TABLE rw_types_subset_table;
 
+################### Test upsert sink when all sink columns are primary keys
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE IF EXISTS pg_pk_only_table"
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_pk_only_table (
+    user_id BIGINT,
+    client_id BIGINT,
+    PRIMARY KEY (user_id, client_id)
+)"
+
+system ok
+PGDATABASE=sink_test psql -c "INSERT INTO pg_pk_only_table VALUES (1, 10)"
+
+statement ok
+CREATE TABLE rw_pk_only_table (
+    user_id BIGINT,
+    client_id BIGINT,
+    PRIMARY KEY (user_id, client_id)
+);
+
+statement ok
+CREATE SINK rw_pk_only_sink FROM rw_pk_only_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_pk_only_table',
+    type='upsert',
+    primary_key='user_id, client_id',
+);
+
+statement ok
+INSERT INTO rw_pk_only_table VALUES
+    (1, 10),
+    (2, 20);
+
+statement ok
+flush;
+
+query II retry 4 backoff 1s
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_pk_only_table order by user_id, client_id;');
+----
+1 10
+2 20
+
+statement ok
+DROP SINK rw_pk_only_sink;
+
+statement ok
+DROP TABLE rw_pk_only_table;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_pk_only_table"
+
 ################### Drop DB
 
 system ok

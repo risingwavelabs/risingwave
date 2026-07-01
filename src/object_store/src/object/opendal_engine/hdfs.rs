@@ -48,9 +48,10 @@ impl OpendalObjectStore {
         //     let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
         //     builder.atomic_write_dir(&atomic_write_dir);
         // }
-        let op: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .finish();
+        new_operator(
+            &config,
+            Operator::new(builder)?.layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,

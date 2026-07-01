@@ -3,6 +3,32 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.sh
+
+profile=""
+
+while getopts 'p:' opt; do
+    case ${opt} in
+        p )
+            profile=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [[ -n "$profile" ]]; then
+    sink_test_env_setup "$profile" --risedev-profile ci-sink-kafka-test
+    trap 'echo "--- Kill cluster"; risedev ci-kill' EXIT
+fi
+
 export RPK_BROKERS="message_queue:29092"
 
 rpk topic create test-rw-sink-append-only
@@ -10,8 +36,10 @@ rpk topic create test-rw-sink-upsert
 rpk topic create test-rw-sink-upsert-schema
 rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
+rpk topic create test-rw-sink-replace
 rpk topic create test-rw-sink-text-key-id
 rpk topic create test-rw-sink-bytes-key-id
+rpk topic create test-rw-sink-alter-connector-props
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -107,6 +135,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# test replace kafka sink
+echo "testing replace kafka sink"
+diff -b ./e2e_test/sink/kafka/replace_sink.result \
+<((rpk topic consume test-rw-sink-replace --offset start --format '%v\n' --num 2 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for replace sink is not as expected."
+  exit 1
+fi
+
 # delete sink data
 echo "deleting sink data"
 psql -h localhost -p 4566 -d dev -U root -c "delete from t_kafka where id = 1;" > /dev/null
@@ -142,9 +179,12 @@ else
 fi
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
+risedev slt 'e2e_test/sink/kafka/alter_kafka_sink_props.slt'
 rpk topic delete test-rw-sink-append-only
 rpk topic delete test-rw-sink-upsert
 rpk topic delete test-rw-sink-debezium
+rpk topic delete test-rw-sink-replace
+rpk topic delete test-rw-sink-alter-connector-props
 
 # test different encoding
 echo "preparing confluent schema registry"
@@ -164,3 +204,5 @@ risedev slt 'e2e_test/sink/kafka/avro-enum.slt'
 
 echo "testing bytes format"
 risedev slt 'e2e_test/sink/kafka/test_bytes_format.slt'
+
+risedev slt './e2e_test/sink/bug_fixes/issue_24367.slt'
