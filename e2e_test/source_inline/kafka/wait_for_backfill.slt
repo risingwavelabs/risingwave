@@ -1,0 +1,114 @@
+control substitution on
+
+# Test wait_for_backfill option for CREATE TABLE WITH CONNECTOR.
+# When wait_for_backfill='true', foreground DDL should block until all existing
+# Kafka data (up to the high watermark at creation time) is consumed.
+
+# Clean up any previous state
+system ok
+rpk topic delete test_wait_for_backfill || true
+
+system ok
+rpk topic create test_wait_for_backfill -p 3
+
+# Produce data BEFORE creating the table.
+# This data represents the "backfill" portion that should be consumed before DDL returns.
+system ok
+cat <<EOF | rpk topic produce test_wait_for_backfill -f "%p %v\n"
+0 {"v1": 1, "v2": "a"}
+0 {"v1": 2, "v2": "b"}
+1 {"v1": 3, "v2": "c"}
+1 {"v1": 4, "v2": "d"}
+2 {"v1": 5, "v2": "e"}
+2 {"v1": 6, "v2": "f"}
+EOF
+
+# Create table with wait_for_backfill.
+# This DDL should block until all 6 messages above are consumed.
+statement ok
+create table t_backfill (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_wait_for_backfill',
+  scan.startup.mode = 'earliest',
+  backfill.wait = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+# Since wait_for_backfill blocks until backfill is done, we should immediately
+# see all pre-existing data after the DDL returns, without needing retry/sleep.
+query IT rowsort
+select v1, v2 from t_backfill;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+6 f
+
+# Produce more data after table creation. This should be consumed normally.
+system ok
+cat <<EOF | rpk topic produce test_wait_for_backfill -f "%p %v\n"
+0 {"v1": 7, "v2": "g"}
+EOF
+
+# New data needs some time to arrive.
+query IT rowsort retry 5 backoff 2s
+select v1, v2 from t_backfill;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+6 f
+7 g
+
+statement ok
+drop table t_backfill;
+
+system ok
+rpk topic delete test_wait_for_backfill
+
+
+# Test: backfill.wait is not supported for non-kafka connectors
+statement error backfill.wait is not supported for this connector
+create table t_bad (v1 int) with (
+  connector = 'datagen',
+  backfill.wait = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+
+# Test: backfill.wait is not supported for CREATE SOURCE (even with kafka)
+statement error backfill.wait is not supported for CREATE SOURCE
+create source s_bad (v1 int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_wait_for_backfill',
+  scan.startup.mode = 'earliest',
+  backfill.wait = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+
+# Test: wait_for_backfill with empty topic should return immediately
+system ok
+rpk topic delete test_wait_for_backfill_empty || true
+
+system ok
+rpk topic create test_wait_for_backfill_empty -p 2
+
+statement ok
+create table t_empty (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_wait_for_backfill_empty',
+  scan.startup.mode = 'earliest',
+  backfill.wait = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+query IT
+select v1, v2 from t_empty;
+----
+
+statement ok
+drop table t_empty;
+
+system ok
+rpk topic delete test_wait_for_backfill_empty
