@@ -32,6 +32,7 @@ use crate::executor::backfill::snapshot_backfill::consume_upstream::upstream_tab
 use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBackfillProgress};
 use crate::executor::backfill::utils::mapping_message;
+use crate::executor::monitor::BackfillMetrics;
 use crate::executor::prelude::{StateTable, *};
 use crate::executor::{Barrier, Message, StreamExecutorError};
 use crate::task::CreateMviewProgressReporter;
@@ -48,6 +49,7 @@ pub struct UpstreamTableExecutor<T: UpstreamTable, S: StateStore> {
     barrier_rx: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgressReporter,
     crossdb_last_consumed_min_epoch: LabelGuardedIntGauge,
+    metrics: BackfillMetrics,
 }
 
 impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
@@ -77,6 +79,9 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                 actor_id_label.as_str(),
                 fragment_id_label.as_str(),
             ]);
+        let metrics = actor_ctx
+            .streaming_metrics
+            .new_backfill_metrics(upstream_table_id, actor_ctx.id);
         Self {
             upstream_table,
             progress_state_table,
@@ -88,6 +93,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             barrier_rx,
             progress,
             crossdb_last_consumed_min_epoch,
+            metrics,
         }
     }
 
@@ -198,6 +204,9 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     }
                     // ensure that the reported row count is non-decreasing.
                     let row_count_to_report = std::cmp::max(prev_reported_row_count, row_count);
+                    self.metrics
+                        .backfill_snapshot_read_row_count
+                        .inc_by(row_count_to_report.saturating_sub(prev_reported_row_count) as _);
                     prev_reported_row_count = row_count_to_report;
 
                     if is_finished {
