@@ -81,7 +81,7 @@ def _(panels: Panels):
             - Abnormal Version Size: the size of the version is too large, exceeding the expected 300MB. Check 'Hummock Manager' section in dev dashboard.
             - Abnormal Delta Log Number: the number of delta logs is too large, exceeding the expected 5000. Check 'Hummock Manager' and `Compaction` section in dev dashboard and take care of the type of 'Compaction Success Count', whether the number of trivial-move tasks spiking.
             - Abnormal Pending Event Number: the number of pending events is too large, exceeding the expected 10000000. Check 'Hummock Write' section in dev dashboard and take care of the 'Event handle latency', whether the time consumed exceeds the barrier latency.
-            - Abnormal Object Storage Failure: object storage failures are occurring. Check 'Object Storage' section in dev dashboard and take care of the 'Object Storage Failure Rate', whether the rate is too high.
+            - Abnormal Object Storage Failure: object storage failures exceed 50 in 5 minutes. Check 'Object Storage' section in dev dashboard and take care of the 'Object Storage Failure Rate', whether the rate is too high.
             """,
             [
                 panels.target(
@@ -154,8 +154,9 @@ def _(panels: Panels):
                     "Abnormal Pending Event Number @ {{%s}}" % (NODE_LABEL),
                 ),
                 panels.target(
-                    alert_when(
-                        f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by (type)"
+                    alert_threshold(
+                        f"sum(increase({metric('object_store_failure_count')}[5m])) by (type)",
+                        50,
                     ),
                     "Abnormal Object Storage Failure ({{type}})",
                 ),
