@@ -319,7 +319,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .get("debezium.time.precision.mode")
             .map(|v| v == "connect")
             .unwrap_or(false)
-            .then_some(TimeHandling::Milli);
+            // Debezium `connect` mode encodes TIME columns in microseconds (not milliseconds).
+            // See https://debezium.io/documentation/reference/stable/connectors/mysql.html
+            .then_some(TimeHandling::Micro);
         let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
             .properties
             .get("debezium.bigint.unsigned.handling.mode")
