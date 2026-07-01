@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::Context;
 use await_tree::span;
 use futures::future::join_all;
 use itertools::Itertools;
@@ -26,8 +27,13 @@ use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, streaming_job};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
+use risingwave_pb::serverless_backfill_controller::{
+    ProvisionRequest, node_group_controller_service_client,
+};
+use risingwave_rpc_client::error::TonicStatusWrapper;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use thiserror_ext::AsReport;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
@@ -135,8 +141,13 @@ pub struct CreateStreamingJobContext {
 
     pub is_serverless_backfill: bool,
 
+    pub resource_type: streaming_job_resource_type::ResourceType,
+
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+
+    /// If set, this create command replaces an existing sink while creating the new sink job.
+    pub replace_sink: Option<SinkId>,
 
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
@@ -502,6 +513,62 @@ impl GlobalStreamManager {
         result
     }
 
+    async fn provision_serverless_backfill_resource_group(&self) -> MetaResult<String> {
+        let sbc_addr = &self.env.opts.serverless_backfill_controller_addr;
+        if sbc_addr.is_empty() {
+            bail_invalid_parameter!(
+                "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature"
+            );
+        }
+
+        let request = tonic::Request::new(ProvisionRequest {});
+        let mut client =
+            node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
+                sbc_addr.clone(),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "unable to reach serverless backfill controller at addr {}",
+                    sbc_addr
+                )
+            })?;
+
+        match client.provision(request).await {
+            Ok(resp) => Ok(resp.into_inner().resource_group),
+            Err(e) => Err(anyhow::Error::new(TonicStatusWrapper::new(e))
+                .context("serverless backfill controller returned error")
+                .into()),
+        }
+    }
+
+    async fn finalize_create_streaming_job_resource_group(
+        &self,
+        resource_type: &streaming_job_resource_type::ResourceType,
+        streaming_job_model: &mut streaming_job::Model,
+    ) -> MetaResult<()> {
+        if !matches!(
+            resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
+        ) {
+            return Ok(());
+        }
+
+        let group = self.provision_serverless_backfill_resource_group().await?;
+        tracing::info!(
+            resource_group = group,
+            "provisioning serverless backfill resource group"
+        );
+
+        self.metadata_manager
+            .catalog_controller
+            .update_streaming_job_resource_group(streaming_job_model.job_id, group.clone())
+            .await?;
+        streaming_job_model.specific_resource_group = Some(group);
+
+        Ok(())
+    }
+
     /// The function will return after barrier collected
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
     #[await_tree::instrument]
@@ -522,7 +589,9 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
-            streaming_job_model,
+            resource_type,
+            mut streaming_job_model,
+            replace_sink,
             refresh_interval_sec,
             since_timestamp_epoch,
             ..
@@ -556,6 +625,9 @@ impl GlobalStreamManager {
                 },
             );
 
+        self.finalize_create_streaming_job_resource_group(&resource_type, &mut streaming_job_model)
+            .await?;
+
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
@@ -570,6 +642,7 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
+            replace_sink,
             refresh_interval_sec,
         };
 

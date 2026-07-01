@@ -29,12 +29,12 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
-    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+    ReplaceJob, ReplaceMaterializedView, ReplaceSink, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
-    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
-    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
-    streaming_job_resource_type,
+    PbTableJobType, StreamingJobResourceType, TableJobType, WaitVersion, alter_name_request,
+    alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -149,6 +149,15 @@ pub trait CatalogWriter: Send + Sync {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
+    ) -> Result<()>;
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -499,6 +508,31 @@ impl CatalogWriter for CatalogWriterImpl {
                 resource_type,
                 if_not_exists,
                 since_timestamp_epoch,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceSink(ReplaceSink {
+                    sink: Some(sink),
+                    old_sink_id,
+                    dependencies: dependencies.into_iter().collect(),
+                    resource_type: Some(StreamingJobResourceType {
+                        resource_type: Some(resource_type),
+                    }),
+                }),
             )
             .await?;
         self.wait_version(version).await

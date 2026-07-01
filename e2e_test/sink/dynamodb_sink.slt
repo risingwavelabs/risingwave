@@ -1,0 +1,67 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+ALTER SYSTEM SET license_key TO DEFAULT;
+
+statement ok
+DROP SINK IF EXISTS dynamodb_pk_sink;
+
+statement ok
+DROP TABLE IF EXISTS dynamodb_pk_t;
+
+statement ok
+CREATE TABLE dynamodb_pk_t (
+    year int,
+    title varchar,
+    description varchar,
+    primary key (year, title)
+);
+
+statement ok
+CREATE SINK dynamodb_pk_sink
+FROM dynamodb_pk_t
+WITH
+(
+  connector = 'dynamodb',
+  table = 'Movies',
+  primary_key = 'year,title',
+  endpoint = 'http://localhost:18082',
+  region = 'us-east-1',
+  access_key = 'ac',
+  secret_key = 'sk'
+);
+
+statement error DynamoDB table Movies primary key .* must match RisingWave primary key
+CREATE SINK dyn_sink_missing_range_key
+FROM dynamodb_pk_t
+WITH
+(
+  connector = 'dynamodb',
+  table = 'Movies',
+  primary_key = 'year',
+  endpoint = 'http://localhost:18082',
+  region = 'us-east-1',
+  access_key = 'ac',
+  secret_key = 'sk'
+);
+
+statement error DynamoDB table Movies primary key .* must match RisingWave primary key
+CREATE SINK dyn_sink_extra_key
+FROM dynamodb_pk_t
+WITH
+(
+  connector = 'dynamodb',
+  table = 'Movies',
+  primary_key = 'year,title,description',
+  endpoint = 'http://localhost:18082',
+  region = 'us-east-1',
+  access_key = 'ac',
+  secret_key = 'sk'
+);
+
+statement ok
+DROP SINK dynamodb_pk_sink;
+
+statement ok
+DROP TABLE dynamodb_pk_t;
