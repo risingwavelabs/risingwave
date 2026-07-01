@@ -118,7 +118,11 @@ pub(super) async fn create_table_if_not_exists_impl(
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
             .context("failed to convert arrow schema to iceberg schema")?;
 
-        let location = {
+        let location = if let Some(table_location) = &config.table_location {
+            // An explicit `table.location` takes precedence over the location
+            // derived from `warehouse.path` below.
+            Some(table_location.clone())
+        } else {
             let mut names = namespace.clone().inner();
             names.push(table_name.clone());
             match &config.common.warehouse_path {
