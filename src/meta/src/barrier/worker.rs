@@ -559,9 +559,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
-                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
-                                    warn!("failed to may have snapshot backfill job");
+                            BarrierManagerRequest::MayHaveCreatingJob(tx) => {
+                                if tx.send(self.checkpoint_control.may_have_creating_jobs()).is_err() {
+                                    warn!("failed to check whether there may be creating jobs");
                                 }
                             }
                         }
@@ -1362,8 +1362,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
                         }
-                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                            // may recover snapshot backfill jobs
+                        BarrierManagerRequest::MayHaveCreatingJob(tx) => {
+                            // May recover creating jobs.
                             let _ = tx.send(true);
                         }
                     }
