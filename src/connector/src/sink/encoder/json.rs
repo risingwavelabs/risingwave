@@ -139,6 +139,23 @@ impl JsonEncoder {
         }
     }
 
+    pub fn new_with_turbopuffer(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::Iso8601String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Turbopuffer,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
+        };
+        Self {
+            schema,
+            col_indices,
+            kafka_connect: None,
+            config,
+        }
+    }
+
     pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
@@ -227,8 +244,12 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Serial, ScalarRefImpl::Serial(v)) => {
-            // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
-            json!(format!("{:#018x}", v.into_inner()))
+            if matches!(&config.custom_json_type, CustomJsonType::Turbopuffer) {
+                json!(v.into_inner())
+            } else {
+                // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
+                json!(format!("{:#018x}", v.into_inner()))
+            }
         }
         (DataType::Float32, ScalarRefImpl::Float32(v)) => {
             json!(f32::from(v))
@@ -245,6 +266,21 @@ fn datum_to_json_object(
                 let s = map.get(&field.name).unwrap();
                 v.rescale(*s as u32);
                 json!(v.to_text())
+            }
+            CustomJsonType::Turbopuffer => {
+                let value = f64::try_from(v).map_err(|err| {
+                    ArrayError::internal(format!(
+                        "failed to convert decimal to f64: {}",
+                        err.as_report()
+                    ))
+                })?;
+                serde_json::Number::from_f64(value)
+                    .map(Value::Number)
+                    .ok_or_else(|| {
+                        ArrayError::internal(
+                            "failed to encode non-finite decimal as JSON number".to_owned(),
+                        )
+                    })?
             }
             CustomJsonType::Es | CustomJsonType::None | CustomJsonType::StarRocks => {
                 json!(v.to_text())
@@ -297,6 +333,9 @@ fn datum_to_json_object(
                 TimestampHandlingMode::Milli => json!(v.0.and_utc().timestamp_millis()),
                 TimestampHandlingMode::String => {
                     json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+                }
+                TimestampHandlingMode::Iso8601String => {
+                    json!(v.0.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
                 }
             }
         }
@@ -356,7 +395,7 @@ fn datum_to_json_object(
                         "starrocks can't support struct".to_owned(),
                     ));
                 }
-                CustomJsonType::Es | CustomJsonType::None => {
+                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::Turbopuffer => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -548,6 +587,48 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&serial_value).unwrap(),
             format!("\"{:#018x}\"", i64::MAX)
+        );
+
+        let turbopuffer_config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Turbopuffer,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
+        };
+        let turbopuffer_serial_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Serial,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Serial(i64::MAX.into()).as_scalar_ref_impl()),
+            &turbopuffer_config,
+        )
+        .unwrap();
+        assert_eq!(turbopuffer_serial_value, json!(i64::MAX));
+        let turbopuffer_decimal_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Decimal,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Decimal(Decimal::try_from(1.25).unwrap()).as_scalar_ref_impl()),
+            &turbopuffer_config,
+        )
+        .unwrap();
+        assert_eq!(turbopuffer_decimal_value, json!(1.25));
+        assert!(
+            datum_to_json_object(
+                &Field {
+                    data_type: DataType::Decimal,
+                    ..mock_field.clone()
+                },
+                Some(ScalarImpl::Decimal(Decimal::NaN).as_scalar_ref_impl()),
+                &turbopuffer_config,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("non-finite decimal")
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java

@@ -13,10 +13,7 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(iterator_try_collect)]
 #![feature(trusted_len)]
-#![feature(buf_read_has_data_left)]
-#![feature(never_type)]
 #![feature(error_generic_member_access)]
 #![feature(str_as_str)]
 #![feature(register_tool)]

@@ -266,7 +266,7 @@ INSERT INTO s_schema_drop VALUES (1, 'before', 'dropped');
 statement ok
 FLUSH;
 
-statement ok
+statement ok retry 6 backoff 1s
 CREATE SOURCE iceberg_schema_drop_source
 WITH (
     connector = 'iceberg',

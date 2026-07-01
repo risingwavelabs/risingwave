@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools as _;
+use itertools::Itertools;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
@@ -267,7 +267,7 @@ impl LogicalPlanRoot {
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
-        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+        let Ok(select_idx) = Itertools::exactly_one(self.out_fields.ones()) else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
@@ -529,10 +529,8 @@ impl LogicalPlanRoot {
     pub(crate) fn derive_backfill_type(&self, allow_snapshot_backfill: bool) -> BackfillType {
         if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         }
     }
 
@@ -858,7 +856,9 @@ impl LogicalPlanRoot {
 
         let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
-                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                Itertools::exactly_one(pk_column_indices.iter())
+                    .copied()
+                    .unwrap(),
                 row_id_index
             );
             if append_only {
@@ -899,7 +899,15 @@ impl LogicalPlanRoot {
                 context.clone(),
                 None,
             )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            .and_then(|s| {
+                s.to_stream(&mut ToStreamContext::new_with_backfill_type(
+                    false,
+                    // Dummy DML source planning does not create stream table scans, so this
+                    // required context value is only a placeholder and is not used for backfill
+                    // selection.
+                    BackfillType::ArrangementBackfill,
+                ))
+            })?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -962,7 +970,7 @@ impl LogicalPlanRoot {
             .chain([dml_node, upstream_sink_union.into()])
             .collect_vec();
 
-        let mut stream_plan = StreamUnion::new_with_dist(
+        let mut stream_plan: StreamPlanRef = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
@@ -978,26 +986,28 @@ impl LogicalPlanRoot {
             .map(|d| d.watermark_idx as usize)
             .collect_vec();
 
+        let add_row_id_gen = |stream_plan: StreamPlanRef, row_id_index| match kind {
+            PrimaryKeyKind::UserDefinedPrimaryKey => {
+                unreachable!()
+            }
+            PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
+                StreamRowIdGen::new_with_dist(
+                    stream_plan,
+                    row_id_index,
+                    Distribution::HashShard(vec![row_id_index]),
+                )
+                .into()
+            }
+        };
+
+        // Add RowIDGen before WatermarkFilter, so filtering always sees a valid row-id key.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = add_row_id_gen(stream_plan, row_id_index);
+        }
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
-        // Add RowIDGen node if needed.
-        if let Some(row_id_index) = row_id_index {
-            match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey => {
-                    unreachable!()
-                }
-                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
-                    stream_plan = StreamRowIdGen::new_with_dist(
-                        stream_plan,
-                        row_id_index,
-                        Distribution::HashShard(vec![row_id_index]),
-                    )
-                    .into();
-                }
-            }
         }
 
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
@@ -1159,16 +1169,30 @@ impl LogicalPlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        without_backfill: bool,
+        without_snapshot: bool,
+        since_timestamp: bool,
+        is_iceberg_engine_internal: bool,
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
-        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let backfill_type = if without_backfill {
-            BackfillType::UpstreamOnly
-        } else if allow_snapshot_backfill
+        let backfill_type = if since_timestamp {
+            assert!(
+                target_table.is_none(),
+                "should not allow since_timestamp for sink-into-table"
+            );
+            if is_iceberg_engine_internal {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "since_timestamp is not allowed for this sink".to_owned(),
+                )
+                .into());
+            }
+            BackfillType::SnapshotBackfillSinceTimestamp
+        } else if without_snapshot {
+            BackfillType::UpstreamOnlySink
+        } else if target_table.is_none()
+            && !is_iceberg_engine_internal
             && self.should_use_snapshot_backfill()
             && {
                 if auto_refresh_schema_from_table.is_some() {
@@ -1185,10 +1209,8 @@ impl LogicalPlanRoot {
             );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         };
         if auto_refresh_schema_from_table.is_some()
             && backfill_type != BackfillType::ArrangementBackfill
@@ -1218,17 +1240,6 @@ impl LogicalPlanRoot {
             partition_info,
             auto_refresh_schema_from_table,
         )
-    }
-
-    pub fn should_use_arrangement_backfill(&self) -> bool {
-        let ctx = self.plan.ctx();
-        let session_ctx = ctx.session_ctx();
-        let arrangement_backfill_enabled = session_ctx
-            .env()
-            .streaming_config()
-            .developer
-            .enable_arrangement_backfill;
-        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {

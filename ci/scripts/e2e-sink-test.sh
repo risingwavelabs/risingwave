@@ -29,6 +29,23 @@ risedev slt './e2e_test/sink/append_only_sink.slt'
 risedev slt './e2e_test/sink/blackhole_sink.slt'
 risedev slt './e2e_test/sink/file_sink.slt'
 risedev slt './e2e_test/sink/license.slt'
+
+echo "--- e2e, dynamodb sink validation"
+DYNAMODB_SINK_SERVER_PID=""
+cleanup_dynamodb_mock_server() {
+  if [[ -n "${DYNAMODB_SINK_SERVER_PID}" ]]; then
+    kill "${DYNAMODB_SINK_SERVER_PID}" || true
+    wait "${DYNAMODB_SINK_SERVER_PID}" || true
+    DYNAMODB_SINK_SERVER_PID=""
+  fi
+}
+trap cleanup_dynamodb_mock_server EXIT
+python3 e2e_test/sink/dynamodb_mock_server.py 18082 &
+DYNAMODB_SINK_SERVER_PID=$!
+for i in $(seq 1 20); do curl -sf http://localhost:18082/ >/dev/null && break; sleep 0.5; done
+risedev slt './e2e_test/sink/dynamodb_sink.slt'
+cleanup_dynamodb_mock_server
+
 risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt './e2e_test/sink/sink_into_table/*.slt'
@@ -64,6 +81,24 @@ grep -q '"content-type": "application/json"' "$HTTP_SINK_HEADERS"
 
 kill "$HTTP_SINK_SERVER_PID" || true
 rm -f "$HTTP_SINK_OUTPUT" "$HTTP_SINK_HEADERS"
+
+echo "--- e2e, turbopuffer sink"
+TURBOPUFFER_SINK_OUTPUT=$(mktemp)
+TURBOPUFFER_SINK_HEADERS=$(mktemp)
+TURBOPUFFER_SINK_PATHS=$(mktemp)
+python3 e2e_test/sink/http_sink_mock_server.py "$TURBOPUFFER_SINK_OUTPUT" 18082 "$TURBOPUFFER_SINK_HEADERS" "$TURBOPUFFER_SINK_PATHS" &
+TURBOPUFFER_SINK_SERVER_PID=$!
+# Wait for the server to be ready
+for i in $(seq 1 20); do curl -sf http://localhost:18082/ && break; sleep 0.5; done
+
+risedev slt './e2e_test/sink/turbopuffer_sink.slt'
+
+# Allow a moment for in-flight requests to complete
+sleep 1
+python3 e2e_test/sink/turbopuffer_sink_check.py "$TURBOPUFFER_SINK_OUTPUT" "$TURBOPUFFER_SINK_HEADERS" "$TURBOPUFFER_SINK_PATHS"
+
+kill "$TURBOPUFFER_SINK_SERVER_PID" || true
+rm -f "$TURBOPUFFER_SINK_OUTPUT" "$TURBOPUFFER_SINK_HEADERS" "$TURBOPUFFER_SINK_PATHS"
 
 echo "--- Kill cluster"
 risedev ci-kill

@@ -22,6 +22,8 @@ use crate::executor::project::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
+impl_stream_node_body!(Project(ProjectNode) => ProjectExecutorBuilder);
+
 impl ExecutorBuilder for ProjectExecutorBuilder {
     type Node = ProjectNode;
 

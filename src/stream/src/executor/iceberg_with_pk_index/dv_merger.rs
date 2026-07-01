@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use anyhow::Context;
+use risingwave_common::id::SinkId;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::stream_service::PbIcebergV3SinkRole;
 
 use crate::executor::prelude::*;
+use crate::task::LocalBarrierManager;
 
 /// Trait abstracting DV (Deletion Vector) file operations for testability.
 ///
@@ -38,12 +41,14 @@ pub trait DvHandler: Send + 'static {
 /// positions for the files assigned to its shard.
 ///
 /// Input schema: [`file_path`: Varchar, `position`: int64]
-/// Output: Only barriers (terminal executor in the stream graph).
+/// Output: Barriers and watermarks only; no data chunks (terminal executor in the stream graph).
 pub struct DvMergerExecutor<H>
 where
     H: DvHandler,
 {
-    _ctx: ActorContextRef,
+    actor_id: ActorId,
+    sink_id: SinkId,
+    local_barrier_manager: LocalBarrierManager,
     input: Option<Executor>,
     handler: H,
 }
@@ -52,9 +57,17 @@ impl<H> DvMergerExecutor<H>
 where
     H: DvHandler,
 {
-    pub fn new(ctx: ActorContextRef, input: Executor, handler: H) -> Self {
+    pub fn new(
+        actor_id: ActorId,
+        sink_id: SinkId,
+        local_barrier_manager: LocalBarrierManager,
+        input: Executor,
+        handler: H,
+    ) -> Self {
         Self {
-            _ctx: ctx,
+            actor_id,
+            sink_id,
+            local_barrier_manager,
             input: Some(input),
             handler,
         }
@@ -86,8 +99,22 @@ where
                     }
                 }
                 Message::Barrier(barrier) => {
-                    let _metadata = self.handler.flush().await?.unwrap_or_default();
-                    // TODO: commit the DV metadata
+                    let mut metadata = None;
+                    if barrier.is_checkpoint() {
+                        metadata = self.handler.flush().await?;
+                    }
+
+                    if let Some(metadata) = metadata
+                        && metadata.metadata.is_some()
+                    {
+                        self.local_barrier_manager.report_iceberg_v3_sink_metadata(
+                            barrier.epoch,
+                            self.sink_id,
+                            self.actor_id,
+                            PbIcebergV3SinkRole::DvMerger,
+                            Some(metadata),
+                        );
+                    }
 
                     yield Message::Barrier(barrier);
                 }
@@ -116,11 +143,13 @@ mod tests {
     use hashbrown::HashMap;
     use risingwave_common::array::{Array, ArrayBuilder, I64ArrayBuilder, Op, Utf8ArrayBuilder};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::id::SinkId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
+    use crate::task::LocalBarrierManager;
 
     fn build_delete_position_chunk(positions: &[(&str, i64)]) -> StreamChunk {
         let len = positions.len();
@@ -198,6 +227,11 @@ mod tests {
                 existing_dvs.insert(file_path.clone(), merged.clone());
                 written_dvs.insert(file_path, merged);
             }
+            // The mock asserts on side effects (`written_dvs`) rather than emitted
+            // metadata, so we still return Ok(None). The report-on-barrier path
+            // is exercised by the SLT integration tests.
+            // TODO: add unit test for report-on-barrier path once test infra is
+            // available to capture `LocalBarrierEvent`s on the receiver side.
             Ok(None)
         }
     }
@@ -217,7 +251,8 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
-        let mut executor = DvMergerExecutor::new(ActorContext::for_test(123), source, handler)
+        let lbm = LocalBarrierManager::for_test();
+        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
             .boxed()
             .execute();
 
@@ -247,7 +282,8 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
-        let mut executor = DvMergerExecutor::new(ActorContext::for_test(123), source, handler)
+        let lbm = LocalBarrierManager::for_test();
+        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
             .boxed()
             .execute();
 
@@ -278,7 +314,8 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
-        let mut executor = DvMergerExecutor::new(ActorContext::for_test(123), source, handler)
+        let lbm = LocalBarrierManager::for_test();
+        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
             .boxed()
             .execute();
 
@@ -299,7 +336,8 @@ mod tests {
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
-        let mut executor = DvMergerExecutor::new(ActorContext::for_test(123), source, handler)
+        let lbm = LocalBarrierManager::for_test();
+        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
             .boxed()
             .execute();
 

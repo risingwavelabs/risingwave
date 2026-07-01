@@ -297,16 +297,6 @@ impl BackfillProgressPerVnode {
     }
 }
 
-pub(crate) fn mark_chunk(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let chunk = chunk.compact_vis();
-    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
-}
-
 pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
@@ -383,39 +373,6 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     let (columns, _) = data.into_parts();
     let chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility.finish());
     Ok(chunk)
-}
-
-/// Mark chunk:
-/// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
-/// ignore it. We implement it by changing the visibility bitmap.
-fn mark_chunk_inner(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let (data, ops) = chunk.into_parts();
-    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-    let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
-    let mut unmatched_update_delete = false;
-    let mut visible_update_delete = false;
-    for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
-        let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos;
-        let visible = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le();
-        new_visibility.append(visible);
-
-        normalize_unmatched_updates(
-            &mut new_ops,
-            &mut unmatched_update_delete,
-            &mut visible_update_delete,
-            visible,
-            i,
-            op,
-        );
-    }
-    let (columns, _) = data.into_parts();
-    StreamChunk::with_visibility(new_ops, columns, new_visibility.finish())
 }
 
 /// We will rewrite unmatched U-/U+ into +/- ops.
@@ -711,57 +668,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
-/// Flush the data
-pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    epoch: EpochPair,
-    old_state: &mut Option<Vec<Datum>>,
-    current_partial_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    let vnodes = table.vnodes().clone();
-    if let Some(old_state) = old_state {
-        if old_state[1..] != current_partial_state[1..] {
-            vnodes.iter_vnodes_scalar().for_each(|vnode| {
-                let datum = Some(vnode.into());
-                current_partial_state[0].clone_from(&datum);
-                old_state[0] = datum;
-                table.write_record(Record::Update {
-                    old_row: &old_state[..],
-                    new_row: &(*current_partial_state),
-                })
-            });
-        }
-    } else {
-        // No existing state, create a new entry.
-        vnodes.iter_vnodes_scalar().for_each(|vnode| {
-            let datum = Some(vnode.into());
-            // fill the state
-            current_partial_state[0] = datum;
-            table.write_record(Record::Insert {
-                new_row: &(*current_partial_state),
-            })
-        });
-    }
-    table.commit_assert_no_update_vnode_bitmap(epoch).await
-}
-
-/// We want to avoid allocating a row for every vnode.
-/// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the following segments of the row:
-/// 1. `current_pos`
-/// 2. `backfill_finished`
-/// 3. `row_count`
-pub(crate) fn build_temporary_state(
-    row_state: &mut [Datum],
-    is_finished: bool,
-    current_pos: &OwnedRow,
-    row_count: u64,
-) {
-    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-    row_state[current_pos.len() + 1] = Some(is_finished.into());
-    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
-}
-
 /// Update backfill pos by vnode.
 pub(crate) fn update_pos_by_vnode(
     vnode: VirtualNode,
@@ -928,31 +834,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     }
 
     table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    Ok(())
-}
-
-/// Schema
-/// | vnode | pk | `backfill_finished` | `row_count` |
-///
-/// For `current_pos` and `old_pos` are just pk of upstream.
-/// They should be strictly increasing.
-pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
-    epoch: EpochPair,
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    is_finished: bool,
-    current_pos: &Option<OwnedRow>,
-    row_count: u64,
-    old_state: &mut Option<Vec<Datum>>,
-    current_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    if let Some(current_pos_inner) = current_pos {
-        // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
-        flush_data(table, epoch, old_state, current_state).await?;
-        *old_state = Some(current_state.into());
-    } else {
-        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    }
     Ok(())
 }
 

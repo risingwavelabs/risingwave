@@ -239,12 +239,18 @@ impl VectorArray {
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let encoded_payload = &array.values[0].body;
         let payload = decode_vector_payload(
-            encoded_payload
-                .len()
-                .checked_exact_div(size_of::<VectorItemType>())
-                .unwrap_or_else(|| {
-                    panic!("invalid payload len {} for vector", encoded_payload.len(),)
-                }),
+            {
+                let payload_len = encoded_payload.len();
+                let elem_size = size_of::<VectorItemType>();
+                // The payload length must be an exact multiple of the element size.
+                // Reject (panic) otherwise, instead of silently truncating the count.
+                // (Equivalent to the previously-used unstable `usize::checked_exact_div`.)
+                if payload_len.is_multiple_of(elem_size) {
+                    payload_len / elem_size
+                } else {
+                    panic!("invalid payload len {} for vector", payload_len)
+                }
+            },
             array.values[0].body.as_slice(),
         );
         let array_data = array.get_list_array_data()?;
