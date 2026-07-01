@@ -99,6 +99,11 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .as_ref()
             .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .transpose()?;
+        let within_deadline = node
+            .within_deadline
+            .as_ref()
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .transpose()?;
 
         let input_arity = input.schema().len();
 
@@ -142,6 +147,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             within,
             nfa,
             skip,
+            within_deadline,
             input_arity,
             state_table,
             frontier_meta_table,

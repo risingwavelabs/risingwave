@@ -403,6 +403,10 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub defines: Vec<CompiledDefine>,
     /// `WITHIN` span check over `[last_order_key, first_order_key]`; rejects matches that exceed it.
     pub within: Option<NonStrictExpression>,
+    /// `WITHIN` deadline `first_order_key + interval` over a synthetic `[first_order_key]` row; the
+    /// watermark at which a partial starting at that row expires. Used to wake idle partitions to
+    /// evict timed-out partials. `None` when there is no `WITHIN`.
+    pub within_deadline: Option<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
     /// Number of input columns; the buffered raw input row stored per row in the state table.
@@ -428,6 +432,9 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
     defines: HashMap<String, CompiledDefine>,
     within: Option<NonStrictExpression>,
+    /// `WITHIN` deadline expr (see [`MatchRecognizeExecutorArgs`]); folded into `next_wakeup` so an
+    /// idle partition is woken to evict a partial that has timed out.
+    within_deadline: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
     input_arity: usize,
@@ -468,6 +475,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             measures: args.measures,
             defines,
             within: args.within,
+            within_deadline: args.within_deadline,
             nfa: args.nfa,
             skip: args.skip,
             input_arity: args.input_arity,
@@ -591,6 +599,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             measures,
             defines,
             within,
+            within_deadline,
             nfa,
             skip,
             input_arity,
@@ -839,16 +848,35 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 cursor = skip.next_pos(m.start, m.end, &m.labels);
                             }
 
-                            // Evict finalized rows that can no longer be part of any match. A match is
-                            // contiguous from its start, so a row is dead once no match starting at it
-                            // is still possible. It is *not* enough to ask whether a row can merely
-                            // *begin* the pattern: for `(a b)`, a buffer `[a, x, x, ...]` whose `a` is
-                            // followed only by non-matching safe rows can never complete, yet the `a`
-                            // can still begin the pattern. Retain from the earliest row whose match is
-                            // still live at the safe boundary. The partition iterator is already
-                            // dropped, so delete in place.
+                            // Evict finalized rows that can no longer be part of any match. Retain
+                            // from the earliest row that is still a live match start; drop everything
+                            // before it. A start at position `p` is live only if BOTH hold:
+                            //
+                            //  * it is structurally alive at the safe boundary — a match from `p` can
+                            //    still reach the boundary given the safe rows so far. (It is not enough
+                            //    that `p` can merely *begin* the pattern: for `(a b)`, a buffer
+                            //    `[a, x, x]` whose `a` is followed only by non-matching safe rows can
+                            //    never complete, though the `a` can still begin it.)
+                            //
+                            //  * its WITHIN window is still open — `order_key + interval > w`. Once the
+                            //    watermark passes that deadline, every row within the bound is final,
+                            //    so if no match from `p` has completed by now none ever can, and `p` is
+                            //    dead even though the NFA is structurally still expecting more input.
+                            //    This is what bounds idle-partition state (see the doc's state bound):
+                            //    reaches_boundary_alive alone would keep a lone `[a]` forever.
+                            //
+                            // The partition iterator is already dropped, so delete in place.
                             let mut retain_from = safe_len;
                             for p in cursor..safe_len {
+                                if let Some(deadline_expr) = &within_deadline {
+                                    let synthetic = OwnedRow::new(vec![rows[p].order_key.clone()]);
+                                    let deadline =
+                                        deadline_expr.eval_row_infallible(&synthetic).await;
+                                    // Window closed (deadline <= w): `p` is dead, skip it.
+                                    if matches!(&deadline, Some(d) if d.default_cmp(&w).is_le()) {
+                                        continue;
+                                    }
+                                }
                                 if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
                                     retain_from = p;
                                     break;
@@ -858,20 +886,53 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 state_table.delete(Self::state_row(c));
                             }
 
-                            // Recompute the wakeup frontier: the earliest surviving row whose
-                            // order_key is still past the watermark (the next row that will become
-                            // safe). Survivors `rows[retain_from..]` are PK-ordered, so this is the
-                            // first such row. If there is none (only live partials remain, awaiting a
-                            // future row), drop the frontier entry — a later insert re-schedules it.
-                            // NOTE: WITHIN-driven expiry of those retained partials is not yet folded
-                            // in here, so an idle partition holding a partial that times out is not
-                            // woken to evict it; that is the next increment.
-                            let new_wakeup: Option<Datum> = rows[retain_from..]
+                            // Recompute the wakeup frontier as the earlier of two events:
+                            //
+                            //  (a) the next row to become safe — the earliest surviving row whose
+                            //      order_key is still past the watermark. Survivors `rows[retain_from..]`
+                            //      are PK-ordered, so it is the first such row.
+                            //
+                            //  (b) the earliest WITHIN expiry of a retained live partial — so an idle
+                            //      partition (no future row) is still woken to evict a partial that
+                            //      times out. The earliest retained safe partial is `rows[retain_from]`
+                            //      (if it is `<= w`); its deadline is `first_order_key + interval`,
+                            //      evaluated from `within_deadline`. After that watermark the existing
+                            //      eviction predicate (which already honours WITHIN) drops it.
+                            //
+                            // If neither exists, drop the frontier entry — a later insert re-schedules.
+                            let row_wakeup: Option<Datum> = rows[retain_from..]
                                 .iter()
                                 .find(|r| {
                                     matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_gt())
                                 })
                                 .map(|r| r.order_key.clone());
+                            let within_wakeup: Option<Datum> = match &within_deadline {
+                                Some(deadline_expr)
+                                    if retain_from < rows.len()
+                                        && matches!(
+                                            &rows[retain_from].order_key,
+                                            Some(k) if k.default_cmp(&w).is_le()
+                                        ) =>
+                                {
+                                    let synthetic =
+                                        OwnedRow::new(vec![rows[retain_from].order_key.clone()]);
+                                    let dl = deadline_expr.eval_row_infallible(&synthetic).await;
+                                    // A null deadline (only on eval error) carries no schedule.
+                                    dl.is_some().then_some(dl)
+                                }
+                                _ => None,
+                            };
+                            let new_wakeup: Option<Datum> = match (row_wakeup, within_wakeup) {
+                                (Some(a), Some(b)) => Some(
+                                    if a.as_ref().unwrap().default_cmp(b.as_ref().unwrap()).is_le()
+                                    {
+                                        a
+                                    } else {
+                                        b
+                                    },
+                                ),
+                                (a, b) => a.or(b),
+                            };
                             match new_wakeup {
                                 Some(nw) => Self::move_frontier(
                                     &mut frontier_meta_table,

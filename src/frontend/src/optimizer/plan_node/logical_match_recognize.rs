@@ -51,6 +51,7 @@ impl LogicalMatchRecognize {
         pattern: MatchRecognizePattern,
         defines: Vec<BoundSymbolDefinition>,
         within: Option<ExprImpl>,
+        within_deadline: Option<ExprImpl>,
     ) -> Self {
         let core = generic::MatchRecognize {
             input,
@@ -62,6 +63,7 @@ impl LogicalMatchRecognize {
             pattern,
             defines,
             within,
+            within_deadline,
         };
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -113,6 +115,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalMatchRecognize {
             self.core.pattern.clone(),
             self.core.defines.clone(),
             self.core.within.clone(),
+            self.core.within_deadline.clone(),
         )
     }
 }
@@ -250,6 +253,7 @@ impl ToStream for LogicalMatchRecognize {
             pattern: self.core.pattern.clone(),
             defines: self.core.defines.clone(),
             within: self.core.within.clone(),
+            within_deadline: self.core.within_deadline.clone(),
         };
         Ok(StreamMatchRecognize::new(core).into())
     }

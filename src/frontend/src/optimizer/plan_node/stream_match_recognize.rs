@@ -339,6 +339,12 @@ impl TryToStreamPb for StreamMatchRecognize {
                 .as_ref()
                 .map(|w| w.to_expr_proto_checked_pure(retract, "match_recognize within"))
                 .transpose()?,
+            within_deadline: self
+                .core
+                .within_deadline
+                .as_ref()
+                .map(|w| w.to_expr_proto_checked_pure(retract, "match_recognize within deadline"))
+                .transpose()?,
         })))
     }
 }

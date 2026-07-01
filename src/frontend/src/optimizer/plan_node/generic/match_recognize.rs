@@ -40,6 +40,11 @@ pub struct MatchRecognize<PlanRef> {
     pub defines: Vec<BoundSymbolDefinition>,
     /// `WITHIN` span check over a synthetic `[last_order_key, first_order_key]` row; `None` if absent.
     pub within: Option<ExprImpl>,
+    /// `WITHIN` deadline expr `first_order_key + interval` over a synthetic `[first_order_key]` row:
+    /// the watermark at which a partial starting at that row can no longer complete within the
+    /// bound. Used to wake an otherwise-idle partition so its expired partials are evicted. `None`
+    /// if there is no `WITHIN`.
+    pub within_deadline: Option<ExprImpl>,
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for MatchRecognize<PlanRef> {
@@ -90,6 +95,9 @@ impl<PlanRef: GenericPlanRef> crate::optimizer::plan_node::expr_visitable::ExprV
         if let Some(within) = &self.within {
             v.visit_expr(within);
         }
+        if let Some(within_deadline) = &self.within_deadline {
+            v.visit_expr(within_deadline);
+        }
     }
 }
 
@@ -125,6 +133,9 @@ impl<PlanRef> MatchRecognize<PlanRef> {
             .for_each(|d| d.definition = r.rewrite_expr(d.definition.clone()));
         if let Some(within) = &mut self.within {
             *within = r.rewrite_expr(within.clone());
+        }
+        if let Some(within_deadline) = &mut self.within_deadline {
+            *within_deadline = r.rewrite_expr(within_deadline.clone());
         }
     }
 

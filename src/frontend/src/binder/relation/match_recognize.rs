@@ -136,6 +136,10 @@ pub struct BoundMatchRecognize {
     /// `WITHIN` span check, lowered to a predicate over a synthetic `[last_order_key,
     /// first_order_key]` row: `InputRef(0) - InputRef(1) <= <interval>`. `None` when omitted.
     pub within: Option<ExprImpl>,
+    /// `WITHIN` deadline expr, `first_order_key + <interval>`, over a synthetic `[first_order_key]`
+    /// row (`InputRef(0) + <interval>`): the watermark at which a partial starting at that row
+    /// expires. Drives idle-partition eviction. `None` when there is no `WITHIN`.
+    pub within_deadline: Option<ExprImpl>,
 }
 
 impl Binder {
@@ -189,7 +193,7 @@ impl Binder {
         // WITHIN: lower `WITHIN <interval>` to a span check over a synthetic [last, first] row, i.e.
         // `InputRef(0) - InputRef(1) <= <interval>`, against the leading ORDER BY column's type. The
         // expression machinery handles the typed arithmetic (timestamp − timestamp → interval, etc).
-        let within = match within {
+        let (within, within_deadline) = match within {
             Some(e) => {
                 let bound = self.bind_expr(e)?;
                 let Some(order_key) = order_by.first() else {
@@ -197,13 +201,21 @@ impl Binder {
                 };
                 let ts_type = order_key.return_type();
                 let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
-                let first = ExprImpl::from(InputRef::new(1, ts_type));
+                let first = ExprImpl::from(InputRef::new(1, ts_type.clone()));
                 let diff =
                     ExprImpl::from(FunctionCall::new(ExprType::Subtract, vec![last, first])?);
-                Some(ExprImpl::from(FunctionCall::new(
+                let predicate = ExprImpl::from(FunctionCall::new(
                     ExprType::LessThanOrEqual,
-                    vec![diff, bound],
-                )?))
+                    vec![diff, bound.clone()],
+                )?);
+                // Deadline `first_order_key + <interval>` over a synthetic `[first_order_key]` row
+                // (`InputRef(0)` is the first row's order key here): the watermark past which a
+                // partial starting at that row can no longer complete within the bound, so an idle
+                // partition can be woken to evict it.
+                let first_only = ExprImpl::from(InputRef::new(0, ts_type));
+                let deadline =
+                    ExprImpl::from(FunctionCall::new(ExprType::Add, vec![first_only, bound])?);
+                (Some(predicate), Some(deadline))
             }
             None => {
                 // No WITHIN: an unmatched partial can be completed by an arbitrarily distant future
@@ -215,7 +227,7 @@ impl Binder {
                      indefinitely: its state is bounded by the number of distinct PARTITION BY keys, \
                      not by time. Add a WITHIN clause to bound state to a time window.",
                 );
-                None
+                (None, None)
             }
         };
 
@@ -327,6 +339,7 @@ impl Binder {
             pattern: pattern.clone(),
             defines,
             within,
+            within_deadline,
         })
     }
 
