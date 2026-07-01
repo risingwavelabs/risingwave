@@ -80,6 +80,15 @@ pub struct KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    fn report_consumer_group_delete_failure(&self, group_id: &str) {
+        let source_id = self.context.info.source_id.to_string();
+        self.context
+            .metrics
+            .kafka_consumer_group_delete_failure_count
+            .with_label_values(&[source_id.as_str(), group_id])
+            .inc();
+    }
+
     async fn drop_consumer_groups(&self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         let admin = Box::pin(SHARED_KAFKA_ADMIN.try_get_with_by_ref(
             &self.properties.connection,
@@ -96,14 +105,49 @@ impl KafkaSplitEnumerator {
             .iter()
             .map(|fragment_id| self.properties.group_id(*fragment_id))
             .collect::<Vec<_>>();
-        let group_ids: Vec<&str> = group_ids.iter().map(|s| s.as_str()).collect();
-        let res = admin
-            .delete_groups(&group_ids, &AdminOptions::default())
-            .await?;
+        let group_id_refs = group_ids
+            .iter()
+            .map(|group_id| group_id.as_str())
+            .collect::<Vec<_>>();
+
+        let res = match admin
+            .delete_groups(&group_id_refs, &AdminOptions::default())
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                for group_id in &group_ids {
+                    self.report_consumer_group_delete_failure(group_id);
+                }
+                tracing::warn!(
+                    error = %err.as_report(),
+                    topic = self.topic,
+                    ?group_ids,
+                    "failed to delete Kafka consumer groups"
+                );
+                return Err(err.into());
+            }
+        };
+
+        let mut failure_count = 0;
+        for result in &res {
+            if let Err((group_id, error_code)) = result {
+                failure_count += 1;
+                self.report_consumer_group_delete_failure(group_id);
+                tracing::warn!(
+                    topic = self.topic,
+                    group_id,
+                    error = %error_code.as_report(),
+                    "failed to delete Kafka consumer group"
+                );
+            }
+        }
         tracing::debug!(
             topic = self.topic,
             ?fragment_ids,
-            "delete groups result: {res:?}"
+            ?res,
+            failure_count,
+            "delete groups result"
         );
         Ok(())
     }
