@@ -199,6 +199,7 @@ enum EncodeType {
   ENCODE_TYPE_NONE = 8;
   ENCODE_TYPE_TEXT = 9;
   ENCODE_TYPE_PARQUET = 10;
+  ENCODE_TYPE_XML = 11;
 }
 
 enum RowFormatType {
