@@ -26,6 +26,7 @@ use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+pub use drop_op::DropObjectResult;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,

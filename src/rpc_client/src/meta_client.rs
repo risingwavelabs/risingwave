@@ -886,17 +886,14 @@ impl MetaClient {
         source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
-    ) -> Result<WaitVersion> {
+    ) -> Result<DropTableResponse> {
         let request = DropTableRequest {
             source_id: source_id.map(risingwave_pb::ddl_service::drop_table_request::SourceId::Id),
             table_id,
             cascade,
         };
 
-        let resp = self.inner.drop_table(request).await?;
-        Ok(resp
-            .version
-            .ok_or_else(|| anyhow!("wait version not set"))?)
+        self.inner.drop_table(request).await
     }
 
     pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
