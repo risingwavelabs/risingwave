@@ -776,6 +776,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             // end of backfill loop, since backfill has finished
                             break 'backfill_loop;
                         }
+                        Some(_) if is_snapshot_paused => {
+                            // Since the snapshot stream is paused, drop the chunk.
+                        }
                         Some(chunk) => {
                             // Raise the current pk position.
                             current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
