@@ -10031,6 +10031,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 
 [[package]]
+name = "pratt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bbc12f7936a7b195790dd6d9b982b66c54f45ff6766decf25c44cac302dce"
+
+[[package]]
 name = "predicates"
 version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12967,6 +12973,7 @@ dependencies = [
  "tracing-subscriber",
  "walkdir",
  "winnow 1.0.1",
+ "winnow-rule",
  "workspace-hack",
 ]
 
@@ -17855,6 +17862,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winnow-rule"
+version = "0.1.1"
+source = "git+https://github.com/TennyZhuang/winnow-rule.git?rev=13814e8#13814e8a8528d418e5d3b24f21ed16890a362449"
+dependencies = [
+ "pratt",
+ "proc-macro-error 1.0.4",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "winnow 1.0.1",
 ]
 
 [[package]]
