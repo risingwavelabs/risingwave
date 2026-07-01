@@ -29,7 +29,7 @@ recover;
 
 skipif parallel
 system ok
-psql_refill_validate.py --job-name s3 --job-type sink --mode streaming --expect-policy both
+psql_refill_validate.py --job-name s3 --job-type sink --mode both --expect-policy both
 
 statement ok
 drop sink s3;
