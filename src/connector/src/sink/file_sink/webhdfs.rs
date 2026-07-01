@@ -113,6 +113,8 @@ impl OpendalSinkBackend for WebhdfsSink {
             max_row_count: properties.batching_strategy.max_row_count,
             rollover_seconds: properties.batching_strategy.rollover_seconds,
             path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+            path_partition_format: properties.batching_strategy.path_partition_format,
+            event_time_field: properties.batching_strategy.event_time_field,
         }
     }
 }
