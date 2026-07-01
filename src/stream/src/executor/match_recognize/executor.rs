@@ -14,7 +14,8 @@
 
 //! Streaming `MATCH_RECOGNIZE` executor (v1, event-time).
 //!
-//! Scope: append-only input, `ONE ROW PER MATCH`, `AFTER MATCH SKIP {PAST LAST ROW | TO NEXT ROW}`,
+//! Scope: append-only input, `ONE ROW PER MATCH`,
+//! `AFTER MATCH SKIP {PAST LAST ROW | TO NEXT ROW | TO {FIRST | LAST} <var>}`,
 //! `MEASURES` with per-variable navigation (`FIRST`/`LAST`/bare `var.col`) and `CLASSIFIER()`.
 //!
 //! Event-time model: rows are buffered per partition (in any arrival order). Matching is driven by
@@ -550,7 +551,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
     /// Remove a partition's wakeup-frontier entry from both tables. Used when a processed partition
     /// is empty or has no future row to wake for. `old_wakeup` is the partition's current frontier
-    /// value (already in hand from the index scan), so neither table needs a point read.
+    /// value (already in hand from the index scan), so neither table needs a point read — it doubles
+    /// as the meta old-value, valid because meta and index are kept in lockstep (see the
+    /// candidate-processing comment in the watermark arm).
     fn remove_frontier(
         meta: &mut StateTable<S>,
         index: &mut StateTable<S>,
@@ -564,7 +567,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
     /// Re-point a partition's wakeup frontier from `old_wakeup` to `new_wakeup`. The index PK leads
     /// with the wakeup, so its entry is delete+insert; the meta PK is the partition, so it updates
-    /// in place. Rows are chained by reference to avoid cloning the partition key.
+    /// in place. Rows are chained by reference to avoid cloning the partition key. `old_wakeup` (from
+    /// the index scan) doubles as the meta old-value; this is valid only while meta and index stay in
+    /// lockstep (see the candidate-processing comment in the watermark arm).
     fn move_frontier(
         meta: &mut StateTable<S>,
         index: &mut StateTable<S>,
@@ -686,10 +691,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         };
                         state_table.insert(Self::state_row(&buffered));
                     }
-                    // One frontier update per distinct partition. The frontier is maintained but not
-                    // yet read by the watermark path (that is a follow-up); keeping it correct now
-                    // locks the state layout in this pre-release PR and proves the write path is
-                    // side-effect-clean.
+                    // One frontier update per distinct partition. On insert `next_wakeup` only ever
+                    // moves earlier (a new row can only make a partition need attention sooner); the
+                    // watermark path (the `Message::Watermark` arm below) reads the frontier to decide
+                    // which partitions to visit, then recomputes each visited partition's entry
+                    // precisely. Insert and watermark both mutate `frontier_meta` and `frontier_index`
+                    // in lockstep — the invariant the watermark path relies on when it reuses an index
+                    // datum as the meta old-value.
                     for (partition_key, new_min) in chunk_min {
                         Self::update_frontier_on_insert(
                             &mut frontier_meta_table,
@@ -734,6 +742,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 // index row = [next_wakeup, partition...]
                                 let row = item?.into_owned_row();
                                 let next_wakeup = row.datum_at(0).to_owned_datum();
+                                // Stop at the first entry past the watermark. Sound because the index
+                                // PK leads with `next_wakeup` ascending and `iter_with_vnode` yields
+                                // rows in memcomparable PK order, which agrees with `default_cmp` on
+                                // the order-key type (negatives sort before positives; a tie on
+                                // `next_wakeup` falls through to the partition suffix, so every
+                                // equal-wakeup candidate is seen before any greater one). `next_wakeup`
+                                // is never NULL: NULL order keys are dropped at ingest, and a WITHIN
+                                // deadline is only scheduled when it evaluates non-null.
                                 if !matches!(&next_wakeup, Some(k) if k.default_cmp(&w).is_le()) {
                                     break;
                                 }
@@ -746,7 +762,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             }
                         }
 
-                        // 2. Process each candidate partition.
+                        // 2. Process each candidate partition. `old_wakeup` is this partition's
+                        //    frontier value as stored in the *index*; `move_frontier`/`remove_frontier`
+                        //    below reuse it as the *meta* old-value instead of point-reading meta. That
+                        //    is sound only because meta and index are always mutated together (by
+                        //    `update_frontier_on_insert`, `move_frontier`, `remove_frontier`), each
+                        //    writing the same wakeup to both — so they never disagree on a partition's
+                        //    `next_wakeup`. The consistent-old-value check does not backstop this: a
+                        //    stale old-value on an untouched, already-committed row is accepted, not
+                        //    rejected, so the lockstep must hold by construction.
                         for (old_wakeup, partition_key) in candidates {
                             // Read this partition's rows from the buffer table in PK order
                             // (partition, order key, seq) — already ORDER BY ordered, no sort — then
@@ -828,6 +852,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     } else {
                                         false
                                     };
+                                    // `break`, not `continue`. `found` is ordered by start; the WITHIN
+                                    // bound is a constant interval and rows are PK-sorted by order key,
+                                    // so a match's deadline (its first order key + interval) is monotone
+                                    // non-decreasing in its start. Once one boundary match is not yet
+                                    // within-final, no later one can be either, so stopping is correct.
+                                    // `continue` would be actively wrong: it could emit a later, shorter
+                                    // match, advance `cursor` past this held boundary match, and then
+                                    // let the eviction below delete this match's start row — losing it.
+                                    // With `break` the held match's rows are retained (a complete match
+                                    // at the boundary is `reaches_boundary_alive`), and any shorter
+                                    // overlapping match is re-found on a later watermark (at worst
+                                    // delayed to this match's WITHIN deadline), never lost.
                                     if !within_final {
                                         break;
                                     }
@@ -883,9 +919,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             //
                             // The partition iterator is already dropped, so delete in place.
                             let mut retain_from = safe_len;
-                            for p in cursor..safe_len {
+                            for (p, row) in rows.iter().enumerate().take(safe_len).skip(cursor) {
                                 if let Some(deadline_expr) = &within_deadline {
-                                    let synthetic = OwnedRow::new(vec![rows[p].order_key.clone()]);
+                                    let synthetic = OwnedRow::new(vec![row.order_key.clone()]);
                                     let deadline =
                                         deadline_expr.eval_row_infallible(&synthetic).await;
                                     // Window closed (deadline <= w): `p` is dead, skip it.
@@ -987,9 +1023,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         .await?;
                     // On a vnode-bitmap change (rescaling) the set of partitions this actor owns
                     // shifts. There is no in-memory buffer to reload — the state table is
-                    // authoritative and the next watermark scans whatever vnodes are now owned. Only
-                    // rebuild the id generator so it mints ids within the new vnode set (mirrors
-                    // `RowIdGenExecutor`).
+                    // authoritative and the next watermark scans whatever vnodes are now owned. Rebuild
+                    // the id generator only when the owned set may have *grown* (`cache_may_stale`), so
+                    // new ids fall in the now-owned range. This is deliberately narrower than
+                    // `RowIdGenExecutor`, which rebuilds on any bitmap change: there the generated id
+                    // *is* the row-id distribution key, so a stale vnode would misplace rows. Here `seq`
+                    // is only a within-partition PK tiebreaker and `_match_id` is an output-only column
+                    // — neither is a distribution key, so a lost vnode never misplaces state, and the
+                    // snowflake timestamp keeps ids unique regardless. Rebuilding on growth alone
+                    // suffices.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                         && cache_may_stale
