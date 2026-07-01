@@ -321,7 +321,7 @@ pub struct StreamingDeveloperConfig {
     pub enable_state_table_vnode_stats_pruning: bool,
 
     /// Cache refill policy for streaming cache refill feature.
-    /// Can be `unspecified`, `disabled`, `streaming`, `serving` or `both`.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
     #[serde(default = "default::developer::cache_refill_policy")]
     pub cache_refill_policy: CacheRefillPolicy,
 

@@ -99,6 +99,6 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetTableCacheRefillStatsRequest>,
     ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        Err(Status::unimplemented("not implemented in frontend node"))
     }
 }
