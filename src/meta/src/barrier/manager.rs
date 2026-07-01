@@ -42,6 +42,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
@@ -193,11 +194,13 @@ impl GlobalBarrierManager {
 }
 
 impl GlobalBarrierManager {
+    #[expect(clippy::too_many_arguments)]
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -213,6 +216,7 @@ impl GlobalBarrierManager {
             env,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,

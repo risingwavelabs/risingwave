@@ -117,6 +117,9 @@ impl ObserverState for FrontendObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
+            Info::TableRefillRuntimeConfig(_) => {
+                panic!("frontend node should not receive TableRefillRuntimeConfig");
+            }
         }
     }
 
@@ -152,6 +155,7 @@ impl ObserverState for FrontendObserverNode {
             secrets,
             cluster_resource,
             object_dependencies,
+            table_refill_runtime_config: _,
         } = snapshot;
 
         for db in databases {

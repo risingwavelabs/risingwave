@@ -29,8 +29,8 @@ use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{PbTableRefillRuntimeConfig, Recovery};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -64,6 +64,7 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
     rendered_layout_matches_current,
@@ -307,6 +308,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -322,6 +324,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             scale_controller,
             env.clone(),
@@ -409,9 +412,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            // Keep the bootstrap recovery future boxed so the outer barrier worker future
+            // stays below clippy's large-futures threshold.
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap)
+                    .instrument(span),
+            )
+            .await;
         }
 
         Box::pin(self.run_inner(shutdown_rx)).await
@@ -678,6 +685,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         // mark ready to unblock subsequent request
                                         self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
+                                        Self::refresh_table_refill_runtime_state_after_recovery(
+                                            self.context.clone(),
+                                            self.env.clone(),
+                                        ).await;
                                     }
                                     Err(e) => {
                                         entering_initializing.fail_reload_runtime_info(e);
@@ -687,6 +698,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
+                                Self::refresh_table_refill_runtime_state_after_recovery(
+                                    self.context.clone(),
+                                    self.env.clone(),
+                                ).await;
                             }
                             CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
                                 self.handle_batch_refresh_trigger(database_id, job_id).await?;
@@ -1062,6 +1077,46 @@ use crate::barrier::partial_graph::{
 };
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    async fn refresh_table_refill_runtime_state_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
+        // Table refill is a best-effort runtime optimization. Recovery uses an
+        // eventually consistent refresh for meta-owned state: policy is global and
+        // broadcast, while serving vnode mapping is worker-specific and delivered
+        // through targeted updates.
+        Self::refresh_table_cache_refill_policies_after_recovery(context.clone(), env).await;
+        Self::refresh_serving_table_vnode_mappings_after_recovery(context).await;
+    }
+
+    async fn refresh_table_cache_refill_policies_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
+        match context.table_cache_refill_policies_snapshot().await {
+            Ok(policies) => {
+                env.notification_manager()
+                    .notify_hummock(
+                        Operation::Update,
+                        Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                            table_cache_refill_policies: Some(policies),
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
+            }
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to refresh table cache refill policies after recovery"
+                );
+            }
+        }
+    }
+
+    async fn refresh_serving_table_vnode_mappings_after_recovery(context: Arc<C>) {
+        if let Err(err) = context.sync_serving_table_vnode_mappings_to_hummock().await {
+            warn!(
+                error = %err.as_report(),
+                "failed to refresh serving table vnode mappings after recovery"
+            );
+        }
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -1420,6 +1475,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 recovering_databases,
             ),
         )]);
+
+        Self::refresh_table_refill_runtime_state_after_recovery(
+            self.context.clone(),
+            self.env.clone(),
+        )
+        .await;
 
         self.env
             .notification_manager()

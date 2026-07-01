@@ -510,6 +510,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
+        serving_vnode_mapping.clone(),
         source_manager.clone(),
         sink_manager.clone(),
         iceberg_pk_index_sink_manager.clone(),
@@ -702,7 +703,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(serving::start_serving_vnode_mapping_worker(
         env.notification_manager_ref(),
         metadata_manager.clone(),
-        serving_vnode_mapping,
+        serving_vnode_mapping.clone(),
         env.session_params_manager_impl_ref(),
     ));
 
