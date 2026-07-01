@@ -23,6 +23,7 @@ use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common_rate_limit::{
     MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
 };
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -34,10 +35,11 @@ use crate::executor::backfill::snapshot_backfill::state::{BackfillState, EpochBa
 use crate::executor::backfill::utils::mapping_message;
 use crate::executor::monitor::BackfillMetrics;
 use crate::executor::prelude::{StateTable, *};
-use crate::executor::{Barrier, Message, StreamExecutorError};
+use crate::executor::{Barrier, Message, Mutation, StreamExecutorError};
 use crate::task::CreateMviewProgressReporter;
 
 pub struct UpstreamTableExecutor<T: UpstreamTable, S: StateStore> {
+    upstream_table_id: TableId,
     upstream_table: T,
     progress_state_table: StateTable<S>,
     snapshot_epoch: u64,
@@ -83,6 +85,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             .streaming_metrics
             .new_backfill_metrics(upstream_table_id, actor_ctx.id);
         Self {
+            upstream_table_id,
             upstream_table,
             progress_state_table,
             snapshot_epoch,
@@ -224,6 +227,28 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
 
                 let post_commit = progress_state.commit(barrier.epoch).await?;
                 let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+                if let Some(new_rate_limit) = barrier.mutation.as_ref().and_then(|mutation| {
+                    if let Mutation::Throttle(config) = &**mutation
+                        && let Some(config) = config.get(&self.actor_ctx.fragment_id)
+                        && config.throttle_type() == ThrottleType::Backfill
+                    {
+                        Some(config.rate_limit)
+                    } else {
+                        None
+                    }
+                }) {
+                    let new_rate_limit = new_rate_limit.into();
+                    let old_rate_limit = self.rate_limiter.update(new_rate_limit);
+                    if old_rate_limit != new_rate_limit {
+                        tracing::info!(
+                            old_rate_limit = ?old_rate_limit,
+                            new_rate_limit = ?new_rate_limit,
+                            upstream_table_id = %self.upstream_table_id,
+                            actor_id = %self.actor_ctx.id,
+                            "cross-db backfill rate limit changed",
+                        );
+                    }
+                }
                 yield Message::Barrier(barrier);
                 if let Some(new_vnode_bitmap) =
                     post_commit.post_yield_barrier(update_vnode_bitmap).await?
