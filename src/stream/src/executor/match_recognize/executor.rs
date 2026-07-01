@@ -812,9 +812,25 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 if m.start < cursor {
                                     continue;
                                 }
-                                // Final only if another safe row follows (greedy match is maximal).
+                                // At the safe boundary we normally wait for a trailing safe row to
+                                // confirm the greedy match is maximal (it might still extend). But
+                                // under WITHIN, once the watermark has passed this match's deadline
+                                // (its first row's order_key + interval), no future row can legally
+                                // extend it — any extension would fall inside the now-fully-safe
+                                // window — so it is final and must be emitted now, before the WITHIN
+                                // eviction below drops its rows. Without WITHIN, keep waiting.
                                 if m.end >= safe_len {
-                                    break;
+                                    let within_final = if let Some(dl) = &within_deadline {
+                                        let synthetic =
+                                            OwnedRow::new(vec![rows[m.start].order_key.clone()]);
+                                        let deadline = dl.eval_row_infallible(&synthetic).await;
+                                        matches!(&deadline, Some(d) if d.default_cmp(&w).is_le())
+                                    } else {
+                                        false
+                                    };
+                                    if !within_final {
+                                        break;
+                                    }
                                 }
                                 // WITHIN is enforced inside the matcher. Evaluate each measure over
                                 // the synthetic row its slots produce from the matched rows + labels.
