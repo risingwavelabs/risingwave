@@ -533,6 +533,16 @@ impl PartialGraphManager {
             .first_inflight_epoch()
     }
 
+    pub(super) fn pending_barrier_infos(
+        &self,
+        partial_graph_id: PartialGraphId,
+    ) -> impl Iterator<Item = &BarrierInfo> {
+        self.running_graph(partial_graph_id)
+            .barrier_item_collector
+            .iter_infos()
+            .map(|info| &info.barrier_info)
+    }
+
     pub(super) fn start_completing(
         &mut self,
         partial_graph_id: PartialGraphId,

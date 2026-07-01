@@ -134,6 +134,7 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
                 table,
             }) => StreamingJob::MaterializedView(table.unwrap()),
+            replace_job_plan::ReplaceJob::ReplaceSink(_) => unreachable!("use replace sink path"),
         };
 
         ReplaceStreamJobInfo {
@@ -390,6 +391,8 @@ impl DdlService for DdlServiceImpl {
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                         refresh_interval_sec: None,
+                        replace_sink: None,
+                        since_timestamp_epoch: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -457,6 +460,7 @@ impl DdlService for DdlServiceImpl {
             .resource_type
             .and_then(|resource_type| resource_type.resource_type)
             .unwrap_or_else(Self::default_streaming_job_resource_type);
+        let since_timestamp_epoch = req.since_timestamp_epoch;
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -467,6 +471,8 @@ impl DdlService for DdlServiceImpl {
             resource_type,
             if_not_exists: req.if_not_exists,
             refresh_interval_sec: None,
+            replace_sink: None,
+            since_timestamp_epoch,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -563,6 +569,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: req.refresh_interval_sec,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -620,7 +628,9 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type,
                 if_not_exists: req.if_not_exists,
+                replace_sink: None,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -712,6 +722,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -853,14 +865,41 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceJobPlanRequest>,
     ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
-        let req = request.into_inner().get_plan().cloned()?;
+        let ReplaceJobPlan {
+            fragment_graph,
+            replace_job,
+        } = request.into_inner().get_plan().cloned()?;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamJob(
-                Self::extract_replace_table_info(req),
-            ))
-            .await?;
+        let command = match replace_job {
+            Some(replace_job_plan::ReplaceJob::ReplaceSink(replace_sink)) => {
+                let replace_job_plan::ReplaceSink {
+                    sink,
+                    old_sink_id,
+                    dependencies,
+                    resource_type,
+                } = replace_sink;
+                DdlCommand::CreateStreamingJob {
+                    stream_job: StreamingJob::Sink(sink.unwrap()),
+                    fragment_graph: fragment_graph.unwrap(),
+                    dependencies: dependencies.into_iter().collect::<HashSet<_>>(),
+                    resource_type: resource_type
+                        .and_then(|resource_type| resource_type.resource_type)
+                        .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
+                    if_not_exists: false,
+                    refresh_interval_sec: None,
+                    replace_sink: Some(old_sink_id),
+                    since_timestamp_epoch: None,
+                }
+            }
+            replace_job => {
+                DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(ReplaceJobPlan {
+                    fragment_graph,
+                    replace_job,
+                }))
+            }
+        };
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(ReplaceJobPlanResponse {
             status: None,
@@ -1712,6 +1751,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -1797,6 +1838,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await;
 
