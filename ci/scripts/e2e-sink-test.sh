@@ -29,6 +29,23 @@ risedev slt './e2e_test/sink/append_only_sink.slt'
 risedev slt './e2e_test/sink/blackhole_sink.slt'
 risedev slt './e2e_test/sink/file_sink.slt'
 risedev slt './e2e_test/sink/license.slt'
+
+echo "--- e2e, dynamodb sink validation"
+DYNAMODB_SINK_SERVER_PID=""
+cleanup_dynamodb_mock_server() {
+  if [[ -n "${DYNAMODB_SINK_SERVER_PID}" ]]; then
+    kill "${DYNAMODB_SINK_SERVER_PID}" || true
+    wait "${DYNAMODB_SINK_SERVER_PID}" || true
+    DYNAMODB_SINK_SERVER_PID=""
+  fi
+}
+trap cleanup_dynamodb_mock_server EXIT
+python3 e2e_test/sink/dynamodb_mock_server.py 18082 &
+DYNAMODB_SINK_SERVER_PID=$!
+for i in $(seq 1 20); do curl -sf http://localhost:18082/ >/dev/null && break; sleep 0.5; done
+risedev slt './e2e_test/sink/dynamodb_sink.slt'
+cleanup_dynamodb_mock_server
+
 risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt './e2e_test/sink/sink_into_table/*.slt'

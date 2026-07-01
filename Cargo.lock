@@ -11961,7 +11961,6 @@ dependencies = [
  "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
- "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "aws-types",
