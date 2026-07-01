@@ -32,7 +32,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional, Union
 
 import psycopg2
 
@@ -112,7 +112,7 @@ def run_command(command: list[str]) -> str:
     return result.stdout
 
 
-def resolve_risectl(explicit_risectl: str | None) -> str:
+def resolve_risectl(explicit_risectl: Optional[str]) -> str:
     if explicit_risectl:
         return explicit_risectl
 
@@ -123,7 +123,7 @@ def resolve_risectl(explicit_risectl: str | None) -> str:
     return "risectl"
 
 
-def resolve_job(conn, job_name: str, job_type: str | None) -> tuple[int, str]:
+def resolve_job(conn, job_name: str, job_type: Optional[str]) -> tuple[int, str]:
     query = """
     WITH all_jobs AS (
         SELECT id, name, 'table' AS job_type FROM rw_catalog.rw_tables
@@ -241,14 +241,21 @@ def parse_refill_stats(output: str) -> dict[int, dict[str, Any]]:
 def parse_serving_fragment_mapping(output: str) -> list[tuple[int, int, int, list[int]]]:
     rows: list[tuple[int, int, int, list[int]]] = []
     for line in output.splitlines():
-        if "│" not in line:
+        if "│" in line:
+            parts = [part.strip() for part in line.split("│")[1:-1]]
+        elif "|" in line:
+            parts = [part.strip() for part in line.split("|")[1:-1]]
+        else:
             continue
-        parts = [part.strip() for part in line.split("│")[1:-1]]
+
         if len(parts) != 4 or parts[0] == "Job Id":
             continue
 
-        job_id = int(parts[0])
-        fragment_id = int(parts[1])
+        try:
+            job_id = int(parts[0])
+            fragment_id = int(parts[1])
+        except ValueError:
+            continue
 
         vnode_match = re.search(r"in total:\s*(.*)$", parts[2])
         if vnode_match and vnode_match.group(1):
@@ -283,7 +290,7 @@ def build_expected_serving_worker_vnodes(
 
 
 def normalize_nested_vnodes(
-    data: dict[int, dict[int, set[int] | list[int]]]
+    data: dict[int, dict[int, Union[set[int], list[int]]]]
 ) -> dict[int, dict[int, list[int]]]:
     normalized: dict[int, dict[int, list[int]]] = {}
     for worker_id, per_table in data.items():

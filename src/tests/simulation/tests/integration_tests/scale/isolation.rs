@@ -17,8 +17,12 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+#[cfg(madsim)]
+use clap::Parser;
 use itertools::Itertools;
 use risingwave_common::monitor::EndpointExt;
+#[cfg(madsim)]
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::GetTableCacheRefillStatsRequest;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
@@ -30,6 +34,7 @@ use tonic::transport::Endpoint;
 const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
 const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
 const COMPUTE_2_HOST: &str = "192.168.3.2";
+const COMPUTE_4_HOST: &str = "192.168.3.4";
 
 async fn assert_no_expected_global_recovery(session: &mut Session) -> Result<()> {
     let global_recovery_events = global_recovery_events(session).await?;
@@ -103,8 +108,9 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_table_cache_refill_policy_after_database_recovery() -> Result<()> {
-    let (cluster, mut session) = prepare_refill_policy_db_recovery_env().await?;
+async fn test_table_cache_refill_runtime_state_after_database_recovery_and_serving_node_change()
+-> Result<()> {
+    let (cluster, mut session) = prepare_refill_runtime_state_db_recovery_env().await?;
 
     let database_mapping = database_id_mapping(&mut session).await?;
     let group1_database_id = database_mapping["group1"];
@@ -152,6 +158,28 @@ async fn test_table_cache_refill_policy_after_database_recovery() -> Result<()> 
     wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, Some("both"))
         .await?;
 
+    // Adding a serving compute node rebuilds serving vnode mappings and pushes the full
+    // replacement to both existing and new serving nodes.
+    let serving_before_add_node =
+        wait_serving_refill_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, None).await?;
+    create_compute_node(&cluster, 4, "serving");
+    wait_until(
+        &mut session,
+        "select count(*) from rw_catalog.rw_worker_nodes where host = '192.168.3.4';",
+        "1",
+    )
+    .await?;
+    wait_serving_refill_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &internal_table_ids,
+        Some(&serving_before_add_node),
+    )
+    .await?;
+    wait_refill_policy_on_compute(&cluster, COMPUTE_4_HOST, &internal_table_ids, Some("both"))
+        .await?;
+    wait_serving_refill_on_compute(&cluster, COMPUTE_4_HOST, &internal_table_ids, None).await?;
+
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
     assert!(!database_recovery_events.contains_key(&group2_database_id));
     assert_eq!(
@@ -164,6 +192,39 @@ async fn test_table_cache_refill_policy_after_database_recovery() -> Result<()> 
     assert_no_expected_global_recovery(&mut session).await?;
 
     Ok(())
+}
+
+#[cfg(madsim)]
+fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
+    let config = cluster.config();
+    let opts = risingwave_compute::ComputeNodeOpts::parse_from([
+        "compute-node",
+        "--config-path",
+        config.config_path.as_str(),
+        "--listen-addr",
+        "0.0.0.0:5688",
+        "--advertise-addr",
+        &format!("192.168.3.{idx}:5688"),
+        "--total-memory-bytes",
+        "6979321856",
+        "--parallelism",
+        &config.compute_node_cores.to_string(),
+        "--role",
+        role,
+    ]);
+    cluster
+        .handle()
+        .create_node()
+        .name(format!("compute-{idx}"))
+        .ip([192, 168, 3, idx as u8].into())
+        .cores(config.compute_node_cores)
+        .init(move || risingwave_compute::start(opts.clone(), CancellationToken::new()))
+        .build();
+}
+
+#[cfg(not(madsim))]
+fn create_compute_node(_cluster: &Cluster, _idx: usize, _role: &str) {
+    panic!("dynamic compute node creation requires madsim");
 }
 
 async fn database_id_mapping(session: &mut Session) -> Result<HashMap<String, u32>> {
@@ -471,10 +532,10 @@ async fn internal_table_ids_for_job(session: &mut Session, job_name: &str) -> Re
         .collect()
 }
 
-async fn table_cache_refill_policies_on_compute(
+async fn table_cache_refill_stats_on_compute(
     cluster: &Cluster,
     worker_host: &str,
-) -> Result<serde_json::Map<String, Value>> {
+) -> Result<Value> {
     let worker_nodes = cluster.get_cluster_info().await?.worker_nodes;
     let worker = worker_nodes
         .into_iter()
@@ -500,16 +561,34 @@ async fn table_cache_refill_policies_on_compute(
                 .get_table_cache_refill_stats(GetTableCacheRefillStatsRequest {})
                 .await?
                 .into_inner();
-            let stats: Value = serde_json::from_str(&response.stats)
-                .context("failed to parse table cache refill stats")?;
-
-            stats
-                .get("policies")
-                .and_then(Value::as_object)
-                .cloned()
-                .context("table cache refill stats missing policies")
+            serde_json::from_str(&response.stats)
+                .context("failed to parse table cache refill stats")
         })
         .await
+}
+
+async fn table_cache_refill_policies_on_compute(
+    cluster: &Cluster,
+    worker_host: &str,
+) -> Result<serde_json::Map<String, Value>> {
+    table_cache_refill_stats_on_compute(cluster, worker_host)
+        .await?
+        .get("policies")
+        .and_then(Value::as_object)
+        .cloned()
+        .context("table cache refill stats missing policies")
+}
+
+async fn serving_refill_vnodes_on_compute(
+    cluster: &Cluster,
+    worker_host: &str,
+) -> Result<serde_json::Map<String, Value>> {
+    table_cache_refill_stats_on_compute(cluster, worker_host)
+        .await?
+        .get("serving")
+        .and_then(Value::as_object)
+        .cloned()
+        .context("table cache refill stats missing serving vnodes")
 }
 
 fn refill_policy_matches(
@@ -520,6 +599,18 @@ fn refill_policy_matches(
     table_ids.iter().all(|table_id| {
         let actual_policy = policies.get(&table_id.to_string()).and_then(Value::as_str);
         actual_policy == expected_policy
+    })
+}
+
+fn serving_refill_matches(
+    serving_vnodes: &serde_json::Map<String, Value>,
+    table_ids: &[u32],
+) -> bool {
+    table_ids.iter().all(|table_id| {
+        serving_vnodes
+            .get(&table_id.to_string())
+            .and_then(Value::as_array)
+            .is_some_and(|vnodes| !vnodes.is_empty())
     })
 }
 
@@ -544,6 +635,33 @@ async fn wait_refill_policy_on_compute(
         anyhow!(
             "timed out waiting for table cache refill policy {:?} on {} for {:?}",
             expected_policy,
+            worker_host,
+            table_ids
+        )
+    })?
+}
+
+async fn wait_serving_refill_on_compute(
+    cluster: &Cluster,
+    worker_host: &str,
+    table_ids: &[u32],
+    previous: Option<&serde_json::Map<String, Value>>,
+) -> Result<serde_json::Map<String, Value>> {
+    tokio::time::timeout(Duration::from_secs(100), async {
+        loop {
+            if let Ok(serving_vnodes) = serving_refill_vnodes_on_compute(cluster, worker_host).await
+                && serving_refill_matches(&serving_vnodes, table_ids)
+                && previous.is_none_or(|previous| &serving_vnodes != previous)
+            {
+                return Ok::<_, anyhow::Error>(serving_vnodes);
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "timed out waiting for serving refill vnodes on {} for {:?}",
             worker_host,
             table_ids
         )
@@ -579,7 +697,7 @@ async fn prepare_isolation_env() -> Result<(Cluster, Session)> {
     Ok((cluster, session))
 }
 
-async fn prepare_refill_policy_db_recovery_env() -> Result<(Cluster, Session)> {
+async fn prepare_refill_runtime_state_db_recovery_env() -> Result<(Cluster, Session)> {
     let mut config = Configuration::for_auto_parallelism(MAX_HEARTBEAT_INTERVAL_SEC, true);
 
     config.compute_nodes = 3;
