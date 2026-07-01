@@ -192,9 +192,10 @@ pub struct Word {
 impl fmt::Display for Word {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
-            Some(s) if s == '"' || s == '[' || s == '`' => {
+            Some(s) if s == '[' || s == '`' => {
                 write!(f, "{}{}{}", s, self.value, Word::matching_end_quote(s))
             }
+            Some('"') => write!(f, "\"{}\"", self.value.replace('"', "\"\"")),
             None => f.write_str(&self.value),
             _ => panic!("Unexpected quote_style!"),
         }
@@ -484,17 +485,8 @@ impl<'a> Tokenizer<'a> {
                 }
                 // delimited (quoted) identifier
                 quote_start if is_delimited_identifier_start(quote_start) => {
-                    self.next(); // consume the opening quote
-                    let quote_end = Word::matching_end_quote(quote_start);
-                    let s = self.peeking_take_while(|ch| ch != quote_end);
-                    if self.next() == Some(quote_end) {
-                        Ok(Some(Token::make_word(&s, Some(quote_start))))
-                    } else {
-                        self.error(format!(
-                            "Expected close delimiter '{}' before EOF.",
-                            quote_end
-                        ))
-                    }
+                    let s = self.tokenize_delimited_identifier(quote_start)?;
+                    Ok(Some(Token::make_word(&s, Some(quote_start))))
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
@@ -653,6 +645,36 @@ impl<'a> Tokenizer<'a> {
             },
             None => Ok(None),
         }
+    }
+
+    fn tokenize_delimited_identifier(
+        &mut self,
+        quote_start: char,
+    ) -> Result<String, TokenizerError> {
+        let quote_end = Word::matching_end_quote(quote_start);
+        let mut s = String::new();
+
+        self.next(); // consume opening quote
+
+        while let Some(ch) = self.peek() {
+            self.next(); // consume ch
+
+            if ch == quote_end {
+                if self.peek() == Some(quote_end) {
+                    self.next(); // consume escaped quote
+                    s.push(quote_end);
+                } else {
+                    return Ok(s);
+                }
+            } else {
+                s.push(ch);
+            }
+        }
+
+        self.error(format!(
+            "Expected close delimiter '{}' before EOF.",
+            quote_end
+        ))
     }
 
     /// Tokenize dollar preceded value (i.e: a string/placeholder)
@@ -1122,6 +1144,36 @@ mod tests {
         ];
 
         compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("a\"b", Some('"')),
+            Token::Comma,
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("x\"\"y", Some('"')),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn display_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        assert_eq!(
+            tokens.iter().map(ToString::to_string).collect::<String>(),
+            sql
+        );
     }
 
     #[test]

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::id::{JobId, SourceId};
+use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -360,6 +360,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+    /// If set, this create command replaces an existing sink while creating the new sink job.
+    pub replace_sink: Option<SinkId>,
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
 }
@@ -408,12 +410,22 @@ impl StreamJobFragments {
     }
 }
 
+pub type TableLogEpochs = Vec<(Vec<u64>, u64)>;
+pub type UpstreamTableLogEpochs = HashMap<TableId, TableLogEpochs>;
+pub type SinceTimestampResolvedEpoch = (u64, TableLogEpochs);
+
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
     /// `table_id` -> `Some(snapshot_backfill_epoch)`
     /// The `snapshot_backfill_epoch` should be None at the beginning, and be filled
     /// by global barrier worker when handling the command.
     pub upstream_mv_table_id_to_backfill_epoch: HashMap<TableId, Option<u64>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SinceEpochInfo {
+    pub provided_since_epoch: u64,
+    pub resolved: Option<SinceTimestampResolvedEpoch>,
 }
 
 #[derive(Debug, Clone)]
@@ -426,7 +438,10 @@ pub struct BatchRefreshInfo {
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
-    SnapshotBackfill(SnapshotBackfillInfo),
+    SnapshotBackfill {
+        snapshot_backfill_info: SnapshotBackfillInfo,
+        since_epoch: Option<SinceEpochInfo>,
+    },
     BatchRefresh(BatchRefreshInfo),
 }
 
@@ -841,13 +856,11 @@ impl Command {
             iceberg_v3_sink_metadata,
         ) = collect_resp_info(resps);
 
-        let new_table_fragment_infos =
-            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } =
-                &barrier_info.post_collect_command
-            {
+        let new_table_fragment_infos = match &barrier_info.post_collect_command {
+            PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
                 assert!(!matches!(
                     job_type,
-                    CreateStreamingJobType::SnapshotBackfill(_)
+                    CreateStreamingJobType::SnapshotBackfill { .. }
                         | CreateStreamingJobType::BatchRefresh(_)
                 ));
                 let table_fragments = &info.stream_job_fragments;
@@ -858,9 +871,9 @@ impl Command {
                 }
 
                 vec![NewTableFragmentInfo { table_ids }]
-            } else {
-                vec![]
-            };
+            }
+            _ => vec![],
+        };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
         // TODO: may collect cross db snapshot backfill
@@ -1014,6 +1027,7 @@ impl Command {
     pub(super) fn create_streaming_job_to_mutation(
         info: &CreateStreamingJobCommandInfo,
         job_type: &CreateStreamingJobType,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
         edges: &mut FragmentEdgeBuildResult,
         control_stream_manager: &ControlStreamManager,
@@ -1037,12 +1051,16 @@ impl Command {
                     .flatten()
                     .map(|actor| actor.actor_id)
                     .collect();
+                let dropped_actors = dropped_actors.into_iter().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
-                let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+                let subscriptions_to_add = {
+                    if let CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    }
                     | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
                         snapshot_backfill_info,
                         ..
@@ -1060,7 +1078,8 @@ impl Command {
                             .collect()
                     } else {
                         Default::default()
-                    };
+                    }
+                };
                 let backfill_nodes_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
@@ -1125,6 +1144,11 @@ impl Command {
                     backfill_nodes_to_pause,
                     actor_cdc_table_snapshot_splits,
                     new_upstream_sinks,
+                    dropped_actors,
+                    sink_log_store_flush: info
+                        .replace_sink
+                        .map(|old_sink_id| vec![old_sink_id])
+                        .unwrap_or_default(),
                 };
 
                 Ok(Mutation::Add(add_mutation))
@@ -1382,6 +1406,8 @@ impl Command {
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: None,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
     }

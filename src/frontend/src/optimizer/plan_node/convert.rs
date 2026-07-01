@@ -156,12 +156,29 @@ pub enum BackfillType {
     /// Frontend-only variant for snapshot-free sinks. It is serialized as
     /// `StreamScanType::UpstreamOnly`, but derives an upsert stream kind.
     UpstreamOnlySink,
-    Backfill,
     ArrangementBackfill,
     SnapshotBackfill,
+    /// Frontend-only variant for sinks created with `since_timestamp`.
+    /// It is serialized as `StreamScanType::SnapshotBackfill`, but derives
+    /// the same upsert stream kind as upstream-only sinks.
+    SnapshotBackfillSinceTimestamp,
 }
 
 impl BackfillType {
+    pub fn without_snapshot(self) -> bool {
+        matches!(
+            self,
+            BackfillType::UpstreamOnlySink | BackfillType::SnapshotBackfillSinceTimestamp
+        )
+    }
+
+    pub fn is_snapshot_backfill(self) -> bool {
+        matches!(
+            self,
+            BackfillType::SnapshotBackfill | BackfillType::SnapshotBackfillSinceTimestamp
+        )
+    }
+
     pub fn to_stream_scan_type(self, is_cross_db: bool) -> StreamScanType {
         if is_cross_db {
             return StreamScanType::CrossDbSnapshotBackfill;
@@ -171,9 +188,10 @@ impl BackfillType {
             BackfillType::Replicated | BackfillType::UpstreamOnlySink => {
                 StreamScanType::UpstreamOnly
             }
-            BackfillType::Backfill => StreamScanType::Backfill,
             BackfillType::ArrangementBackfill => StreamScanType::ArrangementBackfill,
-            BackfillType::SnapshotBackfill => StreamScanType::SnapshotBackfill,
+            BackfillType::SnapshotBackfill | BackfillType::SnapshotBackfillSinceTimestamp => {
+                StreamScanType::SnapshotBackfill
+            }
         }
     }
 }
@@ -186,10 +204,6 @@ pub struct ToStreamContext {
 }
 
 impl ToStreamContext {
-    pub fn new(emit_on_window_close: bool) -> Self {
-        Self::new_with_backfill_type(emit_on_window_close, BackfillType::Backfill)
-    }
-
     pub fn new_with_backfill_type(emit_on_window_close: bool, backfill_type: BackfillType) -> Self {
         Self {
             share_to_stream_map: HashMap::new(),

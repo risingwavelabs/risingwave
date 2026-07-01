@@ -272,9 +272,15 @@ mod failpoint_limited {
         tokio::time::sleep(Duration::from_secs(10)).await;
         fail::remove("iceberg_v3_persist_pre_commit_fail");
 
-        // Give the cluster time to recover and commit again past the fault window.
+        // Give the cluster time to recover and commit again past the fault
+        // window. A persist failure fails the barrier and drives a full meta
+        // recovery (bootstrap + recovery backoff up to 5s/attempt). Once the
+        // fault clears no further commit can fail, so this wait only ever
+        // drains the single in-flight recovery cascade; a seed-sweep over the
+        // 30 CI seeds measured that cascade at ~30s worst case. Budget 120s
+        // (~4x) so the test cannot boundary-flake (30s was provably too tight).
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await
@@ -333,9 +339,16 @@ mod failpoint_limited {
         tokio::time::sleep(Duration::from_secs(10)).await;
         handle.mock.set_err_rate_txn_commit(0.0);
 
-        // Sink resumes committing once the fault clears.
+        // Sink resumes committing once the fault clears. F11 pinned at 100%
+        // guarantees at least one retry-exhausted commit, which fails the
+        // barrier and drives a full meta recovery (bootstrap + recovery backoff
+        // up to 5s/attempt). Once the rate is 0 no further commit can fail, so
+        // this wait only drains the single in-flight cascade. A seed-sweep over
+        // the 30 CI seeds measured that cascade at ~30s worst case (this test,
+        // seed 26); seed 4 fails at the old 30s budget as a boundary flake.
+        // Budget 120s (~4x) so it cannot recur.
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await
@@ -380,8 +393,12 @@ mod failpoint_limited {
         fail::remove("iceberg_v3_commit_prune_fail");
 
         // Sink should eventually commit fresh snapshots once the fault clears.
+        // A prune failure leaves the row Pending and is redriven through a full
+        // meta recovery cascade (~30s worst case across the 30 CI seeds). The
+        // post-clear wait only drains the single in-flight cascade, so budget
+        // 120s (~4x) for ample margin.
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await
@@ -441,9 +458,13 @@ mod failpoint_limited {
 
         fail::remove("iceberg_v3_commit_prune_fail");
 
-        // After clearing, the cluster recovers and commits a new epoch.
+        // After clearing, the cluster recovers and commits a new epoch. The
+        // sustained prune failure keeps the row Pending until a full meta
+        // recovery cascade redrives it (~30s worst case across the 30 CI
+        // seeds). The post-clear wait only drains the single in-flight cascade,
+        // so budget 120s (~4x) for ample margin.
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await
@@ -505,9 +526,14 @@ mod failpoint_limited {
         fail::remove("iceberg_v3_commit_prune_fail");
         handle.mock.set_err_rate_txn_commit(0.0);
 
-        // Sink commits at least one fresh snapshot after the fault window.
+        // Sink commits at least one fresh snapshot after the fault window. The
+        // compound F5/F11/F12 window drives a full meta recovery (F11 pinned at
+        // 100% guarantees at least one retry-exhausted commit). Once every rate
+        // is 0 the post-clear wait only drains the single in-flight cascade
+        // (~30s worst case across the 30 CI seeds), so budget 120s (~4x) for
+        // ample margin.
         tokio::time::timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             handle.mock.wait_for_event_count('I', baseline_i_count + 1),
         )
         .await

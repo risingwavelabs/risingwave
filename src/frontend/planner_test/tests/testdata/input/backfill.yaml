@@ -108,6 +108,30 @@
     select * from t where a = 1 and b = 2;
   expected_outputs:
     - stream_plan
+- name: deprecated arrangement backfill switch is ignored
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    set streaming_use_arrangement_backfill = false;
+    create table t(a int, b int, primary key(a));
+    select * from t;
+  expected_outputs:
+    - stream_plan
+- name: deprecated arrangement backfill switch is ignored for index
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    set streaming_use_arrangement_backfill = false;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create index idx_b on t(b);
+  expected_outputs:
+    - explain_output
+- name: deprecated arrangement backfill switch is ignored for sink
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    set streaming_use_arrangement_backfill = false;
+    create table t(a int, b int, primary key(a));
+    explain (distsql, verbose) create sink s as select * from t with (connector='blackhole');
+  expected_outputs:
+    - explain_output
 - name: snapshot backfill skips non-prefix equality
   sql: |
     create table t(a int, b int, c int, primary key(a, b));

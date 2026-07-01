@@ -789,7 +789,7 @@ impl DatabaseCheckpointControl {
             database_id,
             partial_graph_id: to_partial_graph_id(database_id, None),
             state: BarrierWorkerState::new(),
-            finishing_jobs_collector: BarrierItemCollector::new(),
+            finishing_jobs_collector: BarrierItemCollector::new(false),
             completing_barrier: None,
             committed_epoch: None,
             database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
@@ -808,7 +808,7 @@ impl DatabaseCheckpointControl {
             database_id,
             partial_graph_id: to_partial_graph_id(database_id, None),
             state,
-            finishing_jobs_collector: BarrierItemCollector::new(),
+            finishing_jobs_collector: BarrierItemCollector::new(false),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
             database_info,
@@ -1334,7 +1334,8 @@ impl DatabaseCheckpointControl {
 
         if let Some(Command::CreateStreamingJob {
             job_type:
-                CreateStreamingJobType::SnapshotBackfill(_) | CreateStreamingJobType::BatchRefresh(_),
+                CreateStreamingJobType::SnapshotBackfill { .. }
+                | CreateStreamingJobType::BatchRefresh(_),
             ..
         }) = &command
             && self.state.is_paused()

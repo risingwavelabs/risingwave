@@ -564,6 +564,7 @@ impl stream_plan::PbStreamScanType {
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
             PbStreamScanType::SnapshotBackfill => !is_online,
+            #[expect(deprecated)]
             PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
                 false
             }
@@ -833,10 +834,10 @@ impl streaming_job_resource_type::ResourceType {
     pub fn resource_group(&self) -> Option<String> {
         match self {
             streaming_job_resource_type::ResourceType::Regular(_) => None,
-            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
-            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
                 Some(group.clone())
             }
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(_) => None,
         }
     }
 }

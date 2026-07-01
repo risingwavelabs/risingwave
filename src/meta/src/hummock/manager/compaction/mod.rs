@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -51,7 +52,6 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -83,7 +83,7 @@ use crate::hummock::metrics_utils::{
     trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
+use crate::hummock::{HummockManager, commit_multi_var};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
@@ -337,12 +337,16 @@ impl HummockManager {
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
 
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = self
+            .compaction
+            .write_with_process_name("get_compact_tasks_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("get_compact_tasks_impl")
+            .await;
         let compaction: &mut Compaction = &mut compaction_guard;
-        let mut versioning_guard = self.versioning.write().await;
         let versioning: &mut Versioning = &mut versioning_guard;
-
-        let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
@@ -358,6 +362,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
@@ -795,8 +800,14 @@ impl HummockManager {
     }
 
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
-        let compaction_guard = self.compaction.write().await;
-        let versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("report_compact_tasks")
+            .await;
+        let versioning_guard = self
+            .versioning
+            .write_with_process_name("report_compact_tasks")
+            .await;
 
         self.report_compact_tasks_impl(report_tasks, compaction_guard, versioning_guard)
             .await
@@ -812,8 +823,8 @@ impl HummockManager {
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
-        mut compaction_guard: RwLockWriteGuard<'_, Compaction>,
-        mut versioning_guard: RwLockWriteGuard<'_, Versioning>,
+        mut compaction_guard: impl DerefMut<Target = Compaction>,
+        mut versioning_guard: impl DerefMut<Target = Versioning>,
     ) -> Result<Vec<bool>> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction: &mut Compaction = &mut compaction_guard;
@@ -825,7 +836,6 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
         let versioning: &mut Versioning = &mut versioning_guard;
-        let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
         // purge stale compact_status
         for group_id in original_keys {
@@ -843,6 +853,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
 
         if deterministic_mode {

@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,7 +51,8 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
+    CreateStreamingJobType, RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest,
+    schedule,
 };
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
@@ -431,6 +432,70 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         }
     }
 
+    async fn resolve_since_timestamp_snapshot_backfill(
+        &mut self,
+        new_barrier: &mut schedule::NewBarrier,
+    ) -> MetaResult<bool> {
+        let Some((
+            Command::CreateStreamingJob {
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        since_epoch: Some(since_epoch),
+                    },
+                ..
+            },
+            notifiers,
+        )) = &mut new_barrier.command
+        else {
+            return Ok(true);
+        };
+        let since_timestamp_epoch = since_epoch.provided_since_epoch;
+
+        // Complete any inflight command first so the committed upstream epoch and
+        // table changelog view used for since_timestamp resolution cannot be stale.
+        match self.completing_task.wait_completing_task().await {
+            Ok(Some(output)) => self
+                .checkpoint_control
+                .ack_completed(&mut self.partial_graph_manager, output),
+            Ok(None) => {}
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to wait completing task before resolving since_timestamp"
+                );
+                return Err(err);
+            }
+        }
+
+        match self
+            .context
+            .resolve_log_store_epoch(
+                snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                    .copied(),
+                since_timestamp_epoch,
+            )
+            .await
+        {
+            Ok(upstream_log_epochs) => {
+                since_epoch.resolved = Some(upstream_log_epochs);
+                Ok(true)
+            }
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to resolve log store epoch for since_timestamp"
+                );
+                for notifier in take(notifiers) {
+                    notifier.notify_start_failed(err.clone());
+                }
+                Ok(false)
+            }
+        }
+    }
+
     pub(super) async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -714,7 +779,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
-                    let new_barrier = if matches!(
+                    let mut new_barrier = if matches!(
                         new_barrier.command,
                         Some((Command::RescheduleIntent { .. }, _))
                     ) {
@@ -742,6 +807,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
+                    match self
+                        .resolve_since_timestamp_snapshot_backfill(&mut new_barrier)
+                        .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(err) => {
+                            self.failure_recovery(err).await;
+                            continue;
+                        }
+                    }
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,

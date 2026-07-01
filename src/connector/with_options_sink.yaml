@@ -311,6 +311,14 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
+  - name: dynamodb.batch_write_retry_times
+    field_type: usize
+    required: false
+    default: '3'
+  - name: dynamodb.batch_write_retry_backoff_ms
+    field_type: u64
+    required: false
+    default: '100'
 ElasticSearchConfig:
   fields:
   - name: url
@@ -1835,6 +1843,16 @@ TurbopufferConfig:
   - name: filterable_columns
     field_type: String
     required: false
+  - name: write_batch_size
+    field_type: usize
+    required: false
+    default: DEFAULT_WRITE_BATCH_SIZE
+    allow_alter_on_fly: true
+  - name: max_linger_second
+    field_type: u64
+    required: false
+    default: DEFAULT_MAX_LINGER_SECOND
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true

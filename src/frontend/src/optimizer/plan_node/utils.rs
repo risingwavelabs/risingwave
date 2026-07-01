@@ -480,10 +480,17 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
-            scan.stream_scan_type() == StreamScanType::Backfill
-                || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
-                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
-                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
+            #[expect(deprecated)]
+            match scan.stream_scan_type() {
+                StreamScanType::Backfill
+                | StreamScanType::ArrangementBackfill
+                | StreamScanType::CrossDbSnapshotBackfill
+                | StreamScanType::SnapshotBackfill => true,
+                StreamScanType::Unspecified => unreachable!(),
+                StreamScanType::Chain
+                | StreamScanType::Rearrange
+                | StreamScanType::UpstreamOnly => false,
+            }
         } else {
             false
         }

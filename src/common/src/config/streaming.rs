@@ -111,6 +111,23 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
+    /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
+    ///
+    /// - `1` means no chunk-level concurrency.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_project_expr_concurrency")]
+    pub project_expr_concurrency: usize,
+
+    /// The maximum number of in-flight projection evaluation requests in `ProjectExecutor`.
+    ///
+    /// An in-flight request has started projection evaluation but has not finished yet. A finished
+    /// request no longer counts against this limit even if its result is still waiting to be emitted
+    /// in order.
+    ///
+    /// - `0` means unlimited in-flight requests.
+    #[serde(default = "default::developer::stream_project_expr_inflight_request_concurrency")]
+    pub project_expr_inflight_request_concurrency: usize,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
@@ -148,10 +165,11 @@ pub struct StreamingDeveloperConfig {
     pub memory_controller_sequence_tls_lag: u64,
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
-    /// Enable arrangement backfill
-    /// If false, the arrangement backfill will be disabled,
-    /// even if session variable set.
-    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
+    /// Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the
+    /// fallback backfill type.
+    #[deprecated(
+        note = "Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the fallback backfill type."
+    )]
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_enable_snapshot_backfill")]

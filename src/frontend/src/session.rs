@@ -200,9 +200,6 @@ pub(crate) struct FrontendEnv {
     /// Not used by the RisingWave batch engine.
     df_spillable_budget_ctx: MemoryContext,
 
-    /// address of the serverless backfill controller.
-    serverless_backfill_controller_addr: String,
-
     /// Prometheus client for querying metrics.
     prometheus_client: Option<PrometheusClient>,
 
@@ -294,7 +291,6 @@ impl FrontendEnv {
             mem_context: MemoryContext::none(),
             #[cfg(feature = "datafusion")]
             df_spillable_budget_ctx: MemoryContext::none(),
-            serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
             prometheus_selector: String::new(),
         }
@@ -579,7 +575,6 @@ impl FrontendEnv {
                 frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
-                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
                 udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
@@ -647,10 +642,6 @@ impl FrontendEnv {
 
     pub fn session_params_snapshot(&self) -> SessionConfig {
         self.session_params.read_recursive().clone()
-    }
-
-    pub fn sbc_address(&self) -> &String {
-        &self.serverless_backfill_controller_addr
     }
 
     /// Get a reference to the Prometheus client if available.
