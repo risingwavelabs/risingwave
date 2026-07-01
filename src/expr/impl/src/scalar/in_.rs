@@ -16,27 +16,26 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use futures_util::FutureExt;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt,
+};
 use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
-pub struct InExpression {
-    left: BoxedExpression,
+pub struct InExpression<E> {
+    left: E,
     set: HashSet<Datum>,
     return_type: DataType,
 }
 
-impl InExpression {
-    pub fn new(
-        left: BoxedExpression,
-        data: impl Iterator<Item = Datum>,
-        return_type: DataType,
-    ) -> Self {
+impl<E> InExpression<E> {
+    pub fn new(left: E, data: impl Iterator<Item = Datum>, return_type: DataType) -> Self {
         Self {
             left,
             set: data.collect(),
@@ -59,31 +58,55 @@ impl InExpression {
     }
 }
 
-#[async_trait::async_trait]
-impl Expression for InExpression {
+impl<E: ExpressionInfo> ExpressionInfo for InExpression<E> {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input_array = self.left.eval(input).await?;
+macro_rules! eval_in {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let input_array = risingwave_expr::forward!($mode, $this.left, eval($input))?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
-        for (data, vis) in input_array.iter().zip_eq_fast(input.visibility().iter()) {
+        for (data, vis) in input_array.iter().zip_eq_fast($input.visibility().iter()) {
             if vis {
                 // TODO: avoid `to_owned_datum()`
-                let ret = self.exists(&data.to_owned_datum());
+                let ret = $this.exists(&data.to_owned_datum());
                 output_array.append(ret);
             } else {
                 output_array.append(None);
             }
         }
         Ok(Arc::new(output_array.finish().into()))
+    }};
+}
+
+macro_rules! eval_row_in {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let data = risingwave_expr::forward!($mode, $this.left, eval_row($input))?;
+        let ret = $this.exists(&data);
+        Ok(ret.map(|b| b.to_scalar_value()))
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for InExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_in!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_in!(sync, self, input)
+    }
+}
+
+#[async_trait::async_trait]
+impl<E: AsyncExpression> AsyncExpression for InExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_in!(async, self, input)
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let data = self.left.eval_row(input).await?;
-        let ret = self.exists(&data);
-        Ok(ret.map(|b| b.to_scalar_value()))
+        eval_row_in!(async, self, input)
     }
 }
 
@@ -94,18 +117,21 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
     let mut data = Vec::with_capacity(iter.size_hint().0);
     let data_chunk = DataChunk::new_dummy(1);
     for child in iter {
-        let array = child
-            .eval(&data_chunk)
-            .now_or_never()
-            .expect("constant expression should not be async")?;
+        let BoxedExpression::Sync(child) = child else {
+            bail!("IN set expression must be sync")
+        };
+        let array = child.eval(&data_chunk)?;
         let datum = array.value_at(0).to_owned_datum();
         data.push(datum);
     }
-    Ok(Box::new(InExpression::new(
-        left_expr,
-        data.into_iter(),
-        return_type,
-    )))
+    Ok(match left_expr {
+        BoxedExpression::Sync(left_expr) => {
+            InExpression::new(left_expr, data.into_iter(), return_type).boxed()
+        }
+        left_expr @ BoxedExpression::Async(_) => {
+            InExpression::new(left_expr, data.into_iter(), return_type).boxed()
+        }
+    })
 }
 
 #[cfg(test)]
@@ -115,7 +141,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ToOwnedDatum;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{Expression, build_from_pretty};
+    use risingwave_expr::expr::build_from_pretty;
 
     #[tokio::test]
     async fn test_in_expr() {

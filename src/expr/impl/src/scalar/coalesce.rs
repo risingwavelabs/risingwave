@@ -18,29 +18,33 @@ use std::sync::Arc;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt, try_into_sync_exprs,
+};
 use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
-pub struct CoalesceExpression {
+pub struct CoalesceExpression<E> {
     return_type: DataType,
-    children: Vec<BoxedExpression>,
+    children: Vec<E>,
 }
 
-#[async_trait::async_trait]
-impl Expression for CoalesceExpression {
+impl<E: ExpressionInfo> ExpressionInfo for CoalesceExpression<E> {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let init_vis = input.visibility();
-        let mut input = input.clone();
+macro_rules! eval_coalesce {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let init_vis = $input.visibility();
+        let mut input = $input.clone();
         let len = input.capacity();
         let mut selection: Vec<Option<usize>> = vec![None; len];
-        let mut children_array = Vec::with_capacity(self.children.len());
-        for (child_idx, child) in self.children.iter().enumerate() {
-            let res = child.eval(&input).await?;
+        let mut children_array = Vec::with_capacity($this.children.len());
+        for (child_idx, child) in $this.children.iter().enumerate() {
+            let res = risingwave_expr::forward!($mode, child, eval(&input))?;
             let res_bitmap = res.null_bitmap();
             let orig_vis = input.visibility();
             for pos in orig_vis.bitand(res_bitmap).iter_ones() {
@@ -50,7 +54,7 @@ impl Expression for CoalesceExpression {
             input.set_visibility(new_vis);
             children_array.push(res);
         }
-        let mut builder = self.return_type.create_array_builder(len);
+        let mut builder = $this.return_type.create_array_builder(len);
         for (i, sel) in selection.iter().enumerate() {
             if init_vis.is_set(i)
                 && let Some(child_idx) = sel
@@ -61,25 +65,56 @@ impl Expression for CoalesceExpression {
             }
         }
         Ok(Arc::new(builder.finish()))
-    }
+    }};
+}
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        for child in &self.children {
-            let datum = child.eval_row(input).await?;
+macro_rules! eval_row_coalesce {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        for child in &$this.children {
+            let datum = risingwave_expr::forward!($mode, child, eval_row($input))?;
             if datum.is_some() {
                 return Ok(datum);
             }
         }
         Ok(None)
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for CoalesceExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_coalesce!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_coalesce!(sync, self, input)
+    }
+}
+
+#[async_trait::async_trait]
+impl<E: AsyncExpression> AsyncExpression for CoalesceExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_coalesce!(async, self, input)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_coalesce!(async, self, input)
     }
 }
 
 #[build_function("coalesce(...) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Ok(Box::new(CoalesceExpression {
-        return_type,
-        children,
-    }))
+    match try_into_sync_exprs(children) {
+        Ok(children) => Ok(CoalesceExpression {
+            return_type,
+            children,
+        }
+        .boxed()),
+        Err(children) => Ok(CoalesceExpression {
+            return_type,
+            children,
+        }
+        .boxed()),
+    }
 }
 
 #[cfg(test)]

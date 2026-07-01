@@ -424,7 +424,7 @@ mod tests {
     use risingwave_common::config::StreamingConfig;
     use risingwave_common::types::DefaultOrd;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_expr::expr::{self, Expression, ValueImpl};
+    use risingwave_expr::expr::{self, ExpressionInfo, SyncExpression, ValueImpl};
     use tokio::sync::Notify;
     use tokio::time::timeout;
 
@@ -937,13 +937,14 @@ mod tests {
     #[derive(Debug)]
     struct DummyNondecreasingExpr;
 
-    #[async_trait::async_trait]
-    impl Expression for DummyNondecreasingExpr {
+    impl ExpressionInfo for DummyNondecreasingExpr {
         fn return_type(&self) -> DataType {
             DataType::Int64
         }
+    }
 
-        async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
+    impl SyncExpression for DummyNondecreasingExpr {
+        fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
             let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
             Ok(ValueImpl::Scalar {
                 value: Some(value.into()),
@@ -951,7 +952,7 @@ mod tests {
             })
         }
 
-        async fn eval_row(&self, _input: &OwnedRow) -> expr::Result<Datum> {
+        fn eval_row(&self, _input: &OwnedRow) -> expr::Result<Datum> {
             let value = DUMMY_COUNTER.fetch_add(1, atomic::Ordering::SeqCst);
             Ok(Some(value.into()))
         }

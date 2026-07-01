@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 
 use crate::ExprError;
 use crate::error::Result;
-use crate::expr::{Expression, ValueImpl};
+use crate::expr::{AsyncExpression, ExpressionInfo, SyncExpression, ValueImpl};
 
-/// A wrapper of [`Expression`] that only keeps the first error if multiple errors are returned.
+/// A wrapper of an expression that only keeps the first error if multiple errors are returned.
 pub(crate) struct Strict<E> {
     inner: E,
 }
@@ -39,45 +38,70 @@ where
 
 impl<E> Strict<E>
 where
-    E: Expression,
+    E: ExpressionInfo,
 {
     pub fn new(inner: E) -> Self {
         Self { inner }
     }
 }
 
-#[async_trait]
-impl<E> Expression for Strict<E>
+impl<E> ExpressionInfo for Strict<E>
 where
-    E: Expression,
+    E: ExpressionInfo,
 {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        match self.inner.eval(input).await {
+    fn input_ref_index(&self) -> Option<usize> {
+        self.inner.input_ref_index()
+    }
+}
+
+macro_rules! strict_eval {
+    ($mode:ident, $this:expr, $input:expr, $method:ident) => {
+        match forward!($mode, $this.inner, $method($input)) {
             Err(ExprError::Multiple(_, errors)) => Err(errors.into_first()),
             res => res,
         }
+    };
+}
+
+impl<E> SyncExpression for Strict<E>
+where
+    E: SyncExpression,
+{
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        strict_eval!(sync, self, input, eval)
     }
 
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        match self.inner.eval_v2(input).await {
-            Err(ExprError::Multiple(_, errors)) => Err(errors.into_first()),
-            res => res,
-        }
+    fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        strict_eval!(sync, self, input, eval_v2)
     }
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        self.inner.eval_row(input).await
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        self.inner.eval_row(input)
     }
 
     fn eval_const(&self) -> Result<Datum> {
         self.inner.eval_const()
     }
+}
 
-    fn input_ref_index(&self) -> Option<usize> {
-        self.inner.input_ref_index()
+#[async_trait::async_trait]
+impl<E> AsyncExpression for Strict<E>
+where
+    E: AsyncExpression,
+{
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        strict_eval!(async, self, input, eval)
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        strict_eval!(async, self, input, eval_v2)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        self.inner.eval_row(input).await
     }
 }
