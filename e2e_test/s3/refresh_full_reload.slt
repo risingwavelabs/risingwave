@@ -62,3 +62,72 @@ DROP TABLE s3_full_reload_issue26012;
 
 system ok
 python3 e2e_test/s3/refresh_full_reload_helper.py cleanup
+
+# The periodic refresh path must also complete without a manual REFRESH TABLE.
+# This covers the scheduler-visible `refresh_interval_sec` contract for S3:
+# the interval is persisted, scheduled refreshes can fire while the job is IDLE,
+# and each cycle performs a full replacement of the current S3 object set.
+
+statement ok
+DROP TABLE IF EXISTS s3_full_reload_periodic_issue26012;
+
+system ok
+python3 e2e_test/s3/refresh_full_reload_helper.py setup-initial
+
+statement ok
+CREATE TABLE s3_full_reload_periodic_issue26012 (id int PRIMARY KEY, name varchar) WITH (
+    connector = 's3',
+    match_pattern = 'refresh_full_reload_issue26012/*.csv',
+    s3.region_name = 'custom',
+    s3.bucket_name = 'hummock001',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+    refresh_mode = 'FULL_RELOAD',
+    refresh_interval_sec = '5'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+# The S3 CI lane uses stream_refresh_scheduler_interval_sec = 1, so 20s
+# covers multiple scheduler ticks while keeping the test bounded.
+sleep 20s
+
+query IT rowsort retry 12 backoff 5s
+SELECT id, name FROM s3_full_reload_periodic_issue26012;
+----
+1 alice
+2 bob
+
+query TBI retry 12 backoff 5s
+SELECT s.current_status, s.last_success_time IS NOT NULL, s.trigger_interval_secs
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 's3_full_reload_periodic_issue26012';
+----
+IDLE t 5
+
+system ok
+python3 e2e_test/s3/refresh_full_reload_helper.py setup-updated
+
+# The S3 CI lane uses stream_refresh_scheduler_interval_sec = 1, so 20s
+# covers multiple scheduler ticks while keeping the test bounded.
+sleep 20s
+
+query IT rowsort retry 12 backoff 5s
+SELECT id, name FROM s3_full_reload_periodic_issue26012;
+----
+1 alice_updated
+3 carol
+
+query TBI retry 12 backoff 5s
+SELECT s.current_status, s.last_success_time IS NOT NULL, s.trigger_interval_secs
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 's3_full_reload_periodic_issue26012';
+----
+IDLE t 5
+
+statement ok
+DROP TABLE s3_full_reload_periodic_issue26012;
+
+system ok
+python3 e2e_test/s3/refresh_full_reload_helper.py cleanup
