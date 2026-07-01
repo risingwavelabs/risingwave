@@ -523,8 +523,7 @@ impl DdlController {
                         refresh_interval_sec,
                         replace_sink,
                         since_timestamp_epoch,
-                    )
-                    .await
+                    ))
                 }
                 DdlCommand::DropStreamingJob { job_id, drop_mode } => {
                     ctrl.drop_streaming_job(job_id, drop_mode).await

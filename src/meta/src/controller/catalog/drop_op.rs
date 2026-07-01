@@ -61,22 +61,9 @@ impl CatalogController {
             validate_subscription_deletion(&txn, object_id.as_subscription_id()).await?;
         }
 
-        // Objects that are also removed in RESTRICT mode are implicit dependents, not objects
-        // removed specifically because CASCADE was requested.
-        let mut implicit_object_ids = HashSet::new();
+        let mut notice_excluded_object_ids = HashSet::new();
         let mut removed_objects = match drop_mode {
-            DropMode::Cascade => {
-                if object_type == ObjectType::Table {
-                    implicit_object_ids.extend(
-                        get_referring_objects(object_id, &txn)
-                            .await?
-                            .into_iter()
-                            .filter(|object| object.obj_type == ObjectType::Index)
-                            .map(|object| object.oid),
-                    );
-                }
-                get_referring_objects_cascade(object_id, &txn).await?
-            }
+            DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
                 ObjectType::Schema => {
@@ -119,21 +106,6 @@ impl CatalogController {
             },
         };
 
-        let cascade_objects =
-            if drop_mode == DropMode::Cascade && object_type != ObjectType::Database {
-                Some(
-                    build_cascade_objects_for_notice(
-                        object_id,
-                        &implicit_object_ids,
-                        &removed_objects,
-                        &txn,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-
         // check iceberg source.
         if obj.obj_type == ObjectType::Table {
             let table_name = Table::find_by_id(object_id.as_table_id())
@@ -143,7 +115,7 @@ impl CatalogController {
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-            let iceberg_source = Source::find()
+            let iceberg_source: Option<PartialObject> = Source::find()
                 .inner_join(Object)
                 .filter(
                     object::Column::DatabaseId
@@ -158,6 +130,7 @@ impl CatalogController {
                 .one(&txn)
                 .await?;
             if let Some(iceberg_source) = iceberg_source {
+                notice_excluded_object_ids.insert(iceberg_source.oid);
                 removed_objects.push(iceberg_source);
             }
         }
@@ -219,6 +192,21 @@ impl CatalogController {
                 }
             }
         }
+
+        let cascade_objects =
+            if drop_mode == DropMode::Cascade && object_type != ObjectType::Database {
+                Some(
+                    build_cascade_objects_for_notice(
+                        object_id,
+                        &notice_excluded_object_ids,
+                        &removed_objects,
+                        &txn,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
 
         // 1. Detect when an Iceberg table is part of the dependencies.
         // 2. Drop database with iceberg tables in it is not supported.
@@ -568,13 +556,13 @@ async fn report_drop_object(
 
 async fn build_cascade_objects_for_notice(
     root_object_id: ObjectId,
-    implicit_object_ids: &HashSet<ObjectId>,
+    excluded_object_ids: &HashSet<ObjectId>,
     objects: &[PartialObject],
     txn: &DatabaseTransaction,
 ) -> MetaResult<Vec<PbCascadeObject>> {
     let grouped = objects
         .iter()
-        .filter(|object| object.oid != root_object_id && !implicit_object_ids.contains(&object.oid))
+        .filter(|object| object.oid != root_object_id && !excluded_object_ids.contains(&object.oid))
         .cloned()
         .into_group_map_by(|object| object.obj_type);
     let mut result = vec![];
