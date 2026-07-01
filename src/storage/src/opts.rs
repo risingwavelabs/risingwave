@@ -189,6 +189,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
     /// Pull interval for iceberg compaction task requests in milliseconds.
     pub iceberg_compaction_pull_interval_ms: u64,
+    /// Whether to enable prefetch for iceberg compaction.
+    pub iceberg_compaction_enable_prefetch: bool,
 }
 
 impl Default for StorageOpts {
@@ -348,6 +350,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .iceberg_compaction_pending_parallelism_budget_multiplier,
             iceberg_compaction_pull_interval_ms: c.storage.iceberg_compaction_pull_interval_ms,
+            iceberg_compaction_enable_prefetch: c.storage.iceberg_compaction_enable_prefetch,
             iceberg_compaction_target_binpack_group_size_mb: c
                 .storage
                 .iceberg_compaction_target_binpack_group_size_mb,

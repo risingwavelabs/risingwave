@@ -1492,7 +1492,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     "mem-table operation inconsistent! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
                     self.table_id,
                     vnode,
-                    &key,
+                    key,
                     prev.debug_fmt(&*self.row_serde),
                     new.debug_fmt(&*self.row_serde),
                 )

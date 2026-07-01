@@ -15,7 +15,7 @@
 #![cfg(any(test, feature = "test"))]
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -41,6 +41,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::{ClusterController, ClusterControllerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
 use crate::hummock::compaction::selector::{LocalSelectorStatistic, default_compaction_selector};
 use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
 use crate::hummock::level_handler::LevelHandler;
@@ -49,6 +50,9 @@ use crate::hummock::model::CompactionGroup;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
+
+static EMPTY_IN_PROGRESS_COMPACTION_VIEW: LazyLock<InProgressCompactionView> =
+    LazyLock::new(InProgressCompactionView::default);
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
@@ -426,6 +430,7 @@ pub fn compaction_selector_context<'a>(
         developer_config,
         table_watermarks,
         state_table_info,
+        in_progress_compactions: &EMPTY_IN_PROGRESS_COMPACTION_VIEW,
     }
 }
 

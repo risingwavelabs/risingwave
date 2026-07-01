@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(trait_alias)]
 #![feature(coroutines)]
-#![feature(type_alias_impl_trait)]
-#![feature(box_patterns)]
-#![feature(stmt_expr_attributes)]
-#![feature(error_generic_member_access)]
 
 pub use table::*;
 

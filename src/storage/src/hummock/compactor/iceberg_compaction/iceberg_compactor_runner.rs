@@ -32,7 +32,7 @@ use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_heuristic_output_parallelism,
+    iceberg_compaction_enable_heuristic_output_parallelism, iceberg_compaction_enable_prefetch,
     iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -76,6 +76,10 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
     pub max_concurrent_closes: usize,
+    /// Whether to prefetch entire data files before compaction.
+    /// See `StorageConfig::iceberg_compaction_enable_prefetch` for full documentation.
+    #[builder(default = "iceberg_compaction_enable_prefetch()")]
+    pub enable_prefetch: bool,
     #[builder]
     pub target_binpack_group_size_mb: Option<u64>,
     #[builder]
@@ -262,6 +266,7 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
+            .enable_prefetch(config.enable_prefetch)
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
@@ -441,7 +446,7 @@ pub async fn create_task_execution(
         task_type,
     } = iceberg_compaction_task;
 
-    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
+    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     let catalog = iceberg_config
@@ -605,4 +610,23 @@ pub async fn create_task_execution(
         sink_id,
         plan_runners: runners,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runner_config_enable_prefetch_default_is_false() {
+        let config = IcebergCompactorRunnerConfigBuilder::default()
+            .target_binpack_group_size_mb(None)
+            .min_group_size_mb(None)
+            .min_group_file_count(None)
+            .build()
+            .expect("failed to build IcebergCompactorRunnerConfig with defaults");
+        assert!(
+            !config.enable_prefetch,
+            "enable_prefetch must default to false to match StorageConfig default"
+        );
+    }
 }

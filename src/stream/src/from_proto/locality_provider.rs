@@ -22,6 +22,8 @@ use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::Executor;
 use crate::executor::locality_provider::LocalityProviderExecutor;
 
+impl_stream_node_body!(LocalityProvider(LocalityProviderNode) => LocalityProviderBuilder);
+
 impl ExecutorBuilder for LocalityProviderBuilder {
     type Node = LocalityProviderNode;
 

@@ -74,7 +74,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, PbSstableFilterType, ReportCompactionTaskRequest,
+    CompactTaskProgress, PbSstableFilterLayout, PbSstableFilterType, ReportCompactionTaskRequest,
     SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -90,8 +90,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockErrorInner, HummockResult, ObjectIdManager, SstableBuilderOptions,
-    Xor8FilterBuilder, Xor16FilterBuilder,
+    GetObjectId, HummockError, HummockErrorInner, HummockResult, ObjectIdManager,
+    SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -101,7 +101,7 @@ use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder, NoneFilterBuilder,
     SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
     validate_ssts,
 };
@@ -215,10 +215,22 @@ impl Compactor {
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             match (
-                self.task_config.sstable_filter_kind,
-                self.task_config.use_block_based_filter,
+                self.task_config.sstable_filter_type,
+                self.task_config.sstable_filter_layout,
             ) {
-                (PbSstableFilterType::SstableFilterXor8, true) => {
+                (PbSstableFilterType::SstableFilterNone, _) => {
+                    self.compact_key_range_impl::<_, NoneFilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Blocked) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
                         iter,
@@ -230,7 +242,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor8, false) => {
+                (PbSstableFilterType::SstableFilterXor8, PbSstableFilterLayout::Plain) => {
                     self.compact_key_range_impl::<_, Xor8FilterBuilder>(
                         factory,
                         iter,
@@ -242,7 +254,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor16, true) => {
+                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Blocked) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
                         iter,
@@ -254,7 +266,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (PbSstableFilterType::SstableFilterXor16, false) => {
+                (PbSstableFilterType::SstableFilterXor16, PbSstableFilterLayout::Plain) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,
                         iter,
@@ -266,7 +278,12 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (kind, _) => unreachable!("unsupported sstable filter kind in compactor: {kind:?}"),
+                (filter_type, layout) => {
+                    return Err(HummockError::compaction_executor(format!(
+                        "unresolved SST filter layout in task config: {:?}, {:?}",
+                        filter_type, layout
+                    )));
+                }
             }
         };
 
@@ -582,6 +599,7 @@ pub fn start_iceberg_compactor(
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
+                                    .enable_prefetch(compactor_context.storage_opts.iceberg_compaction_enable_prefetch)
                                     .target_binpack_group_size_mb(
                                         compactor_context.storage_opts.iceberg_compaction_target_binpack_group_size_mb
                                     )
@@ -1044,7 +1062,10 @@ pub fn start_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
+                                    let (
+                                        (compact_task, table_stats, object_timestamps),
+                                        _memory_tracker,
+                                    ) = compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,
@@ -1054,7 +1075,8 @@ pub fn start_compactor(
                                     .await;
 
                                     shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
+                                    running_task_parallelism
+                                        .fetch_sub(parallelism as u32, Ordering::SeqCst);
 
                                     send_report_task_event(
                                         &compact_task,
@@ -1064,14 +1086,16 @@ pub fn start_compactor(
                                     );
 
                                     let enable_check_compaction_result =
-                                    context.storage_opts.check_compaction_result;
-                                    let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
+                                        context.storage_opts.check_compaction_result;
+                                    let need_check_task =
+                                        !compact_task.sorted_output_ssts.is_empty()
+                                            && compact_task.task_status == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
                                         let read_table_ids = compact_task
                                             .get_table_ids_from_input_ssts()
                                             .collect::<Vec<_>>();
-                                        match compaction_catalog_manager_ref.acquire(read_table_ids.into_iter().collect()).await {
+                                        match compaction_catalog_manager_ref.acquire(read_table_ids).await {
                                             Ok(compaction_catalog_agent_ref) =>  {
                                                 match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
                                                 {
@@ -1225,13 +1249,16 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let compaction_catalog_agent_ref = CompactionCatalogManager::build_compaction_catalog_agent(table_id_to_catalog);
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact_with_agent(
+                                    let compaction_catalog_manager_ref =
+                                        Arc::new(CompactionCatalogManager::new_preloaded(
+                                            table_id_to_catalog,
+                                        ));
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,
                                         shared_compactor_object_id_manager,
-                                        compaction_catalog_agent_ref.clone(),
+                                        compaction_catalog_manager_ref.clone(),
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
@@ -1249,16 +1276,31 @@ pub fn start_shared_compactor(
                                     {
                                         Ok(_) => {
                                             // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
-                                            let enable_check_compaction_result = context.storage_opts.check_compaction_result;
-                                            let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
+                                            let enable_check_compaction_result =
+                                                context.storage_opts.check_compaction_result;
+                                            let need_check_task =
+                                                !compact_task.sorted_output_ssts.is_empty()
+                                                    && compact_task.task_status
+                                                        == TaskStatus::Success;
                                             if enable_check_compaction_result && need_check_task {
-                                                match check_compaction_result(&compact_task, context.clone(),compaction_catalog_agent_ref).await {
+                                                let read_table_ids = compact_task
+                                                    .get_table_ids_from_input_ssts()
+                                                    .collect::<Vec<_>>();
+                                                match compaction_catalog_manager_ref.acquire(read_table_ids).await {
+                                                    Ok(compaction_catalog_agent_ref) => {
+                                                        match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
+                                                        {
+                                                            Err(e) => {
+                                                                tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", task_id);
+                                                            }
+                                                            Ok(true) => (),
+                                                            Ok(false) => {
+                                                                panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                            }
+                                                        }
+                                                    }
                                                     Err(e) => {
-                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}", task_id);
-                                                    },
-                                                    Ok(true) => (),
-                                                    Ok(false) => {
-                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
+                                                        tracing::warn!(error = %e.as_report(), "failed to acquire compaction catalog agent");
                                                     }
                                                 }
                                             }

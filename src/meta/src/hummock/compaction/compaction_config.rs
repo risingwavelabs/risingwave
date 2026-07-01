@@ -15,7 +15,7 @@
 use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_hummock_sdk::filter_utils::{
-    parse_sstable_filter_kind, parse_sstable_filter_layout,
+    parse_sstable_filter_layout, parse_sstable_filter_type,
 };
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
@@ -41,7 +41,7 @@ impl CompactionConfigBuilder {
                 compression_algorithm: compaction_config::compression_algorithm_vec(
                     compaction_config::max_level(),
                 ),
-                sstable_filter_kind: compaction_config::sstable_filter_kind(),
+                sstable_filter_type: compaction_config::sstable_filter_type(),
                 sstable_filter_layout: compaction_config::sstable_filter_layout(),
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),
@@ -131,7 +131,7 @@ impl CompactionConfigBuilder {
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
             .max_kv_count_for_xor16(opt.blocked_xor_filter_kv_count_threshold)
             .max_vnode_key_range_bytes(opt.max_vnode_key_range_bytes)
-            .sstable_filter_kind(opt.sstable_filter_kind.clone())
+            .sstable_filter_type(opt.sstable_filter_type.clone())
             .sstable_filter_layout(opt.sstable_filter_layout.clone())
     }
 
@@ -141,10 +141,10 @@ impl CompactionConfigBuilder {
             // Avoid crashing later in compaction task planning due to invalid per-level filter
             // configs. Fallback to legacy behavior (xor16 + auto) and keep other fields unchanged.
             tracing::warn!(
-                "Bad compaction config: {}. Falling back to default sstable filter kind/layout.",
+                "Bad compaction config: {}. Falling back to default sstable filter type/layout.",
                 reason
             );
-            config.sstable_filter_kind.clear();
+            config.sstable_filter_type.clear();
             config.sstable_filter_layout.clear();
         }
         config
@@ -161,16 +161,16 @@ pub fn validate_compaction_config(config: &CompactionConfig) -> Result<(), Strin
             config.level0_stop_write_threshold_sub_level_number, sub_level_number_threshold_min
         ));
     }
-    if !config.sstable_filter_kind.is_empty() {
-        if config.sstable_filter_kind.len() < config.max_level as usize + 1 {
+    if !config.sstable_filter_type.is_empty() {
+        if config.sstable_filter_type.len() < config.max_level as usize + 1 {
             return Err(format!(
-                "sstable_filter_kind must provide at least {} entries for max_level {}",
+                "sstable_filter_type must provide at least {} entries for max_level {}",
                 config.max_level + 1,
                 config.max_level
             ));
         }
-        for filter_kind in &config.sstable_filter_kind {
-            parse_sstable_filter_kind(filter_kind)?;
+        for filter_type in &config.sstable_filter_type {
+            parse_sstable_filter_type(filter_type)?;
         }
     }
 
@@ -217,7 +217,7 @@ builder_field! {
     level0_tier_compact_file_number: u64,
     compaction_mode: i32,
     compression_algorithm: Vec<String>,
-    sstable_filter_kind: Vec<String>,
+    sstable_filter_type: Vec<String>,
     sstable_filter_layout: Vec<String>,
     compaction_filter_mask: u32,
     target_file_size_base: u64,
@@ -248,20 +248,21 @@ mod tests {
     #[test]
     fn test_validate_compaction_config_accepts_missing_filter_config() {
         let mut config = CompactionConfigBuilder::new().build();
-        config.sstable_filter_kind.clear();
+        config.sstable_filter_type.clear();
         config.sstable_filter_layout.clear();
         assert!(validate_compaction_config(&config).is_ok());
     }
 
     #[test]
-    fn test_validate_compaction_config_rejects_short_filter_layout() {
+    fn test_validate_compaction_config_rejects_invalid_filter_config() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_type = vec!["xor16".to_owned()];
+        assert!(validate_compaction_config(&config).is_err());
+
         let mut config = CompactionConfigBuilder::new().build();
         config.sstable_filter_layout = vec!["auto".to_owned()];
         assert!(validate_compaction_config(&config).is_err());
-    }
 
-    #[test]
-    fn test_validate_compaction_config_rejects_invalid_filter_layout_value() {
         let mut config = CompactionConfigBuilder::new().build();
         config.sstable_filter_layout = vec!["auto".to_owned(); config.max_level as usize + 1];
         config.sstable_filter_layout[0] = "unknown".to_owned();
@@ -269,9 +270,9 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_compaction_config_rejects_short_filter_kind() {
+    fn test_validate_compaction_config_accepts_none_filter_type() {
         let mut config = CompactionConfigBuilder::new().build();
-        config.sstable_filter_kind = vec!["xor16".to_owned()];
-        assert!(validate_compaction_config(&config).is_err());
+        config.sstable_filter_type = vec!["none".to_owned(); config.max_level as usize + 1];
+        assert!(validate_compaction_config(&config).is_ok());
     }
 }

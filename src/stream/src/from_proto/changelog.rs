@@ -22,6 +22,8 @@ use crate::task::ExecutorParams;
 
 pub struct ChangeLogExecutorBuilder;
 
+impl_stream_node_body!(Changelog(ChangeLogNode) => ChangeLogExecutorBuilder);
+
 impl ExecutorBuilder for ChangeLogExecutorBuilder {
     type Node = ChangeLogNode;
 

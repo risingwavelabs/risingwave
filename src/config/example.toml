@@ -110,7 +110,7 @@ level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
 blocked_xor_filter_kv_count_threshold = 262144
 max_vnode_key_range_bytes = ""
-sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor8", "xor8"]
+sstable_filter_type = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor8", "xor8"]
 sstable_filter_layout = ["auto", "blocked", "blocked", "blocked", "blocked", "blocked", "blocked"]
 
 [meta.developer]
@@ -188,6 +188,7 @@ max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
 webhook_auth_max_clock_skew_ms = 300000
+unsafe_enable_local_fs_connector = false
 
 [[frontend.hba_config.entries]]
 connection_type = "Local"
@@ -219,6 +220,8 @@ exchange_initial_permits = 2048
 exchange_batched_permits = 256
 exchange_concurrent_barriers = 1
 exchange_concurrent_dispatchers = 0
+project_expr_concurrency = 1
+project_expr_inflight_request_concurrency = 0
 dml_channel_initial_permits = 32768
 hash_agg_max_dirty_groups_heap_size = 67108864
 memory_controller_threshold_aggressive = 0.9
@@ -233,6 +236,7 @@ memory_controller_sequence_tls_lag = 32
 enable_arrangement_backfill = true
 enable_snapshot_backfill = true
 high_join_amplification_threshold = 2048
+high_gap_fill_amplification_threshold = 2048
 enable_actor_tokio_metrics = true
 exchange_connection_pool_size = 1
 enable_auto_schema_change = true
@@ -323,6 +327,7 @@ iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
 iceberg_compaction_pull_interval_ms = 5000
+iceberg_compaction_enable_prefetch = false
 iceberg_compaction_target_binpack_group_size_mb = 102400
 iceberg_compaction_min_group_size_mb = ""
 iceberg_compaction_min_group_file_count = ""

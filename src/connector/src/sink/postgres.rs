@@ -199,7 +199,7 @@ impl Sink for PostgresSink {
             .await
             .context(format!(
                 "failed to connect to database: {}, schema: {}, table: {}",
-                &self.config.database, &self.config.schema, &self.config.table
+                self.config.database, self.config.schema, self.config.table
             ))?;
 
             // Check that names and types match, order of columns doesn't matter.

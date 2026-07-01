@@ -156,8 +156,7 @@ async fn handle_alter_mv_bound(
             dependent_secrets,
             columns,
             emit_mode,
-        )
-        .await?
+        )?
     };
 
     if refresh_interval_sec.is_some() {

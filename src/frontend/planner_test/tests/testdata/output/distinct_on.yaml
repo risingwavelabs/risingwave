@@ -238,3 +238,7 @@
         └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a, t.b] }
           └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
             └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- sql: |
+    create table t (x int);
+    select distinct on(x) count(*) from t;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'

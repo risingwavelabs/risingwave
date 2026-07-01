@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::BytesMut;
-use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -728,12 +727,10 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                         .fields
                         .iter()
                         .map(|f| {
-                            (
-                                f.name.clone(),
-                                DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                            )
+                            let dt = DataType::from(f.data_type.as_ref().unwrap());
+                            Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
                         })
-                        .collect_vec(),
+                        .collect::<Result<Vec<_>>>()?,
                 );
                 self.client
                     .execute_sql_sync(vec![sql.clone()])
@@ -783,12 +780,10 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                             .fields
                             .iter()
                             .map(|f| {
-                                (
-                                    f.name.clone(),
-                                    DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                                )
+                                let dt = DataType::from(f.data_type.as_ref().unwrap());
+                                Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
                             })
-                            .collect::<Vec<_>>(),
+                            .collect::<Result<Vec<_>>>()?,
                     );
                     self.client
                         .execute_sql_sync(vec![sql.clone()])
@@ -902,7 +897,10 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMPTZ".to_owned(),
         DataType::Jsonb => "VARCHAR(MAX)".to_owned(),
-        DataType::Decimal => "DECIMAL".to_owned(),
+        // Redshift's DECIMAL without explicit precision defaults to (38,0), which drops all
+        // fractional digits. We use DECIMAL(38, 10) consistent with the Iceberg/Snowflake sink
+        // convention, though values with more than 10 fractional digits may still lose precision.
+        DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {
             return Err(SinkError::Config(anyhow!(
@@ -1093,5 +1091,13 @@ mod tests {
         assert!(sql.contains(r#"UPDATE SET v1 = source.v1, v3 = source.v3"#));
         assert!(sql.contains(r#"INSERT (v1, v3) VALUES (source.v1, source.v3)"#));
         assert!(!sql.contains("v2"));
+    }
+
+    #[test]
+    fn test_convert_redshift_decimal_data_type() {
+        assert_eq!(
+            convert_redshift_data_type(&DataType::Decimal).unwrap(),
+            "DECIMAL(38, 10)"
+        );
     }
 }

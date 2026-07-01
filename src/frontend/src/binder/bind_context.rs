@@ -116,6 +116,8 @@ pub struct BindContext {
     /// Map the cte's name to its binding state.
     /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
+    /// Exposed relation names of CTE references in the current FROM scope.
+    pub cte_relation_names: HashSet<String>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
     /// Whether the security invoker is set, currently only used for views.
@@ -264,6 +266,52 @@ impl BindContext {
         } else {
             Ok(columns.clone())
         }
+    }
+
+    pub fn check_catalog_name(&self, exposed_relation_name: &str) -> Result<()> {
+        if self.cte_relation_names.contains(exposed_relation_name) {
+            return Err(ErrorCode::DuplicateRelationName(format!(
+                "table name \"{}\" specified more than once",
+                exposed_relation_name
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    pub fn add_cte_name(&mut self, exposed_relation_name: String) {
+        self.cte_relation_names.insert(exposed_relation_name);
+    }
+
+    fn has_relation_name(&self, relation_name: &str) -> bool {
+        self.range_of
+            .keys()
+            .any(|(_, existing_name)| existing_name == relation_name)
+    }
+
+    pub fn check_relation_name_conflict(&self, relation_name: &str) -> Result<()> {
+        if self.has_relation_name(relation_name) {
+            return Err(ErrorCode::DuplicateRelationName(format!(
+                "table name \"{}\" specified more than once",
+                relation_name
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    fn check_cte_relation_name_conflict(&self, other: &Self) -> Result<()> {
+        // `self` may bind a CTE in a separate context, while `other` already has a catalog
+        // relation with the same exposed name.
+        for cte_relation_name in &self.cte_relation_names {
+            other.check_relation_name_conflict(cte_relation_name)?;
+        }
+        // `other` may bind a CTE in a separate context, while `self` already has a catalog
+        // relation with the same exposed name.
+        for cte_relation_name in &other.cte_relation_names {
+            self.check_relation_name_conflict(cte_relation_name)?;
+        }
+        Ok(())
     }
 
     /// Identifies two columns as being in the same group. Additionally, possibly provides one of
@@ -430,6 +478,8 @@ impl BindContext {
     /// Merges two `BindContext`s which are adjacent. For instance, the `BindContext` of two
     /// adjacent cross-joined tables.
     pub fn merge_context(&mut self, other: Self) -> Result<()> {
+        self.check_cte_relation_name_conflict(&other)?;
+
         let begin = self.columns.len();
         self.columns.extend(other.columns.into_iter().map(|mut c| {
             c.index += begin;
@@ -453,6 +503,7 @@ impl BindContext {
                 }
             }
         }
+        self.cte_relation_names.extend(other.cte_relation_names);
         // To merge the column_group_contexts, we just need to offset RHS
         // with the next_group_id of LHS.
         let ColumnGroupContext {

@@ -1083,7 +1083,7 @@ impl StreamFragmentGraph {
                 old_internal_tables.len()
             );
         }
-        old_internal_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        old_internal_tables.sort_by_key(|t| t.id);
         new_internal_table_ids.sort();
 
         let internal_table_id_map = new_internal_table_ids
@@ -1145,12 +1145,15 @@ impl StreamFragmentGraph {
 
     /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
-        self.fragments
-            .values()
-            .filter(|b| b.job_id.is_some())
-            .map(|b| b.fragment_id)
-            .exactly_one()
-            .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
+        Itertools::exactly_one(
+            self.fragments
+                .values()
+                .filter(|b| b.job_id.is_some())
+                .map(|b| b.fragment_id),
+        )
+        .expect(
+            "require exactly 1 materialize/sink/cdc source node when creating the streaming job",
+        )
     }
 
     /// Returns the fragment id where the table dml is received.
@@ -1632,7 +1635,7 @@ pub fn fill_snapshot_backfill_epoch(
             true
         }
     });
-    result.map(|_| applied)
+    result.map_err(MetaError::from).map(|_| applied)
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =

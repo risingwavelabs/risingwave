@@ -29,12 +29,12 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
-    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+    ReplaceJob, ReplaceMaterializedView, ReplaceSink, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
-    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
-    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
-    streaming_job_resource_type,
+    PbTableJobType, StreamingJobResourceType, TableJobType, WaitVersion, alter_name_request,
+    alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -130,6 +130,7 @@ pub trait CatalogWriter: Send + Sync {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -145,7 +146,18 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
+    ) -> Result<()>;
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -261,7 +273,14 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()>;
@@ -398,11 +417,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_index(index, table, graph, if_not_exists)
+            .create_index(index, table, graph, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -475,11 +495,45 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, dependencies, if_not_exists)
+            .create_sink(
+                sink,
+                graph,
+                dependencies,
+                resource_type,
+                if_not_exists,
+                since_timestamp_epoch,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceSink(ReplaceSink {
+                    sink: Some(sink),
+                    old_sink_id,
+                    dependencies: dependencies.into_iter().collect(),
+                    resource_type: Some(StreamingJobResourceType {
+                        resource_type: Some(resource_type),
+                    }),
+                }),
+            )
             .await?;
         self.wait_version(version).await
     }
@@ -742,16 +796,30 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_resource_group(table_id, resource_group, deferred)
+            .alter_resource_group(job_id, resource_group, deferred)
             .await
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_database_resource_group(database_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
     }
 
     async fn alter_database_param(

@@ -249,8 +249,14 @@ impl HandlerArgs {
                 *if_not_exists = false;
             }
             Statement::CreateSink {
-                stmt: CreateSinkStatement { if_not_exists, .. },
+                stmt:
+                    CreateSinkStatement {
+                        or_replace,
+                        if_not_exists,
+                        ..
+                    },
             } => {
+                *or_replace = false;
                 *if_not_exists = false;
             }
             Statement::CreateSubscription {
@@ -269,7 +275,6 @@ impl HandlerArgs {
     }
 }
 
-#[expect(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
@@ -800,6 +805,18 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_database_param::handle_alter_database_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
+                    deferred,
+                )
+                .await
+            }
         },
         Statement::AlterSchema { name, operation } => match operation {
             AlterSchemaOperation::RenameSchema { schema_name } => {
@@ -1012,6 +1029,19 @@ pub async fn handle(
                     handler_args,
                     name,
                     parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
                     StatementType::ALTER_INDEX,
                     deferred,
                 )
@@ -1243,6 +1273,19 @@ pub async fn handle(
                     handler_args,
                     name,
                     parallelism,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
                     StatementType::ALTER_SINK,
                     deferred,
                 )

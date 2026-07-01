@@ -100,6 +100,8 @@ pub enum DateHandlingMode {
 pub enum TimestampHandlingMode {
     Milli,
     String,
+    /// ISO 8601 string without a timezone suffix.
+    Iso8601String,
 }
 
 #[derive(Clone, Copy)]
@@ -150,6 +152,8 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
+    // turbopuffer expects serial and decimal attributes to match `int` and `float` schema types.
+    Turbopuffer,
     None,
 }
 

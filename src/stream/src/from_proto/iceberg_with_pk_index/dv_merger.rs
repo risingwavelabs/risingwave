@@ -25,6 +25,8 @@ use crate::task::ExecutorParams;
 
 pub struct IcebergWithPkIndexDvMergerExecutorBuilder;
 
+impl_stream_node_body!(IcebergWithPkIndexDvMerger(IcebergWithPkIndexDvMergerNode) => IcebergWithPkIndexDvMergerExecutorBuilder);
+
 impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
     type Node = IcebergWithPkIndexDvMergerNode;
 
@@ -46,7 +48,13 @@ impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
             .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
         let handler = DvHandlerImpl::new(config, params.actor_context.id, sink_id).await?;
 
-        let exec = DvMergerExecutor::new(params.actor_context, input, handler);
+        let exec = DvMergerExecutor::new(
+            params.actor_context.id,
+            sink_id,
+            params.local_barrier_manager.clone(),
+            input,
+            handler,
+        );
         Ok((params.info, exec).into())
     }
 }

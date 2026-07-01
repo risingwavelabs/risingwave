@@ -109,7 +109,7 @@ pub(super) async fn create_table_if_not_exists_impl(
                     .map_err(|e| SinkError::Iceberg(anyhow!(e)))
                     .context(format!(
                         "failed to convert {}: {} to arrow type",
-                        &column.name, &column.data_type
+                        column.name, column.data_type
                     ))?)
             })
             .collect::<Result<Vec<ArrowField>>>()?;
