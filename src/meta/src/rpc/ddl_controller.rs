@@ -76,7 +76,7 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -287,7 +287,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
-    iceberg_v3_sink_manager: IcebergV3SinkManager,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -410,7 +410,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -421,7 +421,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -1335,15 +1335,16 @@ impl DdlController {
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
-                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // For Iceberg pk-index sinks, spawn the per-sink commit worker now
                 // so it's ready to receive epoch reports from the very first
                 // barrier instead of relying on lazy registration on every
                 // commit.
-                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
+                {
                     let iceberg_config =
-                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
-                    self.iceberg_v3_sink_manager
-                        .register_v3_sink(sink.id, iceberg_config)
+                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
+                    self.iceberg_pk_index_sink_manager
+                        .register_sink(sink.id, iceberg_config)
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
                 }
@@ -1452,7 +1453,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
-            removed_iceberg_v3_sink_ids,
+            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1538,12 +1539,12 @@ impl DdlController {
             }
         }
 
-        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
         // including user-created sinks with arbitrary names (not just the
         // `__iceberg_sink_%` auto-created ones above).
-        if !removed_iceberg_v3_sink_ids.is_empty() {
-            self.iceberg_v3_sink_manager
-                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
+        if !removed_iceberg_pk_index_sink_ids.is_empty() {
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
         }
 
         // remove secrets.

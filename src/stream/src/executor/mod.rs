@@ -155,7 +155,7 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+    IcebergWriterImpl, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};

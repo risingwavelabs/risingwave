@@ -10,11 +10,7 @@ repository = { workspace = true }
 [features]
 default = []
 datafusion = ["dep:datafusion", "dep:datafusion-common"]
-datafusion-backtrace = [
-    "datafusion",
-    "datafusion/backtrace",
-    "datafusion-common/backtrace",
-]
+datafusion-backtrace = ["datafusion", "datafusion/backtrace", "datafusion-common/backtrace"]
 all-sources = ["source-adbc_snowflake"]
 source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 

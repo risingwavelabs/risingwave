@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, anyhow};
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::spec::{
-    NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
+    FormatVersion, NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
@@ -70,6 +70,17 @@ pub async fn create_and_validate_table_impl(
         .load_table()
         .await
         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    if config.enable_pk_index {
+        let table_format_version = table.metadata().format_version();
+        if table_format_version < FormatVersion::V2 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` requires an Iceberg table with format version >= 2, \
+                 but the target table is format version {}",
+                table_format_version
+            )));
+        }
+    }
 
     let sink_schema = param.schema();
     let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())

@@ -15,36 +15,39 @@
 use anyhow::Context;
 use risingwave_common::id::SinkId;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::stream_service::PbIcebergV3SinkRole;
+use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
-/// Trait abstracting DV (Deletion Vector) file operations for testability.
+/// Trait abstracting position-delete file operations for testability.
 ///
-/// Implementations are responsible for reading existing DVs, merging new
-/// delete positions, writing DV files, and returning the metadata that should
-/// be committed on the current barrier.
+/// Implementations are responsible for reading existing position deletes
+/// (V3 Puffin deletion vectors or V2 Parquet position-delete files),
+/// merging new delete positions, writing the resulting delete file, and
+/// returning the commit metadata for the current barrier.
 #[async_trait::async_trait]
-pub trait DvHandler: Send + 'static {
+pub trait PositionDeleteHandler: Send + 'static {
     fn write(&mut self, path: &str, pos: i64) -> StreamExecutorResult<()>;
 
     async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>>;
 }
 
-/// DV Merger Executor for Iceberg V3 Sink without Equality Delete.
+/// Position-delete merger executor for iceberg pk-index sink without Equality Delete.
 ///
 /// This stateless executor receives [`file_path`, `position`] messages from the Writer Executor,
-/// merges them with historical DVs, and reports the merged DV metadata to meta on each barrier.
+/// merges them with existing position deletes, and reports the merged delete-file metadata to
+/// meta on each barrier. Depending on the table format version, the written delete file is a
+/// V3 Puffin deletion vector or a V2 file-scoped Parquet position-delete file.
 ///
 /// The upstream plan shards messages by `file_path`, so each actor only merges delete
 /// positions for the files assigned to its shard.
 ///
 /// Input schema: [`file_path`: Varchar, `position`: int64]
 /// Output: Barriers and watermarks only; no data chunks (terminal executor in the stream graph).
-pub struct DvMergerExecutor<H>
+pub struct PositionDeleteMergerExecutor<H>
 where
-    H: DvHandler,
+    H: PositionDeleteHandler,
 {
     actor_id: ActorId,
     sink_id: SinkId,
@@ -53,9 +56,9 @@ where
     handler: H,
 }
 
-impl<H> DvMergerExecutor<H>
+impl<H> PositionDeleteMergerExecutor<H>
 where
-    H: DvHandler,
+    H: PositionDeleteHandler,
 {
     pub fn new(
         actor_id: ActorId,
@@ -107,13 +110,14 @@ where
                     if let Some(metadata) = metadata
                         && metadata.metadata.is_some()
                     {
-                        self.local_barrier_manager.report_iceberg_v3_sink_metadata(
-                            barrier.epoch,
-                            self.sink_id,
-                            self.actor_id,
-                            PbIcebergV3SinkRole::DvMerger,
-                            Some(metadata),
-                        );
+                        self.local_barrier_manager
+                            .report_iceberg_pk_index_sink_metadata(
+                                barrier.epoch,
+                                self.sink_id,
+                                self.actor_id,
+                                PbIcebergPkIndexSinkRole::PositionDeleteMerger,
+                                Some(metadata),
+                            );
                     }
 
                     yield Message::Barrier(barrier);
@@ -126,9 +130,9 @@ where
     }
 }
 
-impl<H> Execute for DvMergerExecutor<H>
+impl<H> Execute for PositionDeleteMergerExecutor<H>
 where
-    H: DvHandler,
+    H: PositionDeleteHandler,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
@@ -174,13 +178,13 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct DvHandlerMock {
+    struct PositionDeleteHandlerMock {
         existing_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
         pending_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
         written_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
     }
 
-    impl DvHandlerMock {
+    impl PositionDeleteHandlerMock {
         fn new() -> Self {
             Self {
                 existing_dvs: Arc::new(Mutex::new(HashMap::new())),
@@ -199,7 +203,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl DvHandler for DvHandlerMock {
+    impl PositionDeleteHandler for PositionDeleteHandlerMock {
         fn write(&mut self, path: &str, pos: i64) -> StreamExecutorResult<()> {
             self.pending_dvs
                 .lock()
@@ -244,17 +248,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dv_merger_basic() {
-        let handler = DvHandlerMock::new();
+    async fn test_position_delete_merger_basic() {
+        let handler = PositionDeleteHandlerMock::new();
         let written_dvs = handler.written_dvs.clone();
 
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
         let lbm = LocalBarrierManager::for_test();
-        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
-            .boxed()
-            .execute();
+        let mut executor =
+            PositionDeleteMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
+                .boxed()
+                .execute();
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
@@ -274,18 +279,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dv_merger_merge_with_existing() {
-        let handler =
-            DvHandlerMock::new().with_existing_dv("file1.parquet", BTreeSet::from([0, 5, 10]));
+    async fn test_position_delete_merger_merge_with_existing() {
+        let handler = PositionDeleteHandlerMock::new()
+            .with_existing_dv("file1.parquet", BTreeSet::from([0, 5, 10]));
         let written_dvs = handler.written_dvs.clone();
 
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
         let lbm = LocalBarrierManager::for_test();
-        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
-            .boxed()
-            .execute();
+        let mut executor =
+            PositionDeleteMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
+                .boxed()
+                .execute();
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
@@ -307,17 +313,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dv_merger_no_deletes() {
-        let handler = DvHandlerMock::new();
+    async fn test_position_delete_merger_no_deletes() {
+        let handler = PositionDeleteHandlerMock::new();
         let written_dvs = handler.written_dvs.clone();
 
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
         let lbm = LocalBarrierManager::for_test();
-        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
-            .boxed()
-            .execute();
+        let mut executor =
+            PositionDeleteMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
+                .boxed()
+                .execute();
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
@@ -329,17 +336,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dv_merger_multiple_epochs() {
-        let handler = DvHandlerMock::new();
+    async fn test_position_delete_merger_multiple_epochs() {
+        let handler = PositionDeleteHandlerMock::new();
         let written_dvs = handler.written_dvs.clone();
 
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(input_schema(), vec![]);
 
         let lbm = LocalBarrierManager::for_test();
-        let mut executor = DvMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
-            .boxed()
-            .execute();
+        let mut executor =
+            PositionDeleteMergerExecutor::new(123.into(), SinkId::new(0), lbm, source, handler)
+                .boxed()
+                .execute();
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
