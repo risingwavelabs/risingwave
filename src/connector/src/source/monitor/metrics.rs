@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{Registry, exponential_buckets, histogram_opts};
+use prometheus::{IntCounterVec, Registry, exponential_buckets, histogram_opts, register_int_counter_vec_with_registry};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -29,6 +29,10 @@ use crate::source::kafka::stats::RdKafkaStats;
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
     pub high_watermark: LabelGuardedIntGaugeVec,
+    /// Kafka consumer group delete attempts that failed during source enumerator cleanup.
+    ///
+    /// The `consumer_group` label is fragment-derived and emitted only on cleanup failures.
+    pub kafka_consumer_group_delete_failure_count: IntCounterVec,
     /// PostgreSQL CDC confirmed flush LSN monitoring
     pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (min)
@@ -50,6 +54,14 @@ impl EnumeratorMetrics {
             "source_kafka_high_watermark",
             "High watermark for a exec per partition",
             &["source_id", "partition"],
+            registry,
+        )
+        .unwrap();
+
+        let kafka_consumer_group_delete_failure_count = register_int_counter_vec_with_registry!(
+            "source_kafka_consumer_group_delete_failure_count",
+            "Total number of Kafka consumer group delete attempts that failed during source enumerator cleanup",
+            &["source_id", "consumer_group"],
             registry,
         )
         .unwrap();
@@ -96,6 +108,7 @@ impl EnumeratorMetrics {
 
         EnumeratorMetrics {
             high_watermark,
+            kafka_consumer_group_delete_failure_count,
             pg_cdc_confirmed_flush_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
