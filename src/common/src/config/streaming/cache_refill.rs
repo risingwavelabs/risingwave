@@ -26,7 +26,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 pub enum CacheRefillPolicy {
     /// Enable normal cache refill for the table.
     Enabled,
-    //// Disable cache refill for the table.
+    /// Disable cache refill for the table.
     Disabled,
     /// Enable cache refill optimized for streaming workloads for this table.
     Streaming,
