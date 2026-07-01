@@ -136,7 +136,8 @@ to keep the factorial bounded).
   safe prefix, a match is emitted once a later safe row follows it (so the greedy match is known
   maximal), and `AFTER MATCH SKIP` decides where the scan resumes. Matches stream straight into a
   `StreamChunkBuilder`, flushed a chunk at a time. After processing, the partition's frontier entry is
-  recomputed (next future row) or dropped. Work per watermark is therefore proportional to the
+  recomputed (the earlier of its next future row and the earliest WITHIN expiry of a retained
+  partial) or dropped. Work per watermark is therefore proportional to the
   partitions that need attention, not to the number of live partitions; the working set is the largest
   single candidate partition's live rows plus one output chunk.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
@@ -149,10 +150,10 @@ to keep the factorial bounded).
   table), so deletes apply in place per partition. Together with the watermark this bounds state to
   the live (unfinalized) window (see [State bound and `WITHIN`](#state-bound-and-within)).
 
-  > Eviction currently fires only for partitions the frontier wakes — i.e. those gaining a newly-safe
-  > row. A partition that is idle (no new input) but holds a retained partial match that expires by
-  > `WITHIN` is not yet woken to evict it; folding the earliest `WITHIN` deadline into `next_wakeup`
-  > is the remaining step.
+  Eviction fires for every partition the frontier wakes. A partition gaining a newly-safe row is
+  woken by the row term of `next_wakeup`; an *idle* partition holding a retained partial bounded by
+  `WITHIN` is woken by the deadline term (see [The wakeup frontier](#the-wakeup-frontier)) when that
+  partial times out, so its dead rows are released even with no further input.
 
 Matching is **not incremental**: each advancing watermark re-runs the matcher from the start of the
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
@@ -196,16 +197,21 @@ attention. It is two internal tables, for two access patterns:
   the partition keeps a partition's index entry on the same vnode as its buffered rows (so they
   re-shard together on rescale).
 
-`next_wakeup_order_key` is the earliest `order_key` at which the partition next needs attention. On
-insert it is moved earlier when a chunk brings an earlier row (aggregated once per partition per
-chunk, not per row). On watermark it is recomputed to the partition's next future row after
-processing, or the entry is dropped when nothing remains to wake for (a later insert re-schedules
-it). Both tables are committed with the buffer table at each barrier, so the frontier and the buffer
-stay consistent across recovery and rescale.
+`next_wakeup_order_key` is the earliest `order_key` at which the partition next needs attention,
+which is the earlier of two events:
 
-> Today `next_wakeup` tracks only the next *row*. Folding in the earliest `WITHIN` expiry of a
-> partition's retained partials — so idle partitions are woken to evict timed-out partials — is the
-> remaining step.
+- **the next row to become safe** — its earliest unprocessed `order_key`. On insert this is moved
+  earlier when a chunk brings an earlier row (aggregated once per partition per chunk, not per row).
+- **the earliest `WITHIN` expiry of a retained partial** — `first_order_key + interval`, computed
+  from the `within_deadline` expression. Without it, an idle partition (no future row) holding a
+  partial bounded by `WITHIN` would drop its frontier entry and never be revisited, leaking the
+  partial until — if ever — a new row arrived. With it, the partition is woken exactly when the
+  partial times out, and the eviction predicate (which already honours `WITHIN`) releases it.
+
+On watermark the value is recomputed to the minimum of those two after processing, or the entry is
+dropped when neither applies (a later insert re-schedules it). Both tables are committed with the
+buffer table at each barrier, so the frontier and the buffer stay consistent across recovery and
+rescale.
 
 ### State bound and `WITHIN`
 

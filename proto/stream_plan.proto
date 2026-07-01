@@ -1164,6 +1164,10 @@ message MatchRecognizeNode {
   // WITHIN span check: a predicate over a synthetic `[last_order_key, first_order_key]` row
   // (`InputRef(0) - InputRef(1) <= interval`). Absent when there is no WITHIN clause.
   optional expr.ExprNode within = 11;
+  // WITHIN deadline: `first_order_key + interval` over a synthetic `[first_order_key]` row
+  // (`InputRef(0) + interval`). The watermark at which a partial starting at that row expires;
+  // used to wake an idle partition to evict it. Absent when there is no WITHIN clause.
+  optional expr.ExprNode within_deadline = 15;
 
   reserved 7;
   reserved "pattern";
