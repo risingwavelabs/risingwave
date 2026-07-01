@@ -185,7 +185,7 @@ linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
-mysql_async = { version = "0.36", features = [
+mysql_async = { version = "0.37", features = [
     "native-tls-tls",
     "rust_decimal",
 ] }
