@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
-use risingwave_common::types::{DataType, MapType, StructType};
+use risingwave_common::types::{DataType, Interval, MapType, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
@@ -37,8 +37,8 @@ use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, TableFunction,
-    TableFunctionType, UserDefinedFunction,
+    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
+    TableFunction, TableFunctionType, UserDefinedFunction,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -184,6 +184,23 @@ impl Binder {
                 )
                 .into());
             }
+        }
+
+        if schema_name.is_none() && func_name == "make_interval" {
+            if has_secret_ref_arg {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "secret reference is only allowed in user-defined function arguments"
+                        .to_owned(),
+                )
+                .into());
+            }
+            return self.validate_and_bind_make_interval_params(
+                *scalar_as_agg,
+                arg_list,
+                within_group.as_deref(),
+                filter.as_deref(),
+                over.as_ref(),
+            );
         }
 
         let bind_arg = if func_name.eq_ignore_ascii_case("jsonb_agg") {
@@ -357,22 +374,11 @@ impl Binder {
         }
 
         // now it's a scalar/table function call
-        reject_syntax!(
-            arg_list.distinct,
-            "`DISTINCT` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            !arg_list.order_by.is_empty(),
-            "`ORDER BY` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            within_group.is_some(),
-            "`WITHIN GROUP` is not allowed in scalar/table function call"
-        );
-        reject_syntax!(
-            filter.is_some(),
-            "`FILTER` is not allowed in scalar/table function call"
-        );
+        Self::reject_scalar_table_function_syntax(
+            arg_list,
+            within_group.as_deref(),
+            filter.as_deref(),
+        )?;
 
         // try to bind it as a table function call
         {
@@ -484,6 +490,193 @@ impl Binder {
         }
 
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
+    }
+
+    fn reject_scalar_table_function_syntax(
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&AstExpr>,
+    ) -> Result<()> {
+        reject_syntax!(
+            arg_list.distinct,
+            "`DISTINCT` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            !arg_list.order_by.is_empty(),
+            "`ORDER BY` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            within_group.is_some(),
+            "`WITHIN GROUP` is not allowed in scalar/table function call"
+        );
+        reject_syntax!(
+            filter.is_some(),
+            "`FILTER` is not allowed in scalar/table function call"
+        );
+
+        Ok(())
+    }
+
+    fn reject_scalar_function_syntax(
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&AstExpr>,
+        over: Option<&Window>,
+    ) -> Result<()> {
+        Self::reject_scalar_table_function_syntax(arg_list, within_group, filter)?;
+        reject_syntax!(
+            arg_list.variadic,
+            "`VARIADIC` is not allowed in scalar function call"
+        );
+        reject_syntax!(
+            arg_list.ignore_nulls,
+            "`IGNORE NULLS` is not allowed in aggregate/scalar/table function call"
+        );
+        reject_syntax!(
+            over.is_some(),
+            "`OVER` is not allowed in scalar function call"
+        );
+
+        Ok(())
+    }
+
+    fn validate_and_bind_make_interval_params(
+        &mut self,
+        scalar_as_agg: bool,
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&AstExpr>,
+        over: Option<&Window>,
+    ) -> Result<ExprImpl> {
+        reject_syntax!(
+            scalar_as_agg,
+            "`AGGREGATE:` prefix is not allowed for `make_interval`"
+        );
+        Self::reject_scalar_function_syntax(arg_list, within_group, filter, over)?;
+
+        self.bind_make_interval(&arg_list.args)
+    }
+
+    fn bind_make_interval(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+        const FIELD_NAMES: [&str; 7] =
+            ["years", "months", "weeks", "days", "hours", "mins", "secs"];
+
+        let mut fields = vec![None; FIELD_NAMES.len()];
+        let mut positional_count = 0;
+        let mut has_named_arg = false;
+
+        for arg in args {
+            match arg {
+                FunctionArg::Unnamed(arg_expr) => {
+                    if has_named_arg {
+                        return Err(ErrorCode::BindError(
+                            "positional argument cannot follow named argument".to_owned(),
+                        )
+                        .into());
+                    }
+                    if positional_count >= FIELD_NAMES.len() {
+                        return Err(ErrorCode::ExprError(
+                            format!(
+                                "unexpected arguments number {}, expect at most {}",
+                                args.len(),
+                                FIELD_NAMES.len()
+                            )
+                            .into(),
+                        )
+                        .into());
+                    }
+
+                    let target_type = Self::make_interval_arg_type(positional_count);
+                    fields[positional_count] = Some(self.bind_make_interval_arg(
+                        arg_expr,
+                        FIELD_NAMES[positional_count],
+                        &target_type,
+                    )?);
+                    positional_count += 1;
+                }
+                FunctionArg::Named { name, arg } => {
+                    has_named_arg = true;
+                    let name = name.real_value();
+                    let Some(idx) = FIELD_NAMES.iter().position(|field| *field == name) else {
+                        return Err(ErrorCode::BindError(format!(
+                            "function make_interval has no argument named `{}`",
+                            name
+                        ))
+                        .into());
+                    };
+                    if fields[idx].is_some() {
+                        return Err(ErrorCode::BindError(format!(
+                            "argument `{}` specified more than once",
+                            name
+                        ))
+                        .into());
+                    }
+
+                    let target_type = Self::make_interval_arg_type(idx);
+                    fields[idx] = Some(self.bind_make_interval_arg(arg, &name, &target_type)?);
+                }
+            }
+        }
+
+        let mut interval = Self::interval_literal(Interval::from_month_day_usec(0, 0, 0));
+        for (idx, field) in fields.into_iter().enumerate() {
+            if let Some(field) = field {
+                let component = FunctionCall::new(
+                    ExprType::Multiply,
+                    vec![Self::make_interval_unit(idx), field],
+                )?
+                .into();
+                interval = FunctionCall::new(ExprType::Add, vec![interval, component])?.into();
+            }
+        }
+
+        Ok(interval)
+    }
+
+    fn bind_make_interval_arg(
+        &mut self,
+        arg_expr: &FunctionArgExpr,
+        arg_name: &str,
+        target_type: &DataType,
+    ) -> Result<ExprImpl> {
+        let mut args = self.bind_function_expr_arg(arg_expr)?;
+        if args.len() != 1 {
+            return Err(ErrorCode::BindError(format!(
+                "argument `{}` for make_interval must be a single expression",
+                arg_name
+            ))
+            .into());
+        }
+
+        let mut arg = args.pop().unwrap();
+        arg.cast_implicit_mut(target_type)?;
+        Ok(arg)
+    }
+
+    fn make_interval_arg_type(idx: usize) -> DataType {
+        if idx == 6 {
+            DataType::Float64
+        } else {
+            DataType::Int32
+        }
+    }
+
+    fn make_interval_unit(idx: usize) -> ExprImpl {
+        let interval = match idx {
+            0 => Interval::from_month_day_usec(12, 0, 0),
+            1 => Interval::from_month_day_usec(1, 0, 0),
+            2 => Interval::from_month_day_usec(0, 7, 0),
+            3 => Interval::from_month_day_usec(0, 1, 0),
+            4 => Interval::from_month_day_usec(0, 0, 60 * 60 * Interval::USECS_PER_SEC),
+            5 => Interval::from_month_day_usec(0, 0, 60 * Interval::USECS_PER_SEC),
+            6 => Interval::from_month_day_usec(0, 0, Interval::USECS_PER_SEC),
+            _ => unreachable!("invalid make_interval field index"),
+        };
+        Self::interval_literal(interval)
+    }
+
+    fn interval_literal(interval: Interval) -> ExprImpl {
+        Literal::new(Some(ScalarImpl::Interval(interval)), DataType::Interval).into()
     }
 
     fn validate_and_bind_special_function_params(
