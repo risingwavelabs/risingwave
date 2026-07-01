@@ -540,7 +540,14 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
                     // through its finally block (which releases keep-alive threads + replication
                     // slot). See risingwavelabs/risingwave#26075.
                     forceCloseStreamingSourceConnection();
-                    executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
+                    boolean forceCloseOk =
+                            executor.awaitTermination(shutdownWaitTimeout, TimeUnit.MILLISECONDS);
+                    if (!forceCloseOk) {
+                        LOGGER.warn(
+                                "Source thread still not terminated after force-closing the "
+                                        + "connection; the replication slot may remain held. See "
+                                        + "risingwavelabs/risingwave#26075");
+                    }
                 }
             }
 

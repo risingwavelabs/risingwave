@@ -180,7 +180,9 @@ public class PostgresStreamingChangeEventSource
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("Exception while force-aborting regular PG connection", e);
+            // Not expected on the abort path: abort() does a raw Socket.close() and should not
+            // throw under normal operation, so surface it at warn instead of swallowing silently.
+            LOGGER.warn("Exception while force-aborting regular PG connection", e);
         }
         try {
             if (replicationConnection instanceof io.debezium.jdbc.JdbcConnection) {
@@ -191,7 +193,7 @@ public class PostgresStreamingChangeEventSource
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("Exception while force-aborting replication connection", e);
+            LOGGER.warn("Exception while force-aborting replication connection", e);
         }
     }
 
