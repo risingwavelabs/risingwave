@@ -1653,16 +1653,51 @@ mod tests {
         )
         .await?;
 
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        Sink::insert(sink::ActiveModel::from(PbSink {
+            id: sink_obj.oid.as_sink_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "sink_into_t".to_owned(),
+            sink_type: PbSinkType::AppendOnly as _,
+            target_table: Some(table_obj.oid.as_table_id()),
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
         let result = mgr
             .drop_object(ObjectType::Table, table_obj.oid, DropMode::Cascade)
             .await?;
 
         let cascade_objects = result.cascade_objects.unwrap();
-        assert_eq!(cascade_objects.len(), 1);
-        let cascade_object = &cascade_objects[0];
-        assert_eq!(cascade_object.object_type(), PbObjectType::View);
-        assert_eq!(cascade_object.schema_name.as_deref(), Some("public"));
-        assert_eq!(cascade_object.object_name, "v");
+        assert_eq!(cascade_objects.len(), 2);
+        assert!(
+            cascade_objects.iter().any(|object| {
+                object.object_type() == PbObjectType::Sink
+                    && object.schema_name.as_deref() == Some("public")
+                    && object.object_name == "sink_into_t"
+            }),
+            "sink discovered through Sink::TargetTable should be included"
+        );
+        assert!(
+            cascade_objects.iter().any(|object| {
+                object.object_type() == PbObjectType::View
+                    && object.schema_name.as_deref() == Some("public")
+                    && object.object_name == "v"
+            }),
+            "dependent view should be included"
+        );
 
         Ok(())
     }

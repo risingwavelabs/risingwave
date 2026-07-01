@@ -60,20 +60,8 @@ impl CatalogController {
             validate_subscription_deletion(&txn, object_id.as_subscription_id()).await?;
         }
 
-        // Objects that are also removed in RESTRICT mode are implicit dependents, not objects
-        // removed specifically because CASCADE was requested.
-        let mut implicit_object_ids = HashSet::new();
         let mut removed_objects = match drop_mode {
             DropMode::Cascade => {
-                if object_type == ObjectType::Table {
-                    implicit_object_ids.extend(
-                        get_referring_objects(object_id, object_type, &txn)
-                            .await?
-                            .into_iter()
-                            .filter(|object| object.obj_type == ObjectType::Index)
-                            .map(|object| object.oid),
-                    );
-                }
                 get_referring_objects_cascade(object_id, object_type, &txn).await?
             }
             DropMode::Restrict => match object_type {
@@ -129,17 +117,11 @@ impl CatalogController {
             },
         };
 
+        // The dependency query includes incoming sinks. Build notices before adding owned
+        // objects, which are implicitly removed with their parent.
         let cascade_objects =
             if drop_mode == DropMode::Cascade && object_type != ObjectType::Database {
-                Some(
-                    build_cascade_objects_for_notice(
-                        object_id,
-                        &implicit_object_ids,
-                        &removed_objects,
-                        &txn,
-                    )
-                    .await?,
-                )
+                Some(build_cascade_objects_for_notice(object_id, &removed_objects, &txn).await?)
             } else {
                 None
             };
@@ -461,13 +443,12 @@ async fn report_drop_object(
 
 async fn build_cascade_objects_for_notice(
     root_object_id: ObjectId,
-    implicit_object_ids: &HashSet<ObjectId>,
     objects: &[PartialObject],
     txn: &DatabaseTransaction,
 ) -> MetaResult<Vec<PbCascadeObject>> {
     let grouped = objects
         .iter()
-        .filter(|object| object.oid != root_object_id && !implicit_object_ids.contains(&object.oid))
+        .filter(|object| object.oid != root_object_id)
         .cloned()
         .into_group_map_by(|object| object.obj_type);
     let mut result = vec![];
