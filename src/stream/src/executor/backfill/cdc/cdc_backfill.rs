@@ -265,8 +265,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-        let mut should_bypass_snapshot_stream_patch =
-            self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -490,6 +488,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
             'backfill_loop: loop {
+                let mut should_bypass_snapshot_stream_patch =
+                    self.rate_limit_rps.is_some_and(|val| val == 0);
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let mut snapshot_read_row_cnt: usize = 0;
