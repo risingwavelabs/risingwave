@@ -231,10 +231,13 @@ impl StreamManagerService for StreamServiceImpl {
                 jobs = [request.id.into()].into_iter().collect();
                 raw_object_id = request.id;
             }
-            // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
+                    .update_fragment_rate_limit_by_fragment_id(
+                        request.id.into(),
+                        request.rate,
+                        throttle_type,
+                    )
                     .await?;
                 let fragment_id = request.id.into();
                 fragments = [fragment_id].into_iter().collect();
