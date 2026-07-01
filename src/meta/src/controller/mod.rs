@@ -83,6 +83,18 @@ impl SqlMetaStore {
                     //       same underlying setting in `sqlx` under current implementation.
                     .acquire_timeout(MAX_DURATION)
                     .connect_timeout(MAX_DURATION)
+                    // Never close the only connection due to idleness or age.
+                    // - For in-memory SQLite, releasing the connection clears the database.
+                    // - For file-backed SQLite, a finite `idle_timeout` keeps the pool's background
+                    //   reaper task running, which is subject to a `num_idle` underflow bug in `sqlx`
+                    //   (https://github.com/launchbadge/sqlx/issues/3645, fix pending in
+                    //   https://github.com/launchbadge/sqlx/pull/4289) that can spin the reaper
+                    //   without yielding and permanently wedge the single-connection pool, hanging
+                    //   the meta node (https://github.com/risingwavelabs/risingwave/issues/24991).
+                    // `sqlx` actually supports disabling these timeouts by passing a `None`, but
+                    // `sea-orm` does not expose this option.
+                    .idle_timeout(MAX_DURATION)
+                    .max_lifetime(MAX_DURATION)
             }
         }
 
@@ -92,14 +104,7 @@ impl SqlMetaStore {
 
                 let mut options = ConnectOptions::new(IN_MEMORY_STORE);
 
-                options
-                    .sqlite_common()
-                    // Releasing the connection to in-memory SQLite database is unacceptable
-                    // because it will clear the database. Set a large enough timeout to prevent it.
-                    // `sqlx` actually supports disabling these timeouts by passing a `None`, but
-                    // `sea-orm` does not expose this option.
-                    .idle_timeout(MAX_DURATION)
-                    .max_lifetime(MAX_DURATION);
+                options.sqlite_common();
 
                 let conn = sea_orm::Database::connect(options).await?;
                 Self {
