@@ -616,7 +616,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         // mark ready to unblock subsequent request
                                         self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
-                                        Self::notify_table_refill_runtime_config_after_recovery(
+                                        Self::refresh_table_refill_runtime_state_after_recovery(
                                             self.context.clone(),
                                             self.env.clone(),
                                         ).await;
@@ -629,7 +629,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
-                                Self::notify_table_refill_runtime_config_after_recovery(
+                                Self::refresh_table_refill_runtime_state_after_recovery(
                                     self.context.clone(),
                                     self.env.clone(),
                                 ).await;
@@ -952,7 +952,16 @@ use crate::barrier::partial_graph::{
 };
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
-    async fn notify_table_refill_runtime_config_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
+    async fn refresh_table_refill_runtime_state_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
+        // Table refill is a best-effort runtime optimization. Recovery uses an
+        // eventually consistent refresh for meta-owned state: policy is global and
+        // broadcast, while serving vnode mapping is worker-specific and delivered
+        // through targeted updates.
+        Self::refresh_table_cache_refill_policies_after_recovery(context.clone(), env).await;
+        Self::refresh_serving_table_vnode_mappings_after_recovery(context).await;
+    }
+
+    async fn refresh_table_cache_refill_policies_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
         match context.table_cache_refill_policies_snapshot().await {
             Ok(policies) => {
                 env.notification_manager()
@@ -968,14 +977,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             Err(err) => {
                 warn!(
                     error = %err.as_report(),
-                    "failed to notify table cache refill policies after recovery"
+                    "failed to refresh table cache refill policies after recovery"
                 );
             }
         }
+    }
+
+    async fn refresh_serving_table_vnode_mappings_after_recovery(context: Arc<C>) {
         if let Err(err) = context.sync_serving_table_vnode_mappings_to_hummock().await {
             warn!(
                 error = %err.as_report(),
-                "failed to notify serving table vnode mappings after recovery"
+                "failed to refresh serving table vnode mappings after recovery"
             );
         }
     }
@@ -1339,7 +1351,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             ),
         )]);
 
-        Self::notify_table_refill_runtime_config_after_recovery(
+        Self::refresh_table_refill_runtime_state_after_recovery(
             self.context.clone(),
             self.env.clone(),
         )
