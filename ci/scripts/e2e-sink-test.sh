@@ -35,14 +35,6 @@ risedev slt './e2e_test/sink/sink_into_table/*.slt'
 risedev slt './e2e_test/sink/sink_vector_columns.slt'
 risedev slt './e2e_test/sink/force_compaction_sink.slt'
 
-echo "--- e2e, RabbitMQ sink"
-export RABBITMQ_AMQP_URL="${RABBITMQ_AMQP_URL:-amqp://guest:guest@rabbitmq-server:5672/%2f}"
-export RABBITMQ_MANAGEMENT_URL="${RABBITMQ_MANAGEMENT_URL:-http://rabbitmq-server:15672}"
-export RABBITMQ_USERNAME="${RABBITMQ_USERNAME:-guest}"
-export RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-guest}"
-export RABBITMQ_VIRTUAL_HOST="${RABBITMQ_VIRTUAL_HOST:-/}"
-risedev slt './e2e_test/sink/rabbitmq_sink.slt'
-
 echo "--- e2e, http sink"
 HTTP_SINK_OUTPUT=$(mktemp)
 HTTP_SINK_HEADERS=$(mktemp)

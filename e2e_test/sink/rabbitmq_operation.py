@@ -12,7 +12,7 @@ import urllib.request
 
 
 DEFAULT_MANAGEMENT_URL = os.getenv(
-    "RABBITMQ_MANAGEMENT_URL", "http://rabbitmq-server:15672"
+    "RABBITMQ_MANAGEMENT_URL", "http://127.0.0.1:15672"
 )
 DEFAULT_USERNAME = os.getenv("RABBITMQ_USERNAME", "guest")
 DEFAULT_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
