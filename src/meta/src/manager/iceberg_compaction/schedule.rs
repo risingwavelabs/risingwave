@@ -698,6 +698,16 @@ impl IcebergCompactionManager {
             } else {
                 guard.snapshot_expiration_sink_ids.remove(&sink_id);
             }
+            if config.enable_manifest_rewrite {
+                guard.manifest_rewrite_sink_ids.insert(sink_id);
+            } else {
+                guard.manifest_rewrite_sink_ids.remove(&sink_id);
+            }
+            if config.enable_orphan_file_cleanup {
+                guard.orphan_file_cleanup_sink_ids.insert(sink_id);
+            } else {
+                guard.orphan_file_cleanup_sink_ids.remove(&sink_id);
+            }
 
             if !config.enable_compaction && !kind.allows_disabled_compaction() {
                 if !guard.sink_schedules.get(&sink_id).is_some_and(|track| {
@@ -966,6 +976,8 @@ impl IcebergCompactionManager {
             let mut guard = self.inner.write();
             let task_to_cancel = Self::remove_sink_schedule(&mut guard, sink_id);
             guard.snapshot_expiration_sink_ids.remove(&sink_id);
+            guard.manifest_rewrite_sink_ids.remove(&sink_id);
+            guard.orphan_file_cleanup_sink_ids.remove(&sink_id);
             let waiter = guard.manual_compaction_waiters.remove(&sink_id);
             (task_to_cancel, waiter)
         };

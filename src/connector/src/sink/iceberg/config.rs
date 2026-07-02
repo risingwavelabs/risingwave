@@ -108,6 +108,10 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
+pub const ENABLE_MANIFEST_REWRITE: &str = "enable_manifest_rewrite";
+pub const ENABLE_ORPHAN_FILE_CLEANUP: &str = "enable_orphan_file_cleanup";
+pub const ORPHAN_FILE_CLEANUP_MAX_AGE_MILLIS: &str = "orphan_file_cleanup_max_age_millis";
+pub const ORPHAN_FILE_CLEANUP_DRY_RUN: &str = "orphan_file_cleanup_dry_run";
 pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
 
 pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
@@ -397,6 +401,39 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub snapshot_expiration_clear_expired_meta_data: bool,
 
+    /// Whether to periodically rewrite Iceberg manifests.
+    #[serde(
+        rename = "enable_manifest_rewrite",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_manifest_rewrite: bool,
+
+    /// Whether to periodically delete old orphan files under the Iceberg table location.
+    #[serde(
+        rename = "enable_orphan_file_cleanup",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_orphan_file_cleanup: bool,
+
+    /// The maximum age (in milliseconds) for orphan files before they are deleted.
+    #[serde(rename = "orphan_file_cleanup_max_age_millis", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub orphan_file_cleanup_max_age_millis: Option<i64>,
+
+    /// Whether to only report orphan file candidates without deleting them.
+    #[serde(
+        rename = "orphan_file_cleanup_dry_run",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub orphan_file_cleanup_dry_run: bool,
+
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
     /// If unset, defaults to 1000 only when compaction is enabled
@@ -598,6 +635,12 @@ impl IcebergConfig {
             )));
         }
 
+        if config.orphan_file_cleanup_max_age_millis == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`orphan_file_cleanup_max_age_millis` must be greater than 0"
+            )));
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table
@@ -678,6 +721,11 @@ impl IcebergConfig {
     /// Returns `current_time_ms` - `max_age_millis`
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
+            .map(|max_age_millis| current_time_ms - max_age_millis)
+    }
+
+    pub fn orphan_file_cleanup_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
+        self.orphan_file_cleanup_max_age_millis
             .map(|max_age_millis| current_time_ms - max_age_millis)
     }
 
