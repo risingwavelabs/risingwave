@@ -95,6 +95,7 @@ mod join;
 pub mod locality_provider;
 mod lookup;
 mod lookup_union;
+mod match_recognize;
 mod merge;
 mod mview;
 mod nested_loop_temporal_join;
@@ -162,6 +163,10 @@ pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
+pub use match_recognize::{
+    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa,
+    SkipMode, pattern_from_protobuf,
+};
 pub use merge::MergeExecutor;
 pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::{MaterializeExecutor, RefreshableMaterializeArgs};
