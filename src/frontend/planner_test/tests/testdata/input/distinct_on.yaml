@@ -17,6 +17,45 @@
   expected_outputs:
     - stream_plan
     - batch_plan
+- name: snapshot backfill scan preserves distinct on order key pk
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t_order (id int primary key, k int, v int, ts int);
+    create materialized view mv_order as
+      select distinct on (k) k, v
+      from t_order
+      order by k, ts desc, id desc;
+    create table t_probe (k int primary key);
+    select t_probe.k, mv_order.v
+    from t_probe
+    left join mv_order on mv_order.k = t_probe.k;
+  expected_outputs:
+    - stream_plan
+- name: snapshot backfill keeps scan unchanged when stream key is already table pk
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t_pk (id int primary key, v int);
+    select id, v from t_pk;
+  expected_outputs:
+    - stream_plan
+- name: snapshot backfill resets stream key without adding columns when distinct on pk is visible
+  sql: |
+    set streaming_use_snapshot_backfill = true;
+    create table t_order (id int primary key, k int, v int, ts int);
+    create materialized view mv_order_full as
+      select distinct on (k) k, v, ts, id
+      from t_order
+      order by k, ts desc, id desc;
+    select k, v, ts, id from mv_order_full;
+  expected_outputs:
+    - stream_plan
+- name: distinct on order by stops MV pk after stream key
+  sql: |
+    create table t (a int, b int, c int);
+    select distinct on (a) a, b, c from t order by a, b, c;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;
@@ -83,3 +122,9 @@
   expected_outputs:
     - batch_plan
     - logical_plan
+# Regression test: DISTINCT ON with an aggregate but no GROUP BY must error, not panic
+- sql: |
+    create table t (x int);
+    select distinct on(x) count(*) from t;
+  expected_outputs:
+    - planner_error

@@ -126,6 +126,7 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const ORDER_KEY: &str = "order_key";
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
@@ -398,6 +399,7 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
+    /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -528,6 +530,10 @@ impl IcebergConfig {
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
+        if config.enable_compaction && !values.contains_key(COMPACTION_MAX_SNAPSHOTS_NUM) {
+            config.max_snapshots_num_before_compaction = Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM);
+        }
+
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",
@@ -545,7 +551,11 @@ impl IcebergConfig {
                         SINK_TYPE_UPSERT
                     )));
                 }
-            } else {
+            } else if !config.enable_pk_index {
+                // When `enable_pk_index = true`, the planner auto-derives the iceberg pk
+                // from the upstream stream key, so the user does not need to spell it out
+                // in WITH options. The derived pk is written back into properties before
+                // this validation is consulted again at sink-construction time.
                 return Err(SinkError::Config(anyhow!(
                     "Must set `primary-key` in {}",
                     SINK_TYPE_UPSERT
@@ -582,6 +592,12 @@ impl IcebergConfig {
             )));
         }
 
+        if config.max_snapshots_num_before_compaction == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.max_snapshots_num` must be greater than 0"
+            )));
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table
@@ -602,6 +618,24 @@ impl IcebergConfig {
     }
 
     pub async fn load_table(&self) -> Result<Table> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            let catalog =
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "mock_v3 catalog_type set but no mock catalog registered"
+                    ))
+                })?;
+            let table_id = self
+                .table
+                .to_table_ident()
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Unable to parse table name")))?;
+            let table = catalog
+                .load_table(&table_id)
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Failed to load mock table")))?;
+            return Ok(table);
+        }
         self.common
             .load_table(&self.table, &self.java_catalog_props)
             .await
@@ -609,6 +643,14 @@ impl IcebergConfig {
     }
 
     pub async fn create_catalog(&self) -> Result<Arc<dyn Catalog>> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            return Ok(
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    anyhow::anyhow!("mock_v3 catalog_type set but no mock catalog registered")
+                })?,
+            );
+        }
         self.common
             .create_catalog(&self.java_catalog_props)
             .await

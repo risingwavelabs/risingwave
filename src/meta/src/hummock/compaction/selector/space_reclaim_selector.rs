@@ -44,6 +44,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
             member_table_ids,
             level_handlers,
             developer_config,
+            in_progress_compactions,
             ..
         } = context;
         let dynamic_level_core =
@@ -56,6 +57,11 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
         let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
+        if !compaction_input.skip_target_range_conflict_check
+            && in_progress_compactions.has_conflict_with_input(&compaction_input)
+        {
+            return None;
+        }
         compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(

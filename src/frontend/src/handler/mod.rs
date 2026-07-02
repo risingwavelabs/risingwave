@@ -249,8 +249,14 @@ impl HandlerArgs {
                 *if_not_exists = false;
             }
             Statement::CreateSink {
-                stmt: CreateSinkStatement { if_not_exists, .. },
+                stmt:
+                    CreateSinkStatement {
+                        or_replace,
+                        if_not_exists,
+                        ..
+                    },
             } => {
+                *or_replace = false;
                 *if_not_exists = false;
             }
             Statement::CreateSubscription {
@@ -269,7 +275,6 @@ impl HandlerArgs {
     }
 }
 
-#[expect(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
@@ -800,6 +805,18 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_database_param::handle_alter_database_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
+                    deferred,
+                )
+                .await
+            }
         },
         Statement::AlterSchema { name, operation } => match operation {
             AlterSchemaOperation::RenameSchema { schema_name } => {
@@ -1012,6 +1029,19 @@ pub async fn handle(
                     handler_args,
                     name,
                     parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
                     StatementType::ALTER_INDEX,
                     deferred,
                 )
@@ -1243,6 +1273,19 @@ pub async fn handle(
                     handler_args,
                     name,
                     parallelism,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
                     StatementType::ALTER_SINK,
                     deferred,
                 )
@@ -1630,20 +1673,22 @@ fn check_ban_ddl_for_iceberg_engine_table(
     if let Statement::AlterTable { name, operation } = stmt {
         let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
         if table.is_iceberg_engine_table() {
-            let has_auto_refresh_schema_sink =
-                if matches!(operation, AlterTableOperation::AddColumn { .. }) {
-                    let catalog_reader = session.env().catalog_reader().read_guard();
-                    let db_name = session.database();
-                    let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name());
-                    let sink = catalog_reader
-                        .get_schema_by_name(&db_name, &schema_name)
-                        .ok()
-                        .and_then(|schema| schema.get_created_sink_by_name(&sink_name));
-                    sink.and_then(|s| s.auto_refresh_schema_from_table)
-                        .is_some()
-                } else {
-                    false
-                };
+            let has_auto_refresh_schema_sink = if matches!(
+                operation,
+                AlterTableOperation::AddColumn { .. } | AlterTableOperation::DropColumn { .. }
+            ) {
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                let db_name = session.database();
+                let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name());
+                let sink = catalog_reader
+                    .get_schema_by_name(&db_name, &schema_name)
+                    .ok()
+                    .and_then(|schema| schema.get_created_sink_by_name(&sink_name));
+                sink.and_then(|s| s.auto_refresh_schema_from_table)
+                    .is_some()
+            } else {
+                false
+            };
 
             check_ban_alter_table_operation_for_iceberg_engine_table(
                 operation,
@@ -1675,12 +1720,14 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
             }
         }
         AlterTableOperation::DropColumn { .. } => {
-            // TODO: allow DROP COLUMN for iceberg table after iceberg sink schema change supports drop.
-            bail!(
-                "ALTER TABLE DROP COLUMN is not supported for iceberg table: {}.{}",
-                schema_name,
-                table_name
-            );
+            if !has_auto_refresh_schema_sink {
+                bail!(
+                    "ALTER TABLE {} is not supported for iceberg table without auto schema change sink: {}.{}",
+                    operation,
+                    schema_name,
+                    table_name
+                );
+            }
         }
         AlterTableOperation::RenameColumn { .. }
         | AlterTableOperation::ChangeColumn { .. }

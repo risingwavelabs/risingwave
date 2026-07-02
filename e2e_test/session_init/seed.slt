@@ -1,0 +1,43 @@
+# Verifies that the `[session_init]` section in `risingwave.toml` seeds the cluster-default
+# session parameters on a fresh cluster. This test must run against the `ci-session-init`
+# profile, whose config sets these values; see `src/config/ci-session-init.toml`.
+#
+# A new session inherits the persisted cluster defaults, so `SHOW <param>` reflects the
+# seeded values.
+
+query T
+show streaming_parallelism;
+----
+bounded(8)
+
+# The `default` placeholder must be persisted verbatim, not materialized into a concrete value.
+query T
+show streaming_parallelism_for_table;
+----
+default
+
+query T
+show streaming_parallelism_for_source;
+----
+ratio(0.5)
+
+query T
+show streaming_parallelism_for_sink;
+----
+2
+
+query T
+show streaming_parallelism_for_index;
+----
+adaptive
+
+query T
+show streaming_parallelism_for_materialized_view;
+----
+bounded(4)
+
+# A parameter omitted from `[session_init]` keeps its built-in default.
+query T
+show streaming_parallelism_for_backfill;
+----
+default

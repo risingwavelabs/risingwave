@@ -500,6 +500,27 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         infos
     }
 
+    /// Used by migration of table change log to meta store.
+    /// `Self::table_change_log` will be consumed by the migration process later.
+    pub fn apply_table_change_log_delta_backward_compatibility(
+        &mut self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) {
+        #[expect(deprecated)]
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            let new_change_log = &change_log_delta.new_log;
+            match self.table_change_log.entry(*table_id) {
+                Entry::Occupied(entry) => {
+                    let change_log = entry.into_mut();
+                    change_log.add_change_log(new_change_log.clone());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
+                }
+            };
+        }
+    }
+
     pub fn apply_version_delta(
         &mut self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,

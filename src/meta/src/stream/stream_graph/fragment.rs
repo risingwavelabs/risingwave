@@ -162,6 +162,16 @@ impl BuildingFragment {
 
                 has_job = true;
             }
+            NodeBody::IcebergWithPkIndexWriter(writer_node) => {
+                writer_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
+
+                has_job = true;
+            }
+            NodeBody::IcebergWithPkIndexDvMerger(merger_node) => {
+                merger_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
+
+                has_job = true;
+            }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = job_id.as_mv_table_id();
                 dml_node.table_version_id = job.table_version_id().unwrap();
@@ -480,15 +490,15 @@ fn extend_sink_columns(
 /// Build sink column list after removing and appending columns.
 fn build_new_sink_columns(
     sink: &PbSink,
-    removed_column_ids: &HashSet<ColumnId>,
+    removed_column_names: &HashSet<String>,
     newly_added_columns: &[ColumnCatalog],
 ) -> Vec<PbColumnCatalog> {
     let mut columns: Vec<PbColumnCatalog> = sink
         .columns
         .iter()
         .filter(|col| {
-            let column_id = ColumnId::new(col.column_desc.as_ref().unwrap().column_id as _);
-            !removed_column_ids.contains(&column_id)
+            let column_name = &col.column_desc.as_ref().unwrap().name;
+            !removed_column_names.contains(column_name)
         })
         .cloned()
         .collect();
@@ -749,7 +759,12 @@ pub fn rewrite_refresh_schema_sink_fragment(
         .iter()
         .map(|col| format!("{}_{}", upstream_table.name, col.column_desc.name))
         .collect();
-    let new_sink_columns = build_new_sink_columns(sink, &removed_column_ids, newly_added_columns);
+    let removed_sink_column_names: HashSet<_> = removed_columns
+        .iter()
+        .map(|col| col.column_desc.name.clone())
+        .collect();
+    let new_sink_columns =
+        build_new_sink_columns(sink, &removed_sink_column_names, newly_added_columns);
 
     let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
     let sink_node = &mut new_sink_fragment.nodes;
@@ -1068,7 +1083,7 @@ impl StreamFragmentGraph {
                 old_internal_tables.len()
             );
         }
-        old_internal_tables.sort_by(|a, b| a.id.cmp(&b.id));
+        old_internal_tables.sort_by_key(|t| t.id);
         new_internal_table_ids.sort();
 
         let internal_table_id_map = new_internal_table_ids
@@ -1130,12 +1145,15 @@ impl StreamFragmentGraph {
 
     /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
-        self.fragments
-            .values()
-            .filter(|b| b.job_id.is_some())
-            .map(|b| b.fragment_id)
-            .exactly_one()
-            .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
+        Itertools::exactly_one(
+            self.fragments
+                .values()
+                .filter(|b| b.job_id.is_some())
+                .map(|b| b.fragment_id),
+        )
+        .expect(
+            "require exactly 1 materialize/sink/cdc source node when creating the streaming job",
+        )
     }
 
     /// Returns the fragment id where the table dml is received.
@@ -1617,7 +1635,7 @@ pub fn fill_snapshot_backfill_epoch(
             true
         }
     });
-    result.map(|_| applied)
+    result.map_err(MetaError::from).map(|_| applied)
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =

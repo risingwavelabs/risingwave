@@ -30,10 +30,13 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
+use risingwave_pb::hummock::PbSstableFilterLayout;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::compaction_utils::{
+    blocked_xor_filter_key_count_threshold, estimate_output_key_count_for_task,
+};
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
     CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
@@ -48,8 +51,8 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
-    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    TableHolder, UnifiedSstableWriterFactory,
+    CachePolicy, CompressionAlgorithm, FilterBuilder, GetObjectId, HummockResult,
+    SstableBuilderOptions, TableHolder, UnifiedSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -350,19 +353,19 @@ impl ConcatSstableIterator {
     }
 }
 
-pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
+pub struct CompactorRunner<
+    B: FilterBuilder = BlockedXor16FilterBuilder,
+    C: CompactionFilter = MultiCompactionFilter,
+> {
     left: Box<ConcatSstableIterator>,
     right: Box<ConcatSstableIterator>,
     task_id: u64,
-    executor: CompactTaskExecutor<
-        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
-        C,
-    >,
+    executor: CompactTaskExecutor<RemoteBuilderFactory<UnifiedSstableWriterFactory, B>, C>,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
 }
 
-impl<C: CompactionFilter> CompactorRunner<C> {
+impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
     pub fn new(
         context: CompactorContext,
         task: CompactTask,
@@ -375,19 +378,14 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
         options.compression_algorithm = compression_algorithm;
         options.capacity = task.target_file_size as usize;
+        let estimated_output_key_count =
+            estimate_output_key_count_for_task(&task, options.capacity);
+        options.estimated_output_key_count = Some(estimated_output_key_count);
+        options.filter_hash_prealloc_key_count_cap =
+            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
         // Disable vnode key-range hints for fast compaction path by default.
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
-
-        debug_assert_eq!(
-            task.sstable_filter_kind,
-            PbSstableFilterType::SstableFilterXor16,
-            "fast compaction only supports blocked xor16 filter today"
-        );
-        debug_assert!(
-            task.should_use_block_based_filter(),
-            "fast compaction can only preserve blocked filters; expected blocked output"
-        );
 
         let key_range = KeyRange::inf();
         let read_table_ids = HashSet::from_iter(task.get_table_ids_from_input_ssts());
@@ -398,14 +396,14 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
-            use_block_based_filter: true,
-            sstable_filter_kind: task.sstable_filter_kind,
+            sstable_filter_layout: PbSstableFilterLayout::Blocked,
+            sstable_filter_type: task.sstable_filter_type,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 
-        let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
+        let builder_factory = RemoteBuilderFactory::<_, B> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
             options,
@@ -445,7 +443,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             left_ssts
                 .iter()
                 .chain(right_ssts.iter())
-                .all(|sst| sst.bloom_filter_kind == BloomFilterType::Blocked),
+                .all(|sst| sst.filter_layout == PbSstableFilterLayout::Blocked),
             "fast compaction requires blocked-filter SSTs: {}",
             compact_task_to_string(&task)
         );
@@ -902,7 +900,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{BloomFilterType, LevelType, PbSstableFilterType};
+    use risingwave_pb::hummock::{LevelType, PbSstableFilterLayout, PbSstableFilterType};
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
@@ -944,7 +942,7 @@ mod tests {
             table_id_to_watermark_serde.clone(),
         )
         .await;
-        assert_eq!(dropped_only_sst.bloom_filter_kind, BloomFilterType::Sstable);
+        assert_eq!(dropped_only_sst.filter_layout, PbSstableFilterLayout::Plain);
         let mut inner = dropped_only_sst.get_inner();
         inner.table_ids.clear();
         dropped_only_sst.set_inner(inner);
@@ -1000,14 +998,14 @@ mod tests {
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
             blocked_xor_filter_kv_count_threshold: Some(0),
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_type: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
 
         assert_eq!(task.input_ssts[0].read_sstable_infos().count(), 1);
         assert!(optimize_by_copy_block(&task, &context));
 
-        let runner = CompactorRunner::new(
+        let runner = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
             context,
             task,
             CompactionCatalogAgent::for_test(vec![1, 2]),

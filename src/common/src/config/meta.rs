@@ -651,8 +651,13 @@ pub struct CompactionConfig {
     /// KV-count threshold for using blocked xor filters when output filter layout is "auto".
     ///
     /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked xor filters if
-    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
-    /// single non-blocked xor filter.
+    /// the estimated key count of one output SST exceeds this threshold. Otherwise it will build a
+    /// single non-blocked xor filter for that output.
+    ///
+    /// This is an output-SST-level heuristic. Older versions compared the threshold with the total
+    /// key count of the whole compaction task, which could classify many small output SSTs as
+    /// blocked only because they came from a large task. With the current heuristic, those outputs
+    /// can be classified back to plain filters.
     ///
     /// Note: shared-buffer flush does not read compaction group config, and always uses the
     /// built-in default threshold.
@@ -661,16 +666,17 @@ pub struct CompactionConfig {
     pub blocked_xor_filter_kv_count_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
     pub max_vnode_key_range_bytes: Option<u64>,
-    /// Per-level xor filter family for compaction output.
+    /// Per-level SST filter type for compaction output. Supported values: "none", "xor16", "xor8".
     ///
     /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
     /// flush, which always uses "xor16".
-    #[serde(default = "default::compaction_config::sstable_filter_kind")]
-    pub sstable_filter_kind: Vec<String>,
+    #[serde(default = "default::compaction_config::sstable_filter_type")]
+    pub sstable_filter_type: Vec<String>,
     /// Per-level xor filter layout for compaction output.
     ///
-    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
-    /// kv-count threshold.
+    /// `auto` uses the kv-count heuristic; `plain` forces non-blocked filters; `blocked`
+    /// forces block-based filters. Explicit `plain` and `blocked` values ignore the kv-count
+    /// threshold. This setting is ignored when the corresponding `sstable_filter_type` is "none".
     ///
     /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
     /// flush, which always uses "auto".
@@ -1118,27 +1124,27 @@ pub mod default {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
         }
 
-        pub fn sstable_filter_kind() -> Vec<String> {
+        pub fn sstable_filter_type() -> Vec<String> {
             vec![
                 "xor16".to_owned(),
                 "xor16".to_owned(),
                 "xor16".to_owned(),
                 "xor16".to_owned(),
                 "xor16".to_owned(),
-                "xor16".to_owned(),
-                "xor16".to_owned(),
+                "xor8".to_owned(),
+                "xor8".to_owned(),
             ]
         }
 
         pub fn sstable_filter_layout() -> Vec<String> {
             vec![
                 "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
             ]
         }
     }

@@ -33,6 +33,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
@@ -57,7 +58,7 @@ impl IcebergOrderKeyField {
     }
 }
 
-pub(super) async fn create_and_validate_table_impl(
+pub async fn create_and_validate_table_impl(
     config: &IcebergConfig,
     param: &SinkParam,
 ) -> Result<Table> {
@@ -108,7 +109,7 @@ pub(super) async fn create_table_if_not_exists_impl(
                     .map_err(|e| SinkError::Iceberg(anyhow!(e)))
                     .context(format!(
                         "failed to convert {}: {} to arrow type",
-                        &column.name, &column.data_type
+                        column.name, column.data_type
                     ))?)
             })
             .collect::<Result<Vec<ArrowField>>>()?;
@@ -123,7 +124,7 @@ pub(super) async fn create_table_if_not_exists_impl(
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                    // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                    // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
                     let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                     let url = Url::parse(warehouse_path);
                     if url.is_err() || is_s3_tables || is_bq_catalog_federation {
@@ -402,6 +403,29 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     });
 
     check_compatibility(schema_fields, &arrow_schema.fields)?;
+
+    // The sink writes columns to the Iceberg table by position, so the column order
+    // must match. The check above only validates the name set and types.
+    for (idx, (rw_field, arrow_field)) in rw_schema
+        .fields
+        .iter()
+        .zip_eq_fast(arrow_schema.fields().iter())
+        .enumerate()
+    {
+        if rw_field.name.as_str() != arrow_field.name().as_str() {
+            bail!(
+                "Column order mismatch at position {}: the sink has column `{}` but the \
+                 Iceberg table has column `{}`. The Iceberg sink maps columns to the table \
+                 by position, so the sink's column order must match the Iceberg table \
+                 columns [{}].",
+                idx,
+                rw_field.name,
+                arrow_field.name(),
+                arrow_schema.fields().iter().map(|f| f.name()).join(", "),
+            );
+        }
+    }
+
     Ok(())
 }
 

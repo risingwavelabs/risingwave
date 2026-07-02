@@ -869,6 +869,14 @@ mod tests {
             unimplemented!()
         }
 
+        async fn resolve_log_store_epoch<'a>(
+            &'a self,
+            _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+            _since_epoch: u64,
+        ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+            Ok(Default::default())
+        }
+
         async fn post_collect_command(
             &self,
             _command: crate::barrier::command::PostCollectCommand,
@@ -933,6 +941,32 @@ mod tests {
         async fn handle_refresh_finished_table_ids(
             &self,
             _refresh_finished_table_ids: Vec<JobId>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn load_batch_refresh_trigger_context(
+            &self,
+            _job_id: JobId,
+            _database_id: DatabaseId,
+            _last_committed_epoch: u64,
+        ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+        {
+            unimplemented!()
+        }
+
+        async fn pre_commit_iceberg_v3_sink_metadata(
+            &self,
+            _reports: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+            >,
+        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+            unimplemented!()
+        }
+
+        async fn commit_iceberg_v3_sink_metadata(
+            &self,
+            _sink_ids: Vec<risingwave_meta_model::SinkId>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

@@ -150,9 +150,7 @@ mod upstream {
             );
 
             // Replace the single input.
-            *self = to_add
-                .into_iter()
-                .exactly_one()
+            *self = Itertools::exactly_one(to_add.into_iter())
                 .expect("receiver should have exactly one new upstream");
         }
     }
@@ -562,7 +560,7 @@ mod tests {
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
-        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
 
@@ -581,7 +579,7 @@ mod tests {
         assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             assert_eq!(chunk.ops().len() as u64, 20);
         });
-        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(buffer.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(2));
         });
     }
@@ -682,7 +680,7 @@ mod tests {
                 }
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
+            assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,..}) => {
                 assert_eq!(barrier_epoch.curr, epoch);
             });
         }
@@ -691,7 +689,7 @@ mod tests {
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_deref().unwrap().is_stop()
+            }) if mutation.as_deref().unwrap().is_stop_mutation()
         );
 
         for handle in handles {
@@ -949,7 +947,7 @@ mod tests {
             assert!(columns.is_empty());
             assert!(visibility.is_empty());
         });
-        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, .. }) => {
             assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
         assert!(rpc_called.load(Ordering::SeqCst));

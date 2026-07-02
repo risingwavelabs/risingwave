@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +24,7 @@ use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::WorkerId;
@@ -50,11 +51,13 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
+    CreateStreamingJobType, RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest,
+    schedule,
 };
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -298,6 +301,7 @@ fn build_reschedule_from_context(
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -305,6 +309,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_v3_sink_manager: IcebergV3SinkManager,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -323,6 +328,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_v3_sink_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await
@@ -426,6 +432,70 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         }
     }
 
+    async fn resolve_since_timestamp_snapshot_backfill(
+        &mut self,
+        new_barrier: &mut schedule::NewBarrier,
+    ) -> MetaResult<bool> {
+        let Some((
+            Command::CreateStreamingJob {
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        since_epoch: Some(since_epoch),
+                    },
+                ..
+            },
+            notifiers,
+        )) = &mut new_barrier.command
+        else {
+            return Ok(true);
+        };
+        let since_timestamp_epoch = since_epoch.provided_since_epoch;
+
+        // Complete any inflight command first so the committed upstream epoch and
+        // table changelog view used for since_timestamp resolution cannot be stale.
+        match self.completing_task.wait_completing_task().await {
+            Ok(Some(output)) => self
+                .checkpoint_control
+                .ack_completed(&mut self.partial_graph_manager, output),
+            Ok(None) => {}
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to wait completing task before resolving since_timestamp"
+                );
+                return Err(err);
+            }
+        }
+
+        match self
+            .context
+            .resolve_log_store_epoch(
+                snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                    .copied(),
+                since_timestamp_epoch,
+            )
+            .await
+        {
+            Ok(upstream_log_epochs) => {
+                since_epoch.resolved = Some(upstream_log_epochs);
+                Ok(true)
+            }
+            Err(err) => {
+                error!(
+                    err = %err.as_report(),
+                    "failed to resolve log store epoch for since_timestamp"
+                );
+                for notifier in take(notifiers) {
+                    notifier.notify_start_failed(err.clone());
+                }
+                Ok(false)
+            }
+        }
+    }
+
     pub(super) async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -510,8 +580,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     info!(?changed_worker, "worker changed");
 
                     match changed_worker {
-                        ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) => {
-                            self.partial_graph_manager.add_worker(node, &*self.context).await;
+                        ActiveStreamingWorkerChange::Add(node)
+                        | ActiveStreamingWorkerChange::Update(node) => {
+                            self.partial_graph_manager
+                                .add_worker(node, self.context.clone())
+                                .await;
                         }
                         ActiveStreamingWorkerChange::Remove(node) => {
                             self.partial_graph_manager.remove_worker(node);
@@ -615,6 +688,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
                             }
+                            CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
+                                self.handle_batch_refresh_trigger(database_id, job_id).await?;
+                            }
                         }
                     };
                     if let Err(e) = result {
@@ -674,7 +750,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                             panic!("database {database_id} failure reported from {worker_id} but recovery not enabled")
                                         }
                                         if !self.enable_per_database_isolation() {
-                                                Err(anyhow!("database {database_id} report failure from {worker_id}"))?;
+                                                Err(MetaError::from(anyhow!("database {database_id} report failure from {worker_id}")))?;
                                             }
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                             warn!(%database_id, "database entering recovery");
@@ -688,7 +764,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         self.checkpoint_control.on_partial_graph_reset(partial_graph_id, reset_resps);
                                     }
                                     PartialGraphEvent::Initialized => {
-                                        self.checkpoint_control.on_partial_graph_initialized(partial_graph_id);
+                                        self.checkpoint_control.on_partial_graph_initialized(
+                                            partial_graph_id,
+                                            &mut self.partial_graph_manager,
+                                        )?;
                                     }
                                 }
                             }
@@ -700,7 +779,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
                     let database_id = new_barrier.database_id;
-                    let new_barrier = if matches!(
+                    let mut new_barrier = if matches!(
                         new_barrier.command,
                         Some((Command::RescheduleIntent { .. }, _))
                     ) {
@@ -728,6 +807,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
+                    match self
+                        .resolve_since_timestamp_snapshot_backfill(&mut new_barrier)
+                        .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(err) => {
+                            self.failure_recovery(err).await;
+                            continue;
+                        }
+                    }
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,
@@ -744,7 +834,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         let result: MetaResult<_> = try {
                             if !self.enable_per_database_isolation() {
                                 let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
-                                Err(err)?;
+                                Err(MetaError::from(err))?;
                             } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.partial_graph_manager) {
                                 warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
                                 self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
@@ -798,6 +888,45 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         };
         self.partial_graph_manager.notify_all_err(err);
+    }
+}
+
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    /// Handle a batch refresh trigger: load metadata + log epochs, then start a logstore
+    /// consumption run for the given batch refresh job.
+    async fn handle_batch_refresh_trigger(
+        &mut self,
+        database_id: DatabaseId,
+        job_id: JobId,
+    ) -> MetaResult<()> {
+        // 1. Get the last committed epoch for this job (read-only).
+        let last_committed_epoch = self
+            .checkpoint_control
+            .get_batch_refresh_trigger_info(database_id, job_id);
+
+        // 2. Load context metadata + resolve log epochs asynchronously.
+        let context = self
+            .context
+            .load_batch_refresh_trigger_context(job_id, database_id, last_committed_epoch)
+            .await?;
+
+        // 3. Start the refresh run.
+        let started = self.checkpoint_control.start_batch_refresh_run(
+            database_id,
+            job_id,
+            &context,
+            self.active_streaming_nodes.current(),
+            self.env.actor_id_generator(),
+            &mut self.partial_graph_manager,
+        )?;
+
+        // 5. Update shared_actor_infos with the new fragment infos.
+        if started {
+            self.checkpoint_control
+                .apply_batch_refresh_fragment_infos(database_id, job_id);
+        }
+
+        Ok(())
     }
 }
 

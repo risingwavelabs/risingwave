@@ -45,7 +45,7 @@ pub(crate) type CompactorChangeTx =
 pub(crate) type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-type ManualTaskWaiter = tokio::sync::oneshot::Sender<MetaResult<()>>;
+type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<u64>>;
 
 use schedule::CompactionTrack;
 pub use schedule::IcebergCompactionScheduleStatus;
@@ -65,7 +65,7 @@ pub struct IcebergCompactionManager {
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
     snapshot_expiration_sink_ids: HashSet<SinkId>,
-    manual_task_waiters: HashMap<u64, ManualTaskWaiter>,
+    manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
 }
 
 impl IcebergCompactionManager {
@@ -91,7 +91,7 @@ impl IcebergCompactionManager {
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
                     snapshot_expiration_sink_ids: HashSet::default(),
-                    manual_task_waiters: HashMap::default(),
+                    manual_compaction_waiters: HashMap::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,

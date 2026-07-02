@@ -22,7 +22,7 @@ use futures::Stream;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -297,16 +297,6 @@ impl BackfillProgressPerVnode {
     }
 }
 
-pub(crate) fn mark_chunk(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let chunk = chunk.compact_vis();
-    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
-}
-
 pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
@@ -383,39 +373,6 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     let (columns, _) = data.into_parts();
     let chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility.finish());
     Ok(chunk)
-}
-
-/// Mark chunk:
-/// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
-/// ignore it. We implement it by changing the visibility bitmap.
-fn mark_chunk_inner(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let (data, ops) = chunk.into_parts();
-    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-    let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
-    let mut unmatched_update_delete = false;
-    let mut visible_update_delete = false;
-    for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
-        let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos;
-        let visible = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le();
-        new_visibility.append(visible);
-
-        normalize_unmatched_updates(
-            &mut new_ops,
-            &mut unmatched_update_delete,
-            &mut visible_update_delete,
-            visible,
-            i,
-            op,
-        );
-    }
-    let (columns, _) = data.into_parts();
-    StreamChunk::with_visibility(new_ops, columns, new_visibility.finish())
 }
 
 /// We will rewrite unmatched U-/U+ into +/- ops.
@@ -530,6 +487,110 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
     }
 }
 
+fn same_key_columns(lhs: &[usize], rhs: &[usize]) -> bool {
+    lhs.len() == rhs.len() && lhs.iter().all(|idx| rhs.contains(idx))
+}
+
+/// Rewrites upstream updates when the input stream key is not the same column
+/// set as the current executor stream key.
+///
+/// If an upstream update keeps the input stream key unchanged but changes the
+/// current executor stream key, downstream state keyed by the current stream key
+/// must see it as a delete followed by an insert.
+pub(super) struct UpstreamStreamKeyUpdateNormalizer {
+    current_stream_key_indices: Option<Vec<usize>>,
+}
+
+impl UpstreamStreamKeyUpdateNormalizer {
+    /// Creates a normalizer for chunks with the given schema.
+    ///
+    /// `input_stream_key_indices` are the stream-key column indices of the input
+    /// executor in the incoming chunk schema.
+    ///
+    /// `current_stream_key_indices` are the stream-key column indices of the
+    /// current executor in the same incoming chunk schema.
+    ///
+    /// For example, if an upstream MV has input stream key `[k]` but the current
+    /// executor stream key is `[k, ts]`, then an update from
+    /// `(k = 1, ts = 10)` to `(k = 1, ts = 20)` is rewritten as
+    /// `Delete(k = 1, ts = 10)` plus `Insert(k = 1, ts = 20)`. If the two stream
+    /// keys are the same column set, or if an update does not change current
+    /// stream-key values, it is left unchanged.
+    pub(super) fn new(
+        input_stream_key_indices: &[usize],
+        current_stream_key_indices: Vec<usize>,
+    ) -> Self {
+        let current_stream_key_indices =
+            (!same_key_columns(input_stream_key_indices, &current_stream_key_indices))
+                .then_some(current_stream_key_indices);
+        Self {
+            current_stream_key_indices,
+        }
+    }
+
+    pub(super) fn normalize_chunk(&self, chunk: StreamChunk) -> Option<StreamChunk> {
+        if let Some(current_stream_key_indices) = &self.current_stream_key_indices {
+            normalize_update_chunk_by_key(chunk, current_stream_key_indices)
+        } else {
+            Some(chunk)
+        }
+    }
+
+    pub(super) fn normalize_message(&self, msg: Message) -> Option<Message> {
+        match msg {
+            Message::Chunk(chunk) => self.normalize_chunk(chunk).map(Message::Chunk),
+            msg => Some(msg),
+        }
+    }
+}
+
+fn normalize_update_chunk_by_key(chunk: StreamChunk, key_indices: &[usize]) -> Option<StreamChunk> {
+    let (data_chunk, ops) = chunk.into_parts();
+    let mut update_indices = vec![];
+    let mut row_idx = data_chunk.next_visible_row_idx(0);
+    while let Some(idx) = row_idx {
+        let row = data_chunk.row_at_unchecked_vis(idx);
+        match ops[idx] {
+            Op::UpdateDelete => {
+                let next_idx = data_chunk
+                    .next_visible_row_idx(idx + 1)
+                    .unwrap_or_else(|| panic!("expect a U+ after U-\nU- row: {}", row.display()));
+                let next_row = data_chunk.row_at_unchecked_vis(next_idx);
+                debug_assert_eq!(
+                    ops[next_idx],
+                    Op::UpdateInsert,
+                    "expect a U+ after U-\nU- row: {}\nrow after U-: {}",
+                    row.display(),
+                    next_row.display()
+                );
+                if row.project(key_indices) != next_row.project(key_indices) {
+                    update_indices.push((idx, next_idx));
+                }
+                row_idx = data_chunk.next_visible_row_idx(next_idx + 1);
+            }
+            Op::UpdateInsert => panic!("expect a U- before U+\nU+ row: {}", row.display()),
+            Op::Insert | Op::Delete => {
+                row_idx = data_chunk.next_visible_row_idx(idx + 1);
+            }
+        }
+    }
+
+    if update_indices.is_empty() {
+        return Some(StreamChunk::from_parts(ops, data_chunk));
+    }
+
+    let (columns, visibility) = data_chunk.into_parts();
+    let mut ops = ops.to_vec();
+    for (delete_idx, insert_idx) in update_indices {
+        ops[delete_idx] = Op::Delete;
+        ops[insert_idx] = Op::Insert;
+    }
+    Some(StreamChunk::from_parts(
+        ops,
+        DataChunk::new(columns, visibility),
+    ))
+}
+
 /// Recovers progress per vnode, so we know which to backfill.
 /// See how it decodes the state with the inline comments.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
@@ -605,57 +666,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     }
     assert_eq!(result.len(), state_table.vnodes().count_ones());
     Ok(result)
-}
-
-/// Flush the data
-pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    epoch: EpochPair,
-    old_state: &mut Option<Vec<Datum>>,
-    current_partial_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    let vnodes = table.vnodes().clone();
-    if let Some(old_state) = old_state {
-        if old_state[1..] != current_partial_state[1..] {
-            vnodes.iter_vnodes_scalar().for_each(|vnode| {
-                let datum = Some(vnode.into());
-                current_partial_state[0].clone_from(&datum);
-                old_state[0] = datum;
-                table.write_record(Record::Update {
-                    old_row: &old_state[..],
-                    new_row: &(*current_partial_state),
-                })
-            });
-        }
-    } else {
-        // No existing state, create a new entry.
-        vnodes.iter_vnodes_scalar().for_each(|vnode| {
-            let datum = Some(vnode.into());
-            // fill the state
-            current_partial_state[0] = datum;
-            table.write_record(Record::Insert {
-                new_row: &(*current_partial_state),
-            })
-        });
-    }
-    table.commit_assert_no_update_vnode_bitmap(epoch).await
-}
-
-/// We want to avoid allocating a row for every vnode.
-/// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the following segments of the row:
-/// 1. `current_pos`
-/// 2. `backfill_finished`
-/// 3. `row_count`
-pub(crate) fn build_temporary_state(
-    row_state: &mut [Datum],
-    is_finished: bool,
-    current_pos: &OwnedRow,
-    row_count: u64,
-) {
-    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-    row_state[current_pos.len() + 1] = Some(is_finished.into());
-    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
 }
 
 /// Update backfill pos by vnode.
@@ -824,31 +834,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     }
 
     table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    Ok(())
-}
-
-/// Schema
-/// | vnode | pk | `backfill_finished` | `row_count` |
-///
-/// For `current_pos` and `old_pos` are just pk of upstream.
-/// They should be strictly increasing.
-pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
-    epoch: EpochPair,
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    is_finished: bool,
-    current_pos: &Option<OwnedRow>,
-    row_count: u64,
-    old_state: &mut Option<Vec<Datum>>,
-    current_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    if let Some(current_pos_inner) = current_pos {
-        // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
-        flush_data(table, epoch, old_state, current_state).await?;
-        *old_state = Some(current_state.into());
-    } else {
-        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    }
     Ok(())
 }
 
