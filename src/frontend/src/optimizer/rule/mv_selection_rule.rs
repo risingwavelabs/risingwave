@@ -93,6 +93,10 @@ impl MvSelectionRule {
     ///   └─ Scan(MV table)
     /// [Project] (optional, restore query output order)
     /// ```
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "aggregate call keys are immutable planner values used only for lookup"
+    )]
     fn agg_rollup_rewrite(
         plan: &PlanRef,
         candidate: &MaterializedViewCandidate,

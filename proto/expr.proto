@@ -313,6 +313,14 @@ message ExprNode {
     JSONB_POPULATE_MAP = 632;
     JSONB_TO_ARRAY = 633;
 
+    // Variant functions
+    PARSE_VARIANT = 640;
+    TO_VARIANT = 641;
+    VARIANT_GET = 642;
+    TRY_VARIANT_GET = 643;
+    VARIANT_TYPEOF = 644;
+    VARIANT_TO_JSONB = 645;
+
     // Map functions
     MAP_FROM_ENTRIES = 700;
     MAP_ACCESS = 701;

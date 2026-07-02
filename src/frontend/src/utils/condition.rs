@@ -840,6 +840,10 @@ impl Condition {
     ///
     /// return None indicates that this conjunctions is always false
     #[expect(clippy::type_complexity)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "scan-range analysis hashes immutable folded scalar constants for set operations"
+    )]
     fn analyze_group(
         group: Vec<ExprImpl>,
     ) -> Result<

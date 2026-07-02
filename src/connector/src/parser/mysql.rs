@@ -28,7 +28,7 @@ use anyhow::anyhow;
 use chrono::NaiveDate;
 use risingwave_common::bail;
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
+    DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz, VariantVal,
 };
 use rust_decimal::Decimal as RustDecimal;
 
@@ -231,6 +231,15 @@ pub fn mysql_datum_to_rw_datum(
                 column_name,
                 serde_json::Value,
                 JsonbVal
+            )
+        }
+        DataType::Variant => {
+            handle_data_type!(
+                mysql_row,
+                mysql_datum_index,
+                column_name,
+                serde_json::Value,
+                VariantVal
             )
         }
         DataType::Vector(_)

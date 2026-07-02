@@ -36,7 +36,7 @@ use static_assertions::const_assert_eq;
 use crate::array::{ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
     DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
-    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
+    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, VariantVal,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -622,6 +622,7 @@ impl HashKeyDe for Timestamptz {
 impl_value_encoding_hash_key_serde!(Box<str>);
 impl_value_encoding_hash_key_serde!(Box<[u8]>);
 impl_value_encoding_hash_key_serde!(JsonbVal);
+impl_value_encoding_hash_key_serde!(VariantVal);
 
 // It's possible there's `Decimal` or `Interval` in these composite types, so we currently always
 // use the memcmp encoding for safety.
@@ -684,6 +685,10 @@ mod tests {
         (DataChunk::new(columns, capacity), types)
     }
 
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "test compares hash-key grouping with Row over a fixed non-variant chunk"
+    )]
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
         F: FnOnce() -> DataChunk,
