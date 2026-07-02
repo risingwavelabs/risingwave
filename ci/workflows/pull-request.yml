@@ -452,6 +452,22 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: sink-elasticsearch-test-env
+          wait: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end opensearch sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-elasticsearch-sink-tests" || build.pull_request.labels includes "ci/run-e2e-opensearch-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-(open)?search-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-opensearch-sink-ci-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-opensearch-test-env
+          wait: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry

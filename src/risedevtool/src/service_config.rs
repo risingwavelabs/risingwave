@@ -423,6 +423,22 @@ pub struct SqlServerConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct MongoDbConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct NatsConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -447,6 +463,44 @@ pub struct MqttConfig {
 
     pub address: String,
     pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct ElasticSearchConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub user: String,
+    pub password: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct OpenSearchConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub user: String,
+    pub password: String,
 
     pub image: String,
     pub user_managed: bool,
@@ -509,6 +563,9 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    MongoDb(MongoDbConfig),
+    ElasticSearch(ElasticSearchConfig),
+    OpenSearch(OpenSearchConfig),
     Nats(NatsConfig),
     Mqtt(MqttConfig),
     Lakekeeper(LakekeeperConfig),
@@ -525,6 +582,9 @@ pub enum TaskGroup {
     MySql,
     Postgres,
     SqlServer,
+    MongoDb,
+    ElasticSearch,
+    OpenSearch,
     Nats,
     Mqtt,
     Redis,
@@ -553,6 +613,9 @@ impl ServiceConfig {
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
+            Self::MongoDb(c) => &c.id,
+            Self::ElasticSearch(c) => &c.id,
+            Self::OpenSearch(c) => &c.id,
             Self::Nats(c) => &c.id,
             Self::Mqtt(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
@@ -582,6 +645,9 @@ impl ServiceConfig {
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
+            Self::MongoDb(c) => Some(c.port),
+            Self::ElasticSearch(c) => Some(c.port),
+            Self::OpenSearch(c) => Some(c.port),
             Self::Nats(c) => Some(c.port),
             Self::Mqtt(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
@@ -610,6 +676,9 @@ impl ServiceConfig {
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
+            Self::MongoDb(c) => c.user_managed,
+            Self::ElasticSearch(c) => c.user_managed,
+            Self::OpenSearch(c) => c.user_managed,
             Self::Nats(c) => c.user_managed,
             Self::Mqtt(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
@@ -650,6 +719,9 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::MongoDb(_) => MongoDb,
+            ServiceConfig::ElasticSearch(_) => ElasticSearch,
+            ServiceConfig::OpenSearch(_) => OpenSearch,
             ServiceConfig::Nats(_) => Nats,
             ServiceConfig::Mqtt(_) => Mqtt,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
