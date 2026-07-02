@@ -510,8 +510,9 @@ impl CatalogController {
 
     /// `REASSIGN OWNED BY`: transfer ownership of all objects in the given database owned by
     /// `old_owner_ids` to `new_owner`, along with `Database` objects they own (following the
-    /// "shared objects" semantics of PostgreSQL). Unlike `alter_owner`, companion objects
-    /// (e.g. indexes on an affected table) not owned by the old owners are left untouched.
+    /// "shared objects" semantics of PostgreSQL). Companion objects (e.g. indexes and their
+    /// storage tables, internal state tables) share their host object's owner by construction,
+    /// so they are covered by the owned set itself and need no expansion like `alter_owner`.
     pub async fn reassign_owned(
         &self,
         old_owner_ids: Vec<UserId>,

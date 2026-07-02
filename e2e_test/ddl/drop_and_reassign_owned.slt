@@ -48,6 +48,15 @@ reassign_mv reassign_u2
 reassign_t reassign_u2
 reassign_t_idx reassign_u2
 
+# The internal state tables of the owned streaming jobs are transferred as well.
+query T
+SELECT DISTINCT rw_users.name
+FROM rw_internal_tables
+JOIN rw_users ON rw_users.id = rw_internal_tables.owner
+WHERE rw_internal_tables.name LIKE '%reassign_mv%';
+----
+reassign_u2
+
 # Reassigning from a user that owns nothing is a no-op.
 statement ok
 REASSIGN OWNED BY reassign_u1 TO reassign_u2;
