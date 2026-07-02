@@ -234,6 +234,15 @@ impl SnowflakeV2Config {
                 SINK_TYPE_UPSERT
             )));
         }
+        if config.r#type != SINK_TYPE_UPSERT
+            && (config.task_serverless || config.task_target_completion_interval.is_some())
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`task.serverless` and `task.target_completion_interval` require `{}` = {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_UPSERT
+            )));
+        }
         if config.task_target_completion_interval.is_some() && !config.task_serverless {
             return Err(SinkError::Config(anyhow!(
                 "`task.target_completion_interval` requires `task.serverless` to be true"
@@ -1271,6 +1280,7 @@ mod tests {
     fn test_snowflake_task_target_completion_interval_requires_serverless() {
         let mut props = base_properties();
         props.insert("password".to_owned(), "secret".to_owned());
+        props.insert("type".to_owned(), "upsert".to_owned());
         props.insert(
             "task.target_completion_interval".to_owned(),
             "5 MINUTES".to_owned(),
@@ -1288,6 +1298,7 @@ mod tests {
     fn test_snowflake_serverless_task_rejects_warehouse() {
         let mut props = base_properties();
         props.insert("password".to_owned(), "secret".to_owned());
+        props.insert("type".to_owned(), "upsert".to_owned());
         props.insert("task.serverless".to_owned(), "true".to_owned());
         props.insert("warehouse".to_owned(), "test_warehouse".to_owned());
 
@@ -1297,6 +1308,33 @@ mod tests {
                 .to_string()
                 .contains("`task.serverless` must not be combined with `warehouse`")
         );
+    }
+
+    #[test]
+    fn test_snowflake_append_only_rejects_task_serverless() {
+        let mut props = base_properties();
+        props.insert("password".to_owned(), "secret".to_owned());
+        props.insert("task.serverless".to_owned(), "true".to_owned());
+
+        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+        assert!(err.as_report().to_string().contains(
+            "`task.serverless` and `task.target_completion_interval` require `type` = upsert"
+        ));
+    }
+
+    #[test]
+    fn test_snowflake_append_only_rejects_task_target_completion_interval() {
+        let mut props = base_properties();
+        props.insert("password".to_owned(), "secret".to_owned());
+        props.insert(
+            "task.target_completion_interval".to_owned(),
+            "5 MINUTES".to_owned(),
+        );
+
+        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+        assert!(err.as_report().to_string().contains(
+            "`task.serverless` and `task.target_completion_interval` require `type` = upsert"
+        ));
     }
 
     #[test]
