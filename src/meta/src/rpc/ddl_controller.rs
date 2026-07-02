@@ -156,7 +156,10 @@ pub enum DdlCommand {
     DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
-    ResetSource(SourceId),
+    ResetSource {
+        source_id: SourceId,
+        start_offset: Option<String>,
+    },
     CreateFunction(Function),
     DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
@@ -210,7 +213,7 @@ impl DdlCommand {
             DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
-            DdlCommand::ResetSource(id) => Right(id.as_object_id()),
+            DdlCommand::ResetSource { source_id, .. } => Right(source_id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
@@ -271,7 +274,7 @@ impl DdlCommand {
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
-            | DdlCommand::ResetSource(_)
+            | DdlCommand::ResetSource { .. }
             | DdlCommand::CreateSubscription(_) => false,
         }
     }
@@ -462,7 +465,10 @@ impl DdlController {
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
-                DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
+                DdlCommand::ResetSource {
+                    source_id,
+                    start_offset,
+                } => ctrl.reset_source(source_id, start_offset).await,
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id, drop_mode) => {
                     ctrl.drop_function(function_id, drop_mode).await
@@ -706,8 +712,16 @@ impl DdlController {
             .await
     }
 
-    async fn reset_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
-        tracing::info!(source_id = %source_id, "resetting CDC source offset to latest");
+    async fn reset_source(
+        &self,
+        source_id: SourceId,
+        start_offset: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        tracing::info!(
+            source_id = %source_id,
+            start_offset = ?start_offset,
+            "resetting CDC source offset"
+        );
 
         // Get database_id for the source
         let database_id = self
@@ -718,7 +732,13 @@ impl DdlController {
 
         self.stream_manager
             .barrier_scheduler
-            .run_command(database_id, Command::ResetSource { source_id })
+            .run_command(
+                database_id,
+                Command::ResetSource {
+                    source_id,
+                    start_offset,
+                },
+            )
             .await?;
 
         // RESET SOURCE doesn't modify catalog, so return the current catalog version

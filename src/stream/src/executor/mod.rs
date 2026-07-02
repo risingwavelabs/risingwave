@@ -393,6 +393,7 @@ pub enum Mutation {
     },
     ResetSource {
         source_id: SourceId,
+        start_offset: Option<String>,
     },
     InjectSourceOffsets {
         source_id: SourceId,
@@ -972,9 +973,13 @@ impl Mutation {
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             }),
-            Mutation::ResetSource { source_id } => {
+            Mutation::ResetSource {
+                source_id,
+                start_offset,
+            } => {
                 PbMutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
                     source_id: source_id.as_raw_id(),
+                    start_offset: start_offset.clone(),
                 })
             }
             Mutation::InjectSourceOffsets {
@@ -1159,6 +1164,7 @@ impl Mutation {
             },
             PbMutation::ResetSource(reset_source) => Mutation::ResetSource {
                 source_id: SourceId::from(reset_source.source_id),
+                start_offset: reset_source.start_offset.clone(),
             },
             PbMutation::InjectSourceOffsets(inject) => Mutation::InjectSourceOffsets {
                 source_id: SourceId::from(inject.source_id),
