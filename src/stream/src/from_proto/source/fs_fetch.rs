@@ -25,8 +25,9 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::source::{
-    BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchPosixFsFetchExecutor,
-    FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchOpendalFsFetchExecutor,
+    BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler,
+    StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
@@ -34,6 +35,8 @@ use crate::from_proto::source::is_full_reload_refresh;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
+
+impl_stream_node_body!(StreamFsFetch(StreamFsFetchNode) => FsFetchExecutorBuilder);
 
 impl ExecutorBuilder for FsFetchExecutorBuilder {
     type Node = StreamFsFetchNode;
@@ -91,22 +94,46 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
 
         let exec = match properties {
             risingwave_connector::source::ConnectorProperties::Gcs(_) => {
-                FsFetchExecutor::<_, OpendalGcs>::new(
-                    params.actor_context.clone(),
-                    stream_source_core,
-                    upstream,
-                    source.rate_limit,
-                )
-                .boxed()
+                if is_full_reload_refresh {
+                    BatchOpendalFsFetchExecutor::<_, OpendalGcs>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                        params.local_barrier_manager.clone(),
+                        source.associated_table_id,
+                    )
+                    .boxed()
+                } else {
+                    FsFetchExecutor::<_, OpendalGcs>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                    )
+                    .boxed()
+                }
             }
             risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
-                FsFetchExecutor::<_, OpendalS3>::new(
-                    params.actor_context.clone(),
-                    stream_source_core,
-                    upstream,
-                    source.rate_limit,
-                )
-                .boxed()
+                if is_full_reload_refresh {
+                    BatchOpendalFsFetchExecutor::<_, OpendalS3>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                        params.local_barrier_manager.clone(),
+                        source.associated_table_id,
+                    )
+                    .boxed()
+                } else {
+                    FsFetchExecutor::<_, OpendalS3>::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                    )
+                    .boxed()
+                }
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
                 if is_full_reload_refresh {

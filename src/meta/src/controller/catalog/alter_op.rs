@@ -19,11 +19,13 @@ use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, DatabaseTransaction};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseTransaction, SqlErr};
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::controller::utils::load_streaming_jobs_by_ids;
@@ -988,7 +990,7 @@ impl CatalogController {
             .await?;
         let to_drop_objects = to_drop_source_objects
             .into_iter()
-            .chain(to_drop_internal_table_objs.into_iter())
+            .chain(to_drop_internal_table_objs)
             .collect_vec();
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -1065,6 +1067,41 @@ impl CatalogController {
             )
             .await;
         Ok((version, database))
+    }
+
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let database =
+            database::ActiveModel {
+                database_id: Set(database_id),
+                resource_group: Set(
+                    resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
+                ),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database, obj, None).into()),
+            )
+            .await;
+        Ok(version)
     }
 
     pub async fn alter_subscription_retention(
@@ -1199,7 +1236,18 @@ impl CatalogController {
                 tracing::debug!("refresh job already exists for table_id={}", table_id);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip ensure_refresh_job for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
         }
     }
 
@@ -1230,8 +1278,21 @@ impl CatalogController {
             },
             ..Default::default()
         };
-        RefreshJob::update(active).exec(&inner.db).await?;
-        Ok(())
+        match RefreshJob::update(active).exec(&inner.db).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip update_refresh_job_status for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
     pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
@@ -1261,4 +1322,27 @@ impl CatalogController {
         RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
+}
+
+async fn should_skip_refresh_job_db_err<C>(
+    db: &C,
+    table_id: TableId,
+    err: &sea_orm::DbErr,
+) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if matches!(err, sea_orm::DbErr::RecordNotUpdated) {
+        return Ok(true);
+    }
+
+    if !matches!(
+        err.sql_err(),
+        Some(SqlErr::ForeignKeyConstraintViolation(_))
+    ) {
+        return Ok(false);
+    }
+
+    let table_exists = Table::find_by_id(table_id).one(db).await?.is_some();
+    Ok(!table_exists)
 }

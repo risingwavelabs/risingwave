@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
 mod cache;
 mod sides;
@@ -33,14 +34,14 @@ mod tests;
 ///
 /// The output schema is `| stream columns | arrangement columns |`.
 /// The input is required to be first stream and then arrangement.
-pub struct LookupExecutor<S: StateStore> {
+pub struct LookupExecutor<S: StateStore, SD: ValueRowSerde> {
     ctx: ActorContextRef,
 
     /// the data types of the produced data chunk inside lookup (before reordering)
     chunk_data_types: Vec<DataType>,
 
     /// The join side of the arrangement
-    arrangement: ArrangeJoinSide<S>,
+    arrangement: ArrangeJoinSide<S, SD>,
 
     /// The join side of the stream
     stream: StreamJoinSide,
@@ -50,9 +51,6 @@ pub struct LookupExecutor<S: StateStore> {
 
     /// The executor for stream.
     stream_executor: Option<Executor>,
-
-    /// The last received barrier.
-    last_barrier: Option<Barrier>,
 
     /// Information of column reordering
     column_mapping: Vec<usize>,
@@ -75,7 +73,7 @@ pub struct LookupExecutor<S: StateStore> {
 }
 
 #[async_trait]
-impl<S: StateStore> Execute for LookupExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> Execute for LookupExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }

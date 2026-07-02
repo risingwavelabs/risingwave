@@ -490,7 +490,9 @@ impl SinkFormatterImpl {
         sink_from_name: String,
         topic: &str,
     ) -> Result<Self> {
-        use {SinkEncode as E, SinkFormat as F, SinkFormatterImpl as Impl};
+        use SinkEncode as E;
+        use SinkFormat as F;
+        use SinkFormatterImpl as Impl;
         let p = FormatterParams {
             builder: EncoderParams {
                 format_desc,

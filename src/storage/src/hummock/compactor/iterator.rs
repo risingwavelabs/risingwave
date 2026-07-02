@@ -23,7 +23,6 @@ use await_tree::{InstrumentAwait, SpanExt};
 use fail::fail_point;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -61,8 +60,8 @@ pub struct SstableStreamIterator {
     /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
 
-    /// To Filter out the blocks
-    sstable_table_ids: HashSet<StateTableId>,
+    /// Table ids used to decide which blocks should be read from this SST.
+    read_table_ids: HashSet<TableId>,
     task_progress: Arc<TaskProgress>,
     io_retry_times: usize,
     max_io_retry_times: usize,
@@ -97,17 +96,13 @@ impl SstableStreamIterator {
         sstable_store: SstableStoreRef,
         max_io_retry_times: usize,
     ) -> Self {
-        let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
-
+        let read_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().copied());
         // Further filter the block_metas_range with sstable_info.key_range
         // This is necessary when the SST is split into multiple SstableInfo with different key ranges
         let block_metas_range = {
             let block_metas = &sstable.meta.block_metas[block_metas_range.clone()];
-            let inner_range = filter_block_metas(
-                block_metas,
-                &sstable_table_ids,
-                sstable_info.key_range.clone(),
-            );
+            let inner_range =
+                filter_block_metas(block_metas, &read_table_ids, sstable_info.key_range.clone());
             // Adjust the range to be relative to the original block_metas
             (block_metas_range.start + inner_range.start)
                 ..(block_metas_range.start + inner_range.end)
@@ -124,7 +119,7 @@ impl SstableStreamIterator {
             block_metas_range,
             block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
-            sstable_table_ids,
+            read_table_ids,
             sstable_info,
             sstable_store,
             task_progress,
@@ -163,7 +158,7 @@ impl SstableStreamIterator {
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
         while let Some(block_iter) = self.block_iter.as_mut() {
-            if self.sstable_table_ids.contains(&block_iter.table_id()) {
+            if self.read_table_ids.contains(&block_iter.table_id()) {
                 return Ok(());
             } else {
                 self.next_block().await?;
@@ -385,8 +380,6 @@ pub struct ConcatSstableIterator {
     /// All non-overlapping tables.
     sstables: Vec<SstableInfo>,
 
-    existing_table_ids: HashSet<StateTableId>,
-
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
@@ -399,7 +392,6 @@ impl ConcatSstableIterator {
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
-        existing_table_ids: Vec<StateTableId>,
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
@@ -411,7 +403,6 @@ impl ConcatSstableIterator {
             sstable_iter: None,
             cur_idx: 0,
             sstables: sst_infos,
-            existing_table_ids: HashSet::from_iter(existing_table_ids),
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
@@ -421,13 +412,11 @@ impl ConcatSstableIterator {
 
     #[cfg(test)]
     pub fn for_test(
-        existing_table_ids: Vec<impl Into<StateTableId>>,
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
     ) -> Self {
         Self::new(
-            existing_table_ids.into_iter().map(Into::into).collect(),
             sst_infos,
             key_range,
             sstable_store,
@@ -457,11 +446,8 @@ impl ConcatSstableIterator {
         self.cur_idx = idx;
         while self.cur_idx < self.sstables.len() {
             let table_info = &self.sstables[self.cur_idx];
-            let mut found = table_info
-                .table_ids
-                .iter()
-                .any(|table_id| self.existing_table_ids.contains(table_id));
-            if !found {
+            let read_table_ids = HashSet::from_iter(table_info.table_ids.iter().copied());
+            if read_table_ids.is_empty() {
                 self.cur_idx += 1;
                 seek_key = None;
                 continue;
@@ -479,12 +465,10 @@ impl ConcatSstableIterator {
                 None => self.key_range.clone(),
             };
 
-            let block_metas_range = filter_block_metas(
-                &sstable.meta.block_metas,
-                &self.existing_table_ids,
-                filter_key_range,
-            );
+            let block_metas_range =
+                filter_block_metas(&sstable.meta.block_metas, &read_table_ids, filter_key_range);
 
+            let mut found = true;
             if block_metas_range.is_empty() {
                 found = false;
             } else {
@@ -660,7 +644,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 
 pub(crate) fn filter_block_metas(
     block_metas: &[BlockMeta],
-    existing_table_ids: &HashSet<TableId>,
+    read_table_ids: &HashSet<TableId>,
     key_range: KeyRange,
 ) -> Range<usize> {
     if block_metas.is_empty() {
@@ -696,10 +680,10 @@ pub(crate) fn filter_block_metas(
     }
     .saturating_sub(1);
 
-    // skip blocks that are not in existing_table_ids
+    // Skip blocks that are not in the SST read table ids.
     while start_index <= end_index {
         let start_block_table_id = block_metas[start_index].table_id();
-        if existing_table_ids.contains(&start_block_table_id) {
+        if read_table_ids.contains(&start_block_table_id) {
             break;
         }
 
@@ -718,7 +702,7 @@ pub(crate) fn filter_block_metas(
 
     while start_index <= end_index {
         let end_block_table_id = block_metas[end_index].table_id();
-        if existing_table_ids.contains(&end_block_table_id) {
+        if read_table_ids.contains(&end_block_table_id) {
             break;
         }
 
@@ -749,6 +733,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, next_full_key, prev_full_key};
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
@@ -758,8 +743,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::test_utils::{
-        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_info, test_key_of,
-        test_value_of,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_info,
+        gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
     use crate::hummock::value::HummockValue;
 
@@ -787,12 +772,8 @@ mod tests {
             test_key_of(start_index).encode().into(),
             test_key_of(end_index).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
 
         for idx in start_index..end_index {
@@ -811,24 +792,16 @@ mod tests {
             test_key_of(30000).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         assert!(!iter.is_valid());
         let kr = KeyRange::new(
             test_key_of(start_index).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
@@ -847,12 +820,8 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(test_key_of(10000).to_ref()).await.unwrap();
         assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).to_ref());
         iter.seek(test_key_of(10001).to_ref()).await.unwrap();
@@ -871,12 +840,8 @@ mod tests {
             test_key_of(6000).encode().into(),
             test_key_of(16000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(test_key_of(17000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
         iter.seek(test_key_of(1).to_ref()).await.unwrap();
@@ -906,12 +871,8 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         let sst = sstable_store
             .sstable(&iter.sstables[0], &mut iter.stats)
             .await
@@ -946,12 +907,8 @@ mod tests {
             next_full_key(&block_1_smallest_key).into(),
             prev_full_key(&block_2_smallest_key).into(),
         );
-        let mut iter = ConcatSstableIterator::for_test(
-            vec![0],
-            table_infos.clone(),
-            kr.clone(),
-            sstable_store.clone(),
-        );
+        let mut iter =
+            ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         // Use block_2_smallest_key as seek key and result in invalid iterator.
         let seek_key = FullKey::decode(&block_2_smallest_key);
         assert!(seek_key.cmp(&FullKey::decode(&kr.right)) == Ordering::Greater);
@@ -1215,6 +1172,53 @@ mod tests {
                     .as_raw_id()
             );
         }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+
+            let ret = filter_block_metas(
+                &block_metas,
+                &HashSet::from_iter(vec![1_u32.into(), 3_u32.into()].into_iter()),
+                KeyRange::default(),
+            );
+            let ret = &block_metas[ret];
+
+            assert_eq!(3, ret.len());
+            assert_eq!(
+                1,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[1].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+            assert_eq!(
+                3,
+                FullKey::decode(&ret[2].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+        }
     }
 
     #[tokio::test]
@@ -1257,7 +1261,6 @@ mod tests {
             let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
 
             let mut iter = ConcatSstableIterator::for_test(
-                vec![0],
                 vec![sst_1.clone(), sst_2.clone()],
                 KeyRange::default(),
                 sstable_store.clone(),
@@ -1279,14 +1282,12 @@ mod tests {
         {
             let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
             let concat_1 = ConcatSstableIterator::for_test(
-                vec![0],
                 vec![sst_1.clone()],
                 KeyRange::default(),
                 sstable_store.clone(),
             );
 
             let concat_2 = ConcatSstableIterator::for_test(
-                vec![0],
                 vec![sst_2.clone()],
                 KeyRange::default(),
                 sstable_store.clone(),
@@ -1302,5 +1303,56 @@ mod tests {
             }
             assert_eq!(total_key_count, key_count);
         }
+    }
+
+    #[tokio::test]
+    async fn test_concat_iterator_skips_hole_table_blocks() {
+        let sstable_store = mock_sstable_store().await;
+
+        let key_1 = FullKey::for_test(TableId::new(1), b"a".to_vec(), test_epoch(1));
+        let key_2 = FullKey::for_test(TableId::new(2), b"b".to_vec(), test_epoch(1));
+        let key_3 = FullKey::for_test(TableId::new(3), b"c".to_vec(), test_epoch(1));
+        let kv_pairs = vec![
+            (key_1.clone(), HummockValue::put(b"value-1".to_vec())),
+            (key_2.clone(), HummockValue::put(b"value-2".to_vec())),
+            (key_3.clone(), HummockValue::put(b"value-3".to_vec())),
+        ];
+
+        let (_sstable, table_info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            10,
+            kv_pairs.into_iter(),
+            sstable_store.clone(),
+            vec![1, 2, 3],
+        )
+        .await;
+
+        let table_info: SstableInfo = SstableInfoInner {
+            table_ids: vec![1.into(), 3.into()],
+            ..table_info.get_inner()
+        }
+        .into();
+
+        let mut iter = ConcatSstableIterator::for_test(
+            vec![table_info.clone()],
+            KeyRange::default(),
+            sstable_store.clone(),
+        );
+        iter.rewind().await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_1.to_ref());
+
+        iter.next().await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_3.to_ref());
+
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        let mut iter =
+            ConcatSstableIterator::for_test(vec![table_info], KeyRange::default(), sstable_store);
+        iter.seek(key_2.to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_3.to_ref());
     }
 }

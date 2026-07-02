@@ -1,5 +1,26 @@
 statement ok
+DROP TABLE multi_column_batched;
+
+statement ok
+DROP TABLE multi_column_bigint_precise_option;
+
+statement ok
+DROP TABLE multi_column_time_option;
+
+statement ok
+DROP TABLE multi_column_timestamp_option;
+
+statement ok
+DROP TABLE multi_column_no_pk;
+
+statement ok
+DROP TABLE multi_column_with_options;
+
+statement ok
 DROP TABLE validate_raw_string;
+
+statement ok
+DROP TABLE multi_column_validate;
 
 statement ok
 DROP TABLE test_primary_key;

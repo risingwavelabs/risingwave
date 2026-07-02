@@ -177,6 +177,8 @@ impl IcebergFileScanTask {
 pub struct IcebergSplit {
     pub split_id: i64,
     pub task: IcebergFileScanTask,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
 }
 
 impl IcebergSplit {
@@ -187,7 +189,11 @@ impl IcebergSplit {
             IcebergScanType::PositionDeleteScan => IcebergFileScanTask::PositionDelete(vec![]),
             _ => unimplemented!(),
         };
-        Self { split_id: 0, task }
+        Self {
+            split_id: 0,
+            task,
+            limit: None,
+        }
     }
 }
 
@@ -663,6 +669,7 @@ mod tests {
             start: 0,
             record_count: Some(0),
             data_file_path: format!("test_{}.parquet", id),
+            referenced_data_file: None,
             data_file_content: DataContentType::Data,
             data_file_format: iceberg::spec::DataFileFormat::Parquet,
             schema: Arc::new(Schema::builder().build().unwrap()),

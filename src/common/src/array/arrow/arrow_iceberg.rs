@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_57::{
+pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
@@ -175,7 +175,7 @@ impl ToArrow for IcebergArrowConvert {
                         let value = match scale {
                             _ if scale < max_scale => value
                                 .checked_mul(10_i128.pow(diff_scale as u32))
-                                .and_then(|v| if abs(v) <= max_value { Some(v) } else { None })
+                                .filter(|&v| abs(v) <= max_value)
                                 .unwrap_or_else(|| {
                                     tracing::warn!(
                                         "Decimal overflow when converting to arrow decimal with precision {} and scale {}. It will be replaced with inf/-inf.",

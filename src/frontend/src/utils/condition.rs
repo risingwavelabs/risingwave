@@ -363,7 +363,7 @@ impl Condition {
             let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
             for s1 in &scan_ranges {
                 let overlap = non_overlap_scan_ranges.iter().any(|s2| {
-                    #[allow(clippy::disallowed_methods)]
+                    #[expect(clippy::disallowed_methods)]
                     s1.eq_conds
                         .iter()
                         .zip(s2.eq_conds.iter())
@@ -721,7 +721,7 @@ impl Condition {
             else {
                 return Ok(false_cond());
             };
-            other_conds.extend(part_of_other_conds.into_iter());
+            other_conds.extend(part_of_other_conds);
 
             let lower_bound = Self::merge_lower_bound_conjunctions(lower_bound_conjunctions);
             let upper_bound = Self::merge_upper_bound_conjunctions(upper_bound_conjunctions);
@@ -738,7 +738,7 @@ impl Condition {
                     if eq_conds.is_empty() {
                         return Ok(false_cond());
                     }
-                    scan_range.eq_conds.extend(eq_conds.into_iter());
+                    scan_range.eq_conds.extend(eq_conds);
                 }
                 0 => {
                     let convert = |bound| match bound {
@@ -839,7 +839,7 @@ impl Condition {
     /// 4. other conditions
     ///
     /// return None indicates that this conjunctions is always false
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn analyze_group(
         group: Vec<ExprImpl>,
     ) -> Result<

@@ -25,6 +25,8 @@ use crate::task::ExecutorParams;
 
 pub struct SyncLogStoreExecutorBuilder;
 
+impl_stream_node_body!(SyncLogStore(SyncLogStoreNode) => SyncLogStoreExecutorBuilder);
+
 impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
     type Node = SyncLogStoreNode;
 
@@ -55,12 +57,12 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
 
         // Previously, these configs are persisted in the plan node.
         // Now it's always `None` and we should refer to the job's config override.
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let pause_duration_ms = node.pause_duration_ms.map_or(
             params.config.developer.sync_log_store_pause_duration_ms,
             |v| v as usize,
         );
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let buffer_max_size = node
             .buffer_size
             .map_or(params.config.developer.sync_log_store_buffer_size, |v| {

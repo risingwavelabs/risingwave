@@ -93,6 +93,11 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
+    /// If `DML_WAIT_PERSISTENCE` is on, then every INSERT/UPDATE/DELETE statement waits until
+    /// the transaction is included in a checkpoint. This is ignored when `IMPLICIT_FLUSH` is on.
+    #[parameter(default = false)]
+    dml_wait_persistence: bool,
+
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
     /// MV creation.
     #[parameter(default = false)]
@@ -174,39 +179,40 @@ pub struct SessionConfig {
     /// The execution parallelism for streaming queries, including tables, materialized views,
     /// indexes, and sinks. Defaults to `default`, which preserves the legacy adaptive
     /// scheduling behavior during effective resolution.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism: ConfigParallelism,
 
     /// Specific parallelism for backfill. Only `default` and a fixed positive integer are
     /// supported here. Adaptive backfill strategies are deferred to a later change.
     #[parameter(
         default = ConfigBackfillParallelism::Default,
-        check_hook = check_streaming_parallelism_for_backfill
+        check_hook = check_streaming_parallelism_for_backfill,
+        flags = "SESSION_INIT"
     )]
     streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
     /// Specific parallelism for table. Defaults to `default`, which preserves the legacy
     /// bounded adaptive behavior only when the global parallelism itself remains `default`.
     /// Otherwise it follows the explicit global parallelism.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_table: ConfigParallelism,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_sink: ConfigParallelism,
 
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_index: ConfigParallelism,
 
     /// Specific parallelism for source. Defaults to `default`, which preserves the legacy
     /// bounded adaptive behavior only when the global parallelism itself remains `default`.
     /// Otherwise it follows the explicit global parallelism.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_source: ConfigParallelism,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
@@ -222,12 +228,12 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_force_filter_inside_join")]
     streaming_force_filter_inside_join: bool,
 
-    /// Enable arrangement backfill for streaming queries. Defaults to true.
-    /// When set to true, the parallelism of the upstream fragment will be
-    /// decoupled from the parallelism of the downstream scan fragment.
-    /// Or more generally, the parallelism of the upstream table / index / mv
-    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
-    #[parameter(default = true)]
+    /// Deprecated. Arrangement backfill is always used as the fallback backfill type for new
+    /// streaming jobs, and this setting is ignored.
+    #[parameter(
+        default = true,
+        deprecated = "The session variable STREAMING_USE_ARRANGEMENT_BACKFILL has been deprecated and is ignored. Arrangement backfill is always used as the fallback backfill type for new streaming jobs."
+    )]
     streaming_use_arrangement_backfill: bool,
 
     #[parameter(default = true)]
@@ -391,6 +397,15 @@ pub struct SessionConfig {
     /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
     #[parameter(default = true)]
     streaming_use_shared_source: bool,
+
+    /// Enable in-memory cache for `AsOf` join executor.
+    ///
+    /// When enabled (default), `AsOf` join uses the cache-based implementation.
+    ///
+    /// When disabled, `AsOf` join uses a no-cache implementation that directly queries
+    /// the state table on-demand, reducing unnecessary data fetches for cache.
+    #[parameter(default = true)]
+    streaming_asof_join_use_cache: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
@@ -665,6 +680,8 @@ mod test {
     struct TestConfig {
         #[parameter(default = 1, flags = "NO_ALTER_SYS", alias = "test_param_alias" | "alias_param_test")]
         test_param: i32,
+        #[parameter(default = false, deprecated = "deprecated test notice")]
+        deprecated_test_param: bool,
     }
 
     #[test]
@@ -677,6 +694,11 @@ mod test {
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
+        assert_eq!(
+            TestConfig::deprecated_notice("deprecated_test_param").unwrap(),
+            Some("deprecated test notice")
+        );
+        assert_eq!(TestConfig::deprecated_notice("test_param").unwrap(), None);
     }
 
     #[test]
@@ -793,7 +815,6 @@ mod test {
             "default"
         );
     }
-
     #[test]
     fn test_streaming_parallelism_for_backfill_accepts_default_and_fixed() {
         let mut config = SessionConfig::default();

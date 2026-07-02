@@ -493,7 +493,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
                     let fp_cand_clone = fp_cand.clone();
 
                     // v cannot be a candidate for any other u. Remove it before proceeding.
-                    for (_, u_cands) in fp_cand.iter_mut() {
+                    for u_cands in fp_cand.values_mut() {
                         u_cands.remove(&v);
                     }
 

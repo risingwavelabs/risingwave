@@ -581,6 +581,23 @@ pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Orde
         })
 }
 
+/// Compare two rows column-by-column, assuming all columns are in ascending order.
+/// This function avoids the allocation of `order_types` before each call.
+///
+/// # Panics
+///
+/// See [`cmp_rows`]
+pub fn cmp_rows_ascending(lhs: impl Row, rhs: impl Row) -> Ordering {
+    assert_eq!(lhs.len(), rhs.len());
+    let order_type = OrderType::ascending();
+    lhs.iter()
+        .zip_eq_debug(rhs.iter())
+        .fold(Ordering::Equal, |acc, (l, r)| match acc {
+            Ordering::Equal => cmp_datum(l, r, order_type),
+            acc => acc,
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;

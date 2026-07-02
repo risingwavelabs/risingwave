@@ -22,6 +22,7 @@ use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
 /// original columns of input. It can be used to implement distinct aggregation and group set.
@@ -42,10 +43,6 @@ pub struct Expand<PlanRef> {
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
     pub fn output_len(&self) -> usize {
         self.input.schema().len() * 2 + 1
-    }
-
-    fn flag_index(&self) -> usize {
-        self.output_len() - 1
     }
 
     pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Expand<OtherPlanRef> {
@@ -88,28 +85,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        let input_fd = self
-            .input
-            .functional_dependency()
-            .clone()
-            .into_dependencies();
-        let output_len = self.output_len();
-        let flag_index = self.flag_index();
-
-        self.input
-            .functional_dependency()
-            .as_dependencies()
-            .iter()
-            .map(|_input_fd| {})
-            .collect_vec();
-
-        let mut current_fd = FunctionalDependencySet::new(output_len);
-        for mut fd in input_fd {
-            fd.grow(output_len);
-            fd.set_from(flag_index, true);
-            current_fd.add_functional_dependency(fd);
-        }
-        current_fd
+        // Expanded columns may be nulled by different `column_subsets`, so input FDs are only
+        // guaranteed on the original input columns preserved in the second half of the schema.
+        self.i2o_col_mapping()
+            .rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 

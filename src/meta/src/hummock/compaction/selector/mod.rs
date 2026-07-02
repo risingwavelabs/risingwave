@@ -42,6 +42,7 @@ pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
 pub use vnode_watermark_selector::VnodeWatermarkCompactionSelector;
 
+use super::in_progress_compaction::InProgressCompactionView;
 use super::picker::LocalPickerStatistic;
 use super::{
     CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
@@ -61,6 +62,7 @@ pub struct CompactionSelectorContext<'a> {
     pub developer_config: Arc<CompactionDeveloperConfig>,
     pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     pub state_table_info: &'a HummockVersionStateTableInfo,
+    pub in_progress_compactions: &'a InProgressCompactionView,
 }
 
 pub trait CompactionSelector: Sync + Send {
@@ -207,7 +209,6 @@ pub mod tests {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn generate_table_with_ids_and_epochs(
         id: u64,
         table_prefix: u64,

@@ -20,6 +20,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::id::ObjectId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
@@ -634,10 +636,7 @@ impl DiagnoseCommand {
             }
         };
 
-        let statuses = self
-            .iceberg_compaction_manager
-            .list_compaction_statuses()
-            .await;
+        let statuses = self.iceberg_compaction_manager.list_compaction_statuses();
 
         let _ = writeln!(s, "ICEBERG COMPACTION SCHEDULE");
 
@@ -938,7 +937,13 @@ impl DiagnoseCommand {
                 row.add_cell(job.name.into());
                 row.add_cell(job.obj_type.as_str().into());
                 row.add_cell(format_job_status(job.job_status).into());
-                row.add_cell(format_streaming_parallelism(&job.parallelism).into());
+                row.add_cell(
+                    format_streaming_parallelism(
+                        &job.parallelism,
+                        job.adaptive_parallelism_strategy.as_deref(),
+                    )
+                    .into(),
+                );
                 row.add_cell(job.max_parallelism.into());
                 row.add_cell(job.resource_group.into());
                 row.add_cell(job.database_id.into());
@@ -996,50 +1001,52 @@ impl DiagnoseCommand {
             let _ = writeln!(s, "{table}");
         }
 
-        let actors = self
+        let mut fragments = BTreeMap::new();
+        for (actor_id, fragment_id, job_id, schema_id, obj_type) in self
             .metadata_manager
             .catalog_controller
             .list_actor_info()
             .await?
-            .into_iter()
-            .map(|(actor_id, fragment_id, job_id, schema_id, obj_type)| {
-                (
-                    actor_id,
-                    (
-                        fragment_id,
-                        job_id,
-                        schema_id,
-                        obj_type,
-                        obj_id_to_name.get(&job_id).cloned().unwrap_or_default(),
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        {
+            let entry = fragments
+                .entry(fragment_id)
+                .or_insert_with(|| (job_id, schema_id, obj_type, Vec::new()));
+            entry.3.push(actor_id);
+        }
 
         use comfy_table::{Row, Table};
         let mut table = Table::new();
         table.set_header({
             let mut row = Row::new();
-            row.add_cell("id".into());
             row.add_cell("fragment_id".into());
             row.add_cell("job_id".into());
             row.add_cell("schema_id".into());
             row.add_cell("type".into());
             row.add_cell("name".into());
+            row.add_cell("actor_count".into());
+            row.add_cell("actors".into());
             row
         });
-        for (actor_id, (fragment_id, job_id, schema_id, ddl_type, name)) in actors {
+        for (fragment_id, (job_id, schema_id, obj_type, mut actor_ids)) in fragments {
+            actor_ids.sort_unstable();
             let mut row = Row::new();
-            row.add_cell(actor_id.into());
             row.add_cell(fragment_id.into());
             row.add_cell(job_id.into());
             row.add_cell(schema_id.into());
-            row.add_cell(ddl_type.as_str().into());
-            row.add_cell(name.into());
+            row.add_cell(obj_type.as_str().into());
+            row.add_cell(
+                obj_id_to_name
+                    .get(&job_id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
+            );
+            row.add_cell(actor_ids.len().into());
+            row.add_cell(actor_ids.iter().join(", ").into());
             table.add_row(row);
         }
         let _ = writeln!(s);
-        let _ = writeln!(s, "ACTOR");
+        let _ = writeln!(s, "FRAGMENT");
         let _ = writeln!(s, "{table}");
         Ok(())
     }
@@ -1182,11 +1189,6 @@ impl DiagnoseCommand {
         table.add_row(row);
 
         let mut row = Row::new();
-        row.add_cell("adaptive_parallelism_strategy".into());
-        row.add_cell(params.adaptive_parallelism_strategy().to_string().into());
-        table.add_row(row);
-
-        let mut row = Row::new();
         row.add_cell("per_database_isolation".into());
         row.add_cell(params.per_database_isolation().to_string().into());
         table.add_row(row);
@@ -1243,10 +1245,29 @@ fn format_job_status(status: JobStatus) -> &'static str {
     }
 }
 
-fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+fn format_streaming_parallelism(
+    parallelism: &StreamingParallelism,
+    adaptive_parallelism_strategy: Option<&str>,
+) -> String {
     match parallelism {
-        StreamingParallelism::Adaptive => "adaptive".into(),
-        StreamingParallelism::Fixed(n) => format!("fixed({n})"),
-        StreamingParallelism::Custom => "custom".into(),
+        StreamingParallelism::Adaptive => adaptive_parallelism_strategy
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "adaptive".into()),
+        StreamingParallelism::Fixed(n) => n.to_string(),
+        StreamingParallelism::Custom => adaptive_parallelism_strategy
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "custom".into()),
     }
+}
+
+fn format_adaptive_parallelism_strategy(strategy: &str) -> Option<String> {
+    parse_strategy(strategy)
+        .ok()
+        .map(|strategy| match strategy {
+            AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full => {
+                "adaptive".to_owned()
+            }
+            AdaptiveParallelismStrategy::Bounded(n) => format!("bounded({n})"),
+            AdaptiveParallelismStrategy::Ratio(r) => format!("ratio({r})"),
+        })
 }

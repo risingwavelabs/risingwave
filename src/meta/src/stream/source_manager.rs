@@ -29,8 +29,8 @@ use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
-    SplitMetaData,
+    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
@@ -387,9 +387,7 @@ impl SourceManager {
                 .await
                 .context("failed to create SplitEnumerator")?;
 
-            let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
-                .await
-                .context("failed to list splits")??;
+            validate_enumerator_once(&mut *enumerator).await?;
         }
         Ok(())
     }
@@ -676,6 +674,13 @@ impl SourceManager {
 
         Ok(split_offsets.keys().cloned().collect())
     }
+}
+
+async fn validate_enumerator_once(enumerator: &mut dyn AnySplitEnumerator) -> MetaResult<()> {
+    let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+        .await
+        .context("failed to list splits")??;
+    Ok(())
 }
 
 #[derive(strum::Display, Debug)]

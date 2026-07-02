@@ -21,6 +21,8 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use prometheus::Registry;
+use prometheus::core::Collector;
+use prometheus::proto::MetricFamily;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -30,18 +32,21 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
-use risingwave_hummock_sdk::version::{HummockVersion, MAX_HUMMOCK_VERSION_ID};
+use risingwave_hummock_sdk::version::{
+    HummockVersion, HummockVersionStateTableInfo, MAX_HUMMOCK_VERSION_ID,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableId,
     HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::{HummockPinnedVersion, PbLevelType, StateTableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -50,6 +55,7 @@ use crate::controller::cluster::ClusterController;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
+use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef, MockHummockMetaClient};
@@ -82,6 +88,21 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
 
 fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
+}
+
+fn metric_has_label_value(
+    metric_families: &[MetricFamily],
+    label_name: &str,
+    label_value: &str,
+) -> bool {
+    metric_families.iter().any(|metric_family| {
+        metric_family.get_metric().iter().any(|metric| {
+            metric
+                .get_label()
+                .iter()
+                .any(|label| label.name() == label_name && label.value() == label_value)
+        })
+    })
 }
 
 fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
@@ -195,6 +216,34 @@ async fn setup_compute_env_with_meta_opts(
         .await
         .unwrap();
     (env, hummock_manager, cluster_ctl, worker_id)
+}
+
+async fn build_hummock_manager_for_test_env(env: MetaSrvEnv) -> HummockManagerRef {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(2)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let cluster_ctl = Arc::new(
+        ClusterController::new(env.clone(), Duration::from_secs(1))
+            .await
+            .unwrap(),
+    );
+    let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
+    let compactor_manager = Arc::new(CompactorManager::for_test());
+    let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    HummockManager::with_config(
+        env,
+        cluster_ctl,
+        catalog_ctl,
+        Arc::new(MetaMetrics::default()),
+        compactor_manager,
+        config,
+        compactor_streams_change_tx,
+    )
+    .await
 }
 
 fn compaction_group_ranges(version: &HummockVersion) -> Vec<(u32, u32)> {
@@ -1002,6 +1051,24 @@ async fn test_trigger_manual_compaction() {
     )
     .await;
     {
+        let option = ManualCompactionOption {
+            level: 0,
+            target_level: Some(0),
+            ..Default::default()
+        };
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault, option)
+            .await;
+
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("invalid manual compaction option: target_level for L0 must be")
+        );
+    }
+    {
         // to check compactor send task fail
         drop(receiver);
         {
@@ -1344,7 +1411,7 @@ async fn test_extend_objects_to_delete() {
             .len(),
         orphan_sst_num
     );
-    let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version2 = hummock_manager.pin_version(context_id).await.unwrap();
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
@@ -1370,7 +1437,7 @@ async fn test_extend_objects_to_delete() {
         )
         .await
         .unwrap();
-    let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version3 = hummock_manager.pin_version(context_id).await.unwrap();
     assert_eq!(new_epoch, version_max_committed_epoch(&pinned_version3));
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
@@ -1710,6 +1777,102 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .collect_vec(),
         vec![100, 101]
     );
+}
+
+#[tokio::test]
+async fn test_merge_compaction_group_removes_split_group_metrics() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    hummock_manager
+        .register_table_ids_for_test(&[
+            (100, compaction_group_id),
+            (101, compaction_group_id),
+            (102, compaction_group_id),
+        ])
+        .await
+        .unwrap();
+
+    let epoch = test_epoch(30);
+    let ssts = [100, 101, 102]
+        .into_iter()
+        .enumerate()
+        .map(|(idx, table_id)| gen_local_sstable_info(10 + idx as u64, vec![table_id], epoch))
+        .collect_vec();
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let (right_group_id, _) = hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(
+            compaction_group_id,
+            &[101.into(), 102.into()],
+            None,
+        )
+        .await
+        .unwrap();
+    let left_group_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
+    assert_ne!(left_group_id, right_group_id);
+
+    // Exercise production metric paths before merging: checkpoint updates split stats, and compact
+    // task picking records compact task metrics for the split group.
+    hummock_manager.create_version_checkpoint(0).await.unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .await
+        .unwrap();
+    assert!(compact_task.is_some());
+
+    let right_group_label = right_group_id.to_string();
+    let collect_group_metrics = || {
+        [
+            (
+                "state_table_count",
+                hummock_manager.metrics.state_table_count.collect(),
+            ),
+            (
+                "compact_task_size",
+                hummock_manager.metrics.compact_task_size.collect(),
+            ),
+            (
+                "compact_task_file_count",
+                hummock_manager.metrics.compact_task_file_count.collect(),
+            ),
+        ]
+    };
+    for (metric_name, metric_families) in collect_group_metrics() {
+        assert!(
+            metric_has_label_value(&metric_families, "group", &right_group_label),
+            "{metric_name} should have right group metric before merge"
+        );
+    }
+
+    hummock_manager
+        .merge_compaction_group_for_test(
+            left_group_id,
+            right_group_id,
+            HashSet::from_iter([100.into(), 101.into(), 102.into()]),
+        )
+        .await
+        .unwrap();
+
+    for (metric_name, metric_families) in collect_group_metrics() {
+        assert!(
+            !metric_has_label_value(&metric_families, "group", &right_group_label),
+            "{metric_name} should not have right group metric after merge"
+        );
+    }
 }
 
 #[tokio::test]
@@ -2446,6 +2609,63 @@ async fn test_partition_level() {
 }
 
 #[tokio::test]
+async fn test_unregister_table_prunes_sst_table_ids() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    hummock_manager
+        .register_table_ids_for_test(&[(100, compaction_group_id), (101, compaction_group_id)])
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(30),
+            SyncResult {
+                uncommitted_ssts: vec![
+                    gen_local_sstable_info(10, vec![100, 101], test_epoch(20)),
+                    gen_local_sstable_info(11, vec![101], test_epoch(20)),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    hummock_manager
+        .unregister_table_ids([TableId::new(101)])
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(compaction_group_id)
+            .iter()
+            .copied()
+            .collect_vec(),
+        vec![TableId::new(100)]
+    );
+    assert_eq!(
+        get_compaction_group_object_ids(&current_version, compaction_group_id),
+        vec![10]
+    );
+    let levels = current_version.get_compaction_group_levels(compaction_group_id);
+    let table_ids = levels
+        .l0
+        .sub_levels
+        .iter()
+        .chain(levels.levels.iter())
+        .flat_map(|level| level.table_infos.iter())
+        .map(|sst| sst.table_ids.clone())
+        .collect_vec();
+    assert_eq!(table_ids, vec![vec![TableId::new(100)]]);
+}
+
+#[tokio::test]
 async fn test_unregister_moved_table() {
     let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -2765,56 +2985,204 @@ async fn test_vacuum() {
     assert_eq!(deleted, 3);
 }
 
+#[tokio::test]
+async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() {
+    let data_directory = format!(
+        "hummock_recover_prune_stale_table_ids_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let env = MetaSrvEnv::for_test_opts(MetaOpts::test(false), |params| {
+        // Use shared memory so the second manager can read the dirty checkpoint written by the
+        // first manager, while a unique data directory keeps this test isolated.
+        params.state_store = Some("hummock+memory".to_owned());
+        params.data_directory = Some(data_directory);
+    })
+    .await;
+    let initial_manager = build_hummock_manager_for_test_env(env.clone()).await;
+
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    let live_table_id = TableId::new(100);
+    let stale_table_id = TableId::new(200);
+
+    let mut dirty_version = HummockVersion::create_init_version(Arc::new(
+        CompactionConfigBuilder::new()
+            .level0_sub_level_compact_level_count(2)
+            .build(),
+    ));
+    dirty_version.state_table_info =
+        HummockVersionStateTableInfo::from_protobuf_owned(HashMap::from_iter([(
+            live_table_id,
+            StateTableInfo {
+                committed_epoch: test_epoch(1),
+                compaction_group_id,
+            },
+        )]));
+
+    let live_and_stale_sst = gen_sstable_info(
+        10,
+        vec![live_table_id.as_raw_id(), stale_table_id.as_raw_id()],
+        test_epoch(1),
+    );
+    let stale_only_sst = gen_sstable_info(11, vec![stale_table_id.as_raw_id()], test_epoch(1));
+    let live_only_sst = gen_sstable_info(12, vec![live_table_id.as_raw_id()], test_epoch(1));
+    let another_live_only_sst =
+        gen_sstable_info(13, vec![live_table_id.as_raw_id()], test_epoch(1));
+    let dirty_l0_sub_levels = vec![
+        live_and_stale_sst,
+        stale_only_sst,
+        live_only_sst,
+        another_live_only_sst,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(idx, sst)| Level {
+        level_idx: 0,
+        level_type: PbLevelType::Nonoverlapping,
+        total_file_size: sst.sst_size,
+        uncompressed_file_size: sst.uncompressed_file_size,
+        sub_level_id: idx as u64,
+        table_infos: vec![sst],
+        vnode_partition_count: 0,
+    })
+    .collect_vec();
+    let group = dirty_version.levels.get_mut(&compaction_group_id).unwrap();
+    group.l0.total_file_size = dirty_l0_sub_levels
+        .iter()
+        .map(|level| level.total_file_size)
+        .sum();
+    group.l0.uncompressed_file_size = dirty_l0_sub_levels
+        .iter()
+        .map(|level| level.uncompressed_file_size)
+        .sum();
+    group.l0.sub_levels = dirty_l0_sub_levels;
+
+    // Simulate the upgrade path:
+    // 1. an old version wrote SST metadata containing table ids [live, dropped];
+    // 2. the old version dropped one table, but the checkpoint still had stale SST table ids;
+    // 3. the new version recovers this checkpoint and picks a compaction task.
+    //
+    // After checkpoint and delta replay, recovery should normalize the recovered current version
+    // before publishing it. The normalization should retain only live `state_table_info` table ids
+    // in SST metadata and remove SSTs whose `table_ids` become empty. Otherwise the new compactor
+    // will pass the stale read set to catalog acquire and fail before compaction can run.
+    initial_manager
+        .write_checkpoint(&HummockVersionCheckpoint {
+            version: Arc::new(dirty_version),
+            stale_objects: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    let recovered_manager = build_hummock_manager_for_test_env(env).await;
+    let compact_task = recovered_manager
+        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
+        .await
+        .unwrap()
+        .expect("dirty old-version SST should be picked for compaction");
+    let compact_table_ids = compact_task.get_table_ids_from_input_ssts().collect_vec();
+
+    assert!(
+        !compact_table_ids.contains(&stale_table_id),
+        "new-version compaction task must not read dropped table id; otherwise compactor catalog acquire will fail. read_table_ids: {:?}, task: {}",
+        compact_table_ids,
+        compact_task_to_string(&compact_task),
+    );
+    let recovered_version = recovered_manager.get_current_version().await;
+    let recovered_group_levels = recovered_version.get_compaction_group_levels(compaction_group_id);
+    let recovered_ssts = recovered_group_levels
+        .l0
+        .sub_levels
+        .iter()
+        .chain(recovered_group_levels.levels.iter())
+        .flat_map(|level| level.table_infos.iter())
+        .collect_vec();
+    let stale_table_sst_ids = recovered_ssts
+        .iter()
+        .filter(|sst| sst.table_ids.contains(&stale_table_id))
+        .map(|sst| sst.sst_id)
+        .collect_vec();
+    assert!(
+        stale_table_sst_ids.is_empty(),
+        "recovered version should prune stale table ids from SST metadata: {:?}",
+        stale_table_sst_ids
+    );
+    let recovered_sst_ids = recovered_ssts.iter().map(|sst| sst.sst_id).collect_vec();
+    assert!(
+        !recovered_sst_ids.contains(&HummockSstableId::new(11)),
+        "SSTs whose table_ids become empty after pruning should be removed from the recovered version: {:?}",
+        recovered_sst_ids
+    );
+}
+
 /// Regression test: `try_merge_compaction_group` must return `Err` for groups
 /// with overlapping table ID ranges. Before the fix, errors were swallowed
 /// (always returned `Ok(())`), causing the merge scheduling loop to retry
 /// the same unmergeable pair infinitely (167K+ error log spam).
 #[tokio::test]
 async fn test_try_merge_compaction_group_error_propagation() {
-    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .level0_stop_write_threshold_sub_level_number(10)
+        .level0_stop_write_threshold_max_sst_count(Some(6))
+        .emergency_level0_sst_file_count(Some(100))
+        .build();
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env_with_config(80, config).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
         worker_id as _,
     ));
 
-    // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
+    // StateDefault(2): [200, 202], MaterializedView(3): [100, 201]
     hummock_manager
-        .register_table_ids_for_test(&[(100, 2.into()), (102, 2.into())])
+        .register_table_ids_for_test(&[(200, 2.into()), (202, 2.into())])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(101, 3.into()), (200, 3.into())])
+        .register_table_ids_for_test(&[(100, 3.into()), (201, 3.into())])
         .await
         .unwrap();
 
     // Commit SSTs so that split can proceed
-    let sst_1 = gen_local_sstable_info(1, vec![100, 102], test_epoch(20));
-    let sst_2 = gen_local_sstable_info(2, vec![101, 200], test_epoch(20));
+    let epoch = test_epoch(20);
     hummock_meta_client
         .commit_epoch(
-            30,
+            epoch,
             SyncResult {
-                uncommitted_ssts: vec![sst_1, sst_2],
+                uncommitted_ssts: vec![
+                    gen_local_sstable_info(1, vec![200, 202], epoch),
+                    gen_local_sstable_info(2, vec![100, 201], epoch),
+                    gen_local_sstable_info(3, vec![100, 201], epoch),
+                    gen_local_sstable_info(4, vec![100, 201], epoch),
+                    gen_local_sstable_info(5, vec![100, 201], epoch),
+                ],
                 ..Default::default()
             },
         )
         .await
         .unwrap();
 
-    // Split table 101 out of MV(3) → Group_X = [101].
-    // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
+    // Split table 201 out of MV(3) → Group_X = [201].
+    // Now StateDefault(2)=[200,202] and Group_X=[201] have overlapping table ID ranges.
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
             StaticCompactionGroupId::MaterializedView,
-            &[101.into()],
+            &[201.into()],
             None,
         )
         .await
         .unwrap();
 
     let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault;
-    let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
+    let mv_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView;
+    let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await;
     assert_ne!(state_default_id, group_x_id);
+    assert_ne!(mv_id, group_x_id);
 
     let group_infos = hummock_manager.calculate_compaction_group_statistic().await;
     let sd_stat = group_infos
@@ -2825,10 +3193,26 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .iter()
         .find(|g| g.group_id == group_x_id)
         .unwrap();
+    let mv_stat = group_infos.iter().find(|g| g.group_id == mv_id).unwrap();
 
     let throughput_manager = TableWriteThroughputStatisticManager::new(100);
     let created_tables: HashSet<TableId> =
-        HashSet::from_iter(vec![100.into(), 101.into(), 102.into(), 200.into()]);
+        HashSet::from_iter(vec![100.into(), 200.into(), 201.into(), 202.into()]);
+
+    // Group_X and MaterializedView are each below the L0 SST count write-stop threshold, but the
+    // merged group should be rejected by the post-merge L0 SST count check.
+    let result = hummock_manager
+        .try_merge_compaction_group(&throughput_manager, gx_stat, mv_stat, &created_tables)
+        .await;
+    let err =
+        result.expect_err("try_merge_compaction_group must reject merged L0 SST count write stop");
+    assert!(
+        err.as_report()
+            .to_string()
+            .contains("will trigger write stop after merge"),
+        "unexpected merge rejection: {}",
+        err.as_report()
+    );
 
     // Must return Err for overlapping groups — guards against the swallowed-error regression.
     let result = hummock_manager
@@ -3141,7 +3525,73 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
 }
 
 #[tokio::test]
-async fn test_schedule_group_split_runs_split_logic_after_normalize() {
+async fn test_normalize_overlapping_compaction_groups_refreshes_write_limits() {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .level0_stop_write_threshold_sub_level_number(1)
+        .build();
+    let (_env, hummock_manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, None).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3.into())])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(1),
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(1, vec![64], test_epoch(1))],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(2),
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(2, vec![80], test_epoch(2))],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        hummock_manager.write_limits().await.contains_key(&cg_64),
+        "the parent group should enter write stop before normalize"
+    );
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert!(split_count > 0);
+
+    let write_limits = hummock_manager.write_limits().await;
+    assert!(
+        write_limits.is_empty(),
+        "normalize split should refresh write limits after rewriting L0 sub-levels"
+    );
+}
+
+#[tokio::test]
+async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
     let mut opts = MetaOpts::test(false);
     opts.enable_compaction_group_normalize = true;
     let (_env, hummock_manager, _, worker_id) =
@@ -3196,12 +3646,12 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
     hummock_manager.schedule_group_split_for_test().await;
 
     let current_version = hummock_manager.get_current_version().await;
-    assert_compaction_groups_non_overlapping(&current_version);
+    assert!(has_overlapping_compaction_groups(&current_version));
     assert_eq!(
         all_group_member_table_ids(&current_version),
         vec![64, 65, 80, 81, 200, 201]
     );
-    assert_eq!(non_empty_compaction_group_count(&current_version), 6);
+    assert_eq!(non_empty_compaction_group_count(&current_version), 4);
     assert_ne!(
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await

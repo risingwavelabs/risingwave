@@ -172,16 +172,13 @@ impl Metadata for MetadataV2 {
     }
 
     fn storage_url(&self) -> BackupResult<String> {
-        let storage_url_from_snapshot = self
-            .system_parameters
-            .iter()
-            .filter_map(|m| {
+        let storage_url_from_snapshot =
+            Itertools::exactly_one(self.system_parameters.iter().filter_map(|m| {
                 if m.name == "state_store" {
                     return Some(m.value.clone());
                 }
                 None
-            })
-            .exactly_one()
+            }))
             .map_err(|_| BackupError::Other(anyhow!("expect state_store")))?;
         storage_url_from_snapshot
             .strip_prefix("hummock+")
@@ -195,16 +192,13 @@ impl Metadata for MetadataV2 {
     }
 
     fn storage_directory(&self) -> BackupResult<String> {
-        self.system_parameters
-            .iter()
-            .filter_map(|m| {
-                if m.name == "data_directory" {
-                    return Some(m.value.clone());
-                }
-                None
-            })
-            .exactly_one()
-            .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
+        Itertools::exactly_one(self.system_parameters.iter().filter_map(|m| {
+            if m.name == "data_directory" {
+                return Some(m.value.clone());
+            }
+            None
+        }))
+        .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
     }
 
     fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId> {

@@ -51,7 +51,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_multijoin_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..10)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();

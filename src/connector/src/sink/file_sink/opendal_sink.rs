@@ -277,6 +277,11 @@ impl OpenDalSinkWriter {
         Ok(false)
     }
 
+    /// Returns whether there is pending data (i.e., an active writer that has not been committed yet).
+    pub fn has_pending_data(&self) -> bool {
+        self.sink_writer.is_some()
+    }
+
     // Try commit if the batching condition is met.
     pub async fn try_commit(&mut self) -> Result<bool> {
         if self.can_commit() {

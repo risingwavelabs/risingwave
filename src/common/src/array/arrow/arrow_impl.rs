@@ -287,15 +287,20 @@ pub trait ToArrow {
         let arrow_schema::DataType::Struct(fields) = data_type else {
             return Err(ArrayError::to_arrow("Invalid struct type"));
         };
-        Ok(Arc::new(arrow_array::StructArray::new(
-            fields.clone(),
-            array
-                .fields()
-                .zip_eq_fast(fields)
-                .map(|(arr, field)| self.to_array(field.data_type(), arr))
-                .try_collect::<_, _, ArrayError>()?,
-            Some(array.null_bitmap().into()),
-        )))
+        // Use `try_new_with_length` so that empty-field structs keep their row count;
+        // `StructArray::new` panics for empty `fields` because it derives length from
+        // the child arrays.
+        let len = array.len();
+        let child_arrays = array
+            .fields()
+            .zip_eq_fast(fields)
+            .map(|(arr, field)| self.to_array(field.data_type(), arr))
+            .try_collect::<_, _, ArrayError>()?;
+        let nulls = Some(array.null_bitmap().into());
+        Ok(Arc::new(
+            arrow_array::StructArray::try_new_with_length(fields.clone(), child_arrays, nulls, len)
+                .map_err(ArrayError::from_arrow)?,
+        ))
     }
 
     #[inline]
@@ -564,6 +569,9 @@ pub trait FromArrow {
             Utf8 => DataType::Varchar,
             Utf8View => DataType::Varchar,
             Binary => DataType::Bytea,
+            // Iceberg `uuid` maps to `FixedSizeBinary(16)` and `fixed[L]` maps to
+            // `FixedSizeBinary(L)`. Both are represented as `Bytea` in RisingWave.
+            FixedSizeBinary(_) => self.from_fixed_size_binary()?,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
             List(field) => DataType::list(self.from_field(field)?),
@@ -589,6 +597,11 @@ pub trait FromArrow {
 
     /// Converts Arrow `LargeBinary` type to RisingWave data type.
     fn from_large_binary(&self) -> Result<DataType, ArrayError> {
+        Ok(DataType::Bytea)
+    }
+
+    /// Converts Arrow `FixedSizeBinary` type to RisingWave data type.
+    fn from_fixed_size_binary(&self) -> Result<DataType, ArrayError> {
         Ok(DataType::Bytea)
     }
 
@@ -689,6 +702,9 @@ pub trait FromArrow {
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Utf8View => self.from_utf8_view_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
+            FixedSizeBinary(_) => {
+                self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap())
+            }
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
@@ -902,6 +918,13 @@ pub trait FromArrow {
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Bytea(array.into()))
+    }
+
+    fn from_fixed_size_binary_array(
+        &self,
+        array: &arrow_array::FixedSizeBinaryArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Bytea(array.iter().collect()))
     }
 
     fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
@@ -1243,6 +1266,7 @@ impl FromIntoArrow for F64 {
 impl FromIntoArrow for Date {
     type ArrowType = i32;
 
+    #[allow(deprecated)]
     fn from_arrow(value: Self::ArrowType) -> Self {
         Date(arrow_array::types::Date32Type::to_naive_date(value))
     }
@@ -1625,7 +1649,10 @@ pub fn is_parquet_schema_match_source_schema(
         | (ArrowType::Time32(_) | ArrowType::Time64(_), RwType::Time)
         | (ArrowType::Interval(arrow_schema::IntervalUnit::MonthDayNano), RwType::Interval)
         | (ArrowType::Utf8 | ArrowType::LargeUtf8, RwType::Varchar)
-        | (ArrowType::Binary | ArrowType::LargeBinary, RwType::Bytea) => true,
+        | (
+            ArrowType::Binary | ArrowType::LargeBinary | ArrowType::FixedSizeBinary(_),
+            RwType::Bytea,
+        ) => true,
 
         // Struct type recursive matching
         // Arrow's Struct matches RisingWave's Struct if all expected field names exist and types
@@ -2019,6 +2046,32 @@ mod tests {
         let array = BytesArray::from_iter([None, Some("array".as_bytes())]);
         let arrow = arrow_array::BinaryArray::from(&array);
         assert_eq!(BytesArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn fixed_size_binary() {
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        let uuid = [
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+            0xde, 0xf0,
+        ];
+        let arrow_array = arrow_array::FixedSizeBinaryArray::try_from_sparse_iter_with_size(
+            [None, Some(uuid)].into_iter(),
+            16,
+        )
+        .unwrap();
+        let field =
+            arrow_schema::Field::new("u", arrow_schema::DataType::FixedSizeBinary(16), true);
+
+        assert_eq!(Dummy.from_field(&field).unwrap(), DataType::Bytea);
+
+        let rw_array = Dummy
+            .from_array(&field, &(Arc::new(arrow_array) as arrow_array::ArrayRef))
+            .unwrap();
+        let expected = BytesArray::from_iter([None, Some(uuid.as_slice())]);
+        assert_eq!(rw_array.as_bytea(), &expected);
     }
 
     #[test]
