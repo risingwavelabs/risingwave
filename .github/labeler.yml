@@ -103,8 +103,12 @@ labels:
   - "e2e_test\\/sink\\/nexmark_endless_mvs\\/.*"
   - "e2e_test\\/sink\\/nexmark_endless_sinks\\/.*"
   - "e2e_test\\/sink\\/rate_limit\\.slt"
+  - "e2e_test\\/sink\\/rabbitmq_.*"
   - "e2e_test\\/sink\\/sink_into_table\\/.*"
   - "e2e_test\\/sink\\/sink_vector_columns\\.slt"
+  - "ci\\/scripts\\/e2e-rabbitmq-sink-test\\.sh"
+  - "src\\/connector\\/src\\/connector_common\\/rabbit_mq\\.rs"
+  - "src\\/connector\\/src\\/sink\\/rabbitmq\\.rs"
 
 # Split source connector tests
 - label: "ci/run-e2e-kafka-source-tests"
@@ -188,13 +192,6 @@ labels:
 - label: "ci/run-e2e-mqtt-sink-tests"
   files:
   - "src\\/connector\\/src\\/sink\\/mqtt\\.rs"
-
-- label: "ci/run-e2e-rabbitmq-sink-tests"
-  files:
-  - "ci\\/scripts\\/e2e-rabbitmq-sink-test\\.sh"
-  - "e2e_test\\/sink\\/rabbitmq_.*"
-  - "src\\/connector\\/src\\/connector_common\\/rabbit_mq\\.rs"
-  - "src\\/connector\\/src\\/sink\\/rabbitmq\\.rs"
 
 - label: "ci/run-e2e-clickhouse-sink-tests"
   files:

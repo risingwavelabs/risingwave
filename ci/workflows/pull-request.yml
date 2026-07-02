@@ -471,7 +471,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end RabbitMQ sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-rabbitmq-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-rabbitmq-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-rabbitmq-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-rabbitmq-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
