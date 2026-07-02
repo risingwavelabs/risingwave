@@ -24,6 +24,7 @@ use risingwave_common::id::JobId;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::PbTableCacheRefillPolicies;
 use risingwave_pb::stream_service::barrier_complete_response::{
     IcebergV3SinkMetadata as PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -44,6 +45,7 @@ use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
@@ -99,6 +101,14 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
         since_epoch: u64,
     ) -> impl Future<Output = MetaResult<SinceTimestampResolvedEpoch>> + Send + 'a;
+
+    async fn table_cache_refill_policies_snapshot(&self) -> MetaResult<PbTableCacheRefillPolicies> {
+        Ok(PbTableCacheRefillPolicies::default())
+    }
+
+    async fn sync_serving_table_vnode_mappings_to_hummock(&self) -> MetaResult<()> {
+        Ok(())
+    }
 
     fn post_collect_command(
         &self,
@@ -180,6 +190,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     hummock_manager: HummockManagerRef,
 
+    serving_vnode_mapping: ServingVnodeMappingRef,
+
     source_manager: SourceManagerRef,
 
     _scale_controller: ScaleControllerRef,
@@ -203,6 +215,7 @@ impl GlobalBarrierWorkerContextImpl {
         status: Arc<ArcSwap<BarrierManagerStatus>>,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
@@ -216,6 +229,7 @@ impl GlobalBarrierWorkerContextImpl {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             _scale_controller: scale_controller,
             env,
