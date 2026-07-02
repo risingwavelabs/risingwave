@@ -32,7 +32,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
@@ -231,6 +231,27 @@ pub(super) async fn create_table_if_not_exists_impl(
             .context("failed to create iceberg table")?;
     }
     Ok(())
+}
+
+pub async fn sync_iceberg_table_comments(
+    config: &IcebergConfig,
+    table_comment: Option<&str>,
+    columns: &[ColumnDesc],
+) -> Result<()> {
+    let column_comments = columns
+        .iter()
+        .map(|column| (column.name.clone(), column.description.clone()))
+        .collect();
+    config
+        .common
+        .sync_table_comments(
+            &config.table,
+            &config.java_catalog_props,
+            table_comment,
+            &column_comments,
+        )
+        .await
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))
 }
 
 async fn create_namespace_if_not_exists(

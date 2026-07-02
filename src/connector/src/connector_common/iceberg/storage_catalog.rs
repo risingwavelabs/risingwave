@@ -31,7 +31,7 @@ use iceberg::spec::{TableMetadata, TableMetadataBuilder, TableProperties};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
-    TableIdent,
+    TableIdent, TableRequirement, TableUpdate,
 };
 use thiserror_ext::AsReport;
 use typed_builder::TypedBuilder;
@@ -128,6 +128,32 @@ impl StorageCatalog {
         };
 
         Ok(StorageCatalog { warehouse, file_io })
+    }
+
+    pub async fn apply_metadata_updates(
+        &self,
+        table: &TableIdent,
+        requirements: Vec<TableRequirement>,
+        updates: Vec<TableUpdate>,
+    ) -> Result<Table> {
+        let table = self.load_table(table).await?;
+        let metadata = table.metadata().clone();
+        for requirement in requirements {
+            requirement.check(Some(&metadata))?;
+        }
+
+        let mut metadata_builder = metadata.into_builder(None);
+        for update in updates {
+            metadata_builder = update.apply(metadata_builder)?;
+        }
+
+        self.commit_table(
+            &self.table_path(table.identifier()),
+            metadata_builder.build()?.metadata,
+        )
+        .await?;
+
+        self.load_table(table.identifier()).await
     }
 
     /// Check if version hint file exist.
