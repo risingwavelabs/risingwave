@@ -120,7 +120,7 @@ pub struct JniCatalog {
 }
 
 impl JniCatalog {
-    pub async fn apply_metadata_updates(
+    pub fn apply_metadata_updates(
         &self,
         table: &TableIdent,
         requirements: Vec<TableRequirement>,

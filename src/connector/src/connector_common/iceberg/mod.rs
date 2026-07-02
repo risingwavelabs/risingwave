@@ -815,9 +815,7 @@ impl IcebergCommon {
                 if updates.is_empty() && requirements.is_empty() {
                     return Ok(());
                 }
-                catalog
-                    .apply_metadata_updates(&table_ident, requirements, updates)
-                    .await?;
+                catalog.apply_metadata_updates(&table_ident, requirements, updates)?;
                 Ok(())
             }
             "rest_rust" | "glue_rust" => {
