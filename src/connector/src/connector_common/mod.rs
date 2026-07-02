@@ -17,8 +17,8 @@
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
-mod rabbit_mq;
-pub use rabbit_mq::RabbitMQCommon;
+mod rabbitmq;
+pub use rabbitmq::RabbitMqCommon;
 
 mod common;
 pub use common::{

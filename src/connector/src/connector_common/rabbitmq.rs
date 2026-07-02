@@ -28,7 +28,7 @@ use crate::error::ConnectorResult;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
-pub struct RabbitMQCommon {
+pub struct RabbitMqCommon {
     /// The broker endpoint used to establish the AMQP connection.
     /// Examples: `amqp://localhost:5672` or `amqps://mq.example.com:5671`.
     pub url: String,
@@ -42,7 +42,7 @@ pub struct RabbitMQCommon {
     /// This should be stored as a secret in cloud environments.
     pub password: Option<String>,
 
-    /// RabbitMQ virtual host.
+    /// `RabbitMQ` virtual host.
     /// If unset, broker-side default vhost is used.
     #[serde(rename = "virtual_host")]
     pub virtual_host: Option<String>,
@@ -81,7 +81,7 @@ pub struct RabbitMQCommon {
     pub publisher_confirm: bool,
 }
 
-impl EnforceSecret for RabbitMQCommon {
+impl EnforceSecret for RabbitMqCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "password",
         "tls.client_cert",
@@ -93,7 +93,7 @@ const fn default_publisher_confirm() -> bool {
     true
 }
 
-impl RabbitMQCommon {
+impl RabbitMqCommon {
     pub async fn build_client(&self) -> ConnectorResult<Connection> {
         let mut url = Url::parse(&self.url)?;
 
@@ -142,8 +142,7 @@ impl RabbitMQCommon {
             OwnedTLSConfig::default()
         };
 
-        let runtime = default_runtime()
-            .map_err(|e| anyhow::anyhow!("failed to create lapin runtime: {e}"))?;
+        let runtime = default_runtime().context("failed to create lapin runtime")?;
 
         Connection::connect_with_config(
             url.as_str(),

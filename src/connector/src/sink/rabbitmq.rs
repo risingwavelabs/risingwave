@@ -35,7 +35,7 @@ use super::encoder::{
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use crate::connector_common::RabbitMQCommon;
+use crate::connector_common::RabbitMqCommon;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam};
@@ -44,9 +44,9 @@ pub const RABBITMQ_SINK: &str = "rabbitmq";
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct RabbitMQConfig {
+pub struct RabbitMqConfig {
     #[serde(flatten)]
-    pub common: RabbitMQCommon,
+    pub common: RabbitMqCommon,
 
     /// The exchange to which messages are published.
     pub exchange: String,
@@ -59,31 +59,31 @@ pub struct RabbitMQConfig {
     #[serde(rename = "routing_key.field")]
     pub routing_key_field: Option<String>,
 
-    /// The sink operation mode. RabbitMQ currently only supports `append-only`.
+    /// The sink operation mode. `RabbitMQ` currently only supports `append-only`.
     pub r#type: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct RabbitMQSink {
-    pub config: RabbitMQConfig,
+pub struct RabbitMqSink {
+    pub config: RabbitMqConfig,
     schema: Schema,
     format_desc: SinkFormatDesc,
     is_append_only: bool,
 }
 
-impl EnforceSecret for RabbitMQSink {
+impl EnforceSecret for RabbitMqSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            RabbitMQCommon::enforce_one(prop)?;
+            RabbitMqCommon::enforce_one(prop)?;
         }
         Ok(())
     }
 }
 
-pub struct RabbitMQSinkWriter {
-    config: RabbitMQConfig,
+pub struct RabbitMqSinkWriter {
+    config: RabbitMqConfig,
     // Keep the connection alive for as long as the channel is in use.
     #[expect(dead_code)]
     connection: Connection,
@@ -92,10 +92,10 @@ pub struct RabbitMQSinkWriter {
     routing_key_index_path: Vec<usize>,
 }
 
-impl RabbitMQConfig {
+impl RabbitMqConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config =
-            serde_json::from_value::<RabbitMQConfig>(serde_json::to_value(values).unwrap())
+            serde_json::from_value::<RabbitMqConfig>(serde_json::to_value(values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY {
@@ -114,12 +114,12 @@ impl RabbitMQConfig {
     }
 }
 
-impl TryFrom<SinkParam> for RabbitMQSink {
+impl TryFrom<SinkParam> for RabbitMqSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = RabbitMQConfig::from_btreemap(param.properties)?;
+        let config = RabbitMqConfig::from_btreemap(param.properties)?;
         let format_desc = param
             .format_desc
             .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
@@ -133,14 +133,14 @@ impl TryFrom<SinkParam> for RabbitMQSink {
     }
 }
 
-impl Sink for RabbitMQSink {
-    type LogSinker = AsyncTruncateLogSinkerOf<RabbitMQSinkWriter>;
+impl Sink for RabbitMqSink {
+    type LogSinker = AsyncTruncateLogSinkerOf<RabbitMqSinkWriter>;
 
     const SINK_NAME: &'static str = RABBITMQ_SINK;
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
-            return Err(SinkError::RabbitMQ(anyhow!(
+            return Err(SinkError::RabbitMq(anyhow!(
                 "RabbitMQ sink only supports append-only mode"
             )));
         }
@@ -157,19 +157,19 @@ impl Sink for RabbitMQSink {
             .build_client()
             .await
             .context("failed to validate RabbitMQ sink connection")
-            .map_err(SinkError::RabbitMQ)?;
+            .map_err(SinkError::RabbitMq)?;
         let channel = connection
             .create_channel()
             .await
             .context("failed to create RabbitMQ channel")
-            .map_err(SinkError::RabbitMQ)?;
+            .map_err(SinkError::RabbitMq)?;
 
         if self.config.common.publisher_confirm {
             channel
                 .confirm_select(ConfirmSelectOptions::default())
                 .await
                 .context("failed to enable RabbitMQ publisher confirms")
-                .map_err(SinkError::RabbitMQ)?;
+                .map_err(SinkError::RabbitMq)?;
         }
 
         Ok(())
@@ -177,16 +177,16 @@ impl Sink for RabbitMQSink {
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(
-            RabbitMQSinkWriter::new(self.config.clone(), self.schema.clone(), &self.format_desc)
+            RabbitMqSinkWriter::new(self.config.clone(), self.schema.clone(), &self.format_desc)
                 .await?
                 .into_log_sinker(usize::MAX),
         )
     }
 }
 
-impl RabbitMQSinkWriter {
+impl RabbitMqSinkWriter {
     async fn new(
-        config: RabbitMQConfig,
+        config: RabbitMqConfig,
         schema: Schema,
         format_desc: &SinkFormatDesc,
     ) -> Result<Self> {
@@ -214,19 +214,19 @@ impl RabbitMQSinkWriter {
             .build_client()
             .await
             .context("failed to connect RabbitMQ sink writer")
-            .map_err(SinkError::RabbitMQ)?;
+            .map_err(SinkError::RabbitMq)?;
         let channel = connection
             .create_channel()
             .await
             .context("failed to create RabbitMQ sink channel")
-            .map_err(SinkError::RabbitMQ)?;
+            .map_err(SinkError::RabbitMq)?;
 
         if config.common.publisher_confirm {
             channel
                 .confirm_select(ConfirmSelectOptions::default())
                 .await
                 .context("failed to enable RabbitMQ publisher confirms")
-                .map_err(SinkError::RabbitMQ)?;
+                .map_err(SinkError::RabbitMq)?;
         }
 
         Ok(Self {
@@ -253,25 +253,25 @@ impl RabbitMQSinkWriter {
             )
             .await
             .context("failed to publish message to RabbitMQ")
-            .map_err(SinkError::RabbitMQ)?;
+            .map_err(SinkError::RabbitMq)?;
 
         match confirm
             .await
             .context("failed to receive RabbitMQ publisher confirmation")
-            .map_err(SinkError::RabbitMQ)?
+            .map_err(SinkError::RabbitMq)?
         {
             Confirmation::Ack(None) | Confirmation::NotRequested => Ok(()),
-            Confirmation::Ack(Some(returned)) => Err(SinkError::RabbitMQ(anyhow!(
+            Confirmation::Ack(Some(returned)) => Err(SinkError::RabbitMq(anyhow!(
                 "RabbitMQ returned an unroutable message: {returned:?}"
             ))),
-            Confirmation::Nack(returned) => Err(SinkError::RabbitMQ(anyhow!(
+            Confirmation::Nack(returned) => Err(SinkError::RabbitMq(anyhow!(
                 "RabbitMQ negatively acknowledged a published message: {returned:?}"
             ))),
         }
     }
 }
 
-impl AsyncTruncateSinkWriter for RabbitMQSinkWriter {
+impl AsyncTruncateSinkWriter for RabbitMqSinkWriter {
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -288,7 +288,7 @@ impl AsyncTruncateSinkWriter for RabbitMQSinkWriter {
                 &row,
             )
             .ok_or_else(|| {
-                SinkError::RabbitMQ(anyhow!(
+                SinkError::RabbitMq(anyhow!(
                     "routing key field `{}` is null",
                     self.config.routing_key_field.as_deref().unwrap_or_default()
                 ))
