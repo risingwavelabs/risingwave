@@ -35,6 +35,7 @@ macro_rules! for_all_classified_sources {
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Mqtt, $crate::source::mqtt::MqttProperties, $crate::source::mqtt::split::MqttSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
+                { Rabbitmq, $crate::source::rabbitmq::RabbitmqProperties, $crate::source::rabbitmq::split::RabbitmqSplit },
                 { S3, $crate::source::filesystem::LegacyS3Properties, $crate::source::filesystem::LegacyFsSplit },
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
                 { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },

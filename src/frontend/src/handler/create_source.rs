@@ -67,7 +67,7 @@ pub use risingwave_connector::source::{
 use risingwave_connector::source::{
     AZBLOB_CONNECTOR, ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
-    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, RABBITMQ_CONNECTOR,
 };
 use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
@@ -1598,6 +1598,68 @@ pub mod tests {
                 )
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rabbitmq_addition_columns_public_semantics() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "CREATE SOURCE rabbitmq_payload (v1 int) \
+             INCLUDE payload AS raw_payload \
+             WITH (connector = 'rabbitmq', url = 'amqp://guest:guest@localhost:5672/%2f', queue = 'q1') \
+             FORMAT PLAIN ENCODE JSON"
+            .to_owned();
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "rabbitmq_payload",
+            )
+            .unwrap();
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "raw_payload",
+                    Jsonb,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
+
+        for metadata_col in ["offset", "partition"] {
+            let sql = format!(
+                "CREATE SOURCE rabbitmq_{metadata_col} (v1 int) \
+                 INCLUDE {metadata_col} \
+                 WITH (connector = 'rabbitmq', url = 'amqp://guest:guest@localhost:5672/%2f', queue = 'q1') \
+                 FORMAT PLAIN ENCODE JSON"
+            );
+            let err = frontend.run_sql(sql).await.unwrap_err();
+            assert!(
+                err.to_string().contains(&format!(
+                    "additional column type {metadata_col} is not supported for connector rabbitmq"
+                )),
+                "{err}"
+            );
         }
     }
 }

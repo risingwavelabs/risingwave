@@ -39,6 +39,14 @@ risedev slt './e2e_test/source_inline/fs/parquet_fixed_size_binary.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 
+echo "--- Run RabbitMQ source tests"
+export RABBITMQ_AMQP_URL="${RABBITMQ_AMQP_URL:-amqp://guest:guest@rabbitmq-server:5672/%2f}"
+export RABBITMQ_MANAGEMENT_URL="${RABBITMQ_MANAGEMENT_URL:-http://rabbitmq-server:15672}"
+export RABBITMQ_USER="${RABBITMQ_USER:-guest}"
+export RABBITMQ_PASSWORD="${RABBITMQ_PASSWORD:-guest}"
+export RABBITMQ_VHOST="${RABBITMQ_VHOST:-/}"
+risedev slt './e2e_test/source_inline/rabbitmq/**/*.slt'
+
 echo "--- Run webhook source tests"
 sleep 5
 risedev slt 'e2e_test/webhook/webhook_source.slt'

@@ -245,8 +245,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_split_offset_col_idx(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
 

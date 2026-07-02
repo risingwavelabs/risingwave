@@ -1404,6 +1404,74 @@ PulsarProperties:
     field_type: bool
     required: false
     default: Default::default
+RabbitmqProperties:
+  fields:
+  - name: url
+    field_type: String
+    comments: |-
+      AMQP broker URL. Both `amqp://` and `amqps://` are supported by the AMQP client.
+      Credentials and vhost can be encoded in this URL.
+    required: true
+  - name: queue
+    field_type: String
+    comments: A single queue name to consume. Use either `queue` or `queues`.
+    required: false
+  - name: queues
+    field_type: String
+    comments: Comma-separated queue names. Each queue has at most one active consumer in one RW source.
+    required: false
+  - name: prefetch_count
+    field_type: u16
+    comments: |-
+      `RabbitMQ` prefetch count. Valid range is 1-1000 because `RabbitMQ` treats 0
+      as unlimited.
+    required: false
+  - name: prefetch_size
+    field_type: u32
+    comments: '`RabbitMQ` prefetch size. `RabbitMQ` does not support non-zero values.'
+    required: false
+  - name: max_connections
+    field_type: usize
+    comments: |-
+      Maximum active AMQP consumer connections opened by this source across adaptive splits.
+      If the broker enforces a per-vhost connection limit, deploy at most one source per vhost.
+    required: false
+  - name: heartbeat_interval
+    field_type: u16
+    comments: AMQP heartbeat interval in seconds.
+    required: false
+  - name: frame_max
+    field_type: u32
+    comments: AMQP frame max. Defaults to 131072 (128KiB).
+    required: false
+  - name: connection_attempts
+    field_type: usize
+    comments: Connection attempts before surfacing an error.
+    required: false
+  - name: retry_delay
+    field_type: u64
+    comments: Fixed retry delay in seconds between connection attempts.
+    required: false
+  - name: socket_timeout
+    field_type: u64
+    comments: Socket/connect timeout in seconds.
+    required: false
+  - name: blocked_connection_timeout
+    field_type: u64
+    comments: |-
+      Close and restart the source reader after the broker keeps the connection blocked for this
+      duration. Blocked connections can prevent checkpoint-time acks from being written.
+    required: false
+  - name: queue.passive
+    field_type: bool
+    comments: |-
+      Check queues exist with passive declare instead of creating them.
+      This source only supports customer-owned queues, so this must stay true.
+    required: false
+  - name: consumer_tag_prefix
+    field_type: String
+    comments: Consumer tag prefix used to make `RabbitMQ` consumers observable.
+    required: false
 TestSourceProperties:
   fields:
   - name: properties
