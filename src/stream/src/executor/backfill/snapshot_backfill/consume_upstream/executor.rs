@@ -240,6 +240,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                     let new_rate_limit = new_rate_limit.into();
                     let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                     if old_rate_limit != new_rate_limit {
+                        stream.update_rate_limiter(new_rate_limit);
                         tracing::info!(
                             old_rate_limit = ?old_rate_limit,
                             new_rate_limit = ?new_rate_limit,
