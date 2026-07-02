@@ -34,25 +34,6 @@ pub(super) fn resolve_streaming_job_id_for_alter(
     alter_stmt_type: StatementType,
     alter_target: &str,
 ) -> Result<JobId> {
-    resolve_streaming_job_id_for_alter_impl(session, obj_name, alter_stmt_type, alter_target, false)
-}
-
-pub(super) fn resolve_streaming_job_id_for_alter_parallelism(
-    session: &SessionImpl,
-    obj_name: ObjectName,
-    alter_stmt_type: StatementType,
-    alter_target: &str,
-) -> Result<JobId> {
-    resolve_streaming_job_id_for_alter_impl(session, obj_name, alter_stmt_type, alter_target, true)
-}
-
-fn resolve_streaming_job_id_for_alter_impl(
-    session: &SessionImpl,
-    obj_name: ObjectName,
-    alter_stmt_type: StatementType,
-    alter_target: &str,
-    include_creating_table: bool,
-) -> Result<JobId> {
     let db_name = &session.database();
     let (schema_name, real_table_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
     let search_path = session.config().search_path();
@@ -61,14 +42,32 @@ fn resolve_streaming_job_id_for_alter_impl(
     let reader = session.env().catalog_reader().read_guard();
 
     let job_id = match alter_stmt_type {
-        StatementType::ALTER_TABLE
-        | StatementType::ALTER_MATERIALIZED_VIEW
-        | StatementType::ALTER_INDEX => {
-            let (table, schema_name) = if include_creating_table {
-                reader.get_table_by_name(db_name, schema_path, &real_table_name, true)?
-            } else {
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?
-            };
+        StatementType::ALTER_TABLE => {
+            let (table, schema_name) =
+                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+            match table.table_type() {
+                TableType::Internal => {
+                    // we treat internal table as NOT FOUND
+                    return Err(CatalogError::not_found("table", table.name()).into());
+                }
+                TableType::Table => {}
+                _ => {
+                    bail_invalid_input_syntax!(
+                        "cannot alter {alter_target} of {} {} by {}",
+                        table.table_type().to_prost().as_str_name(),
+                        table.name(),
+                        alter_stmt_type,
+                    );
+                }
+            }
+
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            table.id.as_job_id()
+        }
+        StatementType::ALTER_MATERIALIZED_VIEW | StatementType::ALTER_INDEX => {
+            let (table, schema_name) =
+                reader.get_table_by_name(db_name, schema_path, &real_table_name, true)?;
 
             match (table.table_type(), alter_stmt_type) {
                 (TableType::Internal, _) => {
@@ -107,7 +106,7 @@ fn resolve_streaming_job_id_for_alter_impl(
         }
         StatementType::ALTER_SINK => {
             let (sink, schema_name) =
-                reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
 
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
             sink.id.as_job_id()

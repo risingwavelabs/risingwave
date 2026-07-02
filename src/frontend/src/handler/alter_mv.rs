@@ -46,7 +46,7 @@ pub fn fetch_mv_catalog_for_alter(
     let original_catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
-            reader.get_created_table_by_name(db_name, schema_path, &real_mv_name)?;
+            reader.get_table_by_name(db_name, schema_path, &real_mv_name, true)?;
 
         match table.table_type() {
             TableType::MaterializedView => {}
