@@ -349,6 +349,21 @@ struct PulsarConsumeStream {
 }
 
 impl PulsarConsumeStream {
+    fn unexpected_termination_error(&self) -> pulsar::error::Error {
+        // Current RisingWave Pulsar sources are unbounded, so SDK consumer
+        // termination is unexpected and should trigger source retry. Future
+        // bounded Pulsar source mode must revisit this assumption.
+        pulsar::error::Error::Custom(format!(
+            "unexpected Pulsar consumer termination: source_id={}, source_name={}, actor_id={}, fragment_id={}, split_id={}, topic={}",
+            self.source_ctx.source_id,
+            self.source_ctx.source_name,
+            self.source_ctx.actor_id,
+            self.source_ctx.fragment_id,
+            self.split_id,
+            self.topic,
+        ))
+    }
+
     fn inc_ack_failure_count(&self, failure_type: ConnectorAckFailureType) {
         self.source_ctx.metrics.inc_connector_ack_failure_count(
             self.source_ctx.source_name.as_str(),
@@ -442,7 +457,9 @@ impl futures::Stream for PulsarConsumeStream {
                 Some(Err(e)) => {
                     return Poll::Ready(Some(Err(e)));
                 }
-                None => {}
+                None => {
+                    return Poll::Ready(Some(Err(self.unexpected_termination_error())));
+                }
             },
             (Poll::Ready(some_ack), Poll::Ready(maybe_message)) => {
                 if let Some(ack_message_id) = some_ack {
@@ -455,7 +472,9 @@ impl futures::Stream for PulsarConsumeStream {
                     Some(Err(e)) => {
                         return Poll::Ready(Some(Err(e)));
                     }
-                    None => {}
+                    None => {
+                        return Poll::Ready(Some(Err(self.unexpected_termination_error())));
+                    }
                 }
             }
         }
