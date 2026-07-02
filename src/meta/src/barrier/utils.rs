@@ -333,10 +333,12 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
     }
 
     pub(super) fn iter_infos(&self) -> impl Iterator<Item = &Info> + '_ {
-        self.inflight_barriers
-            .values()
+        // Preserve epoch order: collected barriers are older and kept from old to new,
+        // followed by inflight barriers ordered by `prev_epoch` in the BTreeMap.
+        self.collected_barriers
+            .iter()
             .map(|barrier| &barrier.info)
-            .chain(self.collected_barriers.iter().map(|barrier| &barrier.info))
+            .chain(self.inflight_barriers.values().map(|barrier| &barrier.info))
     }
 
     pub(super) fn into_infos(self) -> impl Iterator<Item = Info> {

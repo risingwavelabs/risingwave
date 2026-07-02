@@ -464,8 +464,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 Message::Barrier(barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let schema_change = barrier.as_sink_schema_change(sink_id);
+                    let wait_log_store_flush = barrier.should_flush_sink_log_store(sink_id);
                     if let Some(schema_change) = &schema_change {
                         info!(?schema_change, %sink_id, "sink receive schema change");
+                    }
+                    if wait_log_store_flush {
+                        info!(%sink_id, "sink wait for log store flush");
                     }
                     let post_flush = log_writer
                         .flush_current_epoch(
@@ -475,6 +479,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
                                 schema_change,
+                                wait_log_store_flush,
                             },
                         )
                         .await?;

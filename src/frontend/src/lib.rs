@@ -178,10 +178,10 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
     pub webhook_listen_addr: String,
 
-    /// Address of the serverless backfill controller.
-    /// Needed if frontend receives a query like
-    /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
-    /// Feature disabled by default.
+    /// Deprecated. Configure the serverless backfill controller address on meta nodes instead.
+    #[deprecated(
+        note = "Configure the serverless backfill controller address on meta nodes instead"
+    )]
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub serverless_backfill_controller_addr: String,
 

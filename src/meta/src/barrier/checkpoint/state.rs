@@ -38,7 +38,6 @@ use risingwave_pb::stream_plan::{
 };
 use tracing::warn;
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
@@ -69,6 +68,7 @@ use crate::stream::{
     GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
+use crate::{MetaError, MetaResult};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -491,7 +491,11 @@ impl DatabaseCheckpointControl {
             None => self.apply_simple_command(None, "barrier"),
             Some(Command::CreateStreamingJob {
                 mut info,
-                job_type: CreateStreamingJobType::SnapshotBackfill(mut snapshot_backfill_info),
+                job_type:
+                    CreateStreamingJobType::SnapshotBackfill {
+                        mut snapshot_backfill_info,
+                        since_epoch,
+                    },
                 cross_db_snapshot_backfill_info,
             }) => {
                 let ensembles = resolve_no_shuffle_ensembles(
@@ -514,7 +518,25 @@ impl DatabaseCheckpointControl {
                 )?;
                 {
                     assert!(!self.state.is_paused());
-                    let snapshot_epoch = barrier_info.prev_epoch();
+                    let (snapshot_epoch, since_timestamp_upstream_log_epochs) =
+                        if let Some(since_epoch) = &since_epoch {
+                            let (snapshot_epoch, log_epochs) =
+                                since_epoch.resolved.as_ref().ok_or_else(|| {
+                            MetaError::from(anyhow::anyhow!(
+                                "since_timestamp epoch has not been resolved for snapshot backfill"
+                            ))
+                        })?;
+                            (
+                                *snapshot_epoch,
+                                Some((
+                                    log_epochs,
+                                    to_partial_graph_id(self.database_id, None),
+                                    barrier_info.prev_epoch(),
+                                )),
+                            )
+                        } else {
+                            (barrier_info.prev_epoch(), None)
+                        };
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -539,7 +561,6 @@ impl DatabaseCheckpointControl {
                         .keys()
                         .cloned()
                         .collect();
-
                     // Build edges first (needed for no-shuffle mapping used in split resolution)
                     let mut edges = self.database_info.build_edge(
                         Some((&info, true)),
@@ -575,6 +596,7 @@ impl DatabaseCheckpointControl {
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         partial_graph_manager,
                         &mut edges,
@@ -602,7 +624,11 @@ impl DatabaseCheckpointControl {
 
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
-                        &CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                        &CreateStreamingJobType::SnapshotBackfill {
+                            snapshot_backfill_info,
+                            since_epoch,
+                        },
+                        [],
                         self.state.is_paused(),
                         &mut edges,
                         partial_graph_manager.control_stream_manager(),
@@ -726,6 +752,8 @@ impl DatabaseCheckpointControl {
                         backfill_nodes_to_pause: Default::default(),
                         actor_cdc_table_snapshot_splits: None,
                         new_upstream_sinks: Default::default(),
+                        dropped_actors: Default::default(),
+                        sink_log_store_flush: Default::default(),
                     });
 
                     let job = BatchRefreshJobCheckpointControl::new(
@@ -835,6 +863,20 @@ impl DatabaseCheckpointControl {
                     &self.database_info,
                 )?;
 
+                let old_sink_job_id = info
+                    .replace_sink
+                    .as_ref()
+                    .map(|old_sink_id| old_sink_id.as_job_id());
+                if old_sink_job_id.is_some()
+                    && matches!(
+                        job_type,
+                        CreateStreamingJobType::SnapshotBackfill { .. }
+                            | CreateStreamingJobType::BatchRefresh(_)
+                    )
+                {
+                    bail!("replace sink must not use snapshot backfill");
+                }
+
                 // Pre-apply: add new job and fragments
                 let cdc_tracker = if let Some(splits) = &info.cdc_table_snapshot_splits {
                     let (fragment, _) =
@@ -873,6 +915,21 @@ impl DatabaseCheckpointControl {
                 }
 
                 let (table_ids, node_actors) = self.collect_base_info();
+                let dropped_actors = if let Some(old_sink_job_id) = old_sink_job_id {
+                    let Some(job) = self.database_info.post_apply_remove_job(old_sink_job_id)
+                    else {
+                        bail!(
+                            "old sink job {} not found in barrier state",
+                            old_sink_job_id
+                        );
+                    };
+                    job.fragment_infos
+                        .values()
+                        .flat_map(|fragment| fragment.actors.keys().copied())
+                        .collect()
+                } else {
+                    vec![]
+                };
 
                 // Actors to create
                 let actors_to_create = Some(Command::create_streaming_job_actors_to_create(
@@ -892,6 +949,7 @@ impl DatabaseCheckpointControl {
                 let mutation = Command::create_streaming_job_to_mutation(
                     &info,
                     &job_type,
+                    dropped_actors,
                     is_currently_paused,
                     &mut edges,
                     partial_graph_manager.control_stream_manager(),

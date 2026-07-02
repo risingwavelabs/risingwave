@@ -200,17 +200,6 @@ pub type HummockManagerRef = Arc<HummockManager>;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
-macro_rules! start_measure_real_process_timer {
-    ($hummock_mgr:expr, $func_name:literal) => {
-        $hummock_mgr
-            .metrics
-            .hummock_manager_real_process_time
-            .with_label_values(&[$func_name])
-            .start_timer()
-    };
-}
-pub(crate) use start_measure_real_process_timer;
-
 use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
@@ -344,21 +333,25 @@ impl HummockManager {
             env,
             versioning: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::versioning",
             ),
             compaction: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::compaction",
             ),
             compaction_group_manager: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 compaction_group_manager,
                 "hummock_manager::compaction_group_manager",
             ),
             context_info: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::context_info",
             ),

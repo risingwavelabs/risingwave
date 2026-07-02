@@ -73,11 +73,8 @@ impl StreamTableScan {
 
         if core.cross_database() {
             assert!(
-                !matches!(
-                    backfill_type,
-                    BackfillType::Replicated | BackfillType::UpstreamOnlySink
-                ),
-                "cross-database upstream-only scan is not supported"
+                !(backfill_type == BackfillType::Replicated || backfill_type.without_snapshot()),
+                "cross-database replicated or without-snapshot scan is not supported"
             );
         }
 
@@ -97,7 +94,7 @@ impl StreamTableScan {
 
         let stream_kind = if core.append_only() {
             StreamKind::AppendOnly
-        } else if backfill_type == BackfillType::UpstreamOnlySink {
+        } else if backfill_type.without_snapshot() {
             StreamKind::Upsert
         } else {
             StreamKind::Retract

@@ -35,6 +35,7 @@ use tokio::time::Sleep;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::decouple_checkpoint_log_sink::should_force_commit_on_checkpoint_barrier;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
@@ -376,8 +377,11 @@ impl LogSinker for TurbopufferLogSinker {
                     ..
                 } => {
                     let offset = TruncateOffset::Barrier { epoch };
-                    let should_flush =
-                        is_stop || new_vnode_bitmap.is_some() || schema_change.is_some();
+                    let should_flush = should_force_commit_on_checkpoint_barrier(
+                        new_vnode_bitmap.is_some(),
+                        is_stop,
+                        schema_change.is_some(),
+                    );
                     if self.writer.is_empty() {
                         log_reader.truncate(offset)?;
                     } else if should_flush {

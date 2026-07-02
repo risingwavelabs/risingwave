@@ -406,9 +406,26 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(old_sink_id.as_raw_id());
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, old_sink_id);
+        self.create_sink_inner(sink, graph)?;
         Ok(())
     }
 
