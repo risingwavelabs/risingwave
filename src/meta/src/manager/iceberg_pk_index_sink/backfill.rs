@@ -44,7 +44,7 @@ pub fn backfill_dv_partitions(
 
     if !waiting_delete_files.is_empty() {
         anyhow::bail!(
-            "backfill iceberg v3 sink delete files failed, missing referenced data files: {:?}",
+            "backfill iceberg pk-index sink delete files failed, missing referenced data files: {:?}",
             waiting_delete_files.keys().collect::<Vec<_>>()
         );
     }
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn dv_referencing_older_snapshot_left_alone() -> Result<()> {
         // DV references a data file NOT in the uncommitted writer set — its
-        // partition was correctly populated by DvMerger from the older
+        // partition was correctly populated by PositionDeleteMerger from the older
         // snapshot and must not be overwritten.
         let writers = [writer_file("data/a.parquet", struct_with_int(1))];
         let dv_partition = struct_with_int(99);

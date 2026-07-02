@@ -273,7 +273,7 @@ service SinkCoordinationService {
   rpc Coordinate(stream CoordinateRequest) returns (stream CoordinateResponse);
 }
 
-message IcebergV3PreCommitState {
+message IcebergPkIndexPreCommitState {
   bytes agg_result = 1;
   int64 snapshot_id = 2;
 }

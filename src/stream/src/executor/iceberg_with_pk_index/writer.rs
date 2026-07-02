@@ -21,7 +21,7 @@ use risingwave_common::row::{Project, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::stream_service::PbIcebergV3SinkRole;
+use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
 use crate::common::change_buffer::output_kind;
@@ -59,7 +59,7 @@ pub trait IcebergWriter: Send + 'static {
     async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>>;
 }
 
-/// Writer Executor for Iceberg V3 Sink with PK index
+/// Writer Executor for iceberg pk-index sink with PK index
 ///
 /// This stateful executor maintains a PK index that maps primary key values to
 /// their position in data files (`file_path`, `position`). It processes change logs
@@ -68,7 +68,7 @@ pub trait IcebergWriter: Send + 'static {
 /// - **Insert**: Writes the row to a data file via [`IcebergWriter`], records the
 ///   position in the PK index state table.
 /// - **Delete**: Looks up the PK index to find the data file position, emits a
-///   delete position message downstream to the DV Merger, removes from index.
+///   delete position message downstream to the position-delete merger, removes from index.
 /// - **Update**: Treated as Delete + Insert. The planner guarantees the old and
 ///   new rows share the same PK, so the executor can reuse the projected PK from
 ///   the old row when updating the PK index.
@@ -276,13 +276,14 @@ where
                     if let Some(metadata) = metadata
                         && metadata.metadata.is_some()
                     {
-                        self.local_barrier_manager.report_iceberg_v3_sink_metadata(
-                            epoch,
-                            self.sink_id,
-                            self.ctx.id,
-                            PbIcebergV3SinkRole::Writer,
-                            Some(metadata),
-                        );
+                        self.local_barrier_manager
+                            .report_iceberg_pk_index_sink_metadata(
+                                epoch,
+                                self.sink_id,
+                                self.ctx.id,
+                                PbIcebergPkIndexSinkRole::Writer,
+                                Some(metadata),
+                            );
                     }
 
                     yield Message::Barrier(barrier);
