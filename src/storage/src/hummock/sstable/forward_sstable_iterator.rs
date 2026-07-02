@@ -23,7 +23,7 @@ use thiserror_ext::AsReport;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{SstableIteratorReadOptions, SstableMetaHandle};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
@@ -66,8 +66,8 @@ impl SstableIterator {
         options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
+        let meta_handle = SstableMetaHandle::v2(&sstable);
         let mut block_start_idx_inclusive = 0;
-        let mut block_end_idx_inclusive = sstable.meta.block_metas.len() - 1;
         assert!(
             !sstable_info_ref.table_ids.is_empty(),
             "SstableIterator: SST {} (object {}) has empty table_ids",
@@ -84,34 +84,28 @@ impl SstableIterator {
             read_table_id_range.0,
             read_table_id_range.1
         );
-        let block_meta_count = sstable.meta.block_metas.len();
+        let block_meta_count = meta_handle.block_count();
         assert!(block_meta_count > 0);
+        let mut block_end_idx_inclusive = block_meta_count - 1;
         assert!(
-            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
+            meta_handle.block_meta(0).table_id() <= read_table_id_range.0,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
+            (0..block_meta_count)
+                .map(|idx| meta_handle.block_meta(idx).table_id())
                 .collect::<Vec<_>>()
         );
         assert!(
-            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
+            meta_handle.block_meta(block_meta_count - 1).table_id() >= read_table_id_range.1,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.1,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
+            (0..block_meta_count)
+                .map(|idx| meta_handle.block_meta(idx).table_id())
                 .collect::<Vec<_>>()
         );
 
         while block_start_idx_inclusive < block_meta_count
-            && sstable.meta.block_metas[block_start_idx_inclusive].table_id()
-                < read_table_id_range.0
+            && meta_handle.block_meta(block_start_idx_inclusive).table_id() < read_table_id_range.0
         {
             block_start_idx_inclusive += 1;
         }
@@ -120,16 +114,13 @@ impl SstableIterator {
             block_start_idx_inclusive < block_meta_count,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
+            (0..block_meta_count)
+                .map(|idx| meta_handle.block_meta(idx).table_id())
                 .collect::<Vec<_>>()
         );
 
         while block_end_idx_inclusive > block_start_idx_inclusive
-            && sstable.meta.block_metas[block_end_idx_inclusive].table_id() > read_table_id_range.1
+            && meta_handle.block_meta(block_end_idx_inclusive).table_id() > read_table_id_range.1
         {
             block_end_idx_inclusive -= 1;
         }
@@ -164,25 +155,28 @@ impl SstableIterator {
 
         self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..=self.block_end_idx_inclusive];
+            let meta_handle = SstableMetaHandle::v2(&self.sst);
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx <= self.block_end_idx_inclusive {
                 let end_idx = match bound {
                     Unbounded => self.block_end_idx_inclusive + 1,
                     Included(dest_key) => {
                         let dest_key = dest_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
+                        meta_handle.block_metas_partition_point(
+                            self.block_start_idx_inclusive..=self.block_end_idx_inclusive,
+                            |block_meta| {
                                 FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
-                            })
+                            },
+                        )
                     }
                     Excluded(end_key) => {
                         let end_key = end_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
+                        meta_handle.block_metas_partition_point(
+                            self.block_start_idx_inclusive..=self.block_end_idx_inclusive,
+                            |block_meta| {
                                 FullKey::decode(&block_meta.smallest_key).user_key < end_key
-                            })
+                            },
+                        )
                     }
                 };
 
@@ -330,16 +324,18 @@ impl SstableIterator {
     }
 
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
-        self.block_start_idx_inclusive
-            + self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..=self.block_end_idx_inclusive]
-                .partition_point(|block_meta| {
-                    // compare by version comparator
-                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                    // partition point should be `prev(<=)` instead of `<`.
-                    FullKey::decode(&block_meta.smallest_key).le(&key)
-                })
-                .saturating_sub(1) // considering the boundary of 0
+        let partition_point = SstableMetaHandle::v2(&self.sst).block_metas_partition_point(
+            self.block_start_idx_inclusive..=self.block_end_idx_inclusive,
+            |block_meta| {
+                // compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                FullKey::decode(&block_meta.smallest_key).le(&key)
+            },
+        );
+        partition_point
+            .saturating_sub(1)
+            .max(self.block_start_idx_inclusive)
     }
 }
 
@@ -475,7 +471,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.block_count() > 10);
 
         inner_test_forward_iterator(sstable_store.clone(), sstable, sstable_info).await;
     }
@@ -488,7 +484,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.block_count() > 10);
         let mut sstable_iter = SstableIterator::create(
             sstable,
             sstable_store,
