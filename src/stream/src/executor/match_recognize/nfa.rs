@@ -24,7 +24,8 @@
 //! and deterministic so it can be unit-tested without a cluster.
 
 // `BTreeSet` is used only by the test-only reference matchers and the unit tests; the streaming
-// matcher walks transitions directly with `HashSet` visited-sets.
+// matcher walks transitions directly with [`Visited`] guards (a `u64` bitmask for automata of at
+// most 64 states, a `HashSet` fallback beyond that).
 #[cfg(test)]
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -253,6 +254,48 @@ pub struct LabeledMatch {
     pub labels: Vec<String>,
 }
 
+/// Visited-state guard for one traversal position of the dynamic matcher. ε-transitions keep the
+/// position, so each consumed row starts a fresh set (see `preferred_from_dynamic`); these sets are
+/// created O(rows × branches) times per partition visit, so their allocation cost matters. The
+/// common case — an automaton with at most 64 states — is a single `u64` bitmask (no allocation,
+/// membership is a bit test); larger automata (deep `PERMUTE` expansions) fall back to a `HashSet`.
+enum Visited {
+    Small(u64),
+    Large(HashSet<StateId>),
+}
+
+impl Visited {
+    fn new(n_states: usize) -> Self {
+        if n_states <= 64 {
+            Visited::Small(0)
+        } else {
+            Visited::Large(HashSet::new())
+        }
+    }
+
+    /// Marks `s` visited; returns whether it was newly inserted (mirrors `HashSet::insert`).
+    fn insert(&mut self, s: StateId) -> bool {
+        match self {
+            Visited::Small(bits) => {
+                let mask = 1u64 << s;
+                let newly = *bits & mask == 0;
+                *bits |= mask;
+                newly
+            }
+            Visited::Large(set) => set.insert(s),
+        }
+    }
+
+    fn remove(&mut self, s: StateId) {
+        match self {
+            Visited::Small(bits) => *bits &= !(1u64 << s),
+            Visited::Large(set) => {
+                set.remove(&s);
+            }
+        }
+    }
+}
+
 impl Nfa {
     /// Greedy longest match starting at `rows[start]`, returning the per-row variable assignment
     /// along the chosen accepting path (the variable each consumed row was matched as). This is
@@ -349,7 +392,7 @@ impl Nfa {
         let mut i = 0;
         while i < n_rows {
             let mut path: Vec<String> = Vec::new();
-            let mut visited: HashSet<StateId> = HashSet::new();
+            let mut visited = Visited::new(self.states.len());
             let found = self
                 .preferred_from_dynamic(n_rows, self.start, i, &mut path, matcher, &mut visited)
                 .await?;
@@ -382,7 +425,7 @@ impl Nfa {
         matcher: &(impl CandidateMatcher + Sync),
     ) -> StreamExecutorResult<bool> {
         let mut path: Vec<String> = Vec::new();
-        let mut visited: HashSet<StateId> = HashSet::new();
+        let mut visited = Visited::new(self.states.len());
         self.live_to_boundary(n_rows, self.start, pos, &mut path, matcher, &mut visited)
             .await
     }
@@ -401,7 +444,7 @@ impl Nfa {
         pos: usize,
         path: &mut Vec<String>,
         matcher: &(impl CandidateMatcher + Sync),
-        visited: &mut HashSet<StateId>,
+        visited: &mut Visited,
     ) -> StreamExecutorResult<bool> {
         if pos == n_rows {
             return Ok(true);
@@ -421,7 +464,7 @@ impl Nfa {
                 Transition::OnVar { var, target } => {
                     if pos < n_rows && matcher.matches(var, pos, path).await? {
                         path.push(var.clone());
-                        let mut next_visited = HashSet::new();
+                        let mut next_visited = Visited::new(self.states.len());
                         let r = self
                             .live_to_boundary(
                                 n_rows,
@@ -440,11 +483,11 @@ impl Nfa {
                 }
             };
             if alive {
-                visited.remove(&state);
+                visited.remove(state);
                 return Ok(true);
             }
         }
-        visited.remove(&state);
+        visited.remove(state);
         Ok(false)
     }
 
@@ -467,7 +510,7 @@ impl Nfa {
         pos: usize,
         path: &mut Vec<String>,
         matcher: &(impl CandidateMatcher + Sync),
-        visited: &mut HashSet<StateId>,
+        visited: &mut Visited,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
         // The single accept state is terminal: reaching it completes the match here.
         if state == self.accept {
@@ -485,7 +528,7 @@ impl Nfa {
                 Transition::OnVar { var, target } => {
                     if pos < n_rows && matcher.matches(var, pos, path).await? {
                         path.push(var.clone());
-                        let mut next_visited = HashSet::new();
+                        let mut next_visited = Visited::new(self.states.len());
                         let r = self
                             .preferred_from_dynamic(
                                 n_rows,
@@ -504,11 +547,11 @@ impl Nfa {
                 }
             };
             if candidate.is_some() {
-                visited.remove(&state);
+                visited.remove(state);
                 return Ok(candidate);
             }
         }
-        visited.remove(&state);
+        visited.remove(state);
         Ok(None)
     }
 }
