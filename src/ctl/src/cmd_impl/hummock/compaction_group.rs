@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
-    CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+    CompressionAlgorithm, SstableFilterLayout, SstableFilterType,
 };
 use risingwave_pb::id::TableId;
 
@@ -67,7 +67,7 @@ pub fn build_compaction_config_vec(
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
     compress_algorithm: Option<CompressionAlgorithm>,
-    sstable_filter_kind: Option<SstableFilterKind>,
+    sstable_filter_type: Option<SstableFilterType>,
     sstable_filter_layout: Option<SstableFilterLayout>,
     max_l0_compact_level: Option<u32>,
     sst_allowed_trivial_move_min_size: Option<u64>,
@@ -131,8 +131,8 @@ pub fn build_compaction_config_vec(
     if let Some(c) = compress_algorithm {
         configs.push(MutableConfig::CompressionAlgorithm(c))
     }
-    if let Some(c) = sstable_filter_kind {
-        configs.push(MutableConfig::SstableFilterKind(c))
+    if let Some(c) = sstable_filter_type {
+        configs.push(MutableConfig::SstableFilterType(c))
     }
     if let Some(c) = sstable_filter_layout {
         configs.push(MutableConfig::SstableFilterLayout(c))

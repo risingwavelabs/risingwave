@@ -27,6 +27,7 @@ use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::cmp_rows_ascending;
@@ -162,6 +163,9 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     cnt_rows_received: &'a mut u32,
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
+    /// Bound at executor scope so the guard isn't dropped between chunks (which resets the series).
+    /// Only observed by [`AsOfJoinExecutor::eq_join_right`].
+    join_matched_join_keys: &'a LabelGuardedHistogram,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
@@ -372,6 +376,17 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        // Bind at executor scope: a per-chunk guard would be dropped between chunks and reset the series.
+        let right_table_id_str = self.side_r.ht.table_id().to_string();
+        let join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                right_table_id_str.as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -407,6 +422,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_matched_join_keys: &join_matched_join_keys,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -432,6 +448,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_matched_join_keys: &join_matched_join_keys,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -559,6 +576,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold: _,
+            join_matched_join_keys: _,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -731,6 +749,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
+            join_matched_join_keys,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -741,15 +760,6 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             side_update.i2o_mapping.clone(),
             side_match.i2o_mapping.clone(),
         );
-
-        let join_matched_join_keys = ctx
-            .streaming_metrics
-            .join_matched_join_keys
-            .with_guarded_label_values(&[
-                &ctx.id.to_string(),
-                &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
-            ]);
 
         // The inequality key is always a single column; wrap in an array for `project()`.
         let inequal_key_idx_update = [side_update.inequal_key_idx];

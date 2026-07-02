@@ -141,11 +141,13 @@ impl AwsAuthProps {
     }
 
     async fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
-        if self.access_key.is_some() && self.secret_key.is_some() {
+        if let (Some(access_key), Some(secret_key)) =
+            (self.access_key.as_ref(), self.secret_key.as_ref())
+        {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
-                    self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
+                    access_key,
+                    secret_key,
                     self.session_token.clone(),
                 ),
             ))

@@ -5215,9 +5215,9 @@ dependencies = [
 
 [[package]]
 name = "ethnum"
-version = "1.5.0"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b90ca2580b73ab6a1f724b76ca11ab632df820fd6040c336200d2c1df7b3c82c"
+checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 dependencies = [
  "serde",
 ]
@@ -11593,7 +11593,7 @@ dependencies = [
  "foyer",
  "futures",
  "hashbrown 0.14.5",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "hex",
  "http 1.4.0",
  "http-body 1.0.1",
@@ -11805,8 +11805,10 @@ name = "risingwave_common_service"
 version = "3.1.0-alpha"
 dependencies = [
  "async-trait",
+ "await-tree",
  "axum",
  "axum-extra",
+ "either",
  "futures",
  "http 1.4.0",
  "madsim-tokio",
@@ -11881,7 +11883,6 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "http 1.4.0",
  "itertools 0.14.0",
  "madsim-tokio",
  "madsim-tonic",
@@ -11937,7 +11938,6 @@ dependencies = [
  "aws-sdk-glue",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
- "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "aws-types",
@@ -12806,6 +12806,7 @@ dependencies = [
  "paste",
  "risingwave_expr_impl",
  "risingwave_frontend",
+ "risingwave_license",
  "risingwave_sqlparser",
  "serde",
  "serde_with",
@@ -12906,6 +12907,7 @@ dependencies = [
  "fail",
  "futures",
  "glob",
+ "iceberg",
  "indexmap 2.13.0",
  "itertools 0.14.0",
  "madsim",
@@ -12927,6 +12929,7 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
+ "risingwave_meta_model",
  "risingwave_meta_node",
  "risingwave_object_store",
  "risingwave_pb",
@@ -14783,7 +14786,7 @@ dependencies = [
 [[package]]
 name = "sqlx"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -14795,7 +14798,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "bigdecimal 0.4.10",
@@ -14839,7 +14842,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14851,7 +14854,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros-core"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "dotenvy",
  "either",
@@ -14876,7 +14879,7 @@ dependencies = [
 [[package]]
 name = "sqlx-mysql"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -14922,7 +14925,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -14965,7 +14968,7 @@ dependencies = [
 [[package]]
 name = "sqlx-sqlite"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "chrono",

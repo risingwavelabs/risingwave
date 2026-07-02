@@ -448,9 +448,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             self.mysql_version.1
         );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
-        let row = rs
-            .iter_mut()
-            .exactly_one()
+        let row = Itertools::exactly_one(rs.iter_mut())
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
         drop(conn);
@@ -820,8 +818,8 @@ mod tests {
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();
-        println!("columns: {:?}", &table.column_descs);
-        println!("primary keys: {:?}", &table.pk_names);
+        println!("columns: {:?}", table.column_descs);
+        println!("primary keys: {:?}", table.pk_names);
     }
 
     #[test]

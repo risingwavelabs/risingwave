@@ -17,13 +17,15 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use iceberg::Catalog;
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
-use iceberg::{Catalog, TableIdent};
 use itertools::Itertools;
-use risingwave_common::array::arrow::arrow_schema_iceberg::Field as ArrowField;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{
+    DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields,
+};
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::Field;
@@ -32,13 +34,13 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_retry::RetryIf;
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 
+use super::commit_retry::{self, CommitError};
 use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch};
 use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 use crate::sink::catalog::SinkId;
@@ -56,62 +58,17 @@ pub struct IcebergCommitResult {
 }
 
 impl IcebergCommitResult {
-    fn try_from(value: &SinkMetadata) -> Result<Self> {
-        if let Some(Serialized(v)) = &value.metadata {
-            let mut values = if let serde_json::Value::Object(v) =
-                serde_json::from_slice::<serde_json::Value>(&v.metadata)
-                    .context("Can't parse iceberg sink metadata")?
-            {
-                v
-            } else {
-                bail!("iceberg sink metadata should be an object");
-            };
+    pub fn try_from(value: &SinkMetadata) -> Result<Self> {
+        let Some(Serialized(value)) = &value.metadata else {
+            bail!("Can't create iceberg sink write result from empty data!");
+        };
 
-            let schema_id;
-            if let Some(serde_json::Value::Number(value)) = values.remove(SCHEMA_ID) {
-                schema_id = value
-                    .as_u64()
-                    .ok_or_else(|| anyhow!("schema_id should be a u64"))?;
-            } else {
-                bail!("iceberg sink metadata should have schema_id");
-            }
-
-            let partition_spec_id;
-            if let Some(serde_json::Value::Number(value)) = values.remove(PARTITION_SPEC_ID) {
-                partition_spec_id = value
-                    .as_u64()
-                    .ok_or_else(|| anyhow!("partition_spec_id should be a u64"))?;
-            } else {
-                bail!("iceberg sink metadata should have partition_spec_id");
-            }
-
-            let data_files: Vec<SerializedDataFile>;
-            if let serde_json::Value::Array(values) = values
-                .remove(DATA_FILES)
-                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
-            {
-                data_files = values
-                    .into_iter()
-                    .map(from_value::<SerializedDataFile>)
-                    .collect::<std::result::Result<_, _>>()
-                    .unwrap();
-            } else {
-                bail!("iceberg sink metadata should have data_files object");
-            }
-
-            Ok(Self {
-                schema_id: schema_id as i32,
-                partition_spec_id: partition_spec_id as i32,
-                data_files,
-            })
-        } else {
-            bail!("Can't create iceberg sink write result from empty data!")
-        }
+        Self::try_from_serialized_bytes(&value.metadata)
     }
 
-    fn try_from_serialized_bytes(value: Vec<u8>) -> Result<Self> {
+    pub fn try_from_serialized_bytes(value: &[u8]) -> Result<Self> {
         let mut values = if let serde_json::Value::Object(value) =
-            serde_json::from_slice::<serde_json::Value>(&value)
+            serde_json::from_slice::<serde_json::Value>(value)
                 .context("Can't parse iceberg sink metadata")?
         {
             value
@@ -163,42 +120,17 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
     type Error = SinkError;
 
     fn try_from(value: &'a IcebergCommitResult) -> std::result::Result<SinkMetadata, Self::Error> {
-        let json_data_files = serde_json::Value::Array(
-            value
-                .data_files
-                .iter()
-                .map(serde_json::to_value)
-                .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
-                .context("Can't serialize data files to json")?,
-        );
-        let json_value = serde_json::Value::Object(
-            vec![
-                (
-                    SCHEMA_ID.to_owned(),
-                    serde_json::Value::Number(value.schema_id.into()),
-                ),
-                (
-                    PARTITION_SPEC_ID.to_owned(),
-                    serde_json::Value::Number(value.partition_spec_id.into()),
-                ),
-                (DATA_FILES.to_owned(), json_data_files),
-            ]
-            .into_iter()
-            .collect(),
-        );
+        let bytes = <Vec<u8>>::try_from(value)?;
         Ok(SinkMetadata {
-            metadata: Some(Serialized(SerializedMetadata {
-                metadata: serde_json::to_vec(&json_value)
-                    .context("Can't serialize iceberg sink metadata")?,
-            })),
+            metadata: Some(Serialized(SerializedMetadata { metadata: bytes })),
         })
     }
 }
 
-impl TryFrom<IcebergCommitResult> for Vec<u8> {
+impl<'a> TryFrom<&'a IcebergCommitResult> for Vec<u8> {
     type Error = SinkError;
 
-    fn try_from(value: IcebergCommitResult) -> std::result::Result<Vec<u8>, Self::Error> {
+    fn try_from(value: &'a IcebergCommitResult) -> std::result::Result<Vec<u8>, Self::Error> {
         let json_data_files = serde_json::Value::Array(
             value
                 .data_files
@@ -225,6 +157,87 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
         Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
     }
 }
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct IcebergDvMergerCommitResult {
+    pub schema_id: i32,
+    pub partition_spec_id: i32,
+    pub delete_files: Vec<SerializedDataFile>,
+    pub overwrite_files: Vec<SerializedDataFile>,
+}
+
+impl<'a> TryFrom<&'a SinkMetadata> for IcebergDvMergerCommitResult {
+    type Error = SinkError;
+
+    fn try_from(value: &'a SinkMetadata) -> Result<Self> {
+        let Some(Serialized(value)) = &value.metadata else {
+            bail!("Can't create iceberg dv merger commit result from empty data!");
+        };
+        let value = serde_json::from_slice(&value.metadata)
+            .context("Can't deserialize iceberg dv merger commit result from metadata")?;
+        Ok(value)
+    }
+}
+
+impl<'a> TryFrom<&'a IcebergDvMergerCommitResult> for SinkMetadata {
+    type Error = SinkError;
+
+    fn try_from(value: &'a IcebergDvMergerCommitResult) -> Result<SinkMetadata> {
+        let bytes = serde_json::to_vec(value)
+            .context("Can't serialize iceberg dv merger commit result to metadata")?;
+        Ok(SinkMetadata {
+            metadata: Some(Serialized(SerializedMetadata { metadata: bytes })),
+        })
+    }
+}
+
+fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType) -> bool {
+    use ArrowDataType::*;
+
+    match (current, expected) {
+        // RW Decimal has no precision/scale. Sink creation already accepts any
+        // table Decimal128 precision/scale, while expected schemas here are
+        // generated from RW columns using the same canonical mapping. Ignoring
+        // both values prevents false schema-state ambiguity and cannot mask an
+        // auto schema change, which only supports add/drop columns.
+        (Decimal128(_, _), Decimal128(_, _)) => true,
+        (Binary, LargeBinary) | (LargeBinary, Binary) => true,
+        (List(current_field), List(expected_field)) => {
+            arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }
+        (Map(current_field, current_sorted), Map(expected_field, expected_sorted)) => {
+            current_sorted == expected_sorted
+                && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }
+        (Struct(current_fields), Struct(expected_fields)) => {
+            let expected_fields = expected_fields
+                .iter()
+                .map(|field| field.as_ref().clone())
+                .collect_vec();
+            schema_contains_same_fields(current_fields, &expected_fields)
+        }
+        _ => current == expected,
+    }
+}
+
+fn schema_contains_same_fields(current: &ArrowFields, expected: &[ArrowField]) -> bool {
+    if current.len() != expected.len() {
+        return false;
+    }
+
+    let mut unmatched_current = current.iter().collect_vec();
+    expected.iter().all(|expected_field| {
+        let Some(pos) = unmatched_current.iter().position(|current_field| {
+            current_field.name() == expected_field.name()
+                && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        }) else {
+            return false;
+        };
+        unmatched_current.swap_remove(pos);
+        true
+    })
+}
+
 pub struct IcebergSinkCommitter {
     pub(super) catalog: Arc<dyn Catalog>,
     pub(super) table: Table,
@@ -283,35 +296,6 @@ impl IcebergSinkCommitter {
                 "failed to send iceberg compaction update"
             );
         }
-    }
-
-    // Reload table and guarantee current schema_id and partition_spec_id matches
-    // given `schema_id` and `partition_spec_id`
-    async fn reload_table(
-        catalog: &dyn Catalog,
-        table_ident: &TableIdent,
-        schema_id: i32,
-        partition_spec_id: i32,
-    ) -> Result<Table> {
-        let table = catalog
-            .load_table(table_ident)
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        if table.metadata().current_schema_id() != schema_id {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Schema evolution not supported, expect schema id {}, but got {}",
-                schema_id,
-                table.metadata().current_schema_id()
-            )));
-        }
-        if table.metadata().default_partition_spec_id() != partition_spec_id {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Partition evolution not supported, expect partition spec id {}, but got {}",
-                partition_spec_id,
-                table.metadata().default_partition_spec_id()
-            )));
-        }
-        Ok(table)
     }
 }
 
@@ -389,8 +373,8 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
 
         let mut write_results_bytes = Vec::new();
         for each_parallelism_write_result in write_results {
-            let each_parallelism_write_result_bytes: Vec<u8> =
-                each_parallelism_write_result.try_into()?;
+            let each_parallelism_write_result_bytes =
+                <Vec<u8>>::try_from(&each_parallelism_write_result)?;
             write_results_bytes.push(each_parallelism_write_result_bytes);
         }
 
@@ -430,7 +414,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         // Remaining elements are write_results
         let write_results = payload
             .into_iter()
-            .map(IcebergCommitResult::try_from_serialized_bytes)
+            .map(|p| IcebergCommitResult::try_from_serialized_bytes(&p))
             .collect::<Result<Vec<_>>>()?;
 
         let snapshot_committed = self
@@ -533,13 +517,14 @@ impl IcebergSinkCommitter {
         let expect_partition_spec_id = write_results[0].partition_spec_id;
 
         // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = Self::reload_table(
+        self.table = commit_retry::reload_table(
             self.catalog.as_ref(),
             self.table.identifier(),
             expect_schema_id,
             expect_partition_spec_id,
         )
-        .await?;
+        .await
+        .map_err(SinkError::Iceberg)?;
 
         let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
             return Err(SinkError::Iceberg(anyhow!(
@@ -572,84 +557,50 @@ impl IcebergSinkCommitter {
                 })
             })
             .collect::<Result<Vec<DataFile>>>()?;
+
         // # TODO:
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
         // For now, we just retry the commit operation.
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
-            .map(jitter)
-            .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
         let table_ident = self.table.identifier().clone();
+        let target_branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
 
-        // Custom retry logic that:
-        // 1. Calls reload_table before each commit attempt to get the latest metadata
-        // 2. If reload_table fails (table not exists/schema/partition mismatch), stops retrying immediately
-        // 3. If commit fails, retries with backoff
-        enum CommitError {
-            ReloadTable(SinkError), // Non-retriable: schema/partition mismatch
-            Commit(SinkError),      // Retriable: commit conflicts, network errors
-        }
+        let table = commit_retry::run_with_retry(
+            catalog.clone(),
+            table_ident.clone(),
+            expect_schema_id,
+            expect_partition_spec_id,
+            self.commit_retry_num as usize,
+            |table| {
+                let target_branch = target_branch.clone();
+                let data_files = data_files.clone();
+                let catalog = catalog.clone();
+                async move {
+                    let txn = Transaction::new(&table);
+                    let append_action = txn
+                        .fast_append()
+                        .set_snapshot_id(snapshot_id)
+                        .set_target_branch(target_branch)
+                        .add_data_files(data_files);
 
-        let table = RetryIf::spawn(
-            retry_strategy,
-            || async {
-                // Reload table before each commit attempt to get the latest metadata
-                let table = Self::reload_table(
-                    catalog.as_ref(),
-                    &table_ident,
-                    expect_schema_id,
-                    expect_partition_spec_id,
-                )
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e.as_report(), "Failed to reload iceberg table");
-                    CommitError::ReloadTable(e)
-                })?;
+                    let tx = append_action.apply(txn).map_err(|err| {
+                        let err: IcebergError = err.into();
+                        tracing::error!(error = %err.as_report(), "Failed to apply iceberg fast_append action");
+                        CommitError::Commit(anyhow!(err).context("apply iceberg fast_append"))
+                    })?;
 
-                let txn = Transaction::new(&table);
-                let append_action = txn
-                    .fast_append()
-                    .set_snapshot_id(snapshot_id)
-                    .set_target_branch(commit_branch(
-                        self.config.r#type.as_str(),
-                        self.config.write_mode,
-                    ))
-                    .add_data_files(data_files.clone());
-
-                let tx = append_action.apply(txn).map_err(|err| {
-                    let err: IcebergError = err.into();
-                    tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
-                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
-                })?;
-
-                tx.commit(catalog.as_ref()).await.map_err(|err| {
-                    let err: IcebergError = err.into();
-                    tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
-                })
-            },
-            |err: &CommitError| {
-                // Only retry on commit errors, not on reload_table errors
-                match err {
-                    CommitError::Commit(_) => {
-                        tracing::warn!("Commit failed, will retry");
-                        true
-                    }
-                    CommitError::ReloadTable(_) => {
-                        tracing::error!(
-                            "reload_table failed with non-retriable error, will not retry"
-                        );
-                        false
-                    }
+                    let table = tx.commit(catalog.as_ref()).await.map_err(|err| {
+                        let err: IcebergError = err.into();
+                        tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                        CommitError::Commit(anyhow!(err).context("commit iceberg transaction"))
+                    })?;
+                    Ok(table)
                 }
             },
         )
         .await
-        .map_err(|e| match e {
-            CommitError::ReloadTable(e) | CommitError::Commit(e) => e,
-        })?;
+        .map_err(SinkError::Iceberg)?;
         self.table = table;
 
         let snapshot_num = self.table.metadata().snapshots().count();
@@ -695,16 +646,7 @@ impl IcebergSinkCommitter {
         let iceberg_arrow_convert = IcebergArrowConvert;
 
         let schema_matches = |expected: &[ArrowField]| {
-            if current_arrow_schema.fields().len() != expected.len() {
-                return false;
-            }
-
-            expected.iter().all(|expected_field| {
-                current_arrow_schema.fields().iter().any(|current_field| {
-                    current_field.name() == expected_field.name()
-                        && current_field.data_type() == expected_field.data_type()
-                })
-            })
+            schema_contains_same_fields(current_arrow_schema.fields(), expected)
         };
 
         let original_arrow_fields: Vec<ArrowField> = schema_change
@@ -965,8 +907,201 @@ mod tests {
         SnapshotReference, SnapshotRetention, SortOrder, Summary, TableMetadataBuilder, Type,
         UnboundPartitionSpec,
     };
+    use risingwave_common::array::arrow::arrow_schema_iceberg::{
+        DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
+        Fields as ArrowFields, Schema as ArrowSchema,
+    };
 
     use super::*;
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_binary_large_binary() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::LargeBinary, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Binary, true),
+        ];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_nested_binary_large_binary() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new(
+                "s",
+                ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                    "payload",
+                    ArrowDataType::LargeBinary,
+                    true,
+                )])),
+                true,
+            ),
+            ArrowField::new(
+                "l",
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::LargeBinary,
+                    true,
+                ))),
+                true,
+            ),
+            ArrowField::new_map(
+                "m",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new("value", ArrowDataType::LargeBinary, true)),
+                false,
+                true,
+            ),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new(
+                "s",
+                ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                    "payload",
+                    ArrowDataType::Binary,
+                    true,
+                )])),
+                true,
+            ),
+            ArrowField::new(
+                "l",
+                ArrowDataType::List(ArrowFieldRef::new(ArrowField::new_list_field(
+                    ArrowDataType::Binary,
+                    true,
+                ))),
+                true,
+            ),
+            ArrowField::new_map(
+                "m",
+                "entries",
+                ArrowFieldRef::new(ArrowField::new("key", ArrowDataType::Utf8, false)),
+                ArrowFieldRef::new(ArrowField::new("value", ArrowDataType::Binary, true)),
+                false,
+                true,
+            ),
+        ];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_decimal_precision_delta() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(28, 10),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_decimal_precision_and_scale_delta() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 2),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_length_mismatch() {
+        let current_schema =
+            ArrowSchema::new(vec![ArrowField::new("k", ArrowDataType::Int32, true)]);
+        let expected_fields = vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Utf8, true),
+        ];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_type_mismatch() {
+        let current_schema =
+            ArrowSchema::new(vec![ArrowField::new("v", ArrowDataType::Utf8, true)]);
+        let expected_fields = vec![ArrowField::new("v", ArrowDataType::Int32, true)];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_reused_duplicate_match() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Utf8, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("v", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Int32, true),
+        ];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_rejects_nested_type_mismatch() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "s",
+            ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                "payload",
+                ArrowDataType::Utf8,
+                true,
+            )])),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "s",
+            ArrowDataType::Struct(ArrowFields::from(vec![ArrowField::new(
+                "payload",
+                ArrowDataType::Int32,
+                true,
+            )])),
+            true,
+        )];
+
+        assert!(!schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
 
     #[test]
     fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {

@@ -112,6 +112,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -122,6 +124,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
             "debezium.heartbeat.interval.ms".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -131,6 +135,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -293,6 +299,14 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         [
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // TurbopufferConfig
+    map.try_insert(
+        std::any::type_name::<TurbopufferConfig>().to_owned(),
+        [
+            "write_batch_size".to_owned(),
+            "max_linger_second".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // Jdbc

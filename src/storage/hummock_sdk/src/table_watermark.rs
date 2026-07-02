@@ -623,7 +623,7 @@ impl TableWatermarks {
                         last_watermarks
                             .iter()
                             .cloned()
-                            .chain(new_vnode_watermarks.into_iter())
+                            .chain(new_vnode_watermarks)
                             .collect_vec(),
                     );
                 } else {

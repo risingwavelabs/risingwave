@@ -124,6 +124,19 @@ impl TestSinkStore {
         Ok(())
     }
 
+    pub fn check_result_rows(&self, rows: &[(i32, &str)]) -> anyhow::Result<()> {
+        let inner = self.inner();
+        let actual = inner
+            .id_name
+            .iter()
+            .flat_map(|(id, names)| names.iter().map(|name| (*id, name.as_str())))
+            .sorted()
+            .collect_vec();
+        let expected = rows.iter().copied().sorted().collect_vec();
+        assert_eq!(actual, expected);
+        Ok(())
+    }
+
     pub fn id_count(&self) -> usize {
         self.inner().id_name.len()
     }

@@ -195,7 +195,7 @@ impl<'a> OverWindowProjectBuilder<'a> {
                 )
             )
         {
-            let input = window_function.args.iter().exactly_one().unwrap();
+            let input = Itertools::exactly_one(window_function.args.iter()).unwrap();
             let squared_input_expr = ExprImpl::from(
                 FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()]).unwrap(),
             );

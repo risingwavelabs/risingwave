@@ -939,7 +939,7 @@ impl IcebergCompactionManager {
                 }
             }
 
-            candidates.sort_by(|a, b| a.1.cmp(&b.1));
+            candidates.sort_by_key(|c| c.1);
 
             let handles = candidates
                 .into_iter()

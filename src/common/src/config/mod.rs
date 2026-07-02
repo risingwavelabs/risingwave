@@ -236,6 +236,14 @@ pub mod default {
             0
         }
 
+        pub fn stream_project_expr_concurrency() -> usize {
+            1
+        }
+
+        pub fn stream_project_expr_inflight_request_concurrency() -> usize {
+            0
+        }
+
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }
@@ -368,6 +376,10 @@ pub mod default {
             2048
         }
 
+        pub fn stream_high_gap_fill_amplification_threshold() -> usize {
+            2048
+        }
+
         /// Default to 1 to be compatible with the behavior before this config is introduced.
         pub fn stream_exchange_connection_pool_size() -> Option<u16> {
             Some(1)
@@ -487,6 +499,8 @@ pub mod tests {
         let mut config = RwConfig::default();
         // Set `license_key` to empty in the docs to avoid any confusion.
         config.system.license_key = Some(LicenseKey::empty());
+        // Keep generated docs and example config aligned with the production-safe default.
+        config.frontend.unsafe_enable_local_fs_connector = false;
         config
     }
 
