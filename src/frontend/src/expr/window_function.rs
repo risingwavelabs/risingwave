@@ -84,10 +84,21 @@ impl WindowFunction {
                 }
                 Ok(value.return_type())
             }
-            (Lag | Lead, [_value, _offset, _default]) => {
-                bail_not_implemented!(
-                    "`{kind}` window function with `default` argument is not supported yet"
-                );
+            (Lag | Lead, [value, offset, default]) => {
+                if !offset.return_type().is_int() {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "the `offset` of `{kind}` function should be integer"
+                    ))
+                    .into());
+                }
+                if !offset.is_const() {
+                    bail_not_implemented!(
+                        "non-const `offset` of `{kind}` function is not supported yet"
+                    );
+                }
+                let return_type = value.return_type();
+                default.cast_implicit_mut(&return_type)?;
+                Ok(return_type)
             }
 
             (Aggregate(agg_type), args) => Ok(match agg_type {
