@@ -466,7 +466,7 @@ impl IcebergCommon {
                 );
             }
             // Defense in depth: reqsign POSTs the OAuth token request — carrying the
-            // client_secret — to this host. Require a bare https origin: no userinfo,
+            // client_secret to this host. Require a bare https origin: no userinfo,
             // no query, no fragment, and no path beyond "/". The value itself is not
             // echoed into error messages in case a user pasted a secret by mistake.
             if let Some(host) = sp_authority {
@@ -481,6 +481,15 @@ impl IcebergCommon {
                         "adlsgen2.authority_host must use the https scheme, got {}",
                         parsed.scheme()
                     );
+                }
+                if !parsed.username().is_empty() || parsed.password().is_some() {
+                    bail!("adlsgen2.authority_host must not contain userinfo");
+                }
+                if parsed.query().is_some() || parsed.fragment().is_some() {
+                    bail!("adlsgen2.authority_host must not contain a query or fragment");
+                }
+                if !matches!(parsed.path(), "" | "/") {
+                    bail!("adlsgen2.authority_host must not contain a path component");
                 }
             }
 
@@ -1123,14 +1132,7 @@ mod tests {
 
     #[test]
     fn test_adlsgen2_service_principal_populates_file_io_configs_with_default_authority_host() {
-        let common = IcebergCommon {
-            adlsgen2_account_name: Some("acct".to_owned()),
-            adlsgen2_tenant_id: Some("tenant-uuid".to_owned()),
-            adlsgen2_client_id: Some("client-uuid".to_owned()),
-            adlsgen2_client_secret: Some("secret-value".to_owned()),
-            warehouse_path: Some("abfss://wh@acct.dfs.core.windows.net/wh".to_owned()),
-            ..test_common("rest")
-        };
+        let common = test_adlsgen2_service_principal_common(None);
 
         let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
 
@@ -1143,6 +1145,113 @@ mod tests {
         assert_eq!(
             file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
             ADLS_DEFAULT_AUTHORITY_HOST
+        );
+    }
+
+    fn test_adlsgen2_service_principal_common(authority_host: Option<&str>) -> IcebergCommon {
+        IcebergCommon {
+            adlsgen2_account_name: Some("acct".to_owned()),
+            adlsgen2_tenant_id: Some("tenant-uuid".to_owned()),
+            adlsgen2_client_id: Some("client-uuid".to_owned()),
+            adlsgen2_client_secret: Some("secret-value".to_owned()),
+            adlsgen2_authority_host: authority_host.map(str::to_owned),
+            warehouse_path: Some("abfss://wh@acct.dfs.core.windows.net/wh".to_owned()),
+            ..test_common("rest")
+        }
+    }
+
+    #[test]
+    fn test_adlsgen2_service_principal_authority_host_override_is_respected() {
+        let common =
+            test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us"));
+
+        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(
+            file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
+            "https://login.microsoftonline.us"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_authority_host_rejects_non_bare_https_origins() {
+        let cases = [
+            ("not a url", "does not parse as a URL"),
+            (
+                "http://login.microsoftonline.com",
+                "must use the https scheme",
+            ),
+            (
+                "https://user:pass@login.microsoftonline.com",
+                "must not contain userinfo",
+            ),
+            (
+                "https://login.microsoftonline.com?bar=baz",
+                "must not contain a query or fragment",
+            ),
+            (
+                "https://login.microsoftonline.com#frag",
+                "must not contain a query or fragment",
+            ),
+            (
+                "https://login.microsoftonline.com/foo",
+                "must not contain a path component",
+            ),
+        ];
+        for (authority_host, expected_error) in cases {
+            let common = test_adlsgen2_service_principal_common(Some(authority_host));
+            let err = common
+                .build_jni_catalog_configs(&HashMap::new())
+                .unwrap_err();
+            assert!(
+                format!("{:#}", err).contains(expected_error),
+                "authority_host {authority_host:?}: expected error containing {expected_error:?}, got: {err:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_adlsgen2_authority_host_accepts_bare_https_origin_with_trailing_slash() {
+        let common =
+            test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us/"));
+
+        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(
+            file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
+            "https://login.microsoftonline.us/"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_rejects_mixing_shared_key_and_service_principal() {
+        let common = IcebergCommon {
+            adlsgen2_account_key: Some("shared-key".to_owned()),
+            ..test_adlsgen2_service_principal_common(None)
+        };
+
+        let err = common
+            .build_jni_catalog_configs(&HashMap::new())
+            .unwrap_err();
+        assert!(
+            format!("{:#}", err).contains("exactly one auth mode"),
+            "expected mutual-exclusion error, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_rejects_partial_service_principal_config() {
+        let common = IcebergCommon {
+            adlsgen2_client_secret: None,
+            ..test_adlsgen2_service_principal_common(None)
+        };
+
+        let err = common
+            .build_jni_catalog_configs(&HashMap::new())
+            .unwrap_err();
+        assert!(
+            format!("{:#}", err).contains("requires all three"),
+            "expected partial-config error, got: {err:#}"
         );
     }
 
