@@ -1116,6 +1116,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::kinesis::KinesisSink;
         use risingwave_connector::sink::mqtt::MqttSink;
         use risingwave_connector::sink::pulsar::PulsarSink;
+        use risingwave_connector::sink::rabbitmq::RabbitMqSink;
         use risingwave_connector::sink::redis::RedisSink;
 
         convert_args!(hashmap!(
@@ -1152,6 +1153,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 MqttSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                ),
+                RabbitMqSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
                 ),
                 PulsarSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
