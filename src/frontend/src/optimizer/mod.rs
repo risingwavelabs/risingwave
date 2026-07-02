@@ -1041,15 +1041,14 @@ impl LogicalPlanRoot {
         let refreshable = source_catalog
             .as_ref()
             .map(|catalog| {
-                catalog.with_properties.is_batch_connector() || {
-                    matches!(
+                catalog.with_properties.supports_full_reload_refresh()
+                    && matches!(
                         catalog
                             .refresh_mode
                             .as_ref()
                             .map(|refresh_mode| refresh_mode.refresh_mode),
                         Some(Some(RefreshMode::FullReload(_)))
                     )
-                }
             })
             .unwrap_or(false);
 
