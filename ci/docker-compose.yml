@@ -314,6 +314,7 @@ services:
       - mongodb-setup
       - sqlserver-server
       - pubsub-emulator
+      - rabbitmq-server
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

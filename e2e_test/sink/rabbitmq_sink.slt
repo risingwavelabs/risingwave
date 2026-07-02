@@ -1,0 +1,124 @@
+control substitution on
+
+statement ok
+set sink_decouple = false;
+
+# Fixed routing key.
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_sink_exchange --queue rw_slt_rabbitmq_sink_queue --routing-key rw.slt.rabbitmq.sink
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py purge --queue rw_slt_rabbitmq_sink_queue
+
+statement ok
+create table t_rabbitmq_sink (
+  id int,
+  value varchar
+);
+
+statement ok
+create sink s_rabbitmq_fixed_routing_key
+from t_rabbitmq_sink
+with (
+  connector = 'rabbitmq',
+  type = 'append-only',
+  url = '${RABBITMQ_AMQP_URL}',
+  exchange = 'rw_slt_rabbitmq_sink_exchange',
+  routing_key = 'rw.slt.rabbitmq.sink',
+  publisher_confirm = 'true'
+) format plain encode json (
+  force_append_only = 'true'
+);
+
+statement ok
+insert into t_rabbitmq_sink values
+  (1, 'message_1'),
+  (2, 'message_2'),
+  (3, 'message_3');
+
+statement ok
+flush;
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py consume --queue rw_slt_rabbitmq_sink_queue --count 3 --timeout 30
+----
+{"id":1,"value":"message_1"}
+{"id":2,"value":"message_2"}
+{"id":3,"value":"message_3"}
+
+
+statement ok
+drop sink s_rabbitmq_fixed_routing_key;
+
+statement ok
+drop table t_rabbitmq_sink;
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py delete --exchange rw_slt_rabbitmq_sink_exchange --queue rw_slt_rabbitmq_sink_queue
+
+# Dynamic routing key with a fixed routing key as fallback.
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_dynamic_exchange --queue rw_slt_rabbitmq_dynamic_queue --routing-key rw.slt.rabbitmq.dynamic
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py setup --exchange rw_slt_rabbitmq_dynamic_exchange --queue rw_slt_rabbitmq_fallback_queue --routing-key rw.slt.rabbitmq.fallback
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py purge --queue rw_slt_rabbitmq_dynamic_queue
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py purge --queue rw_slt_rabbitmq_fallback_queue
+
+statement ok
+create table t_rabbitmq_dynamic_sink (
+  id int,
+  value varchar,
+  route varchar
+);
+
+statement ok
+create sink s_rabbitmq_dynamic_routing_key
+from t_rabbitmq_dynamic_sink
+with (
+  connector = 'rabbitmq',
+  type = 'append-only',
+  url = '${RABBITMQ_AMQP_URL}',
+  exchange = 'rw_slt_rabbitmq_dynamic_exchange',
+  routing_key = 'rw.slt.rabbitmq.fallback',
+  routing_key.field = 'route',
+  publisher_confirm = 'true'
+) format plain encode json (
+  force_append_only = 'true'
+);
+
+statement ok
+insert into t_rabbitmq_dynamic_sink values
+  (100, 'dynamic', 'rw.slt.rabbitmq.dynamic'),
+  (101, 'fallback', null);
+
+statement ok
+flush;
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py consume --queue rw_slt_rabbitmq_dynamic_queue --count 1 --timeout 30
+----
+{"id":100,"route":"rw.slt.rabbitmq.dynamic","value":"dynamic"}
+
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py consume --queue rw_slt_rabbitmq_fallback_queue --count 1 --timeout 30
+----
+{"id":101,"route":null,"value":"fallback"}
+
+
+statement ok
+drop sink s_rabbitmq_dynamic_routing_key;
+
+statement ok
+drop table t_rabbitmq_dynamic_sink;
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py delete --exchange rw_slt_rabbitmq_dynamic_exchange --queue rw_slt_rabbitmq_dynamic_queue
+
+system ok
+python3 e2e_test/sink/rabbitmq_operation.py delete --exchange rw_slt_rabbitmq_dynamic_exchange --queue rw_slt_rabbitmq_fallback_queue

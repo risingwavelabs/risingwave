@@ -56,6 +56,8 @@ class RabbitMQManagementClient:
                 payload = response.read()
                 return json.loads(payload) if payload else None
         except urllib.error.HTTPError as error:
+            if error.code in expected_statuses:
+                return None
             response_body = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(
                 f"RabbitMQ API {method} {path} failed with status "
@@ -134,12 +136,12 @@ class RabbitMQManagementClient:
         self.request(
             "DELETE",
             f"/api/queues/{self.vhost}/{queue_path}",
-            expected_statuses=(204,),
+            expected_statuses=(204, 404),
         )
         self.request(
             "DELETE",
             f"/api/exchanges/{self.vhost}/{exchange_path}",
-            expected_statuses=(204,),
+            expected_statuses=(204, 404),
         )
 
 
