@@ -45,7 +45,7 @@ use std::ops::Bound;
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::row_id::RowIdGenerator;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
@@ -486,14 +486,32 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         }
     }
 
-    /// Build a state-table row: `[ seq , <input cols..> ]`. The partition columns and order key are
-    /// columns of the stored input row (the key is the partition columns plus `seq`), so they are
-    /// not stored separately.
-    fn state_row(row: &BufferedRow) -> OwnedRow {
-        let mut datums: Vec<Datum> = Vec::with_capacity(1 + row.row.len());
-        datums.push(Some(ScalarImpl::Int64(row.seq)));
-        datums.extend(row.row.iter().map(|d| d.to_owned_datum()));
-        OwnedRow::new(datums)
+    /// Memoized WITHIN-deadline lookup for one partition visit. `deadline(rows[i]) = order_key +
+    /// interval` is consulted by the boundary-emit guard, the eviction scan, and the wakeup
+    /// recompute; the expression is evaluated at most once per row (`memo[i]`) instead of once per
+    /// consulting site.
+    async fn deadline_at(
+        deadline_expr: &NonStrictExpression,
+        rows: &[BufferedRow],
+        memo: &mut [Option<Datum>],
+        i: usize,
+    ) -> Datum {
+        if memo[i].is_none() {
+            let synthetic = OwnedRow::new(vec![rows[i].order_key.clone()]);
+            memo[i] = Some(deadline_expr.eval_row_infallible(&synthetic).await);
+        }
+        memo[i].as_ref().unwrap().clone()
+    }
+
+    /// Fold a wakeup key into a running minimum (`None` = nothing folded yet).
+    fn fold_min(acc: &mut Datum, k: &ScalarImpl) {
+        let lower = match acc {
+            Some(m) => k.default_cmp(m).is_lt(),
+            None => true,
+        };
+        if lower {
+            *acc = Some(k.clone());
+        }
     }
 
     /// Maintain the wakeup frontier for one partition on insert. If the partition has no frontier
@@ -633,6 +651,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             state_table.vnodes().len(),
         );
 
+        // In-memory lower bound on the minimum `next_wakeup` across this actor's frontier entries.
+        // `None` = unknown (startup, or after a vnode-bitmap change) — the next watermark must scan
+        // and re-establish it; `Some(None)` = the frontier is known empty; `Some(Some(k))` = no
+        // entry is earlier than `k`. Purely an optimization, never persisted: it lets a watermark
+        // with nothing due skip the per-vnode index scans with a single comparison.
+        let mut min_wakeup: Option<Datum> = None;
+
         // No in-memory partition buffer: the state table is the single source of truth. Inserts are
         // written through immediately; each watermark scans the buffered rows back in PK order
         // (partition, order key, seq), processing one partition at a time and holding only that
@@ -684,12 +709,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 }
                             })
                             .or_insert_with(|| order_key.clone());
-                        let buffered = BufferedRow {
-                            seq: row_id_gen.next(),
-                            order_key,
-                            row: row_ref.to_owned_row(),
-                        };
-                        state_table.insert(Self::state_row(&buffered));
+                        // State-table row layout: `[ seq, <input cols..> ]` — the partition columns
+                        // and order key are columns of the stored input row. Written through by
+                        // reference: `insert` takes `impl Row`, so the seq datum is chained onto the
+                        // borrowed chunk row with no intermediate owned materialization.
+                        state_table.insert(
+                            once(Some(ScalarImpl::Int64(row_id_gen.next()))).chain(row_ref),
+                        );
                     }
                     // One frontier update per distinct partition. On insert `next_wakeup` only ever
                     // moves earlier (a new row can only make a partition need attention sooner); the
@@ -699,6 +725,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // in lockstep — the invariant the watermark path relies on when it reuses an index
                     // datum as the meta old-value.
                     for (partition_key, new_min) in chunk_min {
+                        // Keep the in-memory lower bound a lower bound: an insert only ever moves a
+                        // partition's wakeup earlier. (Unknown stays unknown until a scan.)
+                        if let (Some(acc), Some(k)) = (&mut min_wakeup, &new_min) {
+                            Self::fold_min(acc, k);
+                        }
                         Self::update_frontier_on_insert(
                             &mut frontier_meta_table,
                             &mut frontier_index_table,
@@ -715,6 +746,16 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                     let w = watermark.val;
 
+                    // Idle fast path: if the in-memory lower bound on the frontier's minimum
+                    // `next_wakeup` is known and past `w`, no partition can be due — skip the
+                    // per-vnode index scans entirely. Unknown (`None`) falls through to a scan,
+                    // which re-establishes the exact value below.
+                    match &min_wakeup {
+                        Some(None) => continue,
+                        Some(Some(k)) if k.default_cmp(&w).is_gt() => continue,
+                        _ => {}
+                    }
+
                     // Frontier-driven: visit only the partitions whose `next_wakeup <= w`, instead
                     // of sweeping every live partition. Per owned vnode, scan the index (ordered by
                     // next_wakeup) and stop at the first entry past the watermark; then, for each
@@ -723,6 +764,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // to the partitions that actually need attention, not to the number of live
                     // partitions.
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
+                    // Recomputed exactly during the scan: the first past-`w` index entry per vnode
+                    // plus every re-pointed candidate wakeup — every remaining frontier entry is one
+                    // or the other.
+                    let mut next_min: Datum = None;
                     let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
                     for vnode in vnodes {
                         // 1. Collect candidate `(old_wakeup, partition)` from the index, then drop the
@@ -749,9 +794,16 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 // `next_wakeup` falls through to the partition suffix, so every
                                 // equal-wakeup candidate is seen before any greater one). `next_wakeup`
                                 // is never NULL: NULL order keys are dropped at ingest, and a WITHIN
-                                // deadline is only scheduled when it evaluates non-null.
-                                if !matches!(&next_wakeup, Some(k) if k.default_cmp(&w).is_le()) {
-                                    break;
+                                // deadline is only scheduled when it evaluates non-null. The first
+                                // past-`w` entry also seeds the recomputed in-memory lower bound
+                                // (every entry before it is a candidate being reprocessed below).
+                                match &next_wakeup {
+                                    Some(k) if k.default_cmp(&w).is_le() => {}
+                                    Some(k) => {
+                                        Self::fold_min(&mut next_min, k);
+                                        break;
+                                    }
+                                    None => break,
                                 }
                                 let partition_key = OwnedRow::new(
                                     (1..row.len())
@@ -822,6 +874,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le())
                                 })
                                 .count();
+                            // WITHIN-deadline memo for the safe prefix (see `deadline_at`); only
+                            // sized when a WITHIN bound exists.
+                            let mut deadline_memo: Vec<Option<Datum>> = if within_deadline.is_some()
+                            {
+                                vec![None; safe_len]
+                            } else {
+                                Vec::new()
+                            };
                             // Evaluate DEFINE predicates against the in-progress match; the matcher
                             // borrows `rows`.
                             let matcher = DefineMatcher {
@@ -845,9 +905,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 // eviction below drops its rows. Without WITHIN, keep waiting.
                                 if m.end >= safe_len {
                                     let within_final = if let Some(dl) = &within_deadline {
-                                        let synthetic =
-                                            OwnedRow::new(vec![rows[m.start].order_key.clone()]);
-                                        let deadline = dl.eval_row_infallible(&synthetic).await;
+                                        let deadline = Self::deadline_at(
+                                            dl,
+                                            &rows,
+                                            &mut deadline_memo,
+                                            m.start,
+                                        )
+                                        .await;
                                         matches!(&deadline, Some(d) if d.default_cmp(&w).is_le())
                                     } else {
                                         false
@@ -885,15 +949,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 let match_id = row_id_gen.next();
                                 // Stream the match into the chunk builder, flushing a full chunk the
                                 // moment it fills — output memory stays bounded by one chunk.
+                                let measures_row = OwnedRow::new(measure_datums);
                                 if let Some(c) = builder.append_row(
                                     Op::Insert,
-                                    partition_key
-                                        .clone()
-                                        .chain(OwnedRow::new(measure_datums))
-                                        .chain(OwnedRow::new(vec![Some(ScalarImpl::Int64(
-                                            match_id,
-                                        ))]))
-                                        .into_owned_row(),
+                                    (&partition_key)
+                                        .chain(&measures_row)
+                                        .chain(once(Some(ScalarImpl::Int64(match_id)))),
                                 ) {
                                     yield Message::Chunk(c);
                                 }
@@ -919,11 +980,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             //
                             // The partition iterator is already dropped, so delete in place.
                             let mut retain_from = safe_len;
-                            for (p, row) in rows.iter().enumerate().take(safe_len).skip(cursor) {
+                            for (p, _) in rows.iter().enumerate().take(safe_len).skip(cursor) {
                                 if let Some(deadline_expr) = &within_deadline {
-                                    let synthetic = OwnedRow::new(vec![row.order_key.clone()]);
-                                    let deadline =
-                                        deadline_expr.eval_row_infallible(&synthetic).await;
+                                    let deadline = Self::deadline_at(
+                                        deadline_expr,
+                                        &rows,
+                                        &mut deadline_memo,
+                                        p,
+                                    )
+                                    .await;
                                     // Window closed (deadline <= w): `p` is dead, skip it.
                                     if matches!(&deadline, Some(d) if d.default_cmp(&w).is_le()) {
                                         continue;
@@ -934,8 +999,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     break;
                                 }
                             }
+                            // Delete by reference: the seq datum chained onto the borrowed buffered
+                            // row (`delete` takes `impl Row`), so no owned copy is built per evictee.
                             for c in &rows[0..retain_from] {
-                                state_table.delete(Self::state_row(c));
+                                state_table
+                                    .delete(once(Some(ScalarImpl::Int64(c.seq))).chain(&c.row));
                             }
 
                             // Recompute the wakeup frontier as the earlier of two events:
@@ -966,9 +1034,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                             Some(k) if k.default_cmp(&w).is_le()
                                         ) =>
                                 {
-                                    let synthetic =
-                                        OwnedRow::new(vec![rows[retain_from].order_key.clone()]);
-                                    let dl = deadline_expr.eval_row_infallible(&synthetic).await;
+                                    let dl = Self::deadline_at(
+                                        deadline_expr,
+                                        &rows,
+                                        &mut deadline_memo,
+                                        retain_from,
+                                    )
+                                    .await;
                                     // A null deadline (only on eval error) carries no schedule.
                                     dl.is_some().then_some(dl)
                                 }
@@ -986,13 +1058,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 (a, b) => a.or(b),
                             };
                             match new_wakeup {
-                                Some(nw) => Self::move_frontier(
-                                    &mut frontier_meta_table,
-                                    &mut frontier_index_table,
-                                    &partition_key,
-                                    &old_wakeup,
-                                    nw,
-                                ),
+                                Some(nw) => {
+                                    // The re-pointed wakeup is > w, so it belongs in the recomputed
+                                    // lower bound.
+                                    if let Some(k) = &nw {
+                                        Self::fold_min(&mut next_min, k);
+                                    }
+                                    Self::move_frontier(
+                                        &mut frontier_meta_table,
+                                        &mut frontier_index_table,
+                                        &partition_key,
+                                        &old_wakeup,
+                                        nw,
+                                    )
+                                }
                                 None => Self::remove_frontier(
                                     &mut frontier_meta_table,
                                     &mut frontier_index_table,
@@ -1002,6 +1081,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             }
                         }
                     }
+                    // The scan visited every owned vnode, so `next_min` is now the exact minimum
+                    // remaining `next_wakeup` — known until the next insert lowers it.
+                    min_wakeup = Some(next_min);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1034,12 +1116,16 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // suffices.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale
                     {
-                        row_id_gen = RowIdGenerator::new(
-                            state_table.vnodes().iter_vnodes(),
-                            state_table.vnodes().len(),
-                        );
+                        // The owned-vnode set changed: the in-memory frontier lower bound no longer
+                        // describes it. Unknown forces the next watermark to scan and re-establish.
+                        min_wakeup = None;
+                        if cache_may_stale {
+                            row_id_gen = RowIdGenerator::new(
+                                state_table.vnodes().iter_vnodes(),
+                                state_table.vnodes().len(),
+                            );
+                        }
                     }
                 }
             }
