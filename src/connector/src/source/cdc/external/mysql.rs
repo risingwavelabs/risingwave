@@ -612,6 +612,14 @@ impl MySqlExternalTableReader {
             .unwrap_or(false)
     }
 
+    /// For each given primary key column (by name), whether the upstream column is unsigned.
+    pub(crate) fn pk_column_unsigned_flags(&self, pk_names: &[String]) -> Vec<bool> {
+        pk_names
+            .iter()
+            .map(|name| self.is_unsigned_type(name))
+            .collect()
+    }
+
     /// Convert negative i64 to unsigned u64 based on column type
     fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
         negative_val as u64
