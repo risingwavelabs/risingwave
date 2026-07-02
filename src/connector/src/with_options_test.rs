@@ -516,7 +516,7 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
     let connection_entries = generate_struct_entries(&connection_info);
 
     format!(
-        r#"// Copyright 2025 RisingWave Labs
+        r#"// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
