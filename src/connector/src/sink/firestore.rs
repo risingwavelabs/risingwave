@@ -119,7 +119,7 @@ impl FirestoreConfig {
         };
 
         db.map_err(|e| {
-            SinkError::Firestore(anyhow!("{}", e).context("failed to create Firestore client"))
+            SinkError::Firestore(anyhow!(e).context("failed to create Firestore client"))
         })
     }
 
@@ -316,7 +316,7 @@ impl FirestoreSinkWriter {
                 async move {
                     let batch_writer = client.create_simple_batch_writer().await.map_err(|e| {
                         SinkError::Firestore(
-                            anyhow!("{}", e).context("failed to create Firestore batch writer"),
+                            anyhow!(e).context("failed to create Firestore batch writer"),
                         )
                     })?;
                     let mut batch = batch_writer.new_batch();
@@ -328,7 +328,7 @@ impl FirestoreSinkWriter {
                                     .update_object(&collection, &doc_id, &data, None, None, vec![])
                                     .map_err(|e| {
                                         SinkError::Firestore(
-                                            anyhow!("{}", e)
+                                            anyhow!(e)
                                                 .context("failed to add upsert document to batch"),
                                         )
                                     })?;
@@ -338,7 +338,7 @@ impl FirestoreSinkWriter {
                                     .delete_by_id(&collection, &doc_id, None)
                                     .map_err(|e| {
                                         SinkError::Firestore(
-                                            anyhow!("{}", e)
+                                            anyhow!(e)
                                                 .context("failed to add delete document to batch"),
                                         )
                                     })?;
@@ -348,7 +348,7 @@ impl FirestoreSinkWriter {
 
                     batch.write().await.map_err(|e| {
                         SinkError::Firestore(
-                            anyhow!("{}", e).context("failed to execute Firestore batch write"),
+                            anyhow!(e).context("failed to execute Firestore batch write"),
                         )
                     })?;
 
