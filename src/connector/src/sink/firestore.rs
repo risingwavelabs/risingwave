@@ -264,7 +264,7 @@ impl FirestoreSinkWriter {
                 .map(|&idx| {
                     row.datum_at(idx)
                         .map(|s| s.to_text())
-                        .unwrap_or_else(|| "null".to_string())
+                        .unwrap_or_else(|| "null".to_owned())
                 })
                 .collect();
             Ok(pk_values.join("_"))
@@ -413,7 +413,7 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         | DataType::Time
         | DataType::Timestamp
         | DataType::Timestamptz => JsonValue::String(scalar.to_text_with_type(data_type)),
-        DataType::Varchar => JsonValue::String(scalar.into_utf8().to_string()),
+        DataType::Varchar => JsonValue::String(scalar.into_utf8().to_owned()),
         DataType::Bytea => {
             let bytes = scalar.into_bytea();
             JsonValue::String(base64::engine::general_purpose::STANDARD.encode(bytes))
@@ -435,7 +435,7 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
             let struct_ref = scalar.into_struct();
             let mut map = serde_json::Map::new();
             for (datum, (name, dt)) in struct_ref.iter_fields_ref().zip_eq_debug(st.iter()) {
-                map.insert(name.to_string(), format_datum(datum, dt)?);
+                map.insert(name.to_owned(), format_datum(datum, dt)?);
             }
             JsonValue::Object(map)
         }
