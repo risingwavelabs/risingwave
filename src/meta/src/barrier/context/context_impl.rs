@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use futures::StreamExt;
@@ -781,6 +782,7 @@ impl PostCollectCommand {
                 job_type,
                 cross_db_snapshot_backfill_info,
                 resolved_split_assignment,
+                target_epoch,
             } => {
                 match &job_type {
                     CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
@@ -855,6 +857,74 @@ impl PostCollectCommand {
                     } else {
                         None
                     };
+
+                if let Some(old_sink_id) = replace_sink {
+                    let target_epoch = target_epoch.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "missing target epoch when waiting for old sink commits drained before replacing sink: sink_id={}",
+                            old_sink_id,
+                        )
+                    })?;
+
+                    // Deleting the old sink object cascades `pending_sink_state`. Wait for the
+                    // coordinator to finish old sink commits, then assert the durable state before
+                    // deleting the old sink object.
+                    const WAIT_SINK_COMMITS_DRAINED_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+                    match tokio::time::timeout(
+                        WAIT_SINK_COMMITS_DRAINED_TIMEOUT,
+                        barrier_manager_context
+                            .sink_manager
+                            .wait_sink_commits_drained(old_sink_id, target_epoch),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => {
+                            let pending_epoch_count = barrier_manager_context
+                                .metadata_manager
+                                .catalog_controller
+                                .count_pending_sink_epochs(old_sink_id)
+                                .await?;
+                            return Err(err
+                                .context(format!(
+                                    "failed to wait for old sink commits drained before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+                                    old_sink_id, target_epoch, pending_epoch_count,
+                                ))
+                                .into());
+                        }
+                        Err(_) => {
+                            let pending_epoch_count = barrier_manager_context
+                                .metadata_manager
+                                .catalog_controller
+                                .count_pending_sink_epochs(old_sink_id)
+                                .await?;
+                            return Err(anyhow::anyhow!(
+                                "timed out waiting for old sink commits drained before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}, timeout={:?}",
+                                old_sink_id,
+                                target_epoch,
+                                pending_epoch_count,
+                                WAIT_SINK_COMMITS_DRAINED_TIMEOUT,
+                            )
+                            .into());
+                        }
+                    };
+
+                    let pending_epoch_count = barrier_manager_context
+                        .metadata_manager
+                        .catalog_controller
+                        .count_pending_sink_epochs(old_sink_id)
+                        .await?;
+                    if pending_epoch_count > 0 {
+                        return Err(anyhow::anyhow!(
+                            "pending exactly-once sink epochs remain before replacing sink: sink_id={}, target_epoch={}, pending_epoch_count={}",
+                            old_sink_id,
+                            target_epoch,
+                            pending_epoch_count,
+                        )
+                        .into());
+                    }
+                }
 
                 let old_state_table_ids = barrier_manager_context
                     .metadata_manager

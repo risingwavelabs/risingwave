@@ -709,6 +709,7 @@ pub enum PostCollectCommand {
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
         resolved_split_assignment: SplitAssignment,
+        target_epoch: Option<u64>,
     },
     Reschedule {
         reschedules: HashMap<FragmentId, Reschedule>,
