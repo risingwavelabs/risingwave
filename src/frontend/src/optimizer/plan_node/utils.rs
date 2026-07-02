@@ -240,7 +240,7 @@ pub trait Distill {
     fn distill<'a>(&self) -> XmlNode<'a>;
 
     fn distill_to_string(&self) -> String {
-        let mut config = pretty_config();
+        let mut config = pretty_config(2048);
         let mut output = String::with_capacity(2048);
         config.unicode(&mut output, &Pretty::Record(self.distill()));
         output
