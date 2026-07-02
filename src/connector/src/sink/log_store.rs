@@ -152,6 +152,7 @@ pub struct FlushCurrentEpochOptions {
     pub new_vnode_bitmap: Option<Arc<Bitmap>>,
     pub is_stop: bool,
     pub schema_change: Option<PbSinkSchemaChange>,
+    pub wait_log_store_flush: bool,
 }
 
 pub trait LogWriter: Send {

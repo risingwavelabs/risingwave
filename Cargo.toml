@@ -448,8 +448,8 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # sqlx version: v0.8.2
-# patch diffs: https://github.com/madsim-rs/sqlx/pull/4
-sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
+# patch diffs: https://github.com/madsim-rs/sqlx/pull/4, https://github.com/madsim-rs/sqlx/pull/5
+sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "d43f1f28c0a2ec28144d81fdf78706ce30002b59" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.15.0-json-no-preserve_order" }
 # patch to revert `Hash for StringRef` for compatibility with `&str` in vnode

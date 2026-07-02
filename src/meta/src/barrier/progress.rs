@@ -1122,6 +1122,7 @@ mod tests {
             cdc_table_snapshot_splits: None,
             locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
+            replace_sink: None,
             refresh_interval_sec: None,
             streaming_job_model: streaming_job::Model {
                 job_id: JobId::new(100),

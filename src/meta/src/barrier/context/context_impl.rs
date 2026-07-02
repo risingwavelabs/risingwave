@@ -239,7 +239,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        command.post_collect(self).await
+        Box::pin(command.post_collect(self)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -840,8 +840,10 @@ impl PostCollectCommand {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
+                    replace_sink,
                     ..
                 } = info;
+                let new_job_id = stream_job_fragments.stream_job_id();
                 let new_sink_downstream =
                     if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
                         let new_downstreams = ctx.new_sink_downstream.clone();
@@ -854,14 +856,15 @@ impl PostCollectCommand {
                         None
                     };
 
-                barrier_manager_context
+                let old_state_table_ids = barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id(),
+                        new_job_id,
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
+                        replace_sink.as_ref(),
                     )
                     .await?;
 
@@ -874,6 +877,22 @@ impl PostCollectCommand {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                if let Some(old_sink_id) = replace_sink {
+                    barrier_manager_context
+                        .sink_manager
+                        .stop_sink_coordinator(vec![old_sink_id])
+                        .await;
+                    cleanup_dropped_streaming_jobs(
+                        &barrier_manager_context.refresh_manager,
+                        &barrier_manager_context.hummock_manager,
+                        &barrier_manager_context.metadata_manager,
+                        [old_sink_id.as_job_id()],
+                        old_state_table_ids.expect("replace sink should return old state tables"),
+                        "replace_sink",
+                    )
+                    .await?;
+                }
             }
             PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
@@ -910,6 +929,7 @@ impl PostCollectCommand {
                         upstream_fragment_downstreams,
                         None,
                         Some(&resolved_split_assignment),
+                        None,
                     )
                     .await?;
 
@@ -923,6 +943,7 @@ impl PostCollectCommand {
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment
+                                None,
                             )
                             .await?;
                     }
