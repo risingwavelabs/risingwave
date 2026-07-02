@@ -822,16 +822,6 @@ async fn create_sink_or_replace(
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
 
-fn sink_replace_requires_exactly_once_state(sink: &SinkCatalog) -> bool {
-    match sink.properties.get("is_exactly_once") {
-        Some(value) => value.eq_ignore_ascii_case("true"),
-        None => sink
-            .properties
-            .get(CONNECTOR_TYPE_KEY)
-            .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK)),
-    }
-}
-
 fn prepare_replace_sink(
     handle_args: &mut HandlerArgs,
     stmt: &CreateSinkStatement,
@@ -915,13 +905,6 @@ fn prepare_replace_sink(
             return Err(ErrorCode::NotSupported(
                 "REPLACE SINK with auto schema change is not supported yet".to_owned(),
                 "drop and recreate this auto schema change sink".to_owned(),
-            )
-            .into());
-        }
-        if sink_replace_requires_exactly_once_state(sink) {
-            return Err(ErrorCode::NotSupported(
-                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
-                "set is_exactly_once=false or recreate the sink manually".to_owned(),
             )
             .into());
         }

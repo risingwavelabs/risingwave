@@ -39,6 +39,7 @@ use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 use tokio::time::sleep;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
@@ -504,6 +505,8 @@ enum CoordinatorWorkerState {
 
 pub struct CoordinatorWorker {
     handle_manager: CoordinationHandleManager,
+    drain_rx: UnboundedReceiver<DrainRequest>,
+    drain_waiters: Vec<DrainRequest>,
     /// Last epoch whose commit has been acknowledged to sink writers.
     ///
     /// On recovery, pending sink states are treated as already acknowledged to writers, so this is
@@ -518,10 +521,16 @@ enum CoordinatorWorkerEvent {
     ReadyToCommit(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>),
 }
 
+pub(super) struct DrainRequest {
+    pub target_epoch: u64,
+    pub reply: oneshot::Sender<anyhow::Result<()>>,
+}
+
 impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        drain_rx: UnboundedReceiver<DrainRequest>,
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
@@ -551,7 +560,8 @@ impl CoordinatorWorker {
                         return;
                     }
                 };
-            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
+            Self::execute_coordinator(db, param, request_rx, drain_rx, coordinator, subscriber)
+                .await
         });
     }
 
@@ -559,6 +569,7 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        drain_rx: UnboundedReceiver<DrainRequest>,
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) {
@@ -569,6 +580,8 @@ impl CoordinatorWorker {
                 next_handle_id: 0,
                 request_rx,
             },
+            drain_rx,
+            drain_waiters: Vec::new(),
             last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
         };
@@ -634,27 +647,60 @@ impl CoordinatorWorker {
         Ok(())
     }
 
+    fn flush_drain_waiters_if_drained(
+        &mut self,
+        two_phase_handler: &TwoPhaseCommitHandler,
+        has_aligning_commit_requests: bool,
+    ) {
+        if has_aligning_commit_requests || !two_phase_handler.is_empty() {
+            return;
+        }
+
+        let mut remaining_waiters = Vec::new();
+        for waiter in self.drain_waiters.drain(..) {
+            if self
+                .last_writer_acked_epoch
+                .is_some_and(|epoch| epoch >= waiter.target_epoch)
+            {
+                let _ = waiter.reply.send(Ok(()));
+            } else {
+                remaining_waiters.push(waiter);
+            }
+        }
+        self.drain_waiters = remaining_waiters;
+    }
+
     async fn next_event(
         &mut self,
         two_phase_handler: &mut TwoPhaseCommitHandler,
+        has_aligning_commit_requests: bool,
     ) -> anyhow::Result<CoordinatorWorkerEvent> {
-        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
-            && two_phase_handler.is_empty()
-        {
-            let pending_handle_ids = pending_handle_ids.clone();
-            self.handle_init_requests_impl(pending_handle_ids).await?;
-            self.curr_state = CoordinatorWorkerState::Running;
-        }
+        loop {
+            self.flush_drain_waiters_if_drained(two_phase_handler, has_aligning_commit_requests);
 
-        select! {
-            next_handle_event = self.handle_manager.next_event() => {
-                let (handle_id, event) = next_handle_event?;
-                Ok(CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event))
+            if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
+                && two_phase_handler.is_empty()
+            {
+                let pending_handle_ids = pending_handle_ids.clone();
+                self.handle_init_requests_impl(pending_handle_ids).await?;
+                self.curr_state = CoordinatorWorkerState::Running;
             }
 
-            next_item_to_commit = two_phase_handler.next_to_commit() => {
-                let (epoch, metadata, schema_change) = next_item_to_commit?;
-                Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change))
+            select! {
+                drain_waiter = self.drain_rx.recv() => {
+                    let drain_waiter = drain_waiter.ok_or_else(|| anyhow!("end of drain request stream"))?;
+                    self.drain_waiters.push(drain_waiter);
+                }
+
+                next_handle_event = self.handle_manager.next_event() => {
+                    let (handle_id, event) = next_handle_event?;
+                    return Ok(CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event));
+                }
+
+                next_item_to_commit = two_phase_handler.next_to_commit() => {
+                    let (epoch, metadata, schema_change) = next_item_to_commit?;
+                    return Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change));
+                }
             }
         }
     }
@@ -682,7 +728,9 @@ impl CoordinatorWorker {
         let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
         let mut pending_new_handles = vec![];
         loop {
-            let event = self.next_event(&mut two_phase_handler).await?;
+            let event = self
+                .next_event(&mut two_phase_handler, !pending_epochs.is_empty())
+                .await?;
             let (handle_id, epoch, commit_request) = match event {
                 CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event) => match event {
                     CoordinationHandleManagerEvent::NewHandle => {

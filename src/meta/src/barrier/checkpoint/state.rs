@@ -969,6 +969,7 @@ impl DatabaseCheckpointControl {
                         job_type,
                         cross_db_snapshot_backfill_info,
                         resolved_split_assignment,
+                        target_epoch: Some(barrier_info.prev_epoch()),
                     },
                 )
             }
