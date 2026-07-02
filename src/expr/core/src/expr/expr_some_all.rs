@@ -23,24 +23,22 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::build::get_children_and_return_type;
-use super::{BoxedExpression, Build, Expression};
+use super::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, BuildBoxed, ExpressionInfo,
+    SyncExpression, SyncExpressionBoxExt,
+};
 use crate::Result;
 
 #[derive(Debug)]
-pub struct SomeAllExpression {
-    left_expr: BoxedExpression,
-    right_expr: BoxedExpression,
+pub struct SomeAllExpression<E> {
+    left_expr: E,
+    right_expr: E,
     expr_type: Type,
-    func: BoxedExpression,
+    func: E,
 }
 
-impl SomeAllExpression {
-    pub fn new(
-        left_expr: BoxedExpression,
-        right_expr: BoxedExpression,
-        expr_type: Type,
-        func: BoxedExpression,
-    ) -> Self {
+impl<E> SomeAllExpression<E> {
+    pub fn new(left_expr: E, right_expr: E, expr_type: Type, func: E) -> Self {
         SomeAllExpression {
             left_expr,
             right_expr,
@@ -81,16 +79,17 @@ impl SomeAllExpression {
     }
 }
 
-#[async_trait::async_trait]
-impl Expression for SomeAllExpression {
+impl<E: ExpressionInfo> ExpressionInfo for SomeAllExpression<E> {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
+}
 
-    async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-        let arr_left = self.left_expr.eval(data_chunk).await?;
-        let arr_right = self.right_expr.eval(data_chunk).await?;
-        let mut num_array = Vec::with_capacity(data_chunk.capacity());
+macro_rules! eval_some_all {
+    ($mode:ident, $this:expr, $data_chunk:expr) => {{
+        let arr_left = forward!($mode, $this.left_expr, eval($data_chunk))?;
+        let arr_right = forward!($mode, $this.right_expr, eval($data_chunk))?;
+        let mut num_array = Vec::with_capacity($data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
         let elem_type = arr_right_inner.data_type().into_list_elem();
@@ -118,7 +117,7 @@ impl Expression for SomeAllExpression {
                 }
             };
 
-        if data_chunk.is_vis_compacted() {
+        if $data_chunk.is_vis_compacted() {
             for (left, right) in arr_left.iter().zip_eq_fast(arr_right.iter()) {
                 unfolded_left_right(left, right, &mut num_array);
             }
@@ -126,7 +125,7 @@ impl Expression for SomeAllExpression {
             for ((left, right), visible) in arr_left
                 .iter()
                 .zip_eq_fast(arr_right.iter())
-                .zip_eq_fast(data_chunk.visibility().iter())
+                .zip_eq_fast($data_chunk.visibility().iter())
             {
                 if !visible {
                     num_array.push(None);
@@ -136,7 +135,7 @@ impl Expression for SomeAllExpression {
             }
         }
 
-        assert_eq!(num_array.len(), data_chunk.capacity());
+        assert_eq!(num_array.len(), $data_chunk.capacity());
 
         let unfolded_arr_left = unfolded_arr_left_builder.finish();
         let unfolded_arr_right = unfolded_arr_right_builder.finish();
@@ -151,7 +150,7 @@ impl Expression for SomeAllExpression {
             unfolded_compact_len,
         );
 
-        let func_results = self.func.eval(&data_chunk).await?;
+        let func_results = forward!($mode, $this.func, eval(&data_chunk))?;
         let bools = func_results.as_bool();
         let mut offset = 0;
         Ok(Arc::new(
@@ -161,18 +160,20 @@ impl Expression for SomeAllExpression {
                     Some(num) => {
                         let range = offset..offset + num;
                         offset += num;
-                        self.resolve_bools(range.map(|i| bools.value_at(i)))
+                        $this.resolve_bools(range.map(|i| bools.value_at(i)))
                     }
                     None => None,
                 })
                 .collect::<BoolArray>()
                 .into(),
         ))
-    }
+    }};
+}
 
-    async fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
-        let datum_left = self.left_expr.eval_row(row).await?;
-        let datum_right = self.right_expr.eval_row(row).await?;
+macro_rules! eval_row_some_all {
+    ($mode:ident, $this:expr, $row:expr) => {{
+        let datum_left = forward!($mode, $this.left_expr, eval_row($row))?;
+        let datum_right = forward!($mode, $this.right_expr, eval_row($row))?;
         let Some(array_right) = datum_right else {
             return Ok(None);
         };
@@ -181,21 +182,42 @@ impl Expression for SomeAllExpression {
 
         // expand left to array
         let array_left = {
-            let mut builder = self.left_expr.return_type().create_array_builder(len);
+            let mut builder = $this.left_expr.return_type().create_array_builder(len);
             builder.append_n(len, datum_left);
             builder.finish().into_ref()
         };
 
         let chunk = DataChunk::new(vec![array_left, Arc::new(array_right)], len);
-        let bools = self.func.eval(&chunk).await?;
+        let bools = forward!($mode, $this.func, eval(&chunk))?;
 
-        Ok(self
+        Ok($this
             .resolve_bools(bools.as_bool().iter())
             .map(|b| b.to_scalar_value()))
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for SomeAllExpression<E> {
+    fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        eval_some_all!(sync, self, data_chunk)
+    }
+
+    fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
+        eval_row_some_all!(sync, self, row)
     }
 }
 
-impl Build for SomeAllExpression {
+#[async_trait::async_trait]
+impl<E: AsyncExpression> AsyncExpression for SomeAllExpression<E> {
+    async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        eval_some_all!(async, self, data_chunk)
+    }
+
+    async fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
+        eval_row_some_all!(async, self, row)
+    }
+}
+
+impl SomeAllExpression<BoxedExpression> {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
@@ -258,6 +280,25 @@ impl Build for SomeAllExpression {
             outer_expr_type,
             eval_func,
         ))
+    }
+}
+
+impl BuildBoxed for SomeAllExpression<BoxedExpression> {
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression> {
+        let expr = Self::build(prost, build_child)?;
+        Ok(match (expr.left_expr, expr.right_expr, expr.func) {
+            (
+                BoxedExpression::Sync(left_expr),
+                BoxedExpression::Sync(right_expr),
+                BoxedExpression::Sync(func),
+            ) => SomeAllExpression::new(left_expr, right_expr, expr.expr_type, func).boxed(),
+            (left_expr, right_expr, func) => {
+                SomeAllExpression::new(left_expr, right_expr, expr.expr_type, func).boxed()
+            }
+        })
     }
 }
 

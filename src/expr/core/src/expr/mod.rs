@@ -14,7 +14,7 @@
 
 //! Expressions in RisingWave.
 //!
-//! All expressions are implemented under the [`Expression`] trait.
+//! All expressions are implemented under the [`SyncExpression`] or [`AsyncExpression`] trait.
 //!
 //! ## Construction
 //!
@@ -29,7 +29,17 @@
 //! Expressions can be evaluated using the [`eval`] function.
 //!
 //! [`ExprNode`]: risingwave_pb::expr::ExprNode
-//! [`eval`]: Expression::eval
+//! [`eval`]: BoxedExpression::eval
+
+#[macro_export]
+macro_rules! forward {
+    (sync, $expr:expr, $method:ident($($arg:expr),* $(,)?)) => {
+        ($expr).$method($($arg),*)
+    };
+    (async, $expr:expr, $method:ident($($arg:expr),* $(,)?)) => {
+        ($expr).$method($($arg),*).await
+    };
+}
 
 // These modules define concrete expression structures.
 mod and_or;
@@ -43,7 +53,8 @@ mod build;
 pub mod test_utils;
 mod value;
 
-use futures_util::TryFutureExt;
+use std::sync::Arc;
+
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -55,17 +66,61 @@ pub use self::value::{ValueImpl, ValueRef};
 pub use self::wrapper::*;
 pub use super::{ExprError, Result};
 
-/// Interface of an expression.
+/// Common metadata of an expression.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait ExpressionInfo: std::fmt::Debug + Sync + Send {
+    /// Get the return data type.
+    fn return_type(&self) -> DataType;
+
+    /// Get the index if the expression is an `InputRef`.
+    fn input_ref_index(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// Interface of a synchronous expression.
 ///
 /// There're two functions to evaluate an expression: `eval` and `eval_v2`, exactly one of them
 /// should be implemented. Prefer calling and implementing `eval_v2` instead of `eval` if possible,
 /// to gain the performance benefit of scalar expression.
-#[async_trait::async_trait]
-#[auto_impl::auto_impl(&, Box)]
-pub trait Expression: std::fmt::Debug + Sync + Send {
-    /// Get the return data type.
-    fn return_type(&self) -> DataType;
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait SyncExpression: ExpressionInfo {
+    /// Evaluate the expression in vectorized execution. Returns an array.
+    ///
+    /// The default implementation calls `eval_v2` and always converts the result to an array.
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let value = self.eval_v2(input)?;
+        Ok(match value {
+            ValueImpl::Array(array) => array,
+            ValueImpl::Scalar { value, capacity } => {
+                let mut builder = self.return_type().create_array_builder(capacity);
+                builder.append_n(capacity, value);
+                builder.finish().into()
+            }
+        })
+    }
 
+    /// Evaluate the expression in vectorized execution. Returns a value that can be either an
+    /// array, or a scalar if all values in the array are the same.
+    ///
+    /// The default implementation calls `eval` and puts the result into the `Array` variant.
+    fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        self.eval(input).map(ValueImpl::Array)
+    }
+
+    /// Evaluate the expression in row-based execution. Returns a nullable scalar.
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+
+    /// Evaluate if the expression is constant.
+    fn eval_const(&self) -> Result<Datum> {
+        Err(ExprError::NotConstant)
+    }
+}
+
+/// Interface of an asynchronous expression.
+#[async_trait::async_trait]
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait AsyncExpression: ExpressionInfo {
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
     /// The default implementation calls `eval_v2` and always converts the result to an array.
@@ -86,36 +141,177 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     ///
     /// The default implementation calls `eval` and puts the result into the `Array` variant.
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        self.eval(input).map_ok(ValueImpl::Array).await
+        self.eval(input).await.map(ValueImpl::Array)
     }
 
     /// Evaluate the expression in row-based execution. Returns a nullable scalar.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+}
 
-    /// Evaluate if the expression is constant.
-    fn eval_const(&self) -> Result<Datum> {
-        Err(ExprError::NotConstant)
-    }
+/// An owned dynamically typed expression.
+#[derive(Clone, Debug)]
+pub enum BoxedExpression {
+    Sync(Arc<dyn SyncExpression>),
+    Async(Arc<dyn AsyncExpression>),
+}
 
-    /// Get the index if the expression is an `InputRef`.
-    fn input_ref_index(&self) -> Option<usize> {
-        None
+/// Try to unwrap boxed expressions into sync expressions.
+///
+/// Returns the original boxed expression list if any expression is async.
+pub fn try_into_sync_exprs(
+    exprs: Vec<BoxedExpression>,
+) -> std::result::Result<Vec<Arc<dyn SyncExpression>>, Vec<BoxedExpression>> {
+    try_convert_all(
+        exprs,
+        |expr| match expr {
+            BoxedExpression::Sync(expr) => Ok(expr),
+            expr @ BoxedExpression::Async(_) => Err(expr),
+        },
+        BoxedExpression::Sync,
+    )
+}
+
+/// Try to convert all items in a vector, or return the original vector if any conversion fails.
+pub fn try_convert_all<T, U>(
+    items: Vec<T>,
+    mut try_convert: impl FnMut(T) -> std::result::Result<U, T>,
+    recover: impl Fn(U) -> T,
+) -> std::result::Result<Vec<U>, Vec<T>> {
+    let mut converted = Vec::with_capacity(items.len());
+    let mut items = items.into_iter();
+    loop {
+        let Some(item) = items.next() else {
+            return Ok(converted);
+        };
+        match try_convert(item) {
+            Ok(item) => converted.push(item),
+            Err(item) => {
+                let items = converted
+                    .into_iter()
+                    .map(recover)
+                    .chain(std::iter::once(item))
+                    .chain(items)
+                    .collect();
+                return Err(items);
+            }
+        }
     }
 }
 
-/// An owned dynamically typed [`Expression`].
-pub type BoxedExpression = Box<dyn Expression>;
+impl BoxedExpression {
+    /// Wrap a synchronous expression.
+    pub fn new_sync(expr: impl SyncExpression + 'static) -> Self {
+        Self::Sync(Arc::new(expr))
+    }
+
+    /// Wrap an asynchronous expression.
+    pub fn new_async(expr: impl AsyncExpression + 'static) -> Self {
+        Self::Async(Arc::new(expr))
+    }
+
+    /// Get the return data type.
+    pub fn return_type(&self) -> DataType {
+        match self {
+            Self::Sync(expr) => expr.return_type(),
+            Self::Async(expr) => expr.return_type(),
+        }
+    }
+
+    /// Get the index if the expression is an `InputRef`.
+    pub fn input_ref_index(&self) -> Option<usize> {
+        match self {
+            Self::Sync(expr) => expr.input_ref_index(),
+            Self::Async(expr) => expr.input_ref_index(),
+        }
+    }
+
+    /// Evaluate if the expression is constant.
+    pub fn eval_const(&self) -> Result<Datum> {
+        match self {
+            Self::Sync(expr) => expr.eval_const(),
+            Self::Async(_) => Err(ExprError::NotConstant),
+        }
+    }
+
+    /// Evaluate the expression in vectorized execution. Returns an array.
+    pub async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        match self {
+            Self::Sync(expr) => expr.eval(input),
+            Self::Async(expr) => expr.eval(input).await,
+        }
+    }
+
+    /// Evaluate the expression in vectorized execution. Returns a value that can be either an
+    /// array, or a scalar if all values in the array are the same.
+    pub async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        match self {
+            Self::Sync(expr) => expr.eval_v2(input),
+            Self::Async(expr) => expr.eval_v2(input).await,
+        }
+    }
+
+    /// Evaluate the expression in row-based execution. Returns a nullable scalar.
+    pub async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        match self {
+            Self::Sync(expr) => expr.eval_row(input),
+            Self::Async(expr) => expr.eval_row(input).await,
+        }
+    }
+}
+
+impl<E> From<E> for BoxedExpression
+where
+    E: SyncExpression + 'static,
+{
+    fn from(expr: E) -> Self {
+        Self::new_sync(expr)
+    }
+}
+
+impl ExpressionInfo for BoxedExpression {
+    fn return_type(&self) -> DataType {
+        self.return_type()
+    }
+
+    fn input_ref_index(&self) -> Option<usize> {
+        self.input_ref_index()
+    }
+}
+
+#[async_trait::async_trait]
+impl AsyncExpression for BoxedExpression {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        self.eval(input).await
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        self.eval_v2(input).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        self.eval_row(input).await
+    }
+}
 
 /// Extension trait for boxing expressions.
 ///
-/// This is not directly made into [`Expression`] trait because...
+/// This is not directly made into expression traits because...
 /// - an expression does not have to be `'static`,
 /// - and for the ease of `auto_impl`.
-#[easy_ext::ext(ExpressionBoxExt)]
-impl<E: Expression + 'static> E {
-    /// Wrap the expression in a Box.
+#[easy_ext::ext(SyncExpressionBoxExt)]
+impl<E: SyncExpression + 'static> E {
+    /// Wrap the expression in a [`BoxedExpression::Sync`].
     pub fn boxed(self) -> BoxedExpression {
-        Box::new(self)
+        BoxedExpression::new_sync(self)
+    }
+}
+
+/// Extension trait for boxing async expressions.
+#[easy_ext::ext(AsyncExpressionBoxExt)]
+impl<E: AsyncExpression + 'static> E {
+    /// Wrap the expression in a [`BoxedExpression::Async`].
+    pub fn boxed(self) -> BoxedExpression {
+        BoxedExpression::new_async(self)
     }
 }
 
@@ -131,22 +327,22 @@ impl<E: Expression + 'static> E {
 /// Compared to [`crate::expr::wrapper::non_strict::NonStrict`], this is more like an indicator
 /// applied on the root of an expression tree, while the latter is a wrapper that can be applied on
 /// each node of the tree and actually changes the behavior. As a result, [`NonStrictExpression`]
-/// does not implement [`Expression`] trait and instead deals directly with developers.
+/// does not implement expression traits and instead deals directly with developers.
 #[derive(Debug)]
-pub struct NonStrictExpression<E = BoxedExpression>(E);
+pub enum NonStrictExpression {
+    Sync(Arc<dyn SyncExpression>),
+    Async(Arc<dyn AsyncExpression>),
+}
 
-impl<E> NonStrictExpression<E>
-where
-    E: Expression,
-{
+impl NonStrictExpression {
     /// Create a non-strict expression directly wrapping the given expression.
     ///
     /// Should only be used in tests as evaluation may panic.
-    pub fn for_test(inner: E) -> NonStrictExpression
-    where
-        E: 'static,
-    {
-        NonStrictExpression(inner.boxed())
+    pub fn for_test(inner: impl Into<BoxedExpression>) -> NonStrictExpression {
+        match inner.into() {
+            BoxedExpression::Sync(inner) => Self::Sync(inner),
+            BoxedExpression::Async(inner) => Self::Async(inner),
+        }
     }
 
     /// Create a non-strict expression from the given expression, where only the evaluation of the
@@ -155,23 +351,38 @@ where
     ///
     /// This should be used as a TODO.
     pub fn new_topmost(
-        inner: E,
-        error_report: impl EvalErrorReport,
-    ) -> NonStrictExpression<impl Expression> {
-        let inner = wrapper::non_strict::NonStrict::new(inner, error_report);
-        NonStrictExpression(inner)
+        inner: impl Into<BoxedExpression>,
+        error_report: impl EvalErrorReport + 'static,
+    ) -> NonStrictExpression {
+        match inner.into() {
+            BoxedExpression::Sync(inner) => {
+                let inner = wrapper::non_strict::NonStrict::new(inner, error_report);
+                Self::Sync(Arc::new(inner))
+            }
+            BoxedExpression::Async(inner) => {
+                let inner = wrapper::non_strict::NonStrict::new(inner, error_report);
+                Self::Async(Arc::new(inner))
+            }
+        }
     }
 
     /// Get the return data type.
     pub fn return_type(&self) -> DataType {
-        self.0.return_type()
+        match self {
+            Self::Sync(expr) => expr.return_type(),
+            Self::Async(expr) => expr.return_type(),
+        }
     }
 
     /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
-        self.0.eval(input).await.expect("evaluation failed")
+        match self {
+            Self::Sync(expr) => expr.eval(input),
+            Self::Async(expr) => expr.eval(input).await,
+        }
+        .expect("evaluation failed")
     }
 
     /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
@@ -179,17 +390,27 @@ where
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
-        self.0.eval_row(input).await.expect("evaluation failed")
+        match self {
+            Self::Sync(expr) => expr.eval_row(input),
+            Self::Async(expr) => expr.eval_row(input).await,
+        }
+        .expect("evaluation failed")
     }
 
     /// Unwrap the inner expression.
-    pub fn into_inner(self) -> E {
-        self.0
+    pub fn into_inner(self) -> BoxedExpression {
+        match self {
+            Self::Sync(expr) => BoxedExpression::Sync(expr),
+            Self::Async(expr) => BoxedExpression::Async(expr),
+        }
     }
 
     /// Get a reference to the inner expression.
-    pub fn inner(&self) -> &E {
-        &self.0
+    pub fn inner(&self) -> &dyn ExpressionInfo {
+        match self {
+            Self::Sync(expr) => expr.as_ref(),
+            Self::Async(expr) => expr.as_ref(),
+        }
     }
 }
 

@@ -28,8 +28,8 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 
-use super::{BoxedExpression, Build};
-use crate::expr::Expression;
+use super::{AsyncExpressionBoxExt, BoxedExpression, BuildBoxed};
+use crate::expr::{AsyncExpression, ExpressionInfo};
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 use crate::{ExprError, Result, bail};
 
@@ -45,12 +45,14 @@ pub struct UserDefinedFunction {
     metrics: Metrics,
 }
 
-#[async_trait::async_trait]
-impl Expression for UserDefinedFunction {
+impl ExpressionInfo for UserDefinedFunction {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
+#[async_trait::async_trait]
+impl AsyncExpression for UserDefinedFunction {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         if input.cardinality() == 0 {
             // early return for empty input
@@ -161,8 +163,8 @@ impl UserDefinedFunction {
     }
 }
 
-impl Build for UserDefinedFunction {
-    fn build(
+impl UserDefinedFunction {
+    fn build_inner(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<Self> {
@@ -230,6 +232,15 @@ impl Build for UserDefinedFunction {
             span: await_tree::span!("udf_call({})", name),
             metrics,
         })
+    }
+}
+
+impl BuildBoxed for UserDefinedFunction {
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression> {
+        Self::build_inner(prost, build_child).map(AsyncExpressionBoxExt::boxed)
     }
 }
 

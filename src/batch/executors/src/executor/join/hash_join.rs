@@ -31,7 +31,7 @@ use risingwave_common::types::{DataType, Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::expr::{BoxedExpression, Expression, build_from_prost};
+use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use risingwave_pb::Message;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::data::DataChunk as PbDataChunk;
@@ -987,7 +987,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_left_outer_join_non_equi_condition(
                                 spilled,
-                                cond.as_ref(),
+                                cond,
                                 &mut non_equi_state,
                             )
                             .await?
@@ -1010,7 +1010,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_outer_join_non_equi_condition(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut non_equi_state,
             )
             .await?
@@ -1126,7 +1126,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         ) {
                             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                                 spilled,
-                                cond.as_ref(),
+                                cond,
                                 &mut non_equi_state,
                             )
                             .await?
@@ -1140,7 +1140,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut non_equi_state,
             )
             .await?
@@ -1197,7 +1197,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
                                 spilled,
-                                cond.as_ref(),
+                                cond,
                                 &mut non_equi_state,
                             )
                             .await?
@@ -1216,7 +1216,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut non_equi_state,
             )
             .await?
@@ -1331,7 +1331,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     ) {
                         yield Self::process_right_outer_join_non_equi_condition(
                             spilled,
-                            cond.as_ref(),
+                            cond,
                             &mut non_equi_state,
                         )
                         .await?
@@ -1342,7 +1342,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_right_outer_join_non_equi_condition(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut non_equi_state,
             )
             .await?
@@ -1448,7 +1448,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     ) {
                         Self::process_right_semi_anti_join_non_equi_condition(
                             spilled,
-                            cond.as_ref(),
+                            cond,
                             &mut non_equi_state,
                         )
                         .await?
@@ -1459,7 +1459,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             Self::process_right_semi_anti_join_non_equi_condition(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut non_equi_state,
             )
             .await?
@@ -1605,7 +1605,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 build_row_id_iter.peek().is_some();
                             yield Self::process_full_outer_join_non_equi_condition(
                                 spilled,
-                                cond.as_ref(),
+                                cond,
                                 &mut left_non_equi_state,
                                 &mut right_non_equi_state,
                             )
@@ -1629,7 +1629,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_full_outer_join_non_equi_condition(
                 spilled,
-                cond.as_ref(),
+                cond,
                 &mut left_non_equi_state,
                 &mut right_non_equi_state,
             )
@@ -1784,7 +1784,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// tests.
     async fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
-        cond: &dyn Expression,
+        cond: &BoxedExpression,
         LeftNonEquiJoinState {
             probe_column_count,
             first_output_row_id,
@@ -1808,7 +1808,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// Removes duplicate rows.
     async fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
-        cond: &dyn Expression,
+        cond: &BoxedExpression,
         LeftNonEquiJoinState {
             first_output_row_id,
             found_matched,
@@ -1829,7 +1829,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     async fn process_right_outer_join_non_equi_condition(
         chunk: DataChunk,
-        cond: &dyn Expression,
+        cond: &BoxedExpression,
         RightNonEquiJoinState {
             build_row_ids,
             build_row_matched,
@@ -1843,7 +1843,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     async fn process_right_semi_anti_join_non_equi_condition(
         chunk: DataChunk,
-        cond: &dyn Expression,
+        cond: &BoxedExpression,
         RightNonEquiJoinState {
             build_row_ids,
             build_row_matched,
@@ -1860,7 +1860,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     async fn process_full_outer_join_non_equi_condition(
         chunk: DataChunk,
-        cond: &dyn Expression,
+        cond: &BoxedExpression,
         left_non_equi_state: &mut LeftNonEquiJoinState,
         right_non_equi_state: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
@@ -3441,9 +3441,7 @@ mod tests {
         };
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3471,9 +3469,7 @@ mod tests {
         state.has_more_output_rows = false;
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3501,9 +3497,7 @@ mod tests {
         state.has_more_output_rows = false;
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3541,9 +3535,7 @@ mod tests {
         };
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3568,9 +3560,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3595,9 +3585,7 @@ mod tests {
         state.first_output_row_id = vec![2, 3];
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3636,9 +3624,7 @@ mod tests {
         };
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3665,9 +3651,7 @@ mod tests {
         state.has_more_output_rows = false;
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3694,9 +3678,7 @@ mod tests {
         state.has_more_output_rows = false;
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3757,9 +3739,7 @@ mod tests {
         };
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3798,9 +3778,7 @@ mod tests {
         ];
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .unwrap()
@@ -3851,9 +3829,7 @@ mod tests {
 
         assert!(
             HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .is_ok()
@@ -3886,9 +3862,7 @@ mod tests {
         ];
         assert!(
             HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
-                chunk,
-                cond.as_ref(),
-                &mut state
+                chunk, &cond, &mut state
             )
             .await
             .is_ok()
@@ -3948,7 +3922,7 @@ mod tests {
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
-                cond.as_ref(),
+                &cond,
                 &mut left_state,
                 &mut right_state,
             )
@@ -3996,7 +3970,7 @@ mod tests {
         assert!(compare_data_chunk_with_rowsort(
             &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
                 chunk,
-                cond.as_ref(),
+                &cond,
                 &mut left_state,
                 &mut right_state,
             )
