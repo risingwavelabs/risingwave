@@ -567,8 +567,8 @@ impl CatalogController {
                     .await?;
         if creating != 0 {
             return Err(MetaError::permission_denied(format!(
-                "can not reassign {creating} object(s) that are still being created, \
-                 please cancel or await them firstly"
+                "cannot reassign {creating} object(s) that are still being created, \
+                 please cancel them or wait for the creation to complete first"
             )));
         }
 

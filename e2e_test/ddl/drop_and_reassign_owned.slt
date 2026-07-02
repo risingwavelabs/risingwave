@@ -254,3 +254,75 @@ DROP TABLE dob_t2;
 
 statement ok
 DROP TABLE root_t;
+
+##### DROP OWNED BY: dependent privilege chains (RESTRICT vs CASCADE) #####
+
+# Build a grant-option chain: root -> chain_u1 -> chain_u2 -> chain_u3. The re-grant by
+# chain_u2 depends on chain_u1's grant, but is neither granted by nor to chain_u1, so it
+# blocks `DROP OWNED BY chain_u1` in restrict mode and is revoked by cascade.
+
+statement ok
+CREATE USER chain_u1 WITH PASSWORD 'password';
+
+statement ok
+CREATE USER chain_u2 WITH PASSWORD 'password';
+
+statement ok
+CREATE USER chain_u3;
+
+statement ok
+CREATE TABLE chain_t (v INT PRIMARY KEY);
+
+statement ok
+GRANT SELECT ON chain_t TO chain_u1 WITH GRANT OPTION;
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO chain_u1, chain_u2"'
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U chain_u1 -d "$SLT_DB" -c "GRANT SELECT ON chain_t TO chain_u2 WITH GRANT OPTION;"'
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U chain_u2 -d "$SLT_DB" -c "GRANT SELECT ON chain_t TO chain_u3;"'
+
+skipif madsim
+query I
+SELECT has_table_privilege('chain_u3', 'chain_t', 'SELECT');
+----
+t
+
+skipif madsim
+statement error dependent privileges exist, use CASCADE to revoke them too
+DROP OWNED BY chain_u1;
+
+statement ok
+DROP OWNED BY chain_u1 CASCADE;
+
+# The whole chain is revoked: chain_u2's grant depended on chain_u1's, and chain_u3's
+# on chain_u2's.
+skipif madsim
+query I
+SELECT has_table_privilege('chain_u2', 'chain_t', 'SELECT');
+----
+f
+
+skipif madsim
+query I
+SELECT has_table_privilege('chain_u3', 'chain_t', 'SELECT');
+----
+f
+
+statement ok
+DROP USER chain_u1;
+
+statement ok
+DROP USER chain_u2;
+
+statement ok
+DROP USER chain_u3;
+
+statement ok
+DROP TABLE chain_t;
