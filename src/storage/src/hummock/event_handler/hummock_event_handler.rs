@@ -41,7 +41,9 @@ use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
+use crate::hummock::event_handler::refiller::{
+    CacheRefillerEvent, GLOBAL_CACHE_REFILL_METRICS, SpawnRefillTask,
+};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -639,6 +641,7 @@ impl HummockEventHandler {
             for CacheRefillerEvent {
                 pinned_version,
                 new_pinned_version,
+                ..
             } in &events
             {
                 assert_eq!(pinned_version.id(), state.id());
@@ -651,6 +654,17 @@ impl HummockEventHandler {
             }
             modified
         });
+        for event in &events {
+            GLOBAL_CACHE_REFILL_METRICS
+                .version_update_to_apply_duration
+                .observe(event.started_at.elapsed().as_secs_f64());
+            GLOBAL_CACHE_REFILL_METRICS
+                .version_update_sst_delta_count
+                .observe(event.sst_delta_count as f64);
+            GLOBAL_CACHE_REFILL_METRICS
+                .version_update_inserted_sstable_count
+                .observe(event.inserted_sstable_count as f64);
+        }
 
         debug!("update to hummock version: {}", latest_pinned_version.id(),);
 
