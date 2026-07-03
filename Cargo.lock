@@ -12276,6 +12276,7 @@ dependencies = [
  "moka",
  "num-traits",
  "openssl",
+ "prometheus",
  "rand 0.9.2",
  "regex",
  "risingwave_common",
