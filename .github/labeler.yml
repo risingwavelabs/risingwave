@@ -175,6 +175,12 @@ labels:
   - "e2e_test\\/sink\\/elasticsearch\\/.*"
   - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
 
+- label: "ci/run-e2e-opensearch-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-opensearch-sink-ci-test\\.sh"
+  - "e2e_test\\/sink\\/elasticsearch\\/.*"
+  - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
+
 - label: "ci/run-e2e-postgres-sink-tests"
   files:
   - "ci\\/scripts\\/e2e-postgres-sink-test\\.sh"

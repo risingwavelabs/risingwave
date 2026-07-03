@@ -192,9 +192,3 @@ DROP SINK t5_sink;
 
 statement ok
 DROP TABLE t5;
-
-system ok
-mongosh --eval '
-db.getSiblingDB("demo").dropDatabase();
-db.getSiblingDB("shard_2024_01").dropDatabase();
-'
