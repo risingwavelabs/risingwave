@@ -36,6 +36,7 @@ rpk topic create test-rw-sink-upsert
 rpk topic create test-rw-sink-upsert-schema
 rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
+rpk topic create test-rw-sink-replace
 rpk topic create test-rw-sink-text-key-id
 rpk topic create test-rw-sink-bytes-key-id
 rpk topic create test-rw-sink-alter-connector-props
@@ -134,6 +135,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# test replace kafka sink
+echo "testing replace kafka sink"
+diff -b ./e2e_test/sink/kafka/replace_sink.result \
+<((rpk topic consume test-rw-sink-replace --offset start --format '%v\n' --num 2 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for replace sink is not as expected."
+  exit 1
+fi
+
 # delete sink data
 echo "deleting sink data"
 psql -h localhost -p 4566 -d dev -U root -c "delete from t_kafka where id = 1;" > /dev/null
@@ -173,6 +183,7 @@ risedev slt 'e2e_test/sink/kafka/alter_kafka_sink_props.slt'
 rpk topic delete test-rw-sink-append-only
 rpk topic delete test-rw-sink-upsert
 rpk topic delete test-rw-sink-debezium
+rpk topic delete test-rw-sink-replace
 rpk topic delete test-rw-sink-alter-connector-props
 
 # test different encoding

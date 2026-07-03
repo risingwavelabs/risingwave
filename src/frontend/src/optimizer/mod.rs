@@ -1041,15 +1041,14 @@ impl LogicalPlanRoot {
         let refreshable = source_catalog
             .as_ref()
             .map(|catalog| {
-                catalog.with_properties.is_batch_connector() || {
-                    matches!(
+                catalog.with_properties.supports_full_reload_refresh()
+                    && matches!(
                         catalog
                             .refresh_mode
                             .as_ref()
                             .map(|refresh_mode| refresh_mode.refresh_mode),
                         Some(Some(RefreshMode::FullReload(_)))
                     )
-                }
             })
             .unwrap_or(false);
 
@@ -1169,16 +1168,30 @@ impl LogicalPlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        without_backfill: bool,
+        without_snapshot: bool,
+        since_timestamp: bool,
+        is_iceberg_engine_internal: bool,
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
-        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let backfill_type = if without_backfill {
+        let backfill_type = if since_timestamp {
+            assert!(
+                target_table.is_none(),
+                "should not allow since_timestamp for sink-into-table"
+            );
+            if is_iceberg_engine_internal {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "since_timestamp is not allowed for this sink".to_owned(),
+                )
+                .into());
+            }
+            BackfillType::SnapshotBackfillSinceTimestamp
+        } else if without_snapshot {
             BackfillType::UpstreamOnlySink
-        } else if allow_snapshot_backfill
+        } else if target_table.is_none()
+            && !is_iceberg_engine_internal
             && self.should_use_snapshot_backfill()
             && {
                 if auto_refresh_schema_from_table.is_some() {

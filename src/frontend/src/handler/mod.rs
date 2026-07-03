@@ -249,8 +249,14 @@ impl HandlerArgs {
                 *if_not_exists = false;
             }
             Statement::CreateSink {
-                stmt: CreateSinkStatement { if_not_exists, .. },
+                stmt:
+                    CreateSinkStatement {
+                        or_replace,
+                        if_not_exists,
+                        ..
+                    },
             } => {
+                *or_replace = false;
                 *if_not_exists = false;
             }
             Statement::CreateSubscription {

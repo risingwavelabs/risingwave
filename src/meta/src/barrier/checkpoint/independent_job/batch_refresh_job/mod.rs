@@ -408,6 +408,8 @@ impl BatchRefreshJobCheckpointControl {
             backfill_nodes_to_pause,
             actor_cdc_table_snapshot_splits: None,
             new_upstream_sinks: Default::default(),
+            dropped_actors: Default::default(),
+            sink_log_store_flush: Default::default(),
         })
     }
 
@@ -1271,6 +1273,8 @@ impl BatchRefreshJobCheckpointControl {
             backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits: None,
             new_upstream_sinks: Default::default(),
+            dropped_actors: Default::default(),
+            sink_log_store_flush: Default::default(),
         });
 
         let node_actors = &render_result.node_actors;

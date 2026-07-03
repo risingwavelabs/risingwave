@@ -104,6 +104,7 @@ message CreateSinkRequest {
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
   StreamingJobResourceType resource_type = 6;
+  optional uint64 since_timestamp_epoch = 7;
 }
 
 message CreateSinkResponse {
@@ -150,7 +151,7 @@ message StreamingJobResourceType {
     bool regular = 1;
     // The specific resource group to use for the streaming job. If not set, the database resource group is used.
     string specific_resource_group = 2;
-    string serverless_backfill_resource_group = 3;
+    bool serverless_backfill = 3;
   }
 }
 
@@ -506,10 +507,19 @@ message ReplaceJobPlan {
     catalog.Table table = 1;
   }
 
+  message ReplaceSink {
+    catalog.Sink sink = 1;
+    uint32 old_sink_id = 2;
+    // The list of object IDs that the new sink depends on.
+    repeated uint32 dependencies = 3;
+    StreamingJobResourceType resource_type = 4;
+  }
+
   oneof replace_job {
     ReplaceTable replace_table = 3;
     ReplaceSource replace_source = 4;
     ReplaceMaterializedView replace_materialized_view = 5;
+    ReplaceSink replace_sink = 6;
   }
 }
 

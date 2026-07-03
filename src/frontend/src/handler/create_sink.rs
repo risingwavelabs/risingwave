@@ -32,7 +32,8 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Timestamptz};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
@@ -60,6 +61,7 @@ use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
@@ -105,6 +107,8 @@ static SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionTyp
         }
     });
 
+const SINK_SINCE_TIMESTAMP_OPTION: &str = "since_timestamp";
+
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
     pub query: Box<Query>,
@@ -112,6 +116,7 @@ pub struct SinkPlanContext {
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 pub async fn gen_sink_plan(
@@ -150,6 +155,25 @@ pub async fn gen_sink_plan(
             session,
             Some(TelemetryDatabaseObject::Sink),
         )?;
+
+    let since_timestamp_epoch = resolved_with_options
+        .remove(SINK_SINCE_TIMESTAMP_OPTION)
+        .map(|value| {
+            let timestamp = value.parse::<Timestamptz>().map_err(|err| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value {value:?} of '{SINK_SINCE_TIMESTAMP_OPTION}' option: {err}; \
+                     expected a timestamptz string with an explicit time zone, \
+                     for example '2024-01-01 00:00:00Z'"
+                ))
+            })?;
+            let timestamp_millis = u64::try_from(timestamp.timestamp_millis()).unwrap_or(0);
+            Ok::<_, RwError>(Epoch::from_unix_millis_or_earliest(timestamp_millis).0)
+        })
+        .transpose()?;
+    if since_timestamp_epoch.is_some() {
+        Feature::SinkSinceTimestamp.check_available()?;
+    }
+
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -282,6 +306,33 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
+    if since_timestamp_epoch.is_some() {
+        if sink_into_table_name.is_some() {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support `CREATE SINK INTO TABLE`"
+            ))
+            .into());
+        }
+        if is_iceberg_engine_internal {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support iceberg engine internal sinks"
+            ))
+            .into());
+        }
+        if let Some((from_name, _)) = &direct_sink_from_name {
+            let (table, _) = get_table_catalog_by_table_name(session, from_name)?;
+            if table.database_id != sink_database_id {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "`{SINK_SINCE_TIMESTAMP_OPTION}` does not support cross-database sinks"
+                    ),
+                    "Please create the sink in the same database as the upstream table.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
     let (
         dependent_relations,
         dependent_udfs,
@@ -381,10 +432,17 @@ pub async fn gen_sink_plan(
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = matches!(
+    let without_snapshot = matches!(
         resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
         Some(flag) if flag.eq_ignore_ascii_case("false")
     );
+
+    if since_timestamp_epoch.is_some() && !without_snapshot {
+        return Err(ErrorCode::BindError(format!(
+            "`{SINK_SINCE_TIMESTAMP_OPTION}` requires `snapshot = false`"
+        ))
+        .into());
+    }
 
     let target_table_catalog = stmt
         .into_table_name
@@ -421,8 +479,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -431,12 +487,13 @@ pub async fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
-        without_backfill,
+        without_snapshot,
+        since_timestamp_epoch.is_some(),
+        is_iceberg_engine_internal,
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
-        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -510,6 +567,7 @@ pub async fn gen_sink_plan(
         sink_catalog,
         target_table_catalog,
         dependencies,
+        since_timestamp_epoch,
     })
 }
 
@@ -610,35 +668,65 @@ pub async fn handle_create_sink(
 
     session.check_cluster_limits().await?;
 
-    let if_not_exists = stmt.if_not_exists;
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
-        stmt.sink_name.clone(),
-        StatementType::CREATE_SINK,
-        if_not_exists,
-    )? {
-        return Ok(resp);
-    }
+    let mode = if stmt.or_replace {
+        prepare_replace_sink(&mut handle_args, &stmt)?
+    } else {
+        let if_not_exists = stmt.if_not_exists;
+        if let Either::Right(resp) = session.check_relation_name_duplicated(
+            stmt.sink_name.clone(),
+            StatementType::CREATE_SINK,
+            if_not_exists,
+        )? {
+            return Ok(resp);
+        }
 
-    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
-        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
-            "Sink name cannot start with reserved prefix '{}'",
-            ICEBERG_SINK_PREFIX
-        ))));
+        if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "Sink name cannot start with reserved prefix '{}'",
+                ICEBERG_SINK_PREFIX
+            ))));
+        }
+
+        SinkCreateMode::Create { if_not_exists }
+    };
+
+    create_sink_or_replace(handle_args, stmt, is_iceberg_engine_internal, mode).await
+}
+
+enum SinkCreateMode {
+    Create { if_not_exists: bool },
+    Replace { original_sink: Arc<SinkCatalog> },
+}
+
+impl SinkCreateMode {
+    fn statement_name(&self) -> &'static str {
+        match self {
+            SinkCreateMode::Create { .. } => "CREATE SINK",
+            SinkCreateMode::Replace { .. } => "REPLACE SINK",
+        }
     }
+}
+
+async fn create_sink_or_replace(
+    mut handle_args: HandlerArgs,
+    stmt: CreateSinkStatement,
+    is_iceberg_engine_internal: bool,
+    mode: SinkCreateMode,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session.clone();
 
     let resource_type =
-        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
-            .await?;
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)?;
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let (sink, graph, dependencies, since_timestamp_epoch) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
-
         let SinkPlanContext {
             query,
             sink_plan: plan,
-            sink_catalog: sink,
+            sink_catalog: mut sink,
             target_table_catalog,
             dependencies,
+            since_timestamp_epoch,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -649,46 +737,198 @@ pub async fn handle_create_sink(
             );
         }
 
+        match &mode {
+            SinkCreateMode::Create { .. } => {
+                if let Some(table_catalog) = &target_table_catalog {
+                    sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
+                }
+            }
+            SinkCreateMode::Replace { original_sink } => {
+                if target_table_catalog.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                        "replace ordinary sinks first".to_owned(),
+                    )
+                    .into());
+                }
+
+                sink.schema_id = original_sink.schema_id;
+                sink.database_id = original_sink.database_id;
+                sink.name = original_sink.name.clone();
+                sink.owner = original_sink.owner;
+            }
+        }
+
         let backfill_order =
             plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
-
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (sink, graph, dependencies, since_timestamp_epoch)
     };
 
-    if let Some(table_catalog) = target_table_catalog {
-        sink.original_target_columns = table_catalog.columns_without_rw_timestamp();
+    let statement_name = mode.statement_name();
+    let catalog_writer = session.catalog_writer()?;
+    match mode {
+        SinkCreateMode::Create { if_not_exists } => {
+            let _job_guard = session.env().creating_streaming_job_tracker().guard(
+                CreatingStreamingJobInfo::new(
+                    session.session_id(),
+                    sink.database_id,
+                    sink.schema_id,
+                    sink.name.clone(),
+                ),
+            );
+
+            execute_with_long_running_notification(
+                catalog_writer.create_sink(
+                    sink.to_proto(),
+                    graph,
+                    dependencies,
+                    resource_type,
+                    if_not_exists,
+                    since_timestamp_epoch,
+                ),
+                &session,
+                statement_name,
+                LongRunningNotificationAction::MonitorBackfillJob,
+            )
+            .await?;
+        }
+        SinkCreateMode::Replace { original_sink } => {
+            let original_sink_id = original_sink.id;
+            execute_with_long_running_notification(
+                catalog_writer.replace_sink(
+                    original_sink_id,
+                    sink.to_proto(),
+                    graph,
+                    dependencies,
+                    resource_type,
+                ),
+                &session,
+                statement_name,
+                LongRunningNotificationAction::DiagnoseBarrierLatency,
+            )
+            .await?;
+
+            tracing::info!(
+                old_sink_id = %original_sink_id,
+                sink_name = %sink.name,
+                "replace sink plan submitted"
+            );
+        }
     }
 
-    let _job_guard =
-        session
-            .env()
-            .creating_streaming_job_tracker()
-            .guard(CreatingStreamingJobInfo::new(
-                session.session_id(),
-                sink.database_id,
-                sink.schema_id,
-                sink.name.clone(),
-            ));
-
-    let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(
-        catalog_writer.create_sink(
-            sink.to_proto(),
-            graph,
-            dependencies,
-            resource_type,
-            if_not_exists,
-        ),
-        &session,
-        "CREATE SINK",
-        LongRunningNotificationAction::MonitorBackfillJob,
-    )
-    .await?;
-
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+fn sink_replace_requires_exactly_once_state(sink: &SinkCatalog) -> bool {
+    match sink.properties.get("is_exactly_once") {
+        Some(value) => value.eq_ignore_ascii_case("true"),
+        None => sink
+            .properties
+            .get(CONNECTOR_TYPE_KEY)
+            .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK)),
+    }
+}
+
+fn prepare_replace_sink(
+    handle_args: &mut HandlerArgs,
+    stmt: &CreateSinkStatement,
+) -> Result<SinkCreateMode> {
+    let session = handle_args.session.clone();
+    if stmt.if_not_exists {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "REPLACE SINK does not support IF NOT EXISTS".to_owned(),
+        )
+        .into());
+    }
+    if !matches!(&stmt.sink_from, CreateSink::From(_)) {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK currently only supports REPLACE SINK ... FROM table_or_mv".to_owned(),
+            "use REPLACE SINK name FROM existing_relation ...".to_owned(),
+        )
+        .into());
+    }
+    if stmt.into_table_name.is_some() {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+            "replace ordinary sinks first".to_owned(),
+        )
+        .into());
+    }
+    if handle_args
+        .with_options
+        .get(AUTO_SCHEMA_CHANGE_KEY)
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK with auto schema change is not supported yet".to_owned(),
+            "disable auto schema change for this replacement".to_owned(),
+        )
+        .into());
+    }
+    if handle_args
+        .with_options
+        .contains_key(SINK_SINCE_TIMESTAMP_OPTION)
+    {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK with since_timestamp is not supported yet".to_owned(),
+            "create a new sink with since_timestamp instead".to_owned(),
+        )
+        .into());
+    }
+    match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
+        Some(value) if !value.eq_ignore_ascii_case("false") => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "REPLACE SINK must not enable snapshot backfill".to_owned(),
+            )
+            .into());
+        }
+        Some(_) => {}
+        None => {
+            handle_args
+                .with_options
+                .insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
+        }
+    }
+
+    let db_name = session.database();
+    let (sink_schema_name, sink_table_name) =
+        Binder::resolve_schema_qualified_name(&db_name, &stmt.sink_name)?;
+    let original_sink = {
+        let search_path = session.config().search_path();
+        let user_name = session.user_name();
+        let schema_path = SchemaPath::new(sink_schema_name.as_deref(), &search_path, &user_name);
+        let reader = session.env().catalog_reader().read_guard();
+        let (sink, schema_name) =
+            reader.get_created_sink_by_name(&db_name, schema_path, &sink_table_name)?;
+        session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+        if sink.target_table.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
+                "replace ordinary sinks first".to_owned(),
+            )
+            .into());
+        }
+        if sink.auto_refresh_schema_from_table.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "REPLACE SINK with auto schema change is not supported yet".to_owned(),
+                "drop and recreate this auto schema change sink".to_owned(),
+            )
+            .into());
+        }
+        if sink_replace_requires_exactly_once_state(sink) {
+            return Err(ErrorCode::NotSupported(
+                "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
+                "set is_exactly_once=false or recreate the sink manually".to_owned(),
+            )
+            .into());
+        }
+        sink.clone()
+    };
+
+    Ok(SinkCreateMode::Replace { original_sink })
 }
 
 pub fn fetch_incoming_sinks(
@@ -965,7 +1205,7 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{CreateType, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::config::FrontendConfig;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -1007,12 +1247,37 @@ pub mod tests {
             .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
+        let schema_name = schema_name.to_owned();
 
         // Check sink exists.
         let (sink, _) = catalog_reader
-            .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
+            .get_created_sink_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(&schema_name),
+                "snk1",
+            )
             .unwrap();
         assert_eq!(sink.name, "snk1");
+        drop(catalog_reader);
+
+        let sql = r#"REPLACE SINK snk1 FROM mv1
+                    WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                        '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_owned();
+        frontend.run_sql(sql).await.unwrap();
+
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (sink, _) = catalog_reader
+            .get_created_sink_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(&schema_name),
+                "snk1",
+            )
+            .unwrap();
+        assert_eq!(sink.name, "snk1");
+        // Frontend leaves the replacement job foreground for the meta foreground wait path.
+        // Meta switches it to background when marking the job Creating during cutover.
+        assert_eq!(sink.create_type, CreateType::Foreground);
     }
 
     #[tokio::test]

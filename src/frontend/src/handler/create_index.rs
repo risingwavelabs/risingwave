@@ -655,8 +655,7 @@ pub async fn handle_create_index(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let resource_type =
-        resolve_streaming_job_resource_type(session.as_ref(), &mut handler_args.with_options)
-            .await?;
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handler_args.with_options)?;
 
     let (graph, index_table, index) = {
         let (schema_name, table, index_table_name) =

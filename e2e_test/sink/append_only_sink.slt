@@ -39,6 +39,85 @@ from snapshot_free_t
 group by v2
 with (connector = 'blackhole', snapshot = 'false');
 
+statement error invalid value "not-a-timestamp" of 'since_timestamp' option
+create sink invalid_since_timestamp_format from snapshot_free_t with (
+    connector = 'blackhole',
+    snapshot = 'false',
+    since_timestamp = 'not-a-timestamp'
+);
+
+statement ok
+create table invalid_since_timestamp_target (id int primary key, v1 int, v2 int);
+
+statement error `since_timestamp` does not support `CREATE SINK INTO TABLE`
+create sink invalid_since_timestamp_sink_into
+into invalid_since_timestamp_target
+from snapshot_free_t
+with (
+    snapshot = 'false',
+    since_timestamp = '2024-01-01 00:00:00Z'
+);
+
+statement ok
+drop table invalid_since_timestamp_target;
+
+statement ok
+create table stale_since_timestamp_t (id int primary key, v int);
+
+statement ok
+create subscription stale_since_timestamp_sub from stale_since_timestamp_t with(retention = '1D');
+
+statement ok
+insert into stale_since_timestamp_t values (1, 10);
+
+statement ok
+flush;
+
+statement error since_timestamp is earlier than the retained changelog
+create sink stale_since_timestamp_sink from stale_since_timestamp_t with (
+    connector = 'blackhole',
+    snapshot = 'false',
+    since_timestamp = '1970-01-01 00:00:00Z'
+);
+
+statement ok
+drop subscription stale_since_timestamp_sub;
+
+statement ok
+drop table stale_since_timestamp_t;
+
+statement ok
+create database since_timestamp_cross_db_1;
+
+statement ok
+create database since_timestamp_cross_db_2;
+
+statement ok
+set database to since_timestamp_cross_db_1;
+
+statement ok
+create table cross_db_since_timestamp_t (id int primary key, v int);
+
+statement ok
+set database to since_timestamp_cross_db_2;
+
+statement error cross-database references are not implemented
+create sink cross_db_since_timestamp_sink from since_timestamp_cross_db_1.public.cross_db_since_timestamp_t with (
+    connector = 'blackhole',
+    snapshot = 'false',
+    since_timestamp = '2024-01-01 00:00:00Z'
+);
+
+statement ok
+drop database since_timestamp_cross_db_1;
+
+connection other
+statement ok
+drop database since_timestamp_cross_db_2;
+
+statement ok
+set database to dev;
+
 statement ok
 set sink_decouple=false;
 

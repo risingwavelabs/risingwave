@@ -168,6 +168,8 @@ pub enum DdlCommand {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -383,6 +385,23 @@ impl DdlController {
         Ok(())
     }
 
+    fn validate_serverless_backfill_enabled(
+        &self,
+        resource_type: &streaming_job_resource_type::ResourceType,
+    ) -> MetaResult<()> {
+        if matches!(
+            resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
+        ) && self.env.opts.serverless_backfill_controller_addr.is_empty()
+        {
+            bail_invalid_parameter!(
+                "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature"
+            );
+        }
+
+        Ok(())
+    }
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -461,6 +480,8 @@ impl DdlController {
                     resource_type,
                     if_not_exists,
                     refresh_interval_sec,
+                    replace_sink,
+                    since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -469,6 +490,8 @@ impl DdlController {
                         resource_type,
                         if_not_exists,
                         refresh_interval_sec,
+                        replace_sink,
+                        since_timestamp_epoch,
                     )
                     .await
                 }
@@ -1074,12 +1097,27 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
-        if let StreamingJob::Sink(sink) = &streaming_job
-            && let Some(target_table) = sink.target_table
-        {
-            self.validate_table_for_sink(target_table).await?;
-        }
+        let replace_sink_info = if let Some(old_sink_id) = replace_sink {
+            let StreamingJob::Sink(sink) = &streaming_job else {
+                bail!("replace sink requires a sink job")
+            };
+            if sink.target_table.is_some() {
+                bail_not_implemented!("replace sink into table")
+            }
+
+            Some(old_sink_id)
+        } else {
+            if let StreamingJob::Sink(sink) = &streaming_job
+                && let Some(target_table) = sink.target_table
+            {
+                self.validate_table_for_sink(target_table).await?;
+            }
+            None
+        };
+        self.validate_serverless_backfill_enabled(&resource_type)?;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let adaptive_parallelism_strategy =
             (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
@@ -1093,6 +1131,7 @@ impl DdlController {
             parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
                 .expect("backfill adaptive parallelism strategy should be validated in frontend")
         });
+
         let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
@@ -1106,6 +1145,7 @@ impl DdlController {
                 &fragment_graph.backfill_parallelism,
                 adaptive_parallelism_strategy,
                 backfill_adaptive_parallelism_strategy,
+                replace_sink_info.as_ref(),
                 refresh_interval_sec,
             )
             .await
@@ -1130,13 +1170,23 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
-        tracing::debug!(
-            id = %job_id,
-            definition = streaming_job.definition(),
-            create_type = streaming_job.create_type().as_str_name(),
-            job_type = ?streaming_job.job_type(),
-            "starting streaming job",
-        );
+        if let Some(old_sink_id) = replace_sink_info.as_ref() {
+            tracing::debug!(
+                old_sink_id = %old_sink_id,
+                new_sink_id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                "starting replacement sink",
+            );
+        } else {
+            tracing::debug!(
+                id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                job_type = ?streaming_job.job_type(),
+                "starting streaming job",
+            );
+        }
         // TODO: acquire permits for recovered background DDLs.
         let permit = self
             .creating_streaming_job_permits
@@ -1161,8 +1211,10 @@ impl DdlController {
                 ctx,
                 streaming_job,
                 fragment_graph,
-                resource_type,
+                resource_type.clone(),
                 streaming_job_model,
+                replace_sink_info,
+                since_timestamp_epoch,
             )
             .await
         {
@@ -1216,6 +1268,8 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1235,15 +1289,17 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
-        let (ctx, stream_job_fragments) = self
+        let (mut ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
+                since_timestamp_epoch,
             )
             .await?;
+        ctx.replace_sink = replace_sink;
 
         let streaming_job = &ctx.streaming_job;
 
@@ -1331,15 +1387,32 @@ impl DdlController {
         }
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
-        self.metadata_manager
-            .catalog_controller
-            .prepare_stream_job_fragments(
-                &stream_job_fragments,
-                streaming_job,
-                false,
-                Some(backfill_orders),
-            )
-            .await?;
+        // Replacement sinks use a temporary catalog name before cutover, so do not notify
+        // frontend about their creating catalog.
+        let notify_creating = replace_sink.is_none();
+        if notify_creating {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_stream_job_fragments(
+                    &stream_job_fragments,
+                    streaming_job,
+                    false,
+                    Some(backfill_orders),
+                )
+                .await?;
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_streaming_job(
+                    stream_job_fragments.stream_job_id(),
+                    || stream_job_fragments.fragments.values(),
+                    &stream_job_fragments.downstreams,
+                    false,
+                    None,
+                    Some(backfill_orders),
+                )
+                .await?;
+        }
 
         Ok((stream_job_fragments, ctx))
     }
@@ -1810,6 +1883,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
@@ -1883,16 +1957,13 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group = if let Some(group) = resource_type.resource_group() {
-            group
-        } else {
-            self.metadata_manager
-                .get_database_resource_group(stream_job.database_id())
-                .await?
-        };
+        let database_resource_group = self
+            .metadata_manager
+            .get_database_resource_group(stream_job.database_id())
+            .await?;
         let is_serverless_backfill = matches!(
             &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
         );
 
         // 3. Build the actor graph.
@@ -1970,7 +2041,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            database_resource_group: resource_group,
+            database_resource_group,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
@@ -1983,8 +2054,11 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
+            resource_type,
             streaming_job_model: streaming_job_model.clone(),
+            replace_sink: None,
             refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
+            since_timestamp_epoch,
         };
 
         Ok((
