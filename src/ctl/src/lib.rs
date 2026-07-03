@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -464,6 +465,13 @@ enum MetaCommands {
         #[clap(long, required = true)]
         endpoint: String,
     },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -904,6 +912,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
     }
     Ok(())
