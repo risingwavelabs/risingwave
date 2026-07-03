@@ -85,9 +85,17 @@ else
   exit 1
 fi
 
-if cat ./variant_result.tsv | awk -F "\t" '{
+if cat ./variant_result.tsv | awk -F "\t" '
+{
+    seen++;
     gsub(/[[:space:]]/, "", $2);
-    exit !($1 == 1 && $2 == "{\"nested\":[1,2]}"); }'; then
+    if ($1 == 1 && $2 == "{\"nested\":[1,2]}") {
+        matched++;
+    }
+}
+END {
+    exit !(seen == 1 && matched == 1);
+}'; then
   echo "Doris variant sink check passed"
 else
   cat ./variant_result.tsv
