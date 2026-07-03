@@ -1256,6 +1256,21 @@ profile:
         database: risedev
         user-managed: true
 
+  local-mongodb-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-mongodb-sink-test
+      - use: sqlite
+        id: sqlite-local-mongodb-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mongodb
+
   local-nats-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -1270,6 +1285,22 @@ profile:
       - use: frontend
       - use: compactor
       - use: nats
+
+  local-search-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-search-sink-test
+      - use: sqlite
+        id: sqlite-local-search-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+      - use: opensearch
 
   local-mqtt-test:
     config-path: src/config/ci.toml
@@ -1286,6 +1317,21 @@ profile:
       - use: compactor
       - use: mqtt
 
+  local-elasticsearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-elasticsearch-sink-test
+      - use: sqlite
+        id: sqlite-local-elasticsearch-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+
   deltalake-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1299,6 +1345,21 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
+
+  local-opensearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-opensearch-sink-test
+      - use: sqlite
+        id: sqlite-local-opensearch-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: opensearch
 
   postgres-with-latency:
     steps:
@@ -1829,6 +1890,37 @@ template:
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # MongoDB service backed by docker.
+  mongodb:
+    id: mongodb-${port}
+    address: "127.0.0.1"
+    port: 27017
+    image: "mongo:8"
+    persist-data: true
+    user-managed: false
+
+  # Elasticsearch service backed by docker.
+  elasticsearch:
+    id: elasticsearch-${port}
+    address: "127.0.0.1"
+    port: 9200
+    user: elastic
+    password: "risingwave"
+    image: "docker.elastic.co/elasticsearch/elasticsearch:7.11.0"
+    persist-data: false
+    user-managed: false
+
+  # OpenSearch service backed by docker.
+  opensearch:
+    id: opensearch-${port}
+    address: "127.0.0.1"
+    port: 9201
+    user: admin
+    password: "Risingwave123!"
+    image: "opensearchproject/opensearch:2.19.1"
+    persist-data: false
     user-managed: false
 
   # NATS service backed by docker.
