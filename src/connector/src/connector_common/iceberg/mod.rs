@@ -505,8 +505,10 @@ impl IcebergCommon {
                 iceberg_configs.insert(ADLS_TENANT_ID.to_owned(), tenant_id.to_owned());
                 iceberg_configs.insert(ADLS_CLIENT_ID.to_owned(), client_id.to_owned());
                 iceberg_configs.insert(ADLS_CLIENT_SECRET.to_owned(), client_secret.to_owned());
+                // Strip trailing slash to prevent double slash
                 let authority_host = sp_authority
                     .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
+                    .trim_end_matches('/')
                     .to_owned();
                 iceberg_configs.insert(ADLS_AUTHORITY_HOST.to_owned(), authority_host);
                 require_rest("adlsgen2")?;
@@ -1211,7 +1213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_adlsgen2_authority_host_accepts_bare_https_origin_with_trailing_slash() {
+    fn test_adlsgen2_authority_host_trailing_slash_is_normalized() {
         let common =
             test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us/"));
 
@@ -1219,7 +1221,7 @@ mod tests {
 
         assert_eq!(
             file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
-            "https://login.microsoftonline.us/"
+            "https://login.microsoftonline.us"
         );
     }
 
