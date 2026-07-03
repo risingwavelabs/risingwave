@@ -234,11 +234,15 @@ impl SnowflakeV2Config {
                 SINK_TYPE_UPSERT
             )));
         }
-        if config.r#type != SINK_TYPE_UPSERT
-            && (config.task_serverless || config.task_target_completion_interval.is_some())
-        {
+        let has_upsert_task_config = config.snowflake_cdc_table_name.is_some()
+            || properties.contains_key("write.target.interval.seconds")
+            || config.snowflake_warehouse.is_some()
+            || config.task_serverless
+            || config.task_target_completion_interval.is_some();
+        if config.r#type != SINK_TYPE_UPSERT && has_upsert_task_config {
             return Err(SinkError::Config(anyhow!(
-                "`task.serverless` and `task.target_completion_interval` require `{}` = {}",
+                "`intermediate.table.name`, `write.target.interval.seconds`, `warehouse`, \
+                 `task.serverless`, and `task.target_completion_interval` require `{}` = {}",
                 SINK_TYPE_OPTION,
                 SINK_TYPE_UPSERT
             )));
@@ -1311,30 +1315,27 @@ mod tests {
     }
 
     #[test]
-    fn test_snowflake_append_only_rejects_task_serverless() {
-        let mut props = base_properties();
-        props.insert("password".to_owned(), "secret".to_owned());
-        props.insert("task.serverless".to_owned(), "true".to_owned());
+    fn test_snowflake_append_only_rejects_upsert_task_options() {
+        for (key, value) in [
+            ("intermediate.table.name", "test_intermediate"),
+            ("write.target.interval.seconds", "3600"),
+            ("warehouse", "test_warehouse"),
+            ("task.serverless", "true"),
+            ("task.target_completion_interval", "5 MINUTES"),
+        ] {
+            let mut props = base_properties();
+            props.insert("password".to_owned(), "secret".to_owned());
+            props.insert(key.to_owned(), value.to_owned());
 
-        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
-        assert!(err.as_report().to_string().contains(
-            "`task.serverless` and `task.target_completion_interval` require `type` = upsert"
-        ));
-    }
-
-    #[test]
-    fn test_snowflake_append_only_rejects_task_target_completion_interval() {
-        let mut props = base_properties();
-        props.insert("password".to_owned(), "secret".to_owned());
-        props.insert(
-            "task.target_completion_interval".to_owned(),
-            "5 MINUTES".to_owned(),
-        );
-
-        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
-        assert!(err.as_report().to_string().contains(
-            "`task.serverless` and `task.target_completion_interval` require `type` = upsert"
-        ));
+            let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+            assert!(
+                err.as_report().to_string().contains(
+                    "`intermediate.table.name`, `write.target.interval.seconds`, `warehouse`, \
+                 `task.serverless`, and `task.target_completion_interval` require `type` = upsert"
+                ),
+                "option {key} should be rejected for append-only sink"
+            );
+        }
     }
 
     #[test]
