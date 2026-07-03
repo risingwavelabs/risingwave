@@ -1,0 +1,301 @@
+{
+  "properties": {
+    "name": "RisingWave",
+    "realName": "RisingWave",
+    "icon": "icons/risingwave.png",
+    "doc": "${doc}",
+    "id": "risingwave",
+    "tags": [
+      "Database",
+      "Streaming"
+    ]
+  },
+  "configOptions": {
+    "capabilities": [
+      {
+        "id": "dml_insert_policy",
+        "alternatives": [
+          "update_on_exists",
+          "just_insert"
+        ]
+      },
+      {
+        "id": "dml_update_policy",
+        "alternatives": [
+          "ignore_on_nonexists",
+          "insert_on_nonexists"
+        ]
+      },
+      {
+        "id": "dml_delete_policy",
+        "alternatives": [
+          "ignore_on_nonexists"
+        ]
+      }
+    ],
+    "connection": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "required": true,
+          "type": "string",
+          "title": "${host}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${hostTip}"
+          },
+          "x-index": 10
+        },
+        "port": {
+          "required": true,
+          "type": "string",
+          "title": "${port}",
+          "default": 4566,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${portTip}"
+          },
+          "x-index": 20
+        },
+        "database": {
+          "required": true,
+          "type": "string",
+          "title": "${database}",
+          "default": "dev",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${databaseTip}"
+          },
+          "x-index": 30
+        },
+        "schema": {
+          "required": false,
+          "type": "string",
+          "title": "${schema}",
+          "default": "public",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${schemaTip}"
+          },
+          "x-index": 40
+        },
+        "user": {
+          "required": true,
+          "type": "string",
+          "title": "${user}",
+          "default": "root",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${userTip}"
+          },
+          "x-index": 50
+        },
+        "password": {
+          "type": "string",
+          "title": "${password}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-decorator-props": {
+            "tooltip": "${passwordTip}"
+          },
+          "x-index": 60
+        },
+        "ingest_mode": {
+          "required": false,
+          "type": "string",
+          "title": "${ingestMode}",
+          "default": "jdbc",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${ingestModeTip}"
+          },
+          "x-component-props": {
+            "options": [
+              {"label": "JDBC (compatible)", "value": "jdbc"},
+              {"label": "WebSocket streaming (high throughput)", "value": "streaming"}
+            ]
+          },
+          "x-index": 70
+        },
+        "ingestEndpoint": {
+          "required": false,
+          "type": "string",
+          "title": "${ingestEndpoint}",
+          "default": "ws://host.docker.internal:4560",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${ingestEndpointTip}"
+          },
+          "x-reactions": {
+            "dependencies": ["ingest_mode"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0] === 'streaming'}}"
+              }
+            }
+          },
+          "x-index": 80
+        },
+        "webhookSecret": {
+          "required": false,
+          "type": "string",
+          "title": "${webhookSecret}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-decorator-props": {
+            "tooltip": "${webhookSecretTip}"
+          },
+          "x-reactions": {
+            "dependencies": ["ingest_mode"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0] === 'streaming'}}"
+              }
+            }
+          },
+          "x-index": 90
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "doc": "RisingWave is a Postgres-compatible streaming database. This connector writes data to RisingWave tables using the PostgreSQL wire protocol.",
+      "host": "Host",
+      "hostTip": "RisingWave server hostname or IP address",
+      "port": "Port",
+      "portTip": "RisingWave server port (default: 4566)",
+      "database": "Database",
+      "databaseTip": "RisingWave database name (default: dev)",
+      "schema": "Schema",
+      "schemaTip": "Target schema (default: public)",
+      "user": "User",
+      "userTip": "Database user (default: root)",
+      "password": "Password",
+      "passwordTip": "Database password (leave empty if none)",
+      "ingestMode": "Write Mode",
+      "ingestModeTip": "JDBC: standard SQL inserts (compatible). WebSocket streaming: high-throughput streaming DML with async acks.",
+      "ingestEndpoint": "Ingest Endpoint",
+      "ingestEndpointTip": "Full WebSocket ingest base endpoint, including scheme, for example ws://host:4560 or wss://host:4560. Only used in WebSocket streaming mode.",
+      "webhookSecret": "Webhook Secret",
+      "webhookSecretTip": "Shared secret used to sign the initial WebSocket auth frame when the target RisingWave table uses VALIDATE."
+    },
+    "zh_CN": {
+      "doc": "RisingWave 是一个兼容 PostgreSQL 协议的流式数据库。此连接器使用 PostgreSQL 线协议将数据写入 RisingWave 表。",
+      "host": "主机",
+      "hostTip": "RisingWave 服务器主机名或 IP 地址",
+      "port": "端口",
+      "portTip": "RisingWave 服务器端口（默认：4566）",
+      "database": "数据库",
+      "databaseTip": "RisingWave 数据库名称（默认：dev）",
+      "schema": "Schema",
+      "schemaTip": "目标 Schema（默认：public）",
+      "user": "用户名",
+      "userTip": "数据库用户名（默认：root）",
+      "password": "密码",
+      "passwordTip": "数据库密码（无密码则留空）",
+      "ingestMode": "写入模式",
+      "ingestModeTip": "JDBC：标准 SQL 插入（兼容性好）。WebSocket 流式：高吞吐量流式 DML 与异步 ack。",
+      "ingestEndpoint": "Ingest 地址",
+      "ingestEndpointTip": "完整的 WebSocket ingest 基础地址，需包含协议，例如 ws://host:4560 或 wss://host:4560。仅在 WebSocket 流式模式下使用。",
+      "webhookSecret": "Webhook 密钥",
+      "webhookSecretTip": "当目标 RisingWave 表使用 VALIDATE 时，用于签名初始 WebSocket 认证消息的共享密钥。"
+    }
+  },
+  "dataTypes": {
+    "varchar[($byte)]": {
+      "byte": 65535,
+      "to": "TapString"
+    },
+    "text": {
+      "byte": "2g",
+      "to": "TapString"
+    },
+    "boolean": {
+      "to": "TapBoolean"
+    },
+    "smallint": {
+      "bit": 16,
+      "priority": 3,
+      "to": "TapNumber"
+    },
+    "integer": {
+      "bit": 32,
+      "priority": 2,
+      "to": "TapNumber"
+    },
+    "bigint": {
+      "bit": 64,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "real": {
+      "bit": 32,
+      "to": "TapNumber"
+    },
+    "double precision": {
+      "bit": 64,
+      "to": "TapNumber"
+    },
+    "numeric": {
+      "precision": [
+        1,
+        1000
+      ],
+      "scale": [
+        0,
+        1000
+      ],
+      "to": "TapNumber"
+    },
+    "date": {
+      "range": [
+        "0001-01-01",
+        "9999-12-31"
+      ],
+      "pattern": "yyyy-MM-dd",
+      "to": "TapDate"
+    },
+    "timestamp": {
+      "range": [
+        "0001-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "to": "TapDateTime"
+    },
+    "timestamp with time zone": {
+      "range": [
+        "0001-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "to": "TapDateTime"
+    },
+    "time": {
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss",
+      "to": "TapTime"
+    },
+    "bytea": {
+      "to": "TapBinary"
+    },
+    "jsonb": {
+      "to": "TapMap"
+    },
+    "json": {
+      "to": "TapMap"
+    }
+  }
+}
