@@ -1027,18 +1027,13 @@ impl CacheRefillTask {
             }
         }
 
-        let handles = futures
-            .into_iter()
-            .map(|future| {
-                tokio::spawn(async move {
-                    if let Err(e) = future.await {
-                        tracing::error!(error = %e.as_report(), "data cache refill task error");
-                    }
-                })
-            })
-            .collect_vec();
+        let futures = futures.into_iter().map(|future| async move {
+            if let Err(e) = future.await {
+                tracing::error!(error = %e.as_report(), "data cache refill task error");
+            }
+        });
 
-        join_all(handles).await;
+        join_all(futures).await;
     }
 }
 
