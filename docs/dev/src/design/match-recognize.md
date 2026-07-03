@@ -101,9 +101,15 @@ pre-walk into a synthetic placeholder relation so the remaining predicate binds 
 A partition can contain many matches, and two matches may produce byte-identical `PARTITION BY` +
 `MEASURES` output, so those columns are not a unique key. The output therefore carries a **hidden
 `_match_id` column** (the same mechanism sources use for `_row_id`); the stream key is the partition
-columns plus `_match_id`. It is hidden, so `SELECT *` returns only the user columns. The executor
-fills it from a monotonic counter seeded from, and re-seeded to, the barrier epoch — so ids are
-unique within a run and strictly increasing across restarts.
+columns plus `_match_id`. It is hidden, so `SELECT *` returns only the user columns.
+
+The executor fills `_match_id` with the **match's start row's `seq`** (the buffered row's hidden
+snowflake PK tiebreaker, assigned once at ingest). This is unique forever — an emitted match's start
+row is always evicted, so no later match can share it (the same invariant that prevents
+cross-watermark double emits) — and, unlike an id minted at emission time, it is **deterministic
+across recovery replay**: re-emitting a match after a rollback reproduces byte-identical output. A
+stable, replay-deterministic match identity is also the foundation a future emit-on-update mode
+would retract against.
 
 ## The NFA
 

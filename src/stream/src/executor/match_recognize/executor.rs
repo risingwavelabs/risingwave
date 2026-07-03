@@ -639,12 +639,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         frontier_meta_table.init_epoch(first_epoch).await?;
         frontier_index_table.init_epoch(first_epoch).await?;
 
-        // Generator for two hidden i64s: the buffer-table PK tiebreaker `seq` (assigned to every
-        // input row) and the output `_match_id` (every emitted match). A snowflake-style id
-        // (timestamp + owned vnode + sequence) is unique across this actor's lifetime and across
-        // rescaling, so distinct rows never collide on `(partition, seq)` and distinct matches never
-        // reuse a `(partition, _match_id)` key — even across recovery, where re-emission within a
-        // rolled-back (uncommitted) epoch is not a committed downstream duplicate. Rebuilt on a
+        // Generator for the buffer-table PK tiebreaker `seq`, assigned to every input row. A
+        // snowflake-style id (timestamp + owned vnode + sequence) is unique across this actor's
+        // lifetime and across rescaling, so distinct rows never collide on `(partition, seq)`.
+        // The output `_match_id` is NOT minted here — it is the match's start-row `seq` (see the
+        // emit path), making emitted output deterministic across recovery replay. Rebuilt on a
         // vnode-bitmap change below.
         let mut row_id_gen = RowIdGenerator::new(
             state_table.vnodes().iter_vnodes(),
@@ -946,7 +945,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     let value = measure.expr.eval_row_infallible(&synthetic).await;
                                     measure_datums.push(value);
                                 }
-                                let match_id = row_id_gen.next();
+                                // The match's identity is its start row's `seq`: deterministic
+                                // across recovery replay (re-emission after a rollback reproduces
+                                // byte-identical output, unlike a freshly minted id), and unique
+                                // forever because an emitted match's start row is always evicted
+                                // below (the same invariant that prevents cross-watermark double
+                                // emits), so no later match can ever share the start. A stable,
+                                // replay-deterministic identity is also the foundation an
+                                // emit-on-update mode would retract against.
+                                let match_id = rows[m.start].seq;
                                 // Stream the match into the chunk builder, flushing a full chunk the
                                 // moment it fills — output memory stays bounded by one chunk.
                                 let measures_row = OwnedRow::new(measure_datums);
@@ -1110,10 +1117,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // new ids fall in the now-owned range. This is deliberately narrower than
                     // `RowIdGenExecutor`, which rebuilds on any bitmap change: there the generated id
                     // *is* the row-id distribution key, so a stale vnode would misplace rows. Here `seq`
-                    // is only a within-partition PK tiebreaker and `_match_id` is an output-only column
-                    // — neither is a distribution key, so a lost vnode never misplaces state, and the
-                    // snowflake timestamp keeps ids unique regardless. Rebuilding on growth alone
-                    // suffices.
+                    // is only a within-partition PK tiebreaker (and, via a match's start row, the
+                    // output `_match_id`) — not a distribution key, so a lost vnode never misplaces
+                    // state, and the snowflake timestamp keeps ids unique regardless. Rebuilding on
+                    // growth alone suffices.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                     {
