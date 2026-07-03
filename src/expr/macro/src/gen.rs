@@ -722,7 +722,6 @@ impl FunctionAttr {
                         self.context.return_type.clone()
                     }
                 }
-                #[async_trait]
                 impl risingwave_expr::expr::AsyncExpression for #async_struct_name {
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(

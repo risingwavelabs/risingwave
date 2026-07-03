@@ -53,6 +53,7 @@ mod build;
 pub mod test_utils;
 mod value;
 
+use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -118,41 +119,96 @@ pub trait SyncExpression: ExpressionInfo {
 }
 
 /// Interface of an asynchronous expression.
-#[async_trait::async_trait]
-#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait AsyncExpression: ExpressionInfo {
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
     /// The default implementation calls `eval_v2` and always converts the result to an array.
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let value = self.eval_v2(input).await?;
-        Ok(match value {
-            ValueImpl::Array(array) => array,
-            ValueImpl::Scalar { value, capacity } => {
-                let mut builder = self.return_type().create_array_builder(capacity);
-                builder.append_n(capacity, value);
-                builder.finish().into()
-            }
-        })
+    fn eval<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> impl Future<Output = Result<ArrayRef>> + Send + 'a {
+        async move {
+            let value = self.eval_v2(input).await?;
+            Ok(match value {
+                ValueImpl::Array(array) => array,
+                ValueImpl::Scalar { value, capacity } => {
+                    let mut builder = self.return_type().create_array_builder(capacity);
+                    builder.append_n(capacity, value);
+                    builder.finish().into()
+                }
+            })
+        }
     }
 
     /// Evaluate the expression in vectorized execution. Returns a value that can be either an
     /// array, or a scalar if all values in the array are the same.
     ///
     /// The default implementation calls `eval` and puts the result into the `Array` variant.
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        self.eval(input).await.map(ValueImpl::Array)
+    fn eval_v2<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> impl Future<Output = Result<ValueImpl>> + Send + 'a {
+        async move { self.eval(input).await.map(ValueImpl::Array) }
     }
 
     /// Evaluate the expression in row-based execution. Returns a nullable scalar.
+    fn eval_row<'a>(
+        &'a self,
+        input: &'a OwnedRow,
+    ) -> impl Future<Output = Result<Datum>> + Send + 'a;
+}
+
+/// Object-safe adapter for asynchronous expressions.
+#[async_trait::async_trait]
+pub trait AsyncDynExpression: ExpressionInfo {
+    /// Evaluate the expression in vectorized execution. Returns an array.
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
+
+    /// Evaluate the expression in vectorized execution. Returns a value that can be either an
+    /// array, or a scalar if all values in the array are the same.
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl>;
+
+    /// Evaluate the expression in row-based execution. Returns a nullable scalar.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+}
+
+#[async_trait::async_trait]
+impl<E> AsyncDynExpression for E
+where
+    E: AsyncExpression,
+{
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        AsyncExpression::eval(self, input).await
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        AsyncExpression::eval_v2(self, input).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        AsyncExpression::eval_row(self, input).await
+    }
+}
+
+impl AsyncExpression for Arc<dyn AsyncDynExpression> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        AsyncDynExpression::eval(self.as_ref(), input).await
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        AsyncDynExpression::eval_v2(self.as_ref(), input).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        AsyncDynExpression::eval_row(self.as_ref(), input).await
+    }
 }
 
 /// An owned dynamically typed expression.
 #[derive(Clone, Debug)]
 pub enum BoxedExpression {
     Sync(Arc<dyn SyncExpression>),
-    Async(Arc<dyn AsyncExpression>),
+    Async(Arc<dyn AsyncDynExpression>),
 }
 
 /// Try to unwrap boxed expressions into sync expressions.
@@ -227,7 +283,7 @@ impl BoxedExpression {
     pub async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         match self {
             Self::Sync(expr) => expr.eval(input),
-            Self::Async(expr) => expr.eval(input).await,
+            Self::Async(expr) => AsyncDynExpression::eval(expr.as_ref(), input).await,
         }
     }
 
@@ -236,7 +292,7 @@ impl BoxedExpression {
     pub async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         match self {
             Self::Sync(expr) => expr.eval_v2(input),
-            Self::Async(expr) => expr.eval_v2(input).await,
+            Self::Async(expr) => AsyncDynExpression::eval_v2(expr.as_ref(), input).await,
         }
     }
 
@@ -244,7 +300,7 @@ impl BoxedExpression {
     pub async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         match self {
             Self::Sync(expr) => expr.eval_row(input),
-            Self::Async(expr) => expr.eval_row(input).await,
+            Self::Async(expr) => AsyncDynExpression::eval_row(expr.as_ref(), input).await,
         }
     }
 }
@@ -268,18 +324,26 @@ impl ExpressionInfo for BoxedExpression {
     }
 }
 
-#[async_trait::async_trait]
 impl AsyncExpression for BoxedExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        self.eval(input).await
+        match self {
+            Self::Sync(expr) => expr.eval(input),
+            Self::Async(expr) => AsyncDynExpression::eval(expr.as_ref(), input).await,
+        }
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        self.eval_v2(input).await
+        match self {
+            Self::Sync(expr) => expr.eval_v2(input),
+            Self::Async(expr) => AsyncDynExpression::eval_v2(expr.as_ref(), input).await,
+        }
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        self.eval_row(input).await
+        match self {
+            Self::Sync(expr) => expr.eval_row(input),
+            Self::Async(expr) => expr.as_ref().eval_row(input).await,
+        }
     }
 }
 
@@ -321,7 +385,7 @@ impl<E: AsyncExpression + 'static> E {
 #[derive(Debug)]
 pub enum NonStrictExpression {
     Sync(Arc<dyn SyncExpression>),
-    Async(Arc<dyn AsyncExpression>),
+    Async(Arc<dyn AsyncDynExpression>),
 }
 
 impl NonStrictExpression {
@@ -370,7 +434,7 @@ impl NonStrictExpression {
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
         match self {
             Self::Sync(expr) => expr.eval(input),
-            Self::Async(expr) => expr.eval(input).await,
+            Self::Async(expr) => AsyncDynExpression::eval(expr.as_ref(), input).await,
         }
         .expect("evaluation failed")
     }
@@ -382,7 +446,7 @@ impl NonStrictExpression {
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
         match self {
             Self::Sync(expr) => expr.eval_row(input),
-            Self::Async(expr) => expr.eval_row(input).await,
+            Self::Async(expr) => AsyncDynExpression::eval_row(expr.as_ref(), input).await,
         }
         .expect("evaluation failed")
     }

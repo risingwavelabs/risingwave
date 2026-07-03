@@ -567,14 +567,12 @@ mod tests {
         release_first_notify: Arc<Notify>,
     }
 
-    #[async_trait::async_trait]
     impl ExpressionInfo for BlockingProjectExpr {
         fn return_type(&self) -> DataType {
             DataType::Int64
         }
     }
 
-    #[async_trait::async_trait]
     impl AsyncExpression for BlockingProjectExpr {
         async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
             let call_idx = self.started_count.fetch_add(1, atomic::Ordering::SeqCst);
@@ -616,14 +614,12 @@ mod tests {
         unblock_first_at_started_count: usize,
     }
 
-    #[async_trait::async_trait]
     impl ExpressionInfo for FirstProjectExprWaitsForStartedCount {
         fn return_type(&self) -> DataType {
             DataType::Int64
         }
     }
 
-    #[async_trait::async_trait]
     impl AsyncExpression for FirstProjectExprWaitsForStartedCount {
         async fn eval_v2(&self, input: &DataChunk) -> expr::Result<ValueImpl> {
             let call_idx = self.started_count.fetch_add(1, atomic::Ordering::SeqCst);

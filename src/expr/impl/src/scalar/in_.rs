@@ -99,7 +99,6 @@ impl<E: SyncExpression> SyncExpression for InExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for InExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_in!(async, self, input)

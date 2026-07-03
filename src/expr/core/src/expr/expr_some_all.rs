@@ -206,7 +206,6 @@ impl<E: SyncExpression> SyncExpression for SomeAllExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for SomeAllExpression<E> {
     async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
         eval_some_all!(async, self, data_chunk)

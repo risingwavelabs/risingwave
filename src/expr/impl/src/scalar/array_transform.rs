@@ -62,7 +62,6 @@ impl<E: SyncExpression> SyncExpression for ArrayTransformExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for ArrayTransformExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let lambda_input = self.array.eval(input).await?;

@@ -112,7 +112,6 @@ impl<E: SyncExpression> SyncExpression for BinaryShortCircuitExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for BinaryShortCircuitExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_short_circuit!(async, self, input)

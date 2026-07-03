@@ -90,7 +90,6 @@ impl<E: SyncExpression> SyncExpression for CoalesceExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for CoalesceExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_coalesce!(async, self, input)

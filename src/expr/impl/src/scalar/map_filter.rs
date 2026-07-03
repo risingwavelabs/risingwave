@@ -183,7 +183,6 @@ impl<E: SyncExpression> SyncExpression for MapFilterExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for MapFilterExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_map_filter!(async, self, input)

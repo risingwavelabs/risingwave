@@ -59,7 +59,6 @@ impl<E: SyncExpression> SyncExpression for Checked<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for Checked<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         checked_eval!(async, self, input, eval)

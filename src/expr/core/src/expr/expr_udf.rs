@@ -51,7 +51,6 @@ impl ExpressionInfo for UserDefinedFunction {
     }
 }
 
-#[async_trait::async_trait]
 impl AsyncExpression for UserDefinedFunction {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         if input.cardinality() == 0 {

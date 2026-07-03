@@ -70,7 +70,6 @@ impl<E: SyncExpression> SyncExpression for FieldExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for FieldExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_field!(async, self, input)

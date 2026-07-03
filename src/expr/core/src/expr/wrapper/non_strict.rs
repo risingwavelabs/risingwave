@@ -178,7 +178,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<E, R> AsyncExpression for NonStrict<E, R>
 where
     E: AsyncExpression,

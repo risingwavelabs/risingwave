@@ -88,7 +88,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<E> AsyncExpression for Strict<E>
 where
     E: AsyncExpression,

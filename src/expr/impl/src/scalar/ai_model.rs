@@ -122,7 +122,6 @@ impl ExpressionInfo for OpenAiEmbedding {
     }
 }
 
-#[async_trait::async_trait]
 impl AsyncExpression for OpenAiEmbedding {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let text_array = self.text_expr.eval(input).await?;

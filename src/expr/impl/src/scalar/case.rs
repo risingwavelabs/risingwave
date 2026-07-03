@@ -128,7 +128,6 @@ impl<E: SyncExpression> SyncExpression for CaseExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for CaseExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_case!(async, self, input)
@@ -249,7 +248,6 @@ impl<E: SyncExpression> SyncExpression for ConstantLookupExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for ConstantLookupExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_constant_lookup!(async, self, input)

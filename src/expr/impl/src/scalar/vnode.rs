@@ -147,7 +147,6 @@ impl<E: SyncExpression> SyncExpression for VnodeExpression<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: AsyncExpression> AsyncExpression for VnodeExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         eval_vnode!(async, self, input)
