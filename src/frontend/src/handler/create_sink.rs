@@ -857,12 +857,20 @@ async fn create_sink_or_replace(
             .into_iter()
             .map(|column| column.column_desc)
             .collect_vec();
-        sync_iceberg_table_comments(
+        if let Err(err) = sync_iceberg_table_comments(
             &iceberg_sink.config,
             source_table.description.as_deref(),
             &columns,
         )
-        .await?;
+        .await
+        {
+            tracing::warn!(
+                error = %err,
+                sink_id = %sink.id,
+                sink_name = %sink.name,
+                "failed to sync Iceberg comments after creating sink; keeping RisingWave catalog changes"
+            );
+        }
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))

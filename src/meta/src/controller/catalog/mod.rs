@@ -751,12 +751,22 @@ impl CatalogController {
             .find_iceberg_comment_sinks(txn, table, table_obj)
             .await?;
         for sink in sinks {
-            let sink_param = SinkParam::try_from_sink_catalog(SinkCatalog::from(sink))
-                .map_err(MetaError::from)?;
-            let iceberg_sink = IcebergSink::try_from(sink_param).map_err(MetaError::from)?;
-            sync_iceberg_table_comments(&iceberg_sink.config, table_comment, &columns)
-                .await
-                .map_err(MetaError::from)?;
+            let sink = SinkCatalog::from(sink);
+            let sync_result = async {
+                let sink_param = SinkParam::try_from_sink_catalog(sink.clone())?;
+                let iceberg_sink = IcebergSink::try_from(sink_param)?;
+                sync_iceberg_table_comments(&iceberg_sink.config, table_comment, &columns).await
+            }
+            .await;
+            if let Err(err) = sync_result {
+                tracing::warn!(
+                    error = %err,
+                    table_id = %table.table_id,
+                    sink_id = %sink.id,
+                    sink_name = %sink.name,
+                    "failed to sync Iceberg comments after COMMENT ON; keeping RisingWave catalog changes"
+                );
+            }
         }
         Ok(())
     }

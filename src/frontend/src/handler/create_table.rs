@@ -2565,8 +2565,20 @@ pub async fn create_iceberg_engine_table(
             .into_iter()
             .map(|column| column.column_desc)
             .collect_vec();
-        sync_iceberg_table_comments(&iceberg_sink.config, table.description.as_deref(), &columns)
-            .await?;
+        if let Err(err) = sync_iceberg_table_comments(
+            &iceberg_sink.config,
+            table.description.as_deref(),
+            &columns,
+        )
+        .await
+        {
+            tracing::warn!(
+                error = %err.as_report(),
+                table_id = %table.id,
+                table_name = %table.name,
+                "failed to sync Iceberg comments after creating table; keeping RisingWave catalog changes"
+            );
+        }
     }
 
     Ok(())

@@ -838,9 +838,10 @@ impl IcebergCommon {
                 if requirements.iter().any(|requirement| {
                     matches!(requirement, TableRequirement::CurrentSchemaIdMatch { .. })
                 }) {
-                    bail!(
-                        "column comment synchronization is not supported for catalog type {}",
-                        self.catalog_type()
+                    tracing::warn!(
+                        catalog_type = self.catalog_type(),
+                        table = %table_ident,
+                        "column comment synchronization is not supported for Rust Iceberg catalogs; skipping column comments"
                     );
                 }
 
