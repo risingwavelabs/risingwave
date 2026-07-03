@@ -1318,7 +1318,6 @@ mod tests {
             insert_sst_infos: vec![sst_info],
             delete_sst_object_ids: vec![sst_object_id],
             insert_sst_level: 0,
-            ..Default::default()
         };
         let enabled_context = build_context(CacheRefillPolicy::Enabled);
         let enabled_tasks = DataCacheRefillTaskGenerator {
