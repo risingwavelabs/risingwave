@@ -684,17 +684,16 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
         }
 
-        if self.delta.insert_sst_level != 0 {
-            // Filter by inheritance filter, also requires recent filter enabled.
-            if !self.context.config.skip_recent_filter
-                && !self.context.config.skip_inheritance_filter
-            {
-                tasks = self.filter_by_inheritance_filter(tasks).await;
-            }
-
-            // Filter by table cache refill vnodes.
-            tasks = self.filter_by_table_cache_refill_policy(tasks);
+        // Filter by inheritance filter, also requires recent filter enabled.
+        if self.delta.insert_sst_level != 0
+            && !self.context.config.skip_recent_filter
+            && !self.context.config.skip_inheritance_filter
+        {
+            tasks = self.filter_by_inheritance_filter(tasks).await;
         }
+
+        // Filter by table cache refill policy and vnodes.
+        tasks = self.filter_by_table_cache_refill_policy(tasks);
 
         tasks
     }
@@ -1080,6 +1079,9 @@ mod tests {
     use risingwave_common::config::Role;
     use risingwave_common::config::streaming::CacheRefillPolicy;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::PbHummockVersion;
@@ -1087,11 +1089,15 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
-        CacheRefillConfig, CacheRefillContext, CacheRefiller, SpawnRefillTask, SstDeltaInfo,
-        vnode_range_overlaps_bitmap,
+        CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
+        SpawnRefillTask, SstDeltaInfo, vnode_range_overlaps_bitmap,
     };
-    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_table_ids,
+    };
+    use crate::hummock::value::HummockValue;
 
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         CacheRefillConfig {
@@ -1264,6 +1270,82 @@ mod tests {
         assert!(default_context.streaming_vnode_bitmap.is_none());
         assert!(default_context.serving_vnode_bitmap.is_none());
         assert!(!table_cache_refill_context_map.contains_key(&excluded_table_id));
+    }
+
+    #[tokio::test]
+    async fn test_l0_data_refill_applies_table_cache_refill_policy() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let (sst, sst_info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            (0..2).map(|idx| {
+                (
+                    FullKey {
+                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
+                            table_id,
+                            iterator_test_table_key_of(idx),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(vec![idx as u8]),
+                )
+            }),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
+        let sst_object_id = sst_info.object_id;
+        let build_context = |policy| {
+            let mut config = test_refill_config(policy);
+            config.data_refill_levels.insert(0);
+            CacheRefillContext {
+                config: Arc::new(config),
+                meta_refill_concurrency: None,
+                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
+                sstable_store: sstable_store.clone(),
+                table_cache_refill_context_map: Arc::new(HashMap::from([(
+                    table_id,
+                    super::TableCacheRefillContext {
+                        policy,
+                        streaming_vnode_bitmap: None,
+                        serving_vnode_bitmap: None,
+                    },
+                )])),
+            }
+        };
+        let delta = SstDeltaInfo {
+            insert_sst_infos: vec![sst_info],
+            delete_sst_object_ids: vec![sst_object_id],
+            insert_sst_level: 0,
+            ..Default::default()
+        };
+        let enabled_context = build_context(CacheRefillPolicy::Enabled);
+        let enabled_tasks = DataCacheRefillTaskGenerator {
+            context: &enabled_context,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
+        }
+        .generate()
+        .await;
+        assert!(
+            !enabled_tasks.is_empty(),
+            "L0 refill should reach task generation before the table policy filter"
+        );
+
+        let disabled_context = build_context(CacheRefillPolicy::Disabled);
+        let disabled_tasks = DataCacheRefillTaskGenerator {
+            context: &disabled_context,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
+        }
+        .generate()
+        .await;
+
+        assert!(
+            disabled_tasks.is_empty(),
+            "L0 should skip inheritance filter but still apply table cache refill policy"
+        );
     }
 
     #[test]
