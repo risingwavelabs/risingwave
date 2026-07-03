@@ -65,6 +65,7 @@ enum ManagerRequest {
     NewSinkWriter(SinkWriterCoordinationHandle),
     WaitCommitsDrained {
         sink_id: SinkId,
+        target_epoch: u64,
         reply: Sender<anyhow::Result<()>>,
     },
     StopCoordinator {
@@ -179,11 +180,16 @@ impl SinkCoordinatorManager {
         Ok(UnboundedReceiverStream::new(response_rx))
     }
 
-    pub async fn wait_sink_commits_drained(&self, sink_id: SinkId) -> anyhow::Result<()> {
+    pub async fn wait_sink_commits_drained(
+        &self,
+        sink_id: SinkId,
+        target_epoch: u64,
+    ) -> anyhow::Result<()> {
         let (tx, rx) = channel();
         self.request_tx
             .send(ManagerRequest::WaitCommitsDrained {
                 sink_id,
+                target_epoch,
                 reply: tx,
             })
             .await
@@ -275,9 +281,11 @@ impl ManagerWorker {
                     ManagerRequest::NewSinkWriter(request) => {
                         self.handle_new_sink_writer(request, &mut spawn_coordinator_worker)
                     }
-                    ManagerRequest::WaitCommitsDrained { sink_id, reply } => {
-                        self.handle_wait_commits_drained(sink_id, reply)
-                    }
+                    ManagerRequest::WaitCommitsDrained {
+                        sink_id,
+                        target_epoch,
+                        reply,
+                    } => self.handle_wait_commits_drained(sink_id, target_epoch, reply),
                     ManagerRequest::StopCoordinator {
                         finish_notifier,
                         sink_ids,
@@ -398,13 +406,21 @@ impl ManagerWorker {
         }
     }
 
-    fn handle_wait_commits_drained(&mut self, sink_id: SinkId, reply: Sender<anyhow::Result<()>>) {
+    fn handle_wait_commits_drained(
+        &mut self,
+        sink_id: SinkId,
+        target_epoch: u64,
+        reply: Sender<anyhow::Result<()>>,
+    ) {
         let Some(worker_handle) = self.running_coordinator_worker.get(&sink_id) else {
             send_with_err_check!(reply, Ok(()));
             return;
         };
 
-        if let Err(err) = worker_handle.drain_sender.send(DrainRequest { reply }) {
+        if let Err(err) = worker_handle.drain_sender.send(DrainRequest {
+            target_epoch,
+            reply,
+        }) {
             send_with_err_check!(
                 err.0.reply,
                 Err(anyhow!(
@@ -1895,97 +1911,6 @@ mod tests {
 
         let rows = list_rows(&db).await;
         assert!(rows.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_wait_commits_drained_without_target_epoch_ack() {
-        let db = prepare_db_backend().await;
-
-        let param = SinkParam {
-            sink_id: SinkId::from(1),
-            sink_name: "test".into(),
-            properties: Default::default(),
-            columns: vec![],
-            downstream_pk: None,
-            sink_type: SinkType::AppendOnly,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
-
-        let all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
-        let build_bitmap = |indexes: &[usize]| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
-            for i in indexes {
-                builder.set(*i, true);
-            }
-            builder.finish()
-        };
-        let vnode = build_bitmap(&all_vnode);
-
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-            async move { Ok((1, receiver)) }.boxed()
-        });
-
-        let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
-                let expected_param = param.clone();
-                let db = db.clone();
-                move |param, new_writer_rx, drain_rx| {
-                    let expected_param = expected_param.clone();
-                    let db = db.clone();
-                    tokio::spawn({
-                        let subscriber = mock_subscriber.clone();
-                        async move {
-                            assert_eq!(param, expected_param);
-                            CoordinatorWorker::execute_coordinator(
-                                db,
-                                param.clone(),
-                                new_writer_rx,
-                                drain_rx,
-                                MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, _metadata_list, _schema_change| {
-                                        Err(SinkError::Coordinator(anyhow!(
-                                            "pre_commit should not be called without commit requests"
-                                        )))
-                                    },
-                                    move |_epoch, _commit_metadata| unreachable!(),
-                                    move |_epoch, _schema_change| unreachable!(),
-                                ),
-                                subscriber.clone(),
-                            )
-                            .await;
-                        }
-                    })
-                }
-            });
-
-        let mut client =
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
-            .await
-            .unwrap()
-            .0;
-
-        let aligned_epoch = client.align_initial_epoch(1).await.unwrap();
-        assert_eq!(aligned_epoch, 1);
-
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(1),
-            manager.wait_sink_commits_drained(param.sink_id),
-        )
-        .await
-        .expect("drain waiter should not depend on writer acking target epoch")
-        .unwrap();
     }
 
     #[tokio::test]

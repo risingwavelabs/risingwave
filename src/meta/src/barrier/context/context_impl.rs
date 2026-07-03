@@ -875,7 +875,7 @@ impl PostCollectCommand {
                         WAIT_SINK_COMMITS_DRAINED_TIMEOUT,
                         barrier_manager_context
                             .sink_manager
-                            .wait_sink_commits_drained(old_sink_id),
+                            .wait_sink_commits_drained(old_sink_id, target_epoch),
                     )
                     .await
                     {
