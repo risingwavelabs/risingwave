@@ -23,10 +23,10 @@ curl_args=(
   --silent
   --connect-timeout 5
   --max-time 30
-  -u "${ELASTICSEARCH_USER}:${ELASTICSEARCH_PASSWORD}"
+  -u "${SEARCH_SINK_USER}:${SEARCH_SINK_PASSWORD}"
   -H 'Content-Type: application/json'
   -X "${method}"
-  "${RISEDEV_ELASTICSEARCH_URL}${path}"
+  "${SEARCH_SINK_URL}${path}"
 )
 
 if [ "${#data_args[@]}" -gt 0 ]; then

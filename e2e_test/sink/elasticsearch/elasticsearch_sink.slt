@@ -1,11 +1,11 @@
 control substitution on
 
 system ok retry 30 backoff 1s
-test "$(elasticsearch GET '/' | python3 -c "import json,sys; print(json.load(sys.stdin).get('cluster_name', '') != '')")" = "True"
+search GET '/' >/dev/null
 
 system ok
 for index in test test1 test_route; do
-  elasticsearch DELETE "/${index}" >/dev/null 2>&1 || true
+  search DELETE "/${index}" >/dev/null 2>&1 || true
 done
 
 statement ok
@@ -34,33 +34,33 @@ CREATE TABLE test_route (
 # Invalid field: foo, allowed fields: {"username", "url", "password"}
 statement error
 create connection es_conn_1 with (
-  type = 'elasticsearch',
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
   foo = 'bar',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}',
-  password = '${ELASTICSEARCH_PASSWORD}'
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}',
+  password = '${SEARCH_SINK_PASSWORD}'
 );
 
 # please set the password when the username is set.
 statement error
 create connection es_conn_1 with (
-  type = 'elasticsearch',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}'
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}'
 );
 
 statement ok
 create connection es_conn with (
-  type = 'elasticsearch',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}',
-  password = '${ELASTICSEARCH_PASSWORD}',
+  type = '${SEARCH_SINK_CONNECTION_TYPE}',
+  url = '${SEARCH_SINK_URL}',
+  username = '${SEARCH_SINK_USER}',
+  password = '${SEARCH_SINK_PASSWORD}',
 );
 
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
-    connector = 'elasticsearch',
+    connector = '${SEARCH_SINK_CONNECTOR}',
     index = 'test_route',
     connection = es_conn,
     routing_column = 'v3'
@@ -69,14 +69,14 @@ CREATE SINK test_route_sink from test_route WITH (
 statement ok
 CREATE SINK s7 from t7 WITH (
     type = 'upsert',
-    ${RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON},
+    ${SEARCH_SINK_WITH_OPTIONS_COMMON},
     index = 'test'
 );
 
 statement ok
 CREATE SINK s8 from t7 WITH (
     type = 'upsert',
-    ${RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON},
+    ${SEARCH_SINK_WITH_OPTIONS_COMMON},
     index = 'test1',
     primary_key = 'v1,v3',
     delimiter = '_'
@@ -110,19 +110,19 @@ statement ok
 FLUSH;
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "6"
+test "$(search GET '/test/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "6"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 55))")" = "1"
+test "$(search GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 55))")" = "1"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 50))")" = "1"
+test "$(search GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 50))")" = "1"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test1/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "7"
+test "$(search GET '/test1/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "7"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test_route/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(','.join(sorted(d.get('_routing', '') for d in docs)))")" = "test1,test2,test3"
+test "$(search GET '/test_route/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(','.join(sorted(d.get('_routing', '') for d in docs)))")" = "test1,test2,test3"
 
 statement ok
 DROP SINK s7;
@@ -138,8 +138,3 @@ DROP TABLE test_route;
 
 statement ok
 DROP TABLE t7;
-
-system ok
-for index in test test1 test_route; do
-  elasticsearch DELETE "/${index}" >/dev/null 2>&1 || true
-done

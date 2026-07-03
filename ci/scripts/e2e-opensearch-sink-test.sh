@@ -8,6 +8,12 @@ export OPENSEARCH_USER="admin"
 export OPENSEARCH_PASSWORD="Risingwave123!"
 export RISEDEV_OPENSEARCH_URL="http://opensearch:9200"
 export RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON="connector='opensearch',url='${RISEDEV_OPENSEARCH_URL}',username='${OPENSEARCH_USER}',password='${OPENSEARCH_PASSWORD}'"
+export SEARCH_SINK_CONNECTOR="opensearch"
+export SEARCH_SINK_CONNECTION_TYPE="elasticsearch"
+export SEARCH_SINK_URL="${RISEDEV_OPENSEARCH_URL}"
+export SEARCH_SINK_USER="${OPENSEARCH_USER}"
+export SEARCH_SINK_PASSWORD="${OPENSEARCH_PASSWORD}"
+export SEARCH_SINK_WITH_OPTIONS_COMMON="${RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON}"
 
 echo "--- check opensearch"
 for attempt in $(seq 1 60); do
@@ -24,4 +30,4 @@ for attempt in $(seq 1 60); do
 done
 
 echo "--- testing opensearch sink"
-sqllogictest -p 4566 -d dev './e2e_test/sink/opensearch_sink.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'
