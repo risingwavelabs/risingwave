@@ -34,10 +34,11 @@ use prometheus::{
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::key::{FullKey, vnode_range};
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
@@ -301,13 +302,34 @@ fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> 
     (start..end).any(|vnode| bitmap.is_set(vnode))
 }
 
+type BorrowedTableKeyRange<'a> = (Bound<TableKey<&'a [u8]>>, Bound<TableKey<&'a [u8]>>);
+
+fn vnode_range_ref(range: &BorrowedTableKeyRange<'_>) -> (usize, usize) {
+    let (left, right) = range;
+    let left = match left {
+        Bound::Included(key) | Bound::Excluded(key) => key.vnode_part().to_index(),
+        Bound::Unbounded => 0,
+    };
+    let right = match right {
+        Bound::Included(key) => key.vnode_part().to_index() + 1,
+        Bound::Excluded(key) => {
+            let (vnode, inner_key) = key.split_vnode();
+            if inner_key.is_empty() {
+                vnode.to_index()
+            } else {
+                vnode.to_index() + 1
+            }
+        }
+        Bound::Unbounded => VirtualNode::MAX_REPRESENTABLE.to_index() + 1,
+    };
+    (left, right)
+}
+
 impl TableCacheRefillContext {
     /// Check whether the given sstable block should be refilled according to the vnode mapping.
     fn check_table_refill_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
         let block_smallest_key =
-            FullKey::decode(&sstable.meta.block_metas[block_index].smallest_key)
-                .to_vec()
-                .into_bytes();
+            FullKey::decode(&sstable.meta.block_metas[block_index].smallest_key);
         let block_largest_key = FullKey::decode(
             sstable
                 .meta
@@ -315,25 +337,13 @@ impl TableCacheRefillContext {
                 .get(block_index + 1)
                 .map(|b| &b.smallest_key)
                 .unwrap_or_else(|| &sstable.meta.largest_key),
-        )
-        .to_vec()
-        .into_bytes();
+        );
 
         let table_key_range = (
             Bound::Included(block_smallest_key.user_key.table_key),
             Bound::Excluded(block_largest_key.user_key.table_key),
         );
-        let vnode_range = vnode_range(&table_key_range);
-
-        let num_bits = self
-            .streaming_vnode_bitmap
-            .as_ref()
-            .map(|b| b.len())
-            .or(self.serving_vnode_bitmap.as_ref().map(|b| b.len()))
-            .unwrap_or(0);
-        if num_bits == 0 {
-            return false;
-        }
+        let vnode_range = vnode_range_ref(&table_key_range);
         if let Some(streaming_bitmap) = &self.streaming_vnode_bitmap
             && vnode_range_overlaps_bitmap(vnode_range, streaming_bitmap)
         {
@@ -750,8 +760,7 @@ impl DataCacheRefillTaskGenerator<'_> {
             });
         }
 
-        #[expect(clippy::mutable_key_type)]
-        let mut filtered: HashSet<DataCacheRefillTask> = HashSet::default();
+        let mut filtered: HashSet<SstableUnit> = HashSet::default();
         let recent_filter = self.context.sstable_store.recent_filter();
         for psst in parent_ssts {
             for pblk in 0..psst.block_count() {
@@ -776,11 +785,12 @@ impl DataCacheRefillTaskGenerator<'_> {
 
                 // overlapping: uleft..uright
                 for task in originals.iter().take(uright).skip(uleft) {
-                    if filtered.contains(task) {
+                    let unit = task.unit();
+                    if filtered.contains(&unit) {
                         continue;
                     }
                     if recent_filter.contains(&(psst.id, pblk)) {
-                        filtered.insert(task.clone());
+                        filtered.insert(unit);
                     }
                 }
             }
@@ -795,7 +805,10 @@ impl DataCacheRefillTaskGenerator<'_> {
             .data_refill_unit_inheritance_miss_total
             .inc_by(miss as u64);
 
-        filtered.into_iter().collect()
+        originals
+            .into_iter()
+            .filter(|task| filtered.contains(&task.unit()))
+            .collect()
     }
 
     /// Filter tasks by table cache refill policy and related table id and vnode mapping.
@@ -829,28 +842,20 @@ impl DataCacheRefillTaskGenerator<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct DataCacheRefillTask {
     sst: TableHolder,
     blks: Range<usize>,
 }
 
-impl PartialEq for DataCacheRefillTask {
-    fn eq(&self, other: &Self) -> bool {
-        self.sst.id == other.sst.id && self.blks == other.blks
-    }
-}
-
-impl Eq for DataCacheRefillTask {}
-
-impl Hash for DataCacheRefillTask {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.sst.id.hash(state);
-        self.blks.hash(state);
-    }
-}
-
 impl DataCacheRefillTask {
+    fn unit(&self) -> SstableUnit {
+        SstableUnit {
+            sst_obj_id: self.sst.id,
+            blks: self.blks.clone(),
+        }
+    }
+
     fn smallest_key(&self) -> &[u8] {
         &self.sst.meta.block_metas[self.blks.start].smallest_key
     }
