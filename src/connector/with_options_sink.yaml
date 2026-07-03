@@ -528,6 +528,18 @@ IcebergConfig:
   - name: adlsgen2.endpoint
     field_type: String
     required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.

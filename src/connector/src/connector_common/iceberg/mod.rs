@@ -28,8 +28,9 @@ use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
-    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
-    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
+    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, ADLS_AUTHORITY_HOST, ADLS_CLIENT_ID, ADLS_CLIENT_SECRET,
+    ADLS_TENANT_ID, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
+    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use moka::future::Cache as MokaCache;
@@ -97,6 +98,14 @@ pub struct IcebergCommon {
     pub adlsgen2_account_key: Option<String>,
     #[serde(rename = "adlsgen2.endpoint")]
     pub adlsgen2_endpoint: Option<String>,
+    #[serde(rename = "adlsgen2.tenant_id")]
+    pub adlsgen2_tenant_id: Option<String>,
+    #[serde(rename = "adlsgen2.client_id")]
+    pub adlsgen2_client_id: Option<String>,
+    #[serde(rename = "adlsgen2.client_secret")]
+    pub adlsgen2_client_secret: Option<String>,
+    #[serde(rename = "adlsgen2.authority_host")]
+    pub adlsgen2_authority_host: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -207,6 +216,10 @@ const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
     SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
+
+/// Default Microsoft Entra (AAD) authority host for public Azure. Sovereign-cloud
+/// users override via `adlsgen2.authority_host`.
+const ADLS_DEFAULT_AUTHORITY_HOST: &str = "https://login.microsoftonline.com";
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -366,6 +379,16 @@ impl IcebergCommon {
         let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
+            // Non-S3/Glue object-store backends only work with a REST catalog. This
+            // function is only invoked for catalog_type in {hive, snowflake, jdbc, rest,
+            // glue}, so the only accepted value here is "rest".
+            let require_rest = |backend: &str| -> ConnectorResult<()> {
+                if catalog_type != "rest" {
+                    bail!("{} unsupported in {} catalog", backend, &catalog_type);
+                }
+                Ok(())
+            };
+
             if let Some(region) = &self.s3_region {
                 // iceberg-rust
                 iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
@@ -388,9 +411,7 @@ impl IcebergCommon {
             }
             if let Some(gcs_credential) = &self.gcs_credential {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
-                if catalog_type != "rest" && catalog_type != "rest_rust" {
-                    bail!("gcs unsupported in {} catalog", &catalog_type);
-                }
+                require_rest("gcs")?;
             }
 
             if let (
@@ -406,20 +427,91 @@ impl IcebergCommon {
                 iceberg_configs.insert(AZBLOB_ACCOUNT_KEY.to_owned(), azblob_account_key.clone());
                 iceberg_configs.insert(AZBLOB_ENDPOINT.to_owned(), azblob_endpoint_url.clone());
 
-                if catalog_type != "rest" && catalog_type != "rest_rust" {
-                    bail!("azblob unsupported in {} catalog", &catalog_type);
+                require_rest("azblob")?;
+            }
+
+            // Validate adlsgen2 auth configuration before populating iceberg_configs.
+            // Treat empty and whitespace-only strings as unset — serde surfaces
+            // `adlsgen2.tenant_id = ''` (or a value with trailing `\n` from a copy-paste)
+            // as `Some("...")` which would pass `is_some()` but break downstream auth.
+            fn nonempty(v: &Option<String>) -> Option<&str> {
+                v.as_deref().filter(|s| !s.trim().is_empty())
+            }
+            let sp_tenant = nonempty(&self.adlsgen2_tenant_id);
+            let sp_client = nonempty(&self.adlsgen2_client_id);
+            let sp_secret = nonempty(&self.adlsgen2_client_secret);
+            let sp_authority = nonempty(&self.adlsgen2_authority_host);
+            let sk_account_name = nonempty(&self.adlsgen2_account_name);
+            let sk_account_key = nonempty(&self.adlsgen2_account_key);
+            let any_sp_field = sp_tenant.is_some()
+                || sp_client.is_some()
+                || sp_secret.is_some()
+                || sp_authority.is_some();
+            let all_sp_required = sp_tenant.is_some() && sp_client.is_some() && sp_secret.is_some();
+
+            if sk_account_key.is_some() && any_sp_field {
+                bail!(
+                    "adlsgen2: cannot configure both shared-key auth \
+                     (adlsgen2.account_key) and service-principal auth \
+                     (adlsgen2.tenant_id / adlsgen2.client_id / adlsgen2.client_secret / \
+                     adlsgen2.authority_host) simultaneously. Specify exactly one auth mode."
+                );
+            }
+            if any_sp_field && !all_sp_required {
+                bail!(
+                    "adlsgen2: service-principal auth requires all three of \
+                     adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret \
+                     to be set. (adlsgen2.authority_host is optional and defaults to the \
+                     public Azure AAD endpoint.)"
+                );
+            }
+            // Defense in depth: reqsign POSTs the OAuth token request — carrying the
+            // client_secret to this host. Require a bare https origin: no userinfo,
+            // no query, no fragment, and no path beyond "/". The value itself is not
+            // echoed into error messages in case a user pasted a secret by mistake.
+            if let Some(host) = sp_authority {
+                let parsed = Url::parse(host).map_err(|_| {
+                    anyhow!(
+                        "adlsgen2.authority_host does not parse as a URL ({} chars)",
+                        host.len()
+                    )
+                })?;
+                if parsed.scheme() != "https" {
+                    bail!(
+                        "adlsgen2.authority_host must use the https scheme, got {}",
+                        parsed.scheme()
+                    );
+                }
+                if !parsed.username().is_empty() || parsed.password().is_some() {
+                    bail!("adlsgen2.authority_host must not contain userinfo");
+                }
+                if parsed.query().is_some() || parsed.fragment().is_some() {
+                    bail!("adlsgen2.authority_host must not contain a query or fragment");
+                }
+                if !matches!(parsed.path(), "" | "/") {
+                    bail!("adlsgen2.authority_host must not contain a path component");
                 }
             }
 
-            if let (Some(account_name), Some(account_key)) = (
-                self.adlsgen2_account_name.as_ref(),
-                self.adlsgen2_account_key.as_ref(),
-            ) {
-                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.clone());
-                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.clone());
-                if catalog_type != "rest" && catalog_type != "rest_rust" {
-                    bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
-                }
+            if let (Some(account_name), Some(account_key)) = (sk_account_name, sk_account_key) {
+                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.to_owned());
+                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.to_owned());
+                require_rest("adlsgen2")?;
+            }
+
+            if let (Some(tenant_id), Some(client_id), Some(client_secret)) =
+                (sp_tenant, sp_client, sp_secret)
+            {
+                iceberg_configs.insert(ADLS_TENANT_ID.to_owned(), tenant_id.to_owned());
+                iceberg_configs.insert(ADLS_CLIENT_ID.to_owned(), client_id.to_owned());
+                iceberg_configs.insert(ADLS_CLIENT_SECRET.to_owned(), client_secret.to_owned());
+                // Strip trailing slash to prevent double slash
+                let authority_host = sp_authority
+                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
+                    .trim_end_matches('/')
+                    .to_owned();
+                iceberg_configs.insert(ADLS_AUTHORITY_HOST.to_owned(), authority_host);
+                require_rest("adlsgen2")?;
             }
 
             match &self.warehouse_path {
@@ -995,6 +1087,10 @@ mod tests {
             adlsgen2_account_name: None,
             adlsgen2_account_key: None,
             adlsgen2_endpoint: None,
+            adlsgen2_tenant_id: None,
+            adlsgen2_client_id: None,
+            adlsgen2_client_secret: None,
+            adlsgen2_authority_host: None,
             warehouse_path: Some("s3://bucket/warehouse".to_owned()),
             catalog_name: None,
             catalog_uri: None,
@@ -1034,6 +1130,131 @@ mod tests {
             "arn:aws:iam::123456789012:role/risingwave-s3"
         );
         assert!(!java_catalog_configs.contains_key("client.factory"));
+    }
+
+    #[test]
+    fn test_adlsgen2_service_principal_populates_file_io_configs_with_default_authority_host() {
+        let common = test_adlsgen2_service_principal_common(None);
+
+        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(file_io_props.get(ADLS_TENANT_ID).unwrap(), "tenant-uuid");
+        assert_eq!(file_io_props.get(ADLS_CLIENT_ID).unwrap(), "client-uuid");
+        assert_eq!(
+            file_io_props.get(ADLS_CLIENT_SECRET).unwrap(),
+            "secret-value"
+        );
+        assert_eq!(
+            file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
+            ADLS_DEFAULT_AUTHORITY_HOST
+        );
+    }
+
+    fn test_adlsgen2_service_principal_common(authority_host: Option<&str>) -> IcebergCommon {
+        IcebergCommon {
+            adlsgen2_account_name: Some("acct".to_owned()),
+            adlsgen2_tenant_id: Some("tenant-uuid".to_owned()),
+            adlsgen2_client_id: Some("client-uuid".to_owned()),
+            adlsgen2_client_secret: Some("secret-value".to_owned()),
+            adlsgen2_authority_host: authority_host.map(str::to_owned),
+            warehouse_path: Some("abfss://wh@acct.dfs.core.windows.net/wh".to_owned()),
+            ..test_common("rest")
+        }
+    }
+
+    #[test]
+    fn test_adlsgen2_service_principal_authority_host_override_is_respected() {
+        let common =
+            test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us"));
+
+        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(
+            file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
+            "https://login.microsoftonline.us"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_authority_host_rejects_non_bare_https_origins() {
+        let cases = [
+            ("not a url", "does not parse as a URL"),
+            (
+                "http://login.microsoftonline.com",
+                "must use the https scheme",
+            ),
+            (
+                "https://user:pass@login.microsoftonline.com",
+                "must not contain userinfo",
+            ),
+            (
+                "https://login.microsoftonline.com?bar=baz",
+                "must not contain a query or fragment",
+            ),
+            (
+                "https://login.microsoftonline.com#frag",
+                "must not contain a query or fragment",
+            ),
+            (
+                "https://login.microsoftonline.com/foo",
+                "must not contain a path component",
+            ),
+        ];
+        for (authority_host, expected_error) in cases {
+            let common = test_adlsgen2_service_principal_common(Some(authority_host));
+            let err = common
+                .build_jni_catalog_configs(&HashMap::new())
+                .unwrap_err();
+            assert!(
+                format!("{:#}", err).contains(expected_error),
+                "authority_host {authority_host:?}: expected error containing {expected_error:?}, got: {err:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_adlsgen2_authority_host_trailing_slash_is_normalized() {
+        let common =
+            test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us/"));
+
+        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(
+            file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
+            "https://login.microsoftonline.us"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_rejects_mixing_shared_key_and_service_principal() {
+        let common = IcebergCommon {
+            adlsgen2_account_key: Some("shared-key".to_owned()),
+            ..test_adlsgen2_service_principal_common(None)
+        };
+
+        let err = common
+            .build_jni_catalog_configs(&HashMap::new())
+            .unwrap_err();
+        assert!(
+            format!("{:#}", err).contains("exactly one auth mode"),
+            "expected mutual-exclusion error, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn test_adlsgen2_rejects_partial_service_principal_config() {
+        let common = IcebergCommon {
+            adlsgen2_client_secret: None,
+            ..test_adlsgen2_service_principal_common(None)
+        };
+
+        let err = common
+            .build_jni_catalog_configs(&HashMap::new())
+            .unwrap_err();
+        assert!(
+            format!("{:#}", err).contains("requires all three"),
+            "expected partial-config error, got: {err:#}"
+        );
     }
 
     #[test]
