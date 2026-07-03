@@ -201,6 +201,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                     r#"SEARCH_SINK_WITH_OPTIONS_COMMON="connector='elasticsearch',url='{url}',username='{user}',password='{password}'""#,
                 )
                 .unwrap();
+                writeln!(
+                    env,
+                    r#"SEARCH_SINK_ROUTE_WITH_OPTIONS="connector='elasticsearch',connection=es_conn""#,
+                )
+                .unwrap();
             }
             ServiceConfig::OpenSearch(c) => {
                 let host = &c.address;
@@ -226,6 +231,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(
                     env,
                     r#"SEARCH_SINK_WITH_OPTIONS_COMMON="connector='opensearch',url='{url}',username='{user}',password='{password}'""#,
+                )
+                .unwrap();
+                writeln!(
+                    env,
+                    r#"SEARCH_SINK_ROUTE_WITH_OPTIONS="connector='opensearch',url='{url}',username='{user}',password='{password}'""#,
                 )
                 .unwrap();
             }

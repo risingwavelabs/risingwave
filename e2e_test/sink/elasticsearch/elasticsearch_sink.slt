@@ -60,9 +60,8 @@ create connection es_conn with (
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
-    connector = '${SEARCH_SINK_CONNECTOR}',
+    ${SEARCH_SINK_ROUTE_WITH_OPTIONS},
     index = 'test_route',
-    connection = es_conn,
     routing_column = 'v3'
 );
 
