@@ -522,7 +522,6 @@ enum CoordinatorWorkerEvent {
 }
 
 pub(super) struct DrainRequest {
-    pub target_epoch: u64,
     pub reply: oneshot::Sender<anyhow::Result<()>>,
 }
 
@@ -656,18 +655,9 @@ impl CoordinatorWorker {
             return;
         }
 
-        let mut remaining_waiters = Vec::new();
         for waiter in self.drain_waiters.drain(..) {
-            if self
-                .last_writer_acked_epoch
-                .is_some_and(|epoch| epoch >= waiter.target_epoch)
-            {
-                let _ = waiter.reply.send(Ok(()));
-            } else {
-                remaining_waiters.push(waiter);
-            }
+            let _ = waiter.reply.send(Ok(()));
         }
-        self.drain_waiters = remaining_waiters;
     }
 
     async fn next_event(
