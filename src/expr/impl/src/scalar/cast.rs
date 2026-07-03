@@ -25,7 +25,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::row_id_to_unix_millis;
-use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
+use risingwave_expr::expr::{Context, InputRefExpression, SyncExpressionBoxExt, build_func};
 use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;

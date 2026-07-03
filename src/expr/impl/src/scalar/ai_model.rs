@@ -26,7 +26,9 @@ use risingwave_common::metrics::*;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, F32, ScalarImpl};
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo,
+};
 use risingwave_expr::{ExprError, Result, build_function};
 use serde::Deserialize;
 use serde_json::Value;
@@ -261,12 +263,13 @@ impl Drop for OpenAiEmbeddingInflightGuard {
     }
 }
 
-#[async_trait::async_trait]
-impl Expression for OpenAiEmbedding {
+impl ExpressionInfo for OpenAiEmbedding {
     fn return_type(&self) -> DataType {
         DataType::Float32.list()
     }
+}
 
+impl AsyncExpression for OpenAiEmbedding {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let text_array = self.text_expr.eval(input).await?;
         let text_array = text_array.as_utf8();
@@ -379,12 +382,13 @@ fn build_openai_embedding_expr(
 
     let context = OpenAiEmbeddingContext::from_config(config)?;
 
-    Ok(Box::new(OpenAiEmbedding {
+    Ok(OpenAiEmbedding {
         text_expr: children.pop().unwrap(), // Take the second expression
         metrics: GLOBAL_OPENAI_EMBEDDING_METRICS
             .with_label_values(&context.model, &context.api_base),
         context,
-    }))
+    }
+    .boxed())
 }
 
 /// Monitor metrics for `openai_embedding`.

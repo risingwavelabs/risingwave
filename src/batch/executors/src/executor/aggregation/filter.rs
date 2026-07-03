@@ -13,23 +13,22 @@
 // limitations under the License.
 
 use std::ops::Range;
-use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::Result;
 use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
-use risingwave_expr::expr::Expression;
+use risingwave_expr::expr::BoxedExpression;
 
 /// A special aggregator that filters out rows that do not satisfy the given _condition_
 /// and feeds the rows that satisfy to the _inner_ aggregator.
 pub struct Filter {
-    condition: Arc<dyn Expression>,
+    condition: BoxedExpression,
     inner: BoxedAggregateFunction,
 }
 
 impl Filter {
-    pub fn new(condition: Arc<dyn Expression>, inner: BoxedAggregateFunction) -> Self {
+    pub fn new(condition: BoxedExpression, inner: BoxedAggregateFunction) -> Self {
         assert_eq!(condition.return_type(), DataType::Boolean);
         Self { condition, inner }
     }
@@ -75,7 +74,7 @@ impl AggregateFunction for Filter {
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_expr::aggregate::{AggCall, build_append_only};
-    use risingwave_expr::expr::{ExpressionBoxExt, LiteralExpression, build_from_pretty};
+    use risingwave_expr::expr::{LiteralExpression, SyncExpressionBoxExt, build_from_pretty};
 
     use super::*;
 
@@ -83,7 +82,7 @@ mod tests {
     async fn test_selective_agg_always_true() -> Result<()> {
         let condition = LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed();
         let agg = Filter::new(
-            condition.into(),
+            condition,
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state()?;
@@ -112,7 +111,7 @@ mod tests {
     async fn test_selective_agg() -> Result<()> {
         let expr = build_from_pretty("(greater_than:boolean $0:int8 5:int8)");
         let agg = Filter::new(
-            expr.into(),
+            expr,
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state()?;
@@ -144,7 +143,7 @@ mod tests {
     async fn test_selective_agg_null_condition() -> Result<()> {
         let expr = build_from_pretty("(equal:boolean $0:int8 null:int8)");
         let agg = Filter::new(
-            expr.into(),
+            expr,
             build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state()?;
