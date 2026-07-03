@@ -3,8 +3,9 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-ghcraddr="ghcr.io/risingwavelabs/risingwave"
-dockerhubaddr="risingwavelabs/risingwave"
+IMAGE_NAME=${IMAGE_NAME:-risingwave}
+ghcraddr="ghcr.io/risingwavelabs/${IMAGE_NAME}"
+dockerhubaddr="risingwavelabs/${IMAGE_NAME}"
 arch="$(uname -m)"
 CARGO_PROFILE=${CARGO_PROFILE:-production}
 
@@ -34,7 +35,8 @@ if [[ "${ALWAYS_PULL:-false}" = "true" ]]; then
   PULL_PARAM="--pull"
 fi
 
-docker buildx build -f docker/Dockerfile \
+DOCKER_FILE=${DOCKER_FILE:-docker/Dockerfile}
+docker buildx build -f "${DOCKER_FILE}" \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --build-arg "CARGO_PROFILE=${CARGO_PROFILE}" \
   -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
@@ -42,19 +44,23 @@ docker buildx build -f docker/Dockerfile \
   --builder=container \
   --load \
   ${PULL_PARAM} \
-  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
-  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/${IMAGE_NAME}-build-cache:${arch}" \
+  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/${IMAGE_NAME}-build-cache:${arch}" \
   .
 
 echo "--- check the image can start correctly"
-container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
-sleep 10
-container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
-if [ "$container_status" != "running" ]; then
-  echo "docker run failed with status $container_status"
-  docker inspect "$container_id"
-  docker logs "$container_id"
-  exit 1
+if [[ "${IMAGE_NAME}" == "risectl" ]]; then
+  docker run --rm "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --help
+else
+  container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
+  sleep 10
+  container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
+  if [ "$container_status" != "running" ]; then
+    echo "docker run failed with status $container_status"
+    docker inspect "$container_id"
+    docker logs "$container_id"
+    exit 1
+  fi
 fi
 
 echo "--- docker images"
