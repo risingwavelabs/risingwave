@@ -33,7 +33,9 @@ use tokio_postgres::types::Type as PgType;
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
-use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::connector_common::{
+    PostgresExternalTable, PostgresExternalTableConnectOptions, SslMode, create_pg_client,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -194,7 +196,10 @@ impl Sink for PostgresSink {
                 &self.config.table,
                 &self.config.ssl_mode,
                 &self.config.ssl_root_cert,
-                self.is_append_only,
+                PostgresExternalTableConnectOptions {
+                    is_append_only: self.is_append_only,
+                    required_table_privilege: None,
+                },
             )
             .await
             .context(format!(
