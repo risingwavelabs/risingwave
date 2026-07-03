@@ -15,8 +15,9 @@ set -euo pipefail
 export PATH=$PATH:/var/lib/buildkite-agent/.local/bin
 
 date="$(date +%Y%m%d)"
-ghcraddr="ghcr.io/risingwavelabs/risingwave"
-dockerhubaddr="risingwavelabs/risingwave"
+IMAGE_NAME=${IMAGE_NAME:-risingwave}
+ghcraddr="ghcr.io/risingwavelabs/${IMAGE_NAME}"
+dockerhubaddr="risingwavelabs/${IMAGE_NAME}"
 
 
 arches=()
