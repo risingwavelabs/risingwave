@@ -27,7 +27,8 @@ select * from t match_recognize (
   pattern (a b a)
   subset u = (a, b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # id=1: up(10) down(-5) up(20) then trailing up(1) to finalize; sentinel advances the watermark.
 # match rows = [10, -5, 20]: FIRST(u.v)=10, LAST(u.v)=20, COUNT(u.v)=3, b.v=-5.

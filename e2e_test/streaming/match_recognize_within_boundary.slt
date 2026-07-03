@@ -43,7 +43,8 @@ select * from t match_recognize (
   pattern (a b)
   within 3
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # a@10, b@13: span 13 - 10 = 3, exactly the WITHIN bound -> valid. Partition 1 has no trailing row;
 # the sentinel in partition 2 (ts 14, lateness 1) advances the watermark to 13 -- exactly this
@@ -84,7 +85,8 @@ select * from t2 match_recognize (
   pattern (a b)
   within 3
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 statement ok
 insert into t2 values (1, 10, 5);

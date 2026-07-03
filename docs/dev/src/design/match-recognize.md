@@ -111,6 +111,24 @@ across recovery replay**: re-emitting a match after a rollback reproduces byte-i
 stable, replay-deterministic match identity is also the foundation a future emit-on-update mode
 would retract against.
 
+### Emit semantics
+
+The operator emits **only final matches, at the watermark** — a match is output once no late row
+can change it. In RisingWave's emit taxonomy this is Emit-On-Window-Close behavior: the plan node
+declares it (`emit_on_window_close = true`) and the query is **required** to state it — a
+`MATCH_RECOGNIZE` materialized view must be declared `EMIT ON WINDOW CLOSE`, and the plain
+(default-emit) form is rejected with guidance. The plain form is deliberately reserved: if an
+emit-on-update mode (provisional matches corrected by retractions, keyed by the deterministic
+`_match_id`) is added later, it can adopt RisingWave's default emit semantics under the plain form
+without silently changing the meaning of any existing query — every existing query is explicit by
+construction.
+
+One composition consequence: the operator does not emit a downstream watermark, so stateful
+operators that need one under Emit-On-Window-Close (e.g. an aggregation) cannot sit above
+`MATCH_RECOGNIZE` **inside the same** `EMIT ON WINDOW CLOSE` view. Compose across views instead:
+the `MATCH_RECOGNIZE` view's output is append-only, and a plain (default-emit) view can aggregate
+it. Stateless operators (projections, filters) compose freely within the same view.
+
 ## The NFA
 
 `src/stream/src/executor/match_recognize/nfa.rs` is a self-contained, pure module (unit-tested

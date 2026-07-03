@@ -200,6 +200,20 @@ impl ToStream for LogicalMatchRecognize {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
         use super::StreamMatchRecognize;
 
+        // The operator emits only final matches, at the watermark — Emit-On-Window-Close
+        // semantics. Require the query to say so explicitly. This deliberately reserves the plain
+        // (default-emit) form: if an emit-on-update mode (provisional matches corrected by
+        // retractions) is added later, it can take over the plain form under RisingWave's default
+        // emit semantics without silently changing the meaning of any existing query.
+        if !ctx.emit_on_window_close() {
+            return Err(crate::error::ErrorCode::NotSupported(
+                "MATCH_RECOGNIZE emits only final matches (Emit-On-Window-Close semantics)"
+                    .to_owned(),
+                "declare the materialized view with EMIT ON WINDOW CLOSE".to_owned(),
+            )
+            .into());
+        }
+
         // v1 restrictions: PARTITION BY / ORDER BY must be plain columns, PARTITION BY non-empty.
         if self.core.partition_key_indices().is_none() || self.core.order_key_indices().is_none() {
             bail!(

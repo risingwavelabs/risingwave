@@ -22,7 +22,8 @@ select * from tv match_recognize (
   after match skip past last row
   pattern (a down+ up+)
   define down as down.price < prev(down.price), up as up.price > prev(up.price)
-);
+)
+emit on window close;
 
 # id=1 prices 5,4,3,4,6 then 2 (breaks the rise) and a high-ts sentinel.
 # match: a=5, down=[4,3], up=[4,6] -> start=5, bottom=3, peak=6.
@@ -50,7 +51,8 @@ select * from tr match_recognize (
   after match skip past last row
   pattern (a b)
   define a as a.price > 0, b as b.price > a.price
-);
+)
+emit on window close;
 
 # id=2 prices 10,15,8,20 then 1 (finalizes) + sentinel.
 # matches: (a=10, b=15) and (a=8, b=20); pairs where b <= a do not match.

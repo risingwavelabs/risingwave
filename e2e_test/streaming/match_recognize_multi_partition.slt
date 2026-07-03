@@ -30,7 +30,8 @@ select * from t match_recognize (
   after match skip past last row
   pattern (a b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # 100 partitions (ids 1..100). Each partition: up (ts=1, v=10) -> down (ts=2, v=-5) -> a trailing
 # safe row (ts=3, v=1). The (a b) match is ts1->ts2 (dip = -5); the ts=3 row makes that match final

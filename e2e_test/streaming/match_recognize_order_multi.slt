@@ -22,7 +22,8 @@ select * from t match_recognize (
   after match skip past last row
   pattern (a b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # id=1 has two rows at the same ts=1: k=2 (the `b`, v=-1) and k=1 (the `a`, v=5), inserted b-first.
 # Ordering by (ts, k) puts k=1 before k=2, so (a b) matches; ts=20 finalizes it and the sentinel

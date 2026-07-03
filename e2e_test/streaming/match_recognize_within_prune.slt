@@ -24,7 +24,8 @@ select * from t match_recognize (
   pattern (a+)
   within 2
   define a as a.v > 0
-);
+)
+emit on window close;
 
 # id=1 has two runs of `a` rows (v > 0): ts {0,1,2} and ts {5,6}. ts 100 has v = 0 (not `a`) and
 # terminates the second run. Without pruning, greedy `a+` from ts 0 would grab {0,1,2,5,6}, a span

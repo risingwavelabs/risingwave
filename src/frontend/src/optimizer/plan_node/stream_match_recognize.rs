@@ -51,7 +51,11 @@ impl StreamMatchRecognize {
             &core,
             dist,
             StreamKind::AppendOnly,
-            false,
+            // The operator emits only FINAL matches, at the watermark — i.e. it already satisfies
+            // Emit-On-Window-Close semantics. Declaring it lets `EMIT ON WINDOW CLOSE` queries name
+            // today's behavior explicitly, so a future emit-on-update mode can take over the plain
+            // form without silently changing the meaning of queries that were explicit.
+            true,
             WatermarkColumns::new(),
             MonotonicityMap::new(),
         );

@@ -31,7 +31,8 @@ select * from t match_recognize (
   after match skip past last row
   pattern (a+ b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # id=1: up(10) up(20) up(30) down(-3) then trailing up(1) to finalize; sentinel advances watermark.
 # match rows = [10, 20, 30, -3]: COUNT(*) = 4, COUNT(a.v) = 3, MIN = 10, MAX = 30, SUM = 60,

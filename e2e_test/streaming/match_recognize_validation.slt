@@ -18,7 +18,8 @@ select * from src match_recognize (
   one row per match
   pattern (a)
   define a as a.v > 0
-);
+)
+emit on window close;
 
 statement error ascending
 create materialized view bad_nulls as
@@ -29,7 +30,8 @@ select * from src match_recognize (
   one row per match
   pattern (a)
   define a as a.v > 0
-);
+)
+emit on window close;
 
 # PREV/NEXT offsets are physical row navigation; offset 0 would resolve to the current row, which is
 # not what the navigation means.
@@ -42,7 +44,8 @@ select * from src match_recognize (
   one row per match
   pattern (a b)
   define a as a.v > 0, b as b.v < prev(b.v, 0)
-);
+)
+emit on window close;
 
 # The executor matches over an append-only sequence and emits insert-only results; a non-append-only
 # input (here, an aggregation that produces a retract stream) must be rejected during planning.
@@ -59,7 +62,8 @@ select * from agg match_recognize (
   one row per match
   pattern (a)
   define a as a.v > 0
-);
+)
+emit on window close;
 
 statement ok
 drop materialized view agg;

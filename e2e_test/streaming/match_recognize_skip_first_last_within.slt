@@ -42,7 +42,8 @@ select * from t match_recognize (
   pattern (a b b)
   within 2
   define a as a.v > 0, b as b.v > 0
-);
+)
+emit on window close;
 
 statement ok
 create materialized view mv_first as
@@ -55,7 +56,8 @@ select * from t match_recognize (
   pattern (a b b)
   within 2
   define a as a.v > 0, b as b.v > 0
-);
+)
+emit on window close;
 
 # Partition 1: five rows ts 10..14, each v>0 so each satisfies both `a` and `b`.
 statement ok

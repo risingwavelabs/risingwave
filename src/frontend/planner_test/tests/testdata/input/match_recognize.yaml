@@ -1,4 +1,4 @@
-- name: MATCH_RECOGNIZE plans end-to-end to a stream MatchRecognize node
+- name: MATCH_RECOGNIZE plans end-to-end to a stream MatchRecognize node (EMIT ON WINDOW CLOSE required)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -12,7 +12,7 @@
     );
   expected_outputs:
     - logical_plan
-    - stream_plan
+    - eowc_stream_plan
 - name: MATCH_RECOGNIZE with a CLASSIFIER() measure
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -27,7 +27,7 @@
     );
   expected_outputs:
     - logical_plan
-    - stream_plan
+    - eowc_stream_plan
 - name: MATCH_RECOGNIZE with aggregate MEASURES over matched rows
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -42,7 +42,7 @@
     );
   expected_outputs:
     - logical_plan
-    - stream_plan
+    - eowc_stream_plan
 - name: MATCH_RECOGNIZE stream planning requires a watermark on the leading ORDER BY column
   sql: |
     create table t(id int, ts int, v int) append only;
@@ -56,7 +56,7 @@
       define a as a.v > 0, b as b.v < 0
     );
   expected_outputs:
-    - stream_error
+    - eowc_stream_error
 - name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -70,3 +70,17 @@
     );
   expected_outputs:
     - binder_error
+- name: MATCH_RECOGNIZE without EMIT ON WINDOW CLOSE is rejected (the operator emits final-only; the plain form is reserved for a future emit-on-update mode)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - stream_error

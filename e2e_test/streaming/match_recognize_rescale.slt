@@ -22,7 +22,8 @@ select * from ts match_recognize (
   after match skip past last row
   pattern (a b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
 # Buffer the leading `a` row of each partition's match (partial matches) while parallelism is 1.
 statement ok

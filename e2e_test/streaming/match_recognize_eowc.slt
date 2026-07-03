@@ -1,0 +1,72 @@
+# EMIT ON WINDOW CLOSE is REQUIRED on MATCH_RECOGNIZE.
+#
+# The operator emits only final matches at the watermark — Emit-On-Window-Close semantics — and the
+# query must say so explicitly. The plain (default-emit) form is rejected with guidance: it is
+# deliberately reserved, so a future emit-on-update mode can adopt RisingWave's default emit
+# semantics without silently changing the meaning of any existing query. Scenario mirrors
+# match_recognize_within_boundary.slt (proven expectations).
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+drop materialized view if exists mv_eowc;
+
+statement ok
+drop table if exists t_eowc;
+
+statement ok
+create table t_eowc (id int, ts int, v int, watermark for ts as ts - 1) append only;
+
+# The plain form is rejected, pointing the user at the clause.
+statement error EMIT ON WINDOW CLOSE
+create materialized view mv_eowc as
+select * from t_eowc match_recognize (
+  partition by id
+  order by ts
+  measures a.ts as a_ts, b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  within 3
+  define a as a.v > 0, b as b.v < 0
+);
+
+statement ok
+create materialized view mv_eowc as
+select * from t_eowc match_recognize (
+  partition by id
+  order by ts
+  measures a.ts as a_ts, b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  within 3
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+# a@10, b@13: span exactly the WITHIN bound -> valid; sentinel advances the watermark to the match's
+# deadline. Identical inputs and expectations as the plain-MV boundary test.
+statement ok
+insert into t_eowc values (1, 10, 5);
+
+statement ok
+insert into t_eowc values (1, 13, -1);
+
+statement ok
+insert into t_eowc values (2, 14, 0);
+
+query III rowsort
+select * from mv_eowc;
+----
+1 10 -1
+
+statement ok
+drop materialized view mv_eowc;
+
+statement ok
+drop table t_eowc;

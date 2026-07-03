@@ -8,6 +8,16 @@ set streaming_parallelism = 1;
 statement ok
 set rw_implicit_flush to true;
 
+# Self-cleaning: a mid-file failure aborts before the drops at the end, so guard re-runs.
+statement ok
+drop materialized view if exists mv_cnt;
+
+statement ok
+drop materialized view if exists mv_proj;
+
+statement ok
+drop table if exists tp;
+
 statement ok
 create table tp (id int, ts int, v int, watermark for ts as ts - 10) append only;
 
@@ -23,20 +33,16 @@ select partition_0 from tp match_recognize (
   after match skip past last row
   pattern (a b)
   define a as a.v > 0, b as b.v < 0
-);
+)
+emit on window close;
 
-# Aggregation over the match output.
+# Aggregation over the match output. Aggregating DIRECTLY over MATCH_RECOGNIZE inside the same
+# EMIT ON WINDOW CLOSE view is not possible: the operator emits no downstream watermark, and an
+# EOWC aggregation needs one to close on (the general EOWC rule, not MATCH_RECOGNIZE-specific).
+# Compose instead: the EOWC MATCH_RECOGNIZE view is append-only, and a plain view aggregates it.
 statement ok
 create materialized view mv_cnt as
-select count(*) as n from tp match_recognize (
-  partition by id
-  order by ts
-  measures b.v as dip
-  one row per match
-  after match skip past last row
-  pattern (a b)
-  define a as a.v > 0, b as b.v < 0
-);
+select count(*) as n from mv_proj;
 
 # Partition 1: two (up, down) matches; partition 2: one. Sentinel advances the watermark.
 statement ok
@@ -58,10 +64,10 @@ select * from mv_cnt;
 3
 
 statement ok
-drop materialized view mv_proj;
+drop materialized view mv_cnt;
 
 statement ok
-drop materialized view mv_cnt;
+drop materialized view mv_proj;
 
 statement ok
 drop table tp;

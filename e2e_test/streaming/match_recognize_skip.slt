@@ -23,7 +23,8 @@ select * from t match_recognize (
   after match skip to last b
   pattern (a b b)
   define a as a.v > 0, b as b.v > 0
-);
+)
+emit on window close;
 
 # id=1: six rising rows; sentinel advances the watermark so all become final.
 # matches (SKIP TO LAST b): [10,20,30] and [30,40,50].
