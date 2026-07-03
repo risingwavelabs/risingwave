@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
