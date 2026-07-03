@@ -60,6 +60,25 @@ INSERT INTO t_iceberg_replace_sink_new VALUES (2, 'new-before-replace');
 statement ok
 FLUSH;
 
+statement error does not support Iceberg sinks with `enable_pk_index='true'`
+REPLACE SINK s_iceberg_replace_sink_exactly_once FROM t_iceberg_replace_sink_new WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_exactly_once_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    write_mode = 'merge-on-read',
+    format_version = '3',
+    enable_pk_index = 'true'
+);
+
 statement ok
 REPLACE SINK s_iceberg_replace_sink_exactly_once FROM t_iceberg_replace_sink_new WITH (
     connector = 'iceberg',

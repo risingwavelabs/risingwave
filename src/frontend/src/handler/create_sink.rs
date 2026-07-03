@@ -36,7 +36,7 @@ use risingwave_common::types::{DataType, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
@@ -707,6 +707,27 @@ impl SinkCreateMode {
     }
 }
 
+fn is_iceberg_pk_index_properties(properties: &BTreeMap<String, String>) -> bool {
+    properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+        && properties
+            .get(ENABLE_PK_INDEX)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn ensure_replace_sink_not_iceberg_pk_index(properties: &BTreeMap<String, String>) -> Result<()> {
+    if is_iceberg_pk_index_properties(properties) {
+        return Err(ErrorCode::NotSupported(
+            "REPLACE SINK does not support Iceberg sinks with `enable_pk_index='true'`".to_owned(),
+            "the Iceberg pk-index writer has internal state and must be rebuilt by snapshot backfill"
+                .to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 async fn create_sink_or_replace(
     mut handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
@@ -752,6 +773,7 @@ async fn create_sink_or_replace(
                     .into());
                 }
 
+                ensure_replace_sink_not_iceberg_pk_index(&sink.properties)?;
                 sink.schema_id = original_sink.schema_id;
                 sink.database_id = original_sink.database_id;
                 sink.name = original_sink.name.clone();
@@ -868,6 +890,8 @@ fn prepare_replace_sink(
         )
         .into());
     }
+    let sink_with_options = WithOptions::try_from(stmt.with_properties.0.as_slice())?;
+    ensure_replace_sink_not_iceberg_pk_index(&sink_with_options)?;
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -908,6 +932,7 @@ fn prepare_replace_sink(
             )
             .into());
         }
+        ensure_replace_sink_not_iceberg_pk_index(&sink.properties)?;
         sink.clone()
     };
 
@@ -1261,6 +1286,17 @@ pub mod tests {
         // Frontend leaves the replacement job foreground for the meta foreground wait path.
         // Meta switches it to background when marking the job Creating during cutover.
         assert_eq!(sink.create_type, CreateType::Foreground);
+
+        let sql = r#"REPLACE SINK snk1 FROM mv1
+                    WITH (connector = 'iceberg', type = 'upsert', enable_pk_index = 'true');"#
+            .to_owned();
+        let err = frontend.run_sql(sql).await.unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "REPLACE SINK does not support Iceberg sinks with `enable_pk_index='true'`"
+            ),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
