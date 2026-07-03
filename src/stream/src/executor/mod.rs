@@ -41,7 +41,7 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -342,6 +342,7 @@ pub struct UpdateMutation {
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
+    pub dropped_actors: HashSet<ActorId>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: SplitAssignments,
     pub pause: bool,
@@ -351,6 +352,7 @@ pub struct AddMutation {
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
+    pub sink_log_store_flush: HashSet<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -511,11 +513,7 @@ impl Barrier {
 
     /// Get all actors that to be stopped (dropped) by this barrier.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
-        match self.mutation.as_deref() {
-            Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
-            Some(Mutation::Update(UpdateMutation { dropped_actors, .. })) => Some(dropped_actors),
-            _ => None,
-        }
+        self.mutation.as_deref()?.all_stop_actors()
     }
 
     /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
@@ -688,6 +686,18 @@ impl Barrier {
             })
     }
 
+    pub fn should_flush_sink_log_store(&self, sink_id: SinkId) -> bool {
+        self.mutation
+            .as_deref()
+            .is_some_and(|mutation| match mutation {
+                Mutation::Add(AddMutation {
+                    sink_log_store_flush,
+                    ..
+                }) => sink_log_store_flush.contains(&sink_id),
+                _ => false,
+            })
+    }
+
     pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
         match self.mutation.as_deref() {
             Some(Mutation::DropSubscriptions {
@@ -741,11 +751,27 @@ impl<M: PartialEq> PartialEq for BarrierInner<M> {
 }
 
 impl Mutation {
+    /// Get all actors to be stopped (dropped) by this mutation.
+    pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
+        match self {
+            Mutation::Stop(StopMutation { dropped_actors, .. })
+            | Mutation::Update(UpdateMutation { dropped_actors, .. })
+            | Mutation::Add(AddMutation { dropped_actors, .. }) => Some(dropped_actors),
+            _ => None,
+        }
+    }
+
+    /// Return true if the mutation stops the given actor.
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
+        self.all_stop_actors()
+            .is_some_and(|actors| actors.contains(&actor_id))
+    }
+
     /// Return true if the mutation is stop.
     ///
     /// Note that this does not mean we will stop the current actor.
     #[cfg(test)]
-    pub fn is_stop(&self) -> bool {
+    pub fn is_stop_mutation(&self) -> bool {
         matches!(self, Mutation::Stop(_))
     }
 
@@ -830,12 +856,14 @@ impl Mutation {
             Mutation::Add(AddMutation {
                 adds,
                 added_actors,
+                dropped_actors,
                 splits,
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
+                sink_log_store_flush,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -872,6 +900,8 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                dropped_actors: dropped_actors.iter().copied().collect(),
+                sink_log_store_flush: sink_log_store_flush.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => {
                 PbMutation::Splits(PbSourceChangeSplitMutation {
@@ -1024,6 +1054,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
                 added_actors: add.added_actors.iter().copied().collect(),
+                dropped_actors: add.dropped_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add
@@ -1063,6 +1094,7 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                sink_log_store_flush: add.sink_log_store_flush.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -1237,7 +1269,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &NonStrictExpression<impl Expression>,
+        expr: &NonStrictExpression,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
@@ -1355,7 +1387,7 @@ impl Message {
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_ref().unwrap().is_stop()
+            }) if mutation.as_ref().unwrap().is_stop_mutation()
         )
     }
 }

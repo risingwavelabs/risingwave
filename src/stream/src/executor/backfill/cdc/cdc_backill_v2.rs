@@ -36,7 +36,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, transform_upstream,
 };
@@ -441,10 +440,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     self.rate_limit_rps = entry.rate_limit;
                                                 }
                                             }
-                                            Mutation::Update(UpdateMutation {
-                                                dropped_actors,
-                                                ..
-                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                            mutation if mutation.is_stop(self.actor_ctx.id) => {
                                                 tracing::info!(
                                                     %table_id,
                                                     upstream_table_name,

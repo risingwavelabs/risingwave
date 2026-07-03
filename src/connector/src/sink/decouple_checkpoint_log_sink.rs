@@ -60,6 +60,14 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
     }
 }
 
+pub(crate) fn should_force_commit_on_checkpoint_barrier(
+    vnode_bitmap_updated: bool,
+    is_stop: bool,
+    has_schema_change: bool,
+) -> bool {
+    vnode_bitmap_updated || is_stop || has_schema_change
+}
+
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSinkerOf<W> {
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
@@ -122,7 +130,8 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                 LogStoreReadItem::Barrier {
                     is_checkpoint,
                     new_vnode_bitmap,
-                    ..
+                    is_stop,
+                    schema_change,
                 } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
@@ -131,7 +140,11 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                     if is_checkpoint {
                         current_checkpoint += 1;
                         if current_checkpoint >= commit_checkpoint_interval.get()
-                            || new_vnode_bitmap.is_some()
+                            || should_force_commit_on_checkpoint_barrier(
+                                new_vnode_bitmap.is_some(),
+                                is_stop,
+                                schema_change.is_some(),
+                            )
                         {
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
@@ -152,5 +165,26 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_force_commit_on_checkpoint_barrier;
+
+    #[test]
+    fn test_should_force_commit_on_checkpoint_barrier() {
+        assert!(!should_force_commit_on_checkpoint_barrier(
+            false, false, false
+        ));
+        assert!(should_force_commit_on_checkpoint_barrier(
+            true, false, false
+        ));
+        assert!(should_force_commit_on_checkpoint_barrier(
+            false, true, false
+        ));
+        assert!(should_force_commit_on_checkpoint_barrier(
+            false, false, true
+        ));
     }
 }

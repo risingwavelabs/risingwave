@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
@@ -520,6 +521,13 @@ enum MetaCommands {
         /// Split offsets in JSON format, e.g. '{"split-0": "100", "split-1": "200"}'
         #[clap(long)]
         offsets: String,
+    },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
     },
 }
 
@@ -1029,6 +1037,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::InjectSourceOffsets { source_id, offsets }) => {
             cmd_impl::meta::inject_source_offsets(context, source_id, offsets).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }

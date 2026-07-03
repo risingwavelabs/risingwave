@@ -17,7 +17,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -90,6 +89,13 @@ pub struct SnowflakeV2Config {
 
     #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
+
+    #[serde(default, rename = "task.serverless")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub task_serverless: bool,
+
+    #[serde(rename = "task.target_completion_interval")]
+    pub task_target_completion_interval: Option<String>,
 
     #[serde(rename = "jdbc.url")]
     pub jdbc_url: Option<String>,
@@ -226,6 +232,29 @@ impl SnowflakeV2Config {
                 SINK_TYPE_OPTION,
                 SINK_TYPE_APPEND_ONLY,
                 SINK_TYPE_UPSERT
+            )));
+        }
+        let has_upsert_task_config = config.snowflake_cdc_table_name.is_some()
+            || properties.contains_key("write.target.interval.seconds")
+            || config.snowflake_warehouse.is_some()
+            || config.task_serverless
+            || config.task_target_completion_interval.is_some();
+        if config.r#type != SINK_TYPE_UPSERT && has_upsert_task_config {
+            return Err(SinkError::Config(anyhow!(
+                "`intermediate.table.name`, `write.target.interval.seconds`, `warehouse`, \
+                 `task.serverless`, and `task.target_completion_interval` require `{}` = {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_UPSERT
+            )));
+        }
+        if config.task_target_completion_interval.is_some() && !config.task_serverless {
+            return Err(SinkError::Config(anyhow!(
+                "`task.target_completion_interval` requires `task.serverless` to be true"
+            )));
+        }
+        if config.task_serverless && config.snowflake_warehouse.is_some() {
+            return Err(SinkError::Config(anyhow!(
+                "`task.serverless` must not be combined with `warehouse`"
             )));
         }
 
@@ -366,11 +395,16 @@ impl SnowflakeV2Config {
                 )))?;
             snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
             snowflake_task_ctx.writer_target_interval_seconds = self.writer_target_interval_seconds;
-            snowflake_task_ctx.warehouse = Some(
-                self.snowflake_warehouse
-                    .clone()
-                    .ok_or(SinkError::Config(anyhow!("warehouse is required")))?,
-            );
+            snowflake_task_ctx.task_serverless = self.task_serverless;
+            snowflake_task_ctx.task_target_completion_interval =
+                self.task_target_completion_interval.clone();
+            if !self.task_serverless {
+                snowflake_task_ctx.warehouse = Some(
+                    self.snowflake_warehouse
+                        .clone()
+                        .ok_or(SinkError::Config(anyhow!("warehouse is required")))?,
+                );
+            }
             let pk_column_names: Vec<_> = schema
                 .fields
                 .iter()
@@ -631,6 +665,8 @@ pub struct SnowflakeTaskContext {
     pub cdc_table_name: Option<String>,
     pub writer_target_interval_seconds: u64,
     pub warehouse: Option<String>,
+    pub task_serverless: bool,
+    pub task_target_completion_interval: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
 
@@ -746,8 +782,11 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
                 &add_columns
                     .fields
                     .into_iter()
-                    .map(|f| (f.name, DataType::from(f.data_type.unwrap()).to_string()))
-                    .collect_vec(),
+                    .map(|f| {
+                        let dt = DataType::from(f.data_type.unwrap());
+                        Ok((f.name, convert_snowflake_data_type(&dt)?))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
             )
             .await
     }
@@ -953,7 +992,11 @@ fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMP_TZ".to_owned(),
         DataType::Jsonb => "STRING".to_owned(),
-        DataType::Decimal => "DECIMAL".to_owned(),
+        // RisingWave uses rust_decimal with MAX_PRECISION=28. Snowflake's DECIMAL without
+        // explicit precision defaults to (38,0), which drops all fractional digits. We use
+        // DECIMAL(38, 10) to preserve up to 10 fractional digits, matching the Iceberg sink
+        // convention, though values with more than 10 fractional digits may still lose precision.
+        DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Bytea => "BINARY".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {
@@ -975,8 +1018,9 @@ fn build_create_pipe_sql(
     target_table_name: &str,
 ) -> String {
     let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
-    // Trailing slash is required: Snowflake matches stage paths by prefix, so `t` would
-    // also match sibling folders like `t_foo/`.
+    // Trailing `/` is required to enforce exact directory matching.
+    // Without it, a PIPE for table "dim_project" would also match files under
+    // "dim_project_contract/" since Snowflake uses prefix matching.
     let stage = format!(
         r#""{}"."{}"."{}"/{}/"#,
         database, schema, stage, target_table_name
@@ -1042,6 +1086,8 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         target_table_name,
         writer_target_interval_seconds,
         warehouse,
+        task_serverless,
+        task_target_completion_interval,
         pk_column_names,
         all_column_names,
         database,
@@ -1101,9 +1147,17 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         .collect::<Vec<String>>()
         .join(", ");
 
+    let compute_clause = if *task_serverless {
+        task_target_completion_interval
+            .as_ref()
+            .map(|interval| format!("TARGET_COMPLETION_INTERVAL = '{}'", interval))
+    } else {
+        Some(format!("WAREHOUSE = {}", warehouse.as_ref().unwrap()))
+    };
+
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
-WAREHOUSE = {warehouse}
+{compute_clause}
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
@@ -1131,7 +1185,9 @@ BEGIN
     WHERE "{snowflake_sink_row_id}" <= :max_row_id;
 END;"#,
         task_name = full_task_name,
-        warehouse = warehouse.as_ref().unwrap(),
+        compute_clause = compute_clause
+            .map(|clause| format!("{clause}\n"))
+            .unwrap_or_default(),
         writer_target_interval_seconds = writer_target_interval_seconds,
         cdc_table_name = full_cdc_table_name,
         target_table_name = full_target_table_name,
@@ -1225,6 +1281,64 @@ mod tests {
     }
 
     #[test]
+    fn test_snowflake_task_target_completion_interval_requires_serverless() {
+        let mut props = base_properties();
+        props.insert("password".to_owned(), "secret".to_owned());
+        props.insert("type".to_owned(), "upsert".to_owned());
+        props.insert(
+            "task.target_completion_interval".to_owned(),
+            "5 MINUTES".to_owned(),
+        );
+
+        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+        assert!(
+            err.as_report().to_string().contains(
+                "`task.target_completion_interval` requires `task.serverless` to be true"
+            )
+        );
+    }
+
+    #[test]
+    fn test_snowflake_serverless_task_rejects_warehouse() {
+        let mut props = base_properties();
+        props.insert("password".to_owned(), "secret".to_owned());
+        props.insert("type".to_owned(), "upsert".to_owned());
+        props.insert("task.serverless".to_owned(), "true".to_owned());
+        props.insert("warehouse".to_owned(), "test_warehouse".to_owned());
+
+        let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+        assert!(
+            err.as_report()
+                .to_string()
+                .contains("`task.serverless` must not be combined with `warehouse`")
+        );
+    }
+
+    #[test]
+    fn test_snowflake_append_only_rejects_upsert_task_options() {
+        for (key, value) in [
+            ("intermediate.table.name", "test_intermediate"),
+            ("write.target.interval.seconds", "3600"),
+            ("warehouse", "test_warehouse"),
+            ("task.serverless", "true"),
+            ("task.target_completion_interval", "5 MINUTES"),
+        ] {
+            let mut props = base_properties();
+            props.insert("password".to_owned(), "secret".to_owned());
+            props.insert(key.to_owned(), value.to_owned());
+
+            let err = SnowflakeV2Config::from_btreemap(&props).unwrap_err();
+            assert!(
+                err.as_report().to_string().contains(
+                    "`intermediate.table.name`, `write.target.interval.seconds`, `warehouse`, \
+                 `task.serverless`, and `task.target_completion_interval` require `type` = upsert"
+                ),
+                "option {key} should be rejected for append-only sink"
+            );
+        }
+    }
+
+    #[test]
     fn test_snowflake_sink_commit_coordinator() {
         let snowflake_task_context = SnowflakeTaskContext {
             task_name: Some("test_task".to_owned()),
@@ -1232,6 +1346,8 @@ mod tests {
             target_table_name: "test_target_table".to_owned(),
             writer_target_interval_seconds: 3600,
             warehouse: Some("test_warehouse".to_owned()),
+            task_serverless: false,
+            task_target_completion_interval: None,
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
@@ -1280,6 +1396,8 @@ END;"#;
             target_table_name: "target_multi_pk".to_owned(),
             writer_target_interval_seconds: 300,
             warehouse: Some("multi_pk_warehouse".to_owned()),
+            task_serverless: false,
+            task_target_completion_interval: None,
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
@@ -1321,6 +1439,56 @@ END;"#;
     }
 
     #[test]
+    fn test_snowflake_sink_commit_coordinator_serverless_task() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_serverless_task".to_owned()),
+            cdc_table_name: Some("serverless_cdc_table".to_owned()),
+            target_table_name: "serverless_target_table".to_owned(),
+            writer_target_interval_seconds: 120,
+            warehouse: None,
+            task_serverless: true,
+            task_target_completion_interval: Some("5 MINUTES".to_owned()),
+            pk_column_names: Some(vec!["id".to_owned()]),
+            all_column_names: Some(vec!["id".to_owned(), "val".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_serverless_task"
+TARGET_COMPLETION_INTERVAL = '5 MINUTES'
+SCHEDULE = '120 SECONDS'
+AS
+BEGIN
+    LET max_row_id STRING;
+
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."serverless_cdc_table";
+
+    MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."serverless_cdc_table"
+            WHERE "__row_id" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."id" = source."id"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id" = source."id", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
+
+    DELETE FROM "test_db"."test_schema"."serverless_cdc_table"
+    WHERE "__row_id" <= :max_row_id;
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
     fn test_build_create_pipe_sql_stage_has_trailing_slash() {
         let sql = build_create_pipe_sql(
             "reservations_intermediate",
@@ -1333,6 +1501,14 @@ END;"#;
         assert!(
             sql.contains(r#"FROM @"test_db"."test_schema"."RW_S3_STAGE"/reservations/ "#),
             "unexpected pipe sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_convert_snowflake_decimal_data_type() {
+        assert_eq!(
+            convert_snowflake_data_type(&DataType::Decimal).unwrap(),
+            "DECIMAL(38, 10)"
         );
     }
 }

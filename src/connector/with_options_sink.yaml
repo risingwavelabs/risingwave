@@ -311,6 +311,14 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
+  - name: dynamodb.batch_write_retry_times
+    field_type: usize
+    required: false
+    default: '3'
+  - name: dynamodb.batch_write_retry_backoff_ms
+    field_type: u64
+    required: false
+    default: '100'
 ElasticSearchConfig:
   fields:
   - name: url
@@ -518,6 +526,18 @@ IcebergConfig:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path
@@ -943,10 +963,41 @@ KafkaConfig:
     field_type: bool
     required: false
     allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.ms
+    field_type: usize
+    comments: |-
+      Initial backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.max.ms
+    field_type: usize
+    comments: |-
+      Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.socket.connection.setup.timeout.ms
+    field_type: usize
+    comments: |-
+      Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+      SSL/SASL handshakes.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
     default: 'true'
+  - name: properties.retry.backoff.ms
+    field_type: usize
+    comments: Initial backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.retry.backoff.max.ms
+    field_type: usize
+    comments: Maximum backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -989,11 +1040,6 @@ KafkaConfig:
   - name: properties.message.send.max.retries
     field_type: usize
     comments: How many times to retry sending a failing Message.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.retry.backoff.ms
-    field_type: usize
-    comments: The backoff time in milliseconds before retrying a protocol request.
     required: false
     allow_alter_on_fly: true
   - name: properties.batch.num.messages
@@ -1628,6 +1674,13 @@ SnowflakeV2Config:
     required: false
     default: '1800'
   - name: warehouse
+    field_type: String
+    required: false
+  - name: task.serverless
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: task.target_completion_interval
     field_type: String
     required: false
   - name: jdbc.url
