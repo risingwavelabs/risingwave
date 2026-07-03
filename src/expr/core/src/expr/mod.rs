@@ -199,16 +199,6 @@ pub fn try_convert_all<T, U>(
 }
 
 impl BoxedExpression {
-    /// Wrap a synchronous expression.
-    pub fn new_sync(expr: impl SyncExpression + 'static) -> Self {
-        Self::Sync(Arc::new(expr))
-    }
-
-    /// Wrap an asynchronous expression.
-    pub fn new_async(expr: impl AsyncExpression + 'static) -> Self {
-        Self::Async(Arc::new(expr))
-    }
-
     /// Get the return data type.
     pub fn return_type(&self) -> DataType {
         match self {
@@ -264,7 +254,7 @@ where
     E: SyncExpression + 'static,
 {
     fn from(expr: E) -> Self {
-        Self::new_sync(expr)
+        Self::Sync(Arc::new(expr))
     }
 }
 
@@ -302,7 +292,7 @@ impl AsyncExpression for BoxedExpression {
 impl<E: SyncExpression + 'static> E {
     /// Wrap the expression in a [`BoxedExpression::Sync`].
     pub fn boxed(self) -> BoxedExpression {
-        BoxedExpression::new_sync(self)
+        BoxedExpression::Sync(Arc::new(self))
     }
 }
 
@@ -311,7 +301,7 @@ impl<E: SyncExpression + 'static> E {
 impl<E: AsyncExpression + 'static> E {
     /// Wrap the expression in a [`BoxedExpression::Async`].
     pub fn boxed(self) -> BoxedExpression {
-        BoxedExpression::new_async(self)
+        BoxedExpression::Async(Arc::new(self))
     }
 }
 

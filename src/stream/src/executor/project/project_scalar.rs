@@ -425,7 +425,7 @@ mod tests {
     use risingwave_common::types::DefaultOrd;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{
-        self, AsyncExpression, BoxedExpression, ExpressionInfo, SyncExpression, ValueImpl,
+        self, AsyncExpression, AsyncExpressionBoxExt, ExpressionInfo, SyncExpression, ValueImpl,
     };
     use tokio::sync::Notify;
     use tokio::time::timeout;
@@ -665,14 +665,16 @@ mod tests {
         let release_first = Arc::new(AtomicBool::new(false));
         let release_first_notify = Arc::new(Notify::new());
 
-        let test_expr =
-            NonStrictExpression::for_test(BoxedExpression::new_async(BlockingProjectExpr {
+        let test_expr = NonStrictExpression::for_test(
+            BlockingProjectExpr {
                 started_count,
                 second_started: second_started.clone(),
                 second_started_notify: second_started_notify.clone(),
                 release_first: release_first.clone(),
                 release_first_notify: release_first_notify.clone(),
-            }));
+            }
+            .boxed(),
+        );
 
         let proj = ProjectExecutor::new(
             actor_context_with_project_expr_concurrency(2),
@@ -750,13 +752,14 @@ mod tests {
 
         let started_count = Arc::new(AtomicUsize::new(0));
         let started_notify = Arc::new(Notify::new());
-        let test_expr = NonStrictExpression::for_test(BoxedExpression::new_async(
+        let test_expr = NonStrictExpression::for_test(
             FirstProjectExprWaitsForStartedCount {
                 started_count: started_count.clone(),
                 started_notify: started_notify.clone(),
                 unblock_first_at_started_count: 3,
-            },
-        ));
+            }
+            .boxed(),
+        );
 
         let proj = ProjectExecutor::new(
             actor_context_with_project_expr_limits(3, 2),
@@ -849,13 +852,14 @@ mod tests {
 
         let started_count = Arc::new(AtomicUsize::new(0));
         let started_notify = Arc::new(Notify::new());
-        let test_expr = NonStrictExpression::for_test(BoxedExpression::new_async(
+        let test_expr = NonStrictExpression::for_test(
             FirstProjectExprWaitsForStartedCount {
                 started_count: started_count.clone(),
                 started_notify: started_notify.clone(),
                 unblock_first_at_started_count: 3,
-            },
-        ));
+            }
+            .boxed(),
+        );
 
         let proj = ProjectExecutor::new(
             actor_context_with_project_expr_limits(3, 2),
