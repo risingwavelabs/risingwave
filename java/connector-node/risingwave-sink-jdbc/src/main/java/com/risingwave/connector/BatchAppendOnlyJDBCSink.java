@@ -62,11 +62,12 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
             List<Integer> columnSqlTypes =
                     Arrays.stream(tableSchema.getColumnNames())
                             .map(
-                                    columnName ->
-                                            columnTypeMapping.getOrDefault(
-                                                    columnName,
-                                                    getSqlTypeFromTableSchema(
-                                                            tableSchema, columnName)))
+                                    columnName -> {
+                                        Integer sqlType = columnTypeMapping.get(columnName);
+                                        return sqlType != null
+                                                ? sqlType
+                                                : getSqlTypeFromTableSchema(tableSchema, columnName);
+                                    })
                             .collect(Collectors.toList());
 
             List<Integer> pkIndices =
