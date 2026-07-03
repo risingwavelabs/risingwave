@@ -7,6 +7,116 @@ sparksql --e "DROP TABLE IF EXISTS demo.demo_db.e2e_replace_sink_exactly_once_ta
 statement ok
 set sink_decouple = true;
 
+system ok
+sparksql --e "DROP TABLE IF EXISTS demo.demo_db.e2e_replace_sink_exactly_once_idle_table PURGE;"
+
+statement ok
+DROP SOURCE IF EXISTS iceberg_replace_sink_exactly_once_idle_source;
+
+statement ok
+DROP SINK IF EXISTS s_iceberg_replace_sink_exactly_once_idle;
+
+statement ok
+DROP TABLE IF EXISTS t_iceberg_replace_sink_idle_old;
+
+statement ok
+DROP TABLE IF EXISTS t_iceberg_replace_sink_idle_new;
+
+statement ok
+CREATE TABLE t_iceberg_replace_sink_idle_old (id int, v varchar);
+
+statement ok
+CREATE TABLE t_iceberg_replace_sink_idle_new (id int, v varchar);
+
+statement ok
+CREATE SINK s_iceberg_replace_sink_exactly_once_idle FROM t_iceberg_replace_sink_idle_old WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_exactly_once_idle_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    snapshot = 'false',
+    commit_checkpoint_interval = 60,
+    is_exactly_once = 'true'
+);
+
+statement ok
+FLUSH;
+
+statement ok
+FLUSH;
+
+statement ok
+REPLACE SINK s_iceberg_replace_sink_exactly_once_idle FROM t_iceberg_replace_sink_idle_new WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_exactly_once_idle_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    snapshot = 'false',
+    commit_checkpoint_interval = 1,
+    is_exactly_once = 'true'
+);
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_idle_old VALUES (10, 'old-after-idle-replace');
+
+statement ok
+INSERT INTO t_iceberg_replace_sink_idle_new VALUES (11, 'new-after-idle-replace');
+
+statement ok
+FLUSH;
+
+statement ok retry 6 backoff 1s
+CREATE SOURCE iceberg_replace_sink_exactly_once_idle_source WITH (
+    connector = 'iceberg',
+    database.name = 'demo_db',
+    table.name = 'e2e_replace_sink_exactly_once_idle_table',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+query TT rowsort retry 11 backoff 1s
+SELECT id, v FROM iceberg_replace_sink_exactly_once_idle_source;
+----
+11 new-after-idle-replace
+
+statement ok
+DROP SOURCE iceberg_replace_sink_exactly_once_idle_source;
+
+statement ok
+DROP SINK s_iceberg_replace_sink_exactly_once_idle;
+
+statement ok
+DROP TABLE t_iceberg_replace_sink_idle_old;
+
+statement ok
+DROP TABLE t_iceberg_replace_sink_idle_new;
+
+system ok
+sparksql --e "DROP TABLE IF EXISTS demo.demo_db.e2e_replace_sink_exactly_once_idle_table PURGE;"
+
 statement ok
 DROP SOURCE IF EXISTS iceberg_replace_sink_exactly_once_source;
 
