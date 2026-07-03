@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -468,6 +469,13 @@ enum MetaCommands {
         #[clap(long, required = true)]
         parallelism: u32,
     },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -922,6 +930,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             parallelism,
         }) => {
             set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }
