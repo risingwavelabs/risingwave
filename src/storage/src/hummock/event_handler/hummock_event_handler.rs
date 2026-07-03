@@ -194,6 +194,7 @@ struct HummockEventHandlerMetrics {
     event_handler_on_apply_version_update: Histogram,
     event_handler_on_recv_version_update: Histogram,
     event_handler_on_spiller: Histogram,
+    event_handler_on_apply_table_refill_runtime_config: Histogram,
 }
 
 fn table_cache_refill_policies_to_map(
@@ -496,6 +497,9 @@ impl HummockEventHandler {
             event_handler_on_spiller: state_store_metrics
                 .event_handler_latency
                 .with_label_values(&["spiller"]),
+            event_handler_on_apply_table_refill_runtime_config: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["apply_table_refill_runtime_config"]),
         };
 
         let uploader = HummockUploader::new(
@@ -724,6 +728,10 @@ impl HummockEventHandler {
                 self.handle_version_update(version_update);
             }
             HummockObserverEvent::TableRefillRuntimeConfig(_, config) => {
+                let _timer = self
+                    .metrics
+                    .event_handler_on_apply_table_refill_runtime_config
+                    .start_timer();
                 Self::apply_table_refill_runtime_config(&mut self.refiller, config);
             }
         }
