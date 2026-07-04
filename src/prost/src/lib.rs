@@ -205,7 +205,7 @@ pub fn configured_monitor_service_client<T>(
     client: monitor_service::monitor_service_client::MonitorServiceClient<T>,
 ) -> monitor_service::monitor_service_client::MonitorServiceClient<T>
 where
-    T: tonic::client::GrpcService<tonic::body::Body>,
+    T: tonic::client::GrpcService<tonic::body::BoxBody>,
     T::Error: Into<tonic::codegen::StdError>,
     T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
     <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError> + Send,
