@@ -57,6 +57,8 @@ BigQueryConfig:
     field_type: bool
     required: false
     default: Default::default
+    alias:
+    - create_table_if_not_exists
   - name: bigquery.credentials
     field_type: String
     required: false
