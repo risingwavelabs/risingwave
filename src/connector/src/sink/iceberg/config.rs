@@ -27,7 +27,10 @@ use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
 use super::{SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError};
-use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
+use crate::connector_common::{
+    IcebergCatalogKind, IcebergCommon, IcebergTableIdentifier, ResolvedIcebergCatalogConfig,
+    iceberg_java_catalog_props_from_options,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 use crate::sink::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
@@ -568,17 +571,11 @@ impl IcebergConfig {
         config.validate_enable_pk_index()?;
 
         // All configs start with "catalog." will be treated as java configs.
-        config.java_catalog_props = values
-            .iter()
-            .filter(|(k, _v)| {
-                k.starts_with("catalog.")
-                    && k != &"catalog.uri"
-                    && k != &"catalog.type"
-                    && k != &"catalog.name"
-                    && k != &"catalog.header"
-            })
-            .map(|(k, v)| (k[8..].to_string(), v.clone()))
-            .collect();
+        config.java_catalog_props = iceberg_java_catalog_props_from_options(
+            values
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
 
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
@@ -617,6 +614,18 @@ impl IcebergConfig {
         self.common.catalog_type()
     }
 
+    pub fn catalog_kind(&self) -> Result<IcebergCatalogKind> {
+        self.common
+            .resolve_catalog_kind()
+            .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    fn resolved_catalog_config(&self) -> Result<ResolvedIcebergCatalogConfig<'_>> {
+        self.common
+            .resolve_catalog_config(self.java_catalog_props.clone())
+            .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
     pub async fn load_table(&self) -> Result<Table> {
         #[cfg(any(test, madsim))]
         if self.catalog_type() == "mock_v3" {
@@ -636,8 +645,8 @@ impl IcebergConfig {
                 .map_err(|e| SinkError::Config(anyhow!(e).context("Failed to load mock table")))?;
             return Ok(table);
         }
-        self.common
-            .load_table(&self.table, &self.java_catalog_props)
+        self.resolved_catalog_config()?
+            .load_table(&self.table)
             .await
             .map_err(Into::into)
     }
@@ -651,8 +660,8 @@ impl IcebergConfig {
                 })?,
             );
         }
-        self.common
-            .create_catalog(&self.java_catalog_props)
+        self.resolved_catalog_config()?
+            .create_catalog()
             .await
             .map_err(Into::into)
     }
