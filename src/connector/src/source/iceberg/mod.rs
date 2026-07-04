@@ -38,7 +38,9 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
-use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
+use crate::connector_common::{
+    IcebergCommon, IcebergTableIdentifier, iceberg_java_catalog_props_from_options,
+};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
@@ -86,29 +88,32 @@ impl EnforceSecret for IcebergProperties {
 }
 
 impl IcebergProperties {
-    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
-        let mut java_catalog_props = HashMap::new();
+    fn java_catalog_props(&self) -> HashMap<String, String> {
+        let mut java_catalog_props = iceberg_java_catalog_props_from_options(
+            self.unknown_fields
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
-        // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common.create_catalog(&java_catalog_props).await
+        java_catalog_props
+    }
+
+    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
+        self.common
+            .resolve_catalog_config(self.java_catalog_props())?
+            .create_catalog()
+            .await
     }
 
     pub async fn load_table(&self) -> ConnectorResult<Table> {
-        let mut java_catalog_props = HashMap::new();
-        if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
-        }
-        if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
-        }
-        // TODO: support java_catalog_props for iceberg source
         self.common
-            .load_table(&self.table, &java_catalog_props)
+            .resolve_catalog_config(self.java_catalog_props())?
+            .load_table(&self.table)
             .await
     }
 }
