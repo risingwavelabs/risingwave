@@ -323,6 +323,8 @@ impl IcebergCatalogKind {
             "jdbc" => Self::Jdbc,
             "snowflake" => Self::Snowflake,
             "mock" => Self::Mock,
+            #[cfg(any(test, madsim))]
+            "mock_v3" => Self::Mock,
             _ => {
                 bail!(
                     "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
@@ -1282,6 +1284,16 @@ mod tests {
         assert_eq!(
             common.resolve_catalog_kind().unwrap(),
             IcebergCatalogKind::Rest(IcebergCatalogRuntime::JavaJni)
+        );
+    }
+
+    #[test]
+    fn test_mock_v3_resolves_to_mock_catalog_for_simulation_tests() {
+        let common = test_common("mock_v3");
+
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Mock
         );
     }
 
