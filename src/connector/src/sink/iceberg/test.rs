@@ -337,6 +337,7 @@ fn test_parse_iceberg_config() {
                 glue_access_key: None,
                 glue_secret_key: None,
                 glue_iam_role_arn: None,
+                glue_endpoint: None,
                 catalog_name: Some("demo".to_owned()),
                 s3_path_style_access: Some(true),
                 catalog_credential: None,

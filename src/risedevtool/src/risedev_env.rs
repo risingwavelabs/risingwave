@@ -295,6 +295,34 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"LAKEKEEPER_CATALOG_URL="{catalog_url}""#,).unwrap();
                 writeln!(env, r#"RISEDEV_LAKEKEEPER_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='rest',catalog.uri='{catalog_url}'""#,).unwrap();
             }
+            ServiceConfig::Moto(c) => {
+                let endpoint = format!("http://{}:{}", c.address, c.port);
+                let glue_access_key = "my_access_id";
+                let glue_secret_key = "my_secret_key";
+                writeln!(env, r#"RISEDEV_MOTO_ENDPOINT="{endpoint}""#).unwrap();
+                writeln!(env, r#"RISEDEV_GLUE_ENDPOINT="{endpoint}""#).unwrap();
+                writeln!(env, r#"RW_TEST_GLUE_ENDPOINT="{endpoint}""#).unwrap();
+                writeln!(env, r#"RW_TEST_GLUE_ACCESS_KEY="{glue_access_key}""#).unwrap();
+                writeln!(env, r#"RW_TEST_GLUE_SECRET_KEY="{glue_secret_key}""#).unwrap();
+
+                if let Some(minio_configs) = &c.provide_minio
+                    && let Some(minio) = minio_configs.first()
+                {
+                    let s3_endpoint = format!("http://{}:{}", minio.address, minio.port);
+                    let warehouse_path = format!("s3://{}/iceberg", minio.hummock_bucket);
+                    writeln!(env, r#"RW_TEST_GLUE_S3_ENDPOINT="{s3_endpoint}""#).unwrap();
+                    writeln!(env, r#"RW_TEST_GLUE_S3_ACCESS_KEY="{0}""#, minio.root_user).unwrap();
+                    writeln!(
+                        env,
+                        r#"RW_TEST_GLUE_S3_SECRET_KEY="{0}""#,
+                        minio.root_password
+                    )
+                    .unwrap();
+                    writeln!(env, r#"RW_TEST_GLUE_WAREHOUSE_PATH="{warehouse_path}""#).unwrap();
+                    writeln!(env, r#"RISEDEV_GLUE_RUST_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='glue_rust',catalog.uri='{endpoint}',glue.endpoint='{endpoint}',glue.region='us-east-1',glue.access.key='{glue_access_key}',glue.secret.key='{glue_secret_key}',warehouse.path='{warehouse_path}',s3.endpoint='{s3_endpoint}',s3.region='us-east-1',s3.access.key='{0}',s3.secret.key='{1}',s3.path.style.access='true'""#, minio.root_user, minio.root_password).unwrap();
+                    writeln!(env, r#"RISEDEV_GLUE_JNI_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='glue',catalog.uri='{endpoint}',glue.endpoint='{endpoint}',glue.region='us-east-1',glue.access.key='{glue_access_key}',glue.secret.key='{glue_secret_key}',warehouse.path='{warehouse_path}',s3.endpoint='{s3_endpoint}',s3.region='us-east-1',s3.access.key='{0}',s3.secret.key='{1}',s3.path.style.access='true'""#, minio.root_user, minio.root_password).unwrap();
+                }
+            }
             _ => {}
         }
     }
