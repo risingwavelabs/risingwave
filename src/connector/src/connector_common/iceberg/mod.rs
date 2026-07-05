@@ -77,6 +77,8 @@ pub struct IcebergCommon {
     pub glue_iam_role_arn: Option<String>,
     #[serde(rename = "glue.region")]
     pub glue_region: Option<String>,
+    #[serde(rename = "glue.endpoint")]
+    pub glue_endpoint: Option<String>,
     /// AWS Client id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
@@ -322,6 +324,8 @@ impl IcebergCatalogKind {
             "hive" => Self::Hive,
             "jdbc" => Self::Jdbc,
             "snowflake" => Self::Snowflake,
+            #[cfg(any(test, madsim))]
+            "mock_v3" => Self::Mock,
             "mock" => Self::Mock,
             _ => {
                 bail!(
@@ -536,6 +540,17 @@ impl IcebergCommon {
 
     fn glue_region(&self) -> Option<&str> {
         self.glue_region.as_deref().or(self.s3_region.as_deref())
+    }
+
+    fn glue_endpoint(&self) -> Option<&str> {
+        self.glue_endpoint
+            .as_deref()
+            .or_else(|| match self.resolve_catalog_kind() {
+                Ok(IcebergCatalogKind::Glue(IcebergCatalogRuntime::JavaJni)) => {
+                    self.catalog_uri.as_deref()
+                }
+                _ => None,
+            })
     }
 
     pub fn catalog_name(&self) -> String {
@@ -1136,10 +1151,13 @@ impl IcebergCommon {
 
                     if let Some(region) = self.glue_region() {
                         java_catalog_configs.insert("client.region".to_owned(), region.to_owned());
-                        java_catalog_configs.insert(
-                            "glue.endpoint".to_owned(),
-                            format!("https://glue.{}.amazonaws.com", region),
-                        );
+                    }
+                    let glue_endpoint = self.glue_endpoint().map(str::to_owned).or_else(|| {
+                        self.glue_region()
+                            .map(|region| format!("https://glue.{}.amazonaws.com", region))
+                    });
+                    if let Some(endpoint) = glue_endpoint {
+                        java_catalog_configs.insert("glue.endpoint".to_owned(), endpoint);
                     }
 
                     if let Some(glue_id) = self.glue_id.as_deref() {
@@ -1228,6 +1246,7 @@ mod tests {
             glue_secret_key: None,
             glue_iam_role_arn: None,
             glue_region: None,
+            glue_endpoint: None,
             glue_id: None,
             gcs_credential: None,
             azblob_account_name: None,
@@ -1282,6 +1301,16 @@ mod tests {
         assert_eq!(
             common.resolve_catalog_kind().unwrap(),
             IcebergCatalogKind::Rest(IcebergCatalogRuntime::JavaJni)
+        );
+    }
+
+    #[test]
+    fn test_mock_v3_resolves_to_mock_catalog_kind() {
+        let common = test_common("mock_v3");
+
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Mock
         );
     }
 

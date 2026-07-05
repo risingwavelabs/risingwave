@@ -352,6 +352,7 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+      - use: moto
       - use: mysql
         port: 3306
         address: mysql
@@ -377,6 +378,11 @@ profile:
         exporter-port: 1261
       - use: lakekeeper
         port: 8181
+
+  iceberg-glue:
+    steps:
+      - use: minio
+      - use: moto
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
@@ -1971,6 +1977,28 @@ template:
 
     # Storage backend - MinIO for S3-compatible storage
     provide-minio: "minio*"
+
+  # Moto AWS emulator, used as a local Glue Data Catalog endpoint for Iceberg tests.
+  moto:
+    # Id to be picked-up by services
+    id: moto-${port}
+
+    # Address of Moto endpoint
+    address: "127.0.0.1"
+
+    # Listen port of Moto endpoint
+    port: 5001
+
+    # Docker image for Moto server
+    image: "motoserver/moto:5.0.3"
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+    # Storage backend - MinIO for S3-compatible Iceberg warehouse files
+    provide-minio: "minio*"
+
   moat:
     # Id to be picked-up by services
     id: moat-${port}

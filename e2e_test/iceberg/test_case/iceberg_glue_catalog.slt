@@ -1,0 +1,143 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=1;
+
+statement ok
+CREATE TABLE glue_rust_input (
+    id int primary key,
+    name varchar
+);
+
+statement ok
+CREATE SINK glue_rust_sink AS SELECT * FROM glue_rust_input WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'rw_glue_e2e',
+    table.name = 'glue_rust_table',
+    catalog.name = 'rw_glue_e2e',
+    catalog.type = 'glue_rust',
+    catalog.uri = 'http://127.0.0.1:5001',
+    glue.region = 'us-east-1',
+    glue.access.key = 'my_access_id',
+    glue.secret.key = 'my_secret_key',
+    warehouse.path = 's3://icebergdata/glue_e2e',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1
+);
+
+statement ok
+INSERT INTO glue_rust_input VALUES (1, 'rust-a'), (2, 'rust-b');
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE glue_rust_source WITH (
+    connector = 'iceberg',
+    database.name = 'rw_glue_e2e',
+    table.name = 'glue_rust_table',
+    catalog.name = 'rw_glue_e2e',
+    catalog.type = 'glue_rust',
+    catalog.uri = 'http://127.0.0.1:5001',
+    glue.region = 'us-east-1',
+    glue.access.key = 'my_access_id',
+    glue.secret.key = 'my_secret_key',
+    warehouse.path = 's3://icebergdata/glue_e2e',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true'
+);
+
+query IT rowsort retry 6 backoff 1s
+SELECT id, name FROM glue_rust_source;
+----
+1 rust-a
+2 rust-b
+
+statement ok
+CREATE TABLE glue_jni_input (
+    id int primary key,
+    name varchar
+);
+
+statement ok
+CREATE SINK glue_jni_sink AS SELECT * FROM glue_jni_input WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'rw_glue_e2e',
+    table.name = 'glue_jni_table',
+    catalog.name = 'rw_glue_e2e',
+    catalog.type = 'glue',
+    glue.endpoint = 'http://127.0.0.1:5001',
+    glue.region = 'us-east-1',
+    glue.access.key = 'my_access_id',
+    glue.secret.key = 'my_secret_key',
+    warehouse.path = 's3://icebergdata/glue_e2e',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1
+);
+
+statement ok
+INSERT INTO glue_jni_input VALUES (3, 'jni-a'), (4, 'jni-b');
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE glue_jni_source WITH (
+    connector = 'iceberg',
+    database.name = 'rw_glue_e2e',
+    table.name = 'glue_jni_table',
+    catalog.name = 'rw_glue_e2e',
+    catalog.type = 'glue',
+    glue.endpoint = 'http://127.0.0.1:5001',
+    glue.region = 'us-east-1',
+    glue.access.key = 'my_access_id',
+    glue.secret.key = 'my_secret_key',
+    warehouse.path = 's3://icebergdata/glue_e2e',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true'
+);
+
+query IT rowsort retry 6 backoff 1s
+SELECT id, name FROM glue_jni_source;
+----
+3 jni-a
+4 jni-b
+
+statement ok
+DROP SOURCE glue_jni_source;
+
+statement ok
+DROP SINK glue_jni_sink;
+
+statement ok
+DROP TABLE glue_jni_input;
+
+statement ok
+DROP SOURCE glue_rust_source;
+
+statement ok
+DROP SINK glue_rust_sink;
+
+statement ok
+DROP TABLE glue_rust_input;

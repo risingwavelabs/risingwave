@@ -31,8 +31,8 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     ElasticSearchService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
     KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService, MongoDbService,
-    MongoDbSetupTask, MqttService, MySqlService, NatsService, OpenSearchService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    MongoDbSetupTask, MotoService, MqttService, MySqlService, NatsService, OpenSearchService,
+    PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
     SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
     TempoService, generate_risedev_env, preflight_check,
 };
@@ -246,6 +246,14 @@ fn task_main(
                     DummyService::new(&c.id).execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("using Opendal, namenode =  {}", c.namenode));
+                }
+                ServiceConfig::Moto(c) => {
+                    MotoService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("moto http://{}:{}/", c.address, c.port));
                 }
                 ServiceConfig::Kafka(c) => {
                     let mut service = KafkaService::new(c.clone());
