@@ -51,6 +51,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -2364,7 +2365,7 @@ impl CatalogController {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<(HashSet<JobId>, HashSet<FragmentId>)> {
+    ) -> MetaResult<(HashSet<JobId>, HashMap<FragmentId, PbStreamNode>)> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -2469,10 +2470,13 @@ impl CatalogController {
             "source id should be used by at least one fragment"
         );
 
-        let (fragment_ids, job_ids) = fragments
-            .iter()
-            .map(|(framgnet_id, job_id, _, _)| (framgnet_id, job_id))
-            .unzip();
+        let (fragment_nodes, job_ids): (HashMap<FragmentId, PbStreamNode>, HashSet<JobId>) =
+            fragments
+                .iter()
+                .map(|(fragment_id, job_id, _, stream_node)| {
+                    ((*fragment_id, stream_node.clone()), *job_id)
+                })
+                .unzip();
 
         for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
             Fragment::update(fragment::ActiveModel {
@@ -2500,11 +2504,11 @@ impl CatalogController {
             )
             .await;
 
-        Ok((job_ids, fragment_ids))
+        Ok((job_ids, fragment_nodes))
     }
 
     // edit the content of fragments in given `table_id`
-    // return the actor_ids to be applied
+    // return the updated stream nodes to be applied
     pub async fn mutate_fragments_by_job_id(
         &self,
         job_id: JobId,
@@ -2512,7 +2516,7 @@ impl CatalogController {
         mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
         err_msg: &'static str,
-    ) -> MetaResult<HashSet<FragmentId>> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -2552,7 +2556,10 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
+        let fragment_nodes = fragments
+            .iter()
+            .map(|(id, _, stream_node)| (*id, stream_node.clone()))
+            .collect();
         for (id, _, stream_node) in fragments {
             Fragment::update(fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -2565,7 +2572,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(fragment_ids)
+        Ok(fragment_nodes)
     }
 
     async fn mutate_fragment_by_fragment_id(
@@ -2573,7 +2580,7 @@ impl CatalogController {
         fragment_id: FragmentId,
         mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
         err_msg: &'static str,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<PbStreamNode> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -2600,7 +2607,7 @@ impl CatalogController {
 
         Fragment::update(fragment::ActiveModel {
             fragment_id: Set(fragment_id),
-            stream_node: Set(stream_node),
+            stream_node: Set(StreamNode::from(&pb_stream_node)),
             ..Default::default()
         })
         .exec(&txn)
@@ -2608,7 +2615,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(())
+        Ok(pb_stream_node)
     }
 
     pub async fn update_backfill_orders_by_job_id(
@@ -2640,7 +2647,7 @@ impl CatalogController {
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashSet<FragmentId>> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let update_backfill_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
@@ -2680,7 +2687,7 @@ impl CatalogController {
         &self,
         sink_id: SinkId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashSet<FragmentId>> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let update_sink_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = Ok(false);
@@ -2713,7 +2720,7 @@ impl CatalogController {
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashSet<FragmentId>> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let update_dml_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
@@ -3650,44 +3657,84 @@ impl CatalogController {
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
+        throttle_type: ThrottleType,
         rate_limit: Option<u32>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<PbStreamNode> {
         let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
                                  stream_node: &mut PbStreamNode| {
             let mut found = false;
-            if fragment_type_mask.contains_any(
-                FragmentTypeFlag::dml_rate_limit_fragments()
-                    .chain(FragmentTypeFlag::sink_rate_limit_fragments())
-                    .chain(FragmentTypeFlag::backfill_rate_limit_fragments())
-                    .chain(FragmentTypeFlag::source_rate_limit_fragments()),
-            ) {
-                visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::Dml(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
+            match throttle_type {
+                ThrottleType::Source => {
+                    visit_stream_node_mut(stream_node, |node| match node {
+                        PbNodeBody::Source(node) => {
+                            if let Some(node_inner) = &mut node.source_inner {
+                                node_inner.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        }
+                        PbNodeBody::StreamFsFetch(node) => {
+                            if let Some(node_inner) = &mut node.node_inner {
+                                node_inner.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        }
+                        _ => {}
+                    });
+                }
+                ThrottleType::Backfill => {
+                    if fragment_type_mask
+                        .contains_any(FragmentTypeFlag::backfill_rate_limit_fragments())
+                    {
+                        visit_stream_node_mut(stream_node, |node| match node {
+                            PbNodeBody::StreamCdcScan(node) => {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                            PbNodeBody::StreamScan(node) => {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                            PbNodeBody::SourceBackfill(node) => {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                            _ => {}
+                        });
                     }
-                    if let PbNodeBody::Sink(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
+                }
+                ThrottleType::Sink => {
+                    if fragment_type_mask
+                        .contains_any(FragmentTypeFlag::sink_rate_limit_fragments())
+                    {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::Sink(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        });
                     }
-                    if let PbNodeBody::StreamCdcScan(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
+                }
+                ThrottleType::Dml => {
+                    if fragment_type_mask.contains_any(FragmentTypeFlag::dml_rate_limit_fragments())
+                    {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::Dml(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        });
                     }
-                    if let PbNodeBody::StreamScan(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                    if let PbNodeBody::SourceBackfill(node) = node {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                });
+                }
+                ThrottleType::Unspecified => {}
             }
             found
         };
-        self.mutate_fragment_by_fragment_id(fragment_id, update_rate_limit, "fragment not found")
-            .await
+        self.mutate_fragment_by_fragment_id(
+            fragment_id,
+            update_rate_limit,
+            "rate limit node not found",
+        )
+        .await
     }
 
     /// Note: `FsFetch` created in old versions are not included.

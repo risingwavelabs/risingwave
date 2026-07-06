@@ -33,8 +33,8 @@ use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    AddMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
-    PbUpstreamSinkInfo, ThrottleMutation,
+    AddMutation, PbStartFragmentBackfillMutation, PbStreamNode, PbSubscriptionUpstreamInfo,
+    PbUpdateMutation, PbUpstreamSinkInfo, ThrottleMutation,
 };
 use tracing::warn;
 
@@ -69,6 +69,11 @@ use crate::stream::{
     fill_snapshot_backfill_epoch,
 };
 use crate::{MetaError, MetaResult};
+
+type ThrottleForCreatingJobs = (
+    HashSet<JobId>,
+    HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
+);
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -472,11 +477,10 @@ impl DatabaseCheckpointControl {
             Ok(resolved)
         }
 
-        // Throttle data for creating jobs (set only in the Throttle arm)
-        let mut throttle_for_creating_jobs: Option<(
-            HashSet<JobId>,
-            HashMap<FragmentId, ThrottleConfig>,
-        )> = None;
+        // Throttle data for creating jobs (set only in the Throttle arm). Creating jobs live
+        // outside `database_info`, so they need both the compute mutation and the stream-node
+        // pre-apply.
+        let mut throttle_for_creating_jobs: Option<ThrottleForCreatingJobs> = None;
 
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
@@ -1005,9 +1009,9 @@ impl DatabaseCheckpointControl {
 
             Some(Command::Throttle { jobs, config }) => {
                 let mutation = Some(Command::throttle_to_mutation(&config));
-                for (fragment_id, throttle_config) in &config {
+                for (fragment_id, (_, stream_node)) in &config {
                     self.database_info
-                        .pre_apply_throttle(*fragment_id, throttle_config);
+                        .pre_apply_throttle(*fragment_id, stream_node);
                 }
                 throttle_for_creating_jobs = Some((jobs, config));
                 self.apply_simple_command(mutation, "Throttle")
@@ -1733,11 +1737,16 @@ impl DatabaseCheckpointControl {
                                 1,
                                 "should not alter rate limit of snapshot backfill job with other jobs"
                             );
+                            creating_job.pre_apply_throttle(config.iter().map(
+                                |(fragment_id, (_, stream_node))| (*fragment_id, stream_node),
+                            ));
                             Some((
                                 Mutation::Throttle(ThrottleMutation {
                                     fragment_throttle: config
                                         .iter()
-                                        .map(|(fragment_id, config)| (*fragment_id, *config))
+                                        .map(|(fragment_id, (throttle_config, _))| {
+                                            (*fragment_id, *throttle_config)
+                                        })
                                         .collect(),
                                 }),
                                 take(notifiers),

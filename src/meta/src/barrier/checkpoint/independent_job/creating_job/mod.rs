@@ -31,7 +31,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation};
+use risingwave_pb::stream_plan::{AddMutation, PbStreamNode, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
@@ -885,6 +885,13 @@ impl CreatingStreamingJobControl {
             assert!(notifiers.is_empty(), "must consumed notifiers");
         }
         Ok(())
+    }
+
+    pub(crate) fn pre_apply_throttle<'a>(
+        &mut self,
+        fragment_nodes: impl IntoIterator<Item = (FragmentId, &'a PbStreamNode)>,
+    ) {
+        self.status.pre_apply_throttle(fragment_nodes);
     }
 
     /// Returns whether the next barrier should be forced to a checkpoint.

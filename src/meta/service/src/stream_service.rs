@@ -195,7 +195,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let raw_object_id: u32;
         let jobs: HashSet<JobId>;
-        let fragments: HashSet<FragmentId>;
+        let fragments: HashMap<FragmentId, _>;
 
         match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
@@ -233,11 +233,16 @@ impl StreamManagerService for StreamServiceImpl {
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
-                self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?;
                 let fragment_id = request.id.into();
-                fragments = [fragment_id].into_iter().collect();
+                let stream_node = self
+                    .metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(
+                        fragment_id,
+                        throttle_type,
+                        request.rate,
+                    )
+                    .await?;
+                fragments = [(fragment_id, stream_node)].into_iter().collect();
                 let job_id = self
                     .metadata_manager
                     .catalog_controller
@@ -264,18 +269,13 @@ impl StreamManagerService for StreamServiceImpl {
             rate_limit: request.rate,
             throttle_type: throttle_type.into(),
         };
+        let config = fragments
+            .into_iter()
+            .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+            .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(
-                database_id,
-                Command::Throttle {
-                    jobs,
-                    config: fragments
-                        .into_iter()
-                        .map(|fragment_id| (fragment_id, throttle_config))
-                        .collect(),
-                },
-            )
+            .run_command(database_id, Command::Throttle { jobs, config })
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
