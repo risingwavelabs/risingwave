@@ -130,8 +130,10 @@ pub(super) async fn create_table_if_not_exists_impl(
                     if url.is_err() || is_s3_tables || is_bq_catalog_federation {
                         // For rest catalog, the warehouse_path could be a warehouse name.
                         // In this case, we should specify the location when creating a table.
-                        if config.common.catalog_type() == "rest"
-                            || config.common.catalog_type() == "rest_rust"
+                        if config
+                            .common
+                            .is_rest_catalog()
+                            .map_err(|err| SinkError::Config(anyhow!(err)))?
                         {
                             None
                         } else {
