@@ -66,7 +66,8 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
                                         Integer sqlType = columnTypeMapping.get(columnName);
                                         return sqlType != null
                                                 ? sqlType
-                                                : getSqlTypeFromTableSchema(tableSchema, columnName);
+                                                : getSqlTypeFromTableSchema(
+                                                        tableSchema, columnName);
                                     })
                             .collect(Collectors.toList());
 
