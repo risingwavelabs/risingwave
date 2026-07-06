@@ -37,6 +37,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
+use crate::connector_common::{IcebergCatalogKind, IcebergCatalogRuntime};
 use crate::sink::{Result, SinkParam};
 
 static ORDER_KEY_COLUMN_RE: LazyLock<Regex> =
@@ -188,11 +189,19 @@ pub(super) async fn create_table_if_not_exists_impl(
             None => None,
         };
 
-        // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
-        let properties = HashMap::from([(
-            TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
-            (config.format_version as u8).to_string(),
-        )]);
+        // Some JNI catalogs extract `format-version` from table properties, while
+        // native Rust Glue rejects reserved properties before creating metadata.
+        let properties = if matches!(
+            config.catalog_kind()?,
+            IcebergCatalogKind::Glue(IcebergCatalogRuntime::NativeRust)
+        ) {
+            HashMap::new()
+        } else {
+            HashMap::from([(
+                TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
+                (config.format_version as u8).to_string(),
+            )])
+        };
 
         let table_creation_builder = TableCreation::builder()
             .name(table_name)

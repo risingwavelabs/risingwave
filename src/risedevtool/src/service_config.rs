@@ -245,6 +245,24 @@ pub struct AwsS3Config {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct MotoConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    #[serde(with = "string")]
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+
+    pub provide_minio: Option<Vec<MinioConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct OpendalConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -555,6 +573,7 @@ pub enum ServiceConfig {
     Tempo(TempoConfig),
     Opendal(OpendalConfig),
     AwsS3(AwsS3Config),
+    Moto(MotoConfig),
     Kafka(KafkaConfig),
     SchemaRegistry(SchemaRegistryConfig),
     Pubsub(PubsubConfig),
@@ -605,6 +624,7 @@ impl ServiceConfig {
             Self::Grafana(c) => &c.id,
             Self::Tempo(c) => &c.id,
             Self::AwsS3(c) => &c.id,
+            Self::Moto(c) => &c.id,
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
             Self::Pulsar(c) => &c.id,
@@ -637,6 +657,7 @@ impl ServiceConfig {
             Self::Grafana(c) => Some(c.port),
             Self::Tempo(c) => Some(c.port),
             Self::AwsS3(_) => None,
+            Self::Moto(c) => Some(c.port),
             Self::Kafka(c) => Some(c.port),
             Self::Pubsub(c) => Some(c.port),
             Self::Pulsar(c) => Some(c.http_port),
@@ -668,6 +689,7 @@ impl ServiceConfig {
             Self::Grafana(_c) => false,
             Self::Tempo(_c) => false,
             Self::AwsS3(_c) => false,
+            Self::Moto(c) => c.user_managed,
             Self::Kafka(c) => c.user_managed,
             Self::Pubsub(c) => c.user_managed,
             Self::Pulsar(c) => c.user_managed,
@@ -700,6 +722,7 @@ impl ServiceConfig {
                 Observability
             }
             ServiceConfig::Opendal(_) | ServiceConfig::AwsS3(_) => RisingWave,
+            ServiceConfig::Moto(_) => RisingWave,
             ServiceConfig::Kafka(_) | ServiceConfig::SchemaRegistry(_) => Kafka,
             ServiceConfig::Pubsub(_) => Pubsub,
             ServiceConfig::Pulsar(_) => Pulsar,

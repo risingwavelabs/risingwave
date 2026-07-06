@@ -32,6 +32,10 @@ export CONNECTOR_LIBS_PATH="./connector-node/libs"
 echo "--- starting risingwave cluster"
 PGPASSWORD='post\tgres' psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
 risedev ci-start ci-iceberg-test
+set -a
+# shellcheck source=/dev/null
+source .risingwave/config/risedev-env
+set +a
 
 
 echo "--- Running tests"
