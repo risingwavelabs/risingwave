@@ -25,6 +25,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    refresh.interval.sec = '1',
     enable_pk_index = 'true'
 );
 
@@ -42,15 +43,6 @@ statement ok
 FLUSH;
 
 statement ok
-DELETE FROM t_v3_no_partition_pk_index WHERE v1 IN (2, 8);
-
-statement ok
-INSERT INTO t_v3_no_partition_pk_index VALUES (1, 1, 50, '1-50', '2022-03-11'), (1, 13, 130, '13-130', '2022-03-13');
-
-statement ok
-FLUSH;
-
-statement ok
 CREATE SOURCE iceberg_no_partition_v3_pk_index_source WITH (
     connector = 'iceberg',
     database.name = 'public',
@@ -63,6 +55,20 @@ CREATE SOURCE iceberg_no_partition_v3_pk_index_source WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin'
 );
+
+query I retry 11 backoff 1s
+select count(*) from iceberg_no_partition_v3_pk_index_source;
+----
+7
+
+statement ok
+DELETE FROM t_v3_no_partition_pk_index WHERE v1 IN (2, 8);
+
+statement ok
+INSERT INTO t_v3_no_partition_pk_index VALUES (1, 1, 50, '1-50', '2022-03-11'), (1, 13, 130, '13-130', '2022-03-13');
+
+statement ok
+FLUSH;
 
 query ????? rowsort retry 11 backoff 1s
 select * from iceberg_no_partition_v3_pk_index_source;

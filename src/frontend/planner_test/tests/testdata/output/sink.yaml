@@ -306,6 +306,7 @@
       write_mode = 'merge-on-read',
       format_version = '3',
       create_table_if_not_exists = 'true',
+      refresh.interval.sec = '60',
       enable_pk_index = 'true'
     );
   explain_output: |
@@ -332,6 +333,7 @@
       write_mode = 'merge-on-read',
       format_version = '3',
       create_table_if_not_exists = 'true',
+      refresh.interval.sec = '60',
       enable_pk_index = 'true'
     );
   explain_output: |
@@ -394,6 +396,7 @@
       write_mode = 'merge-on-read',
       format_version = '3',
       create_table_if_not_exists = 'true',
+      refresh.interval.sec = '60',
       enable_pk_index = 'true'
     );
   explain_output: |
@@ -406,7 +409,8 @@
   sql: |
     create table u (v1 int primary key, name varchar);
     create table o (oid bigint primary key, v1 int, p varchar);
-    explain create sink s as select u.v1 as v1, o.oid as v2, u.name as v3, cast('00:00:00' as time) as v4 from u join o on u.v1 = o.v1 WITH (
+    create materialized view mv as select u.v1 as v1, o.oid as v2, u.name as v3, cast('00:00:00' as time) as v4 from u join o on u.v1 = o.v1;
+    explain create sink s from mv WITH (
       connector = 'iceberg',
       type = 'upsert',
       catalog.type = 'mock',
@@ -420,19 +424,15 @@
       s3.secret.key = 'hummockadmin',
       write_mode = 'merge-on-read',
       format_version = '3',
+      refresh.interval.sec = '60',
       enable_pk_index = 'true'
     );
   explain_output: |
     StreamIcebergWithPkIndexPositionDeleteMerger
     └─StreamExchange { dist: HashShard(file_path) }
       └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4], downstream_pk: [v1, v2] }
-        └─StreamExchange { dist: HashShard(u.v1, o.oid) }
-          └─StreamProject { exprs: [u.v1, o.oid, u.name, '00:00:00':Time] }
-            └─StreamHashJoin { type: Inner, predicate: u.v1 = o.v1 }
-              ├─StreamExchange { dist: HashShard(u.v1) }
-              │ └─StreamTableScan { table: u, columns: [v1, name] }
-              └─StreamExchange { dist: HashShard(o.v1) }
-                └─StreamTableScan { table: o, columns: [oid, v1] }
+        └─StreamExchange { dist: HashShard(mv.v1, mv.v2) }
+          └─StreamTableScan { table: mv, columns: [v1, v2, v3, v4] }
 - id: separate_aggregation_and_sink
   sql: |
     set streaming_separate_sink to true;

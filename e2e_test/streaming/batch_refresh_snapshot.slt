@@ -63,7 +63,7 @@ CREATE SOURCE src_test (v1 int) WITH (
     datagen.rows.per.second = '1'
 );
 
-statement error batch refresh materialized views must not depend on sources
+statement error batch refresh jobs must not depend on sources directly
 CREATE MATERIALIZED VIEW mv_batch_source_bad WITH (refresh.interval.sec = 5) AS
 SELECT v1 FROM src_test
 UNION ALL

@@ -36,7 +36,7 @@ use risingwave_common::types::{DataType, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
@@ -55,6 +55,7 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
@@ -86,7 +87,10 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
+use crate::utils::{
+    BATCH_REFRESH_INTERVAL_SEC_KEY, resolve_connection_ref_and_secret_ref,
+    resolve_privatelink_in_with_option,
+};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
 static SINK_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
@@ -117,6 +121,7 @@ pub struct SinkPlanContext {
     pub target_table_catalog: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
     pub since_timestamp_epoch: Option<u64>,
+    pub refresh_interval_sec: Option<u64>,
 }
 
 pub async fn gen_sink_plan(
@@ -173,6 +178,10 @@ pub async fn gen_sink_plan(
     if since_timestamp_epoch.is_some() {
         Feature::SinkSinceTimestamp.check_available()?;
     }
+    let refresh_interval_sec = resolved_with_options
+        .remove(BATCH_REFRESH_INTERVAL_SEC_KEY)
+        .map(parse_batch_refresh_interval_sec)
+        .transpose()?;
 
     ensure_connection_type_allowed(connection_type, &SINK_ALLOWED_CONNECTION_CONNECTOR)?;
 
@@ -226,6 +235,24 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+    let is_iceberg_pk_index_sink = connector.eq_ignore_ascii_case(ICEBERG_SINK)
+        && resolved_with_options
+            .get(ENABLE_PK_INDEX)
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    if refresh_interval_sec.is_some() && !is_iceberg_pk_index_sink {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` is only supported for Iceberg sinks with \
+             `enable_pk_index='true'`"
+        ))
+        .into());
+    }
+    if is_iceberg_pk_index_sink && !is_iceberg_engine_internal && refresh_interval_sec.is_none() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "Iceberg sink with `enable_pk_index='true'` must be created as a batch refresh job. \
+             Please specify `{BATCH_REFRESH_INTERVAL_SEC_KEY}` in the WITH clause."
+        ))
+        .into());
+    }
     ensure_local_fs_connector_allowed(session, &connector)?;
 
     // Used for debezium's table name
@@ -332,6 +359,26 @@ pub async fn gen_sink_plan(
             }
         }
     }
+    if refresh_interval_sec.is_some() {
+        if since_timestamp_epoch.is_some() {
+            return Err(ErrorCode::BindError(format!(
+                "`{SINK_SINCE_TIMESTAMP_OPTION}` cannot be used with `{BATCH_REFRESH_INTERVAL_SEC_KEY}`"
+            ))
+            .into());
+        }
+        if sink_into_table_name.is_some() {
+            return Err(ErrorCode::BindError(format!(
+                "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` does not support `CREATE SINK INTO TABLE`"
+            ))
+            .into());
+        }
+        if is_iceberg_engine_internal {
+            return Err(ErrorCode::BindError(format!(
+                "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` does not support iceberg engine internal sinks"
+            ))
+            .into());
+        }
+    }
 
     let (
         dependent_relations,
@@ -386,6 +433,14 @@ pub async fn gen_sink_plan(
     };
 
     reject_internal_table_dependencies(session, &dependent_relations, "CREATE SINK")?;
+    if refresh_interval_sec.is_some() && dependent_relations.len() != 1 {
+        return Err(ErrorCode::NotSupported(
+            "Iceberg pk-index batch refresh sink requires exactly one direct upstream relation"
+                .to_owned(),
+            "Please create a materialized view for complex queries first, then create the sink from that materialized view.".to_owned(),
+        )
+        .into());
+    }
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
@@ -436,6 +491,12 @@ pub async fn gen_sink_plan(
         resolved_with_options.remove(SINK_SNAPSHOT_OPTION),
         Some(flag) if flag.eq_ignore_ascii_case("false")
     );
+    if refresh_interval_sec.is_some() && without_snapshot {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` requires snapshot backfill, but `snapshot=false` was specified"
+        ))
+        .into());
+    }
 
     if since_timestamp_epoch.is_some() && !without_snapshot {
         return Err(ErrorCode::BindError(format!(
@@ -489,6 +550,7 @@ pub async fn gen_sink_plan(
         format_desc,
         without_snapshot,
         since_timestamp_epoch.is_some(),
+        refresh_interval_sec.is_some(),
         is_iceberg_engine_internal,
         target_table_catalog.clone(),
         partition_info,
@@ -568,7 +630,25 @@ pub async fn gen_sink_plan(
         target_table_catalog,
         dependencies,
         since_timestamp_epoch,
+        refresh_interval_sec,
     })
+}
+
+fn parse_batch_refresh_interval_sec(value: String) -> Result<u64> {
+    let seconds = value.parse::<u64>().map_err(|err| {
+        ErrorCode::InvalidParameterValue(format!(
+            "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` must be a positive integer, but got: {value} \
+             (error: {})",
+            err.as_report()
+        ))
+    })?;
+    if seconds == 0 {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "`{BATCH_REFRESH_INTERVAL_SEC_KEY}` must be larger than 0, but got: {seconds}"
+        ))
+        .into());
+    }
+    Ok(seconds)
 }
 
 // This function is used to return partition compute info for a sink. More details refer in `PartitionComputeInfo`.
@@ -718,7 +798,7 @@ async fn create_sink_or_replace(
     let resource_type =
         resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)?;
 
-    let (sink, graph, dependencies, since_timestamp_epoch) = {
+    let (sink, graph, dependencies, since_timestamp_epoch, refresh_interval_sec) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
         let SinkPlanContext {
             query,
@@ -727,6 +807,7 @@ async fn create_sink_or_replace(
             target_table_catalog,
             dependencies,
             since_timestamp_epoch,
+            refresh_interval_sec,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -744,6 +825,13 @@ async fn create_sink_or_replace(
                 }
             }
             SinkCreateMode::Replace { original_sink } => {
+                if refresh_interval_sec.is_some() {
+                    return Err(ErrorCode::NotSupported(
+                        "REPLACE SINK with batch refresh is not supported yet".to_owned(),
+                        "drop and recreate the sink instead".to_owned(),
+                    )
+                    .into());
+                }
                 if target_table_catalog.is_some() {
                     return Err(ErrorCode::NotSupported(
                         "REPLACE SINK INTO TABLE is not supported yet".to_owned(),
@@ -764,7 +852,13 @@ async fn create_sink_or_replace(
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, dependencies, since_timestamp_epoch)
+        (
+            sink,
+            graph,
+            dependencies,
+            since_timestamp_epoch,
+            refresh_interval_sec,
+        )
     };
 
     let statement_name = mode.statement_name();
@@ -788,6 +882,7 @@ async fn create_sink_or_replace(
                     resource_type,
                     if_not_exists,
                     since_timestamp_epoch,
+                    refresh_interval_sec,
                 ),
                 &session,
                 statement_name,
