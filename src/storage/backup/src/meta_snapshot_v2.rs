@@ -285,18 +285,106 @@ fn get_1<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<T, serde_json::Er
 
 fn put_with_len_prefix<T: Serialize>(buf: &mut Vec<u8>, data: &T) -> Result<(), serde_json::Error> {
     let b = serde_json::to_vec(data)?;
-    buf.put_u32_le(
-        b.len()
-            .try_into()
-            .unwrap_or_else(|_| panic!("cannot convert {} into u32", b.len())),
-    );
+    // Any valid JSON value serialized by serde_json is non-empty, such as `null`, `{}`, or `[]`.
+    assert!(!b.is_empty());
+    if let Ok(len) = u32::try_from(b.len()) {
+        buf.put_u32_le(len);
+    } else {
+        buf.put_u32_le(0);
+        buf.put_u64_le(
+            b.len()
+                .try_into()
+                .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
+        );
+    }
     buf.put_slice(&b);
     Ok(())
 }
 
 fn get_with_len_prefix<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<T, serde_json::Error> {
-    let len = buf.get_u32_le() as usize;
+    let len = match buf.get_u32_le() {
+        0 => {
+            let len = buf.get_u64_le();
+            len.try_into()
+                .unwrap_or_else(|_| panic!("cannot convert {} into usize", len))
+        }
+        len => len as usize,
+    };
+    assert!(
+        buf.remaining() >= len,
+        "JSON payload length {} exceeds remaining buffer {}",
+        len,
+        buf.remaining()
+    );
     let d = serde_json::from_slice(&buf[..len])?;
     buf.advance(len);
     Ok(d)
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BufMut;
+
+    use super::*;
+
+    #[test]
+    fn test_len_prefix_legacy_u32_round_trip() {
+        let mut buf = vec![];
+        put_with_len_prefix(&mut buf, &"hello").unwrap();
+
+        assert_ne!(u32::from_le_bytes(buf[..4].try_into().unwrap()), 0);
+
+        let decoded: String = get_with_len_prefix(&mut buf.as_slice()).unwrap();
+        assert_eq!(decoded, "hello");
+    }
+
+    #[test]
+    fn test_len_prefix_extended_u64_decoding() {
+        let payload = serde_json::to_vec("hello").unwrap();
+        let mut buf = vec![];
+        buf.put_u32_le(0);
+        buf.put_u64_le(payload.len() as u64);
+        buf.put_slice(&payload);
+
+        let decoded: String = get_with_len_prefix(&mut buf.as_slice()).unwrap();
+        assert_eq!(decoded, "hello");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_len_prefix_panics_on_missing_extended_u64() {
+        let mut buf = vec![];
+        buf.put_u32_le(0);
+
+        let _ = get_with_len_prefix::<String>(&mut buf.as_slice());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_len_prefix_panics_on_payload_shorter_than_declared_len() {
+        let mut buf = vec![];
+        buf.put_u32_le(100);
+        buf.put_slice(br#""hello""#);
+
+        let _ = get_with_len_prefix::<String>(&mut buf.as_slice());
+    }
+
+    #[test]
+    fn test_snapshot_v2_legacy_encoding_decoding() {
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2::default(),
+        };
+
+        let encoded = raw.encode().unwrap();
+        let decoded = MetaSnapshotV2::decode(&encoded).unwrap();
+
+        assert_eq!(decoded.format_version, raw.format_version);
+        assert_eq!(decoded.id, raw.id);
+        assert_eq!(
+            decoded.metadata.hummock_version.id,
+            raw.metadata.hummock_version.id
+        );
+    }
 }
