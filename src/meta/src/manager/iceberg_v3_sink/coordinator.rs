@@ -44,7 +44,7 @@ use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use prost::Message;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError};
+use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
     IcebergCommitResult, IcebergConfig, IcebergDvMergerCommitResult, commit_branch,
 };
@@ -176,6 +176,7 @@ impl IcebergV3Coordinator {
             self.catalog.clone(),
             self.table.identifier().clone(),
             self.target_branch.clone(),
+            self.sink_id,
             &commit,
             self.retry_num,
         )
@@ -323,6 +324,7 @@ async fn commit_one_epoch(
     catalog: Arc<dyn Catalog>,
     table_ident: iceberg::TableIdent,
     target_branch: String,
+    sink_id: SinkId,
     commit: &EpochCommit,
     retry_num: usize,
 ) -> Result<Table, CommitError> {
@@ -331,10 +333,19 @@ async fn commit_one_epoch(
 
     commit_retry::run_with_retry(
         catalog.clone(),
-        table_ident,
+        table_ident.clone(),
         merged.schema_id,
         merged.partition_spec_id,
         retry_num,
+        CommitRetryLogContext::new(
+            "iceberg_v3_sink_coordinator",
+            "commit_epoch",
+            table_ident.to_string(),
+            target_branch.clone(),
+        )
+        .with_sink_id(sink_id)
+        .with_epoch(commit.epoch)
+        .with_snapshot_id(snapshot_id),
         |table| {
             let merged = merged.clone();
             let catalog = catalog.clone();
