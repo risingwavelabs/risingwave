@@ -60,11 +60,10 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 parking_lot = { workspace = true }
 parquet-variant = { workspace = true }
+parquet-variant-compute = { workspace = true }
 parquet-variant-json = { workspace = true }
 parse-display = "0.11"
 paste = "1"
-parquet-variant-compute = "57"
-parquet-variant-json = "57"
 pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6", features = [
     "derive",
@@ -134,7 +133,6 @@ criterion = { workspace = true }
 expect-test = "1"
 lru = { workspace = true }
 more-asserts = "0.3"
-parquet-variant = "57"
 pretty_assertions = "1"
 rand = { workspace = true }
 rusty-fork = "0.3"
