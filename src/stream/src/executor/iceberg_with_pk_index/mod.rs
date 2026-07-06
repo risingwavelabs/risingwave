@@ -12,24 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Iceberg V3 Sink with Primary Key Index
+//! pk-index sink (V2/V3)
 //!
-//! This module implements three core executors for the Iceberg V3 sink that uses
+//! This module implements three core executors for the Iceberg pk-index sink that uses
 //! Deletion Vectors (DVs) instead of Equality Delete files:
 //!
 //! 1. **Writer Executor** (Stateful): Maintains a PK index mapping primary keys to
 //!    (`file_path`, `position`). Writes data files for inserts and emits
 //!    (`file_path`, `position`) messages for deletes.
 //!
-//! 2. **DV Merger Executor** (Stateless): Consumes the Writer's (`file_path`, `position`) messages,
-//!    merges delete positions with historical DVs, and reports the resulting DV files to meta.
+//! 2. **Position-delete merger executor** (Stateless): Consumes the Writer's (`file_path`, `position`)
+//!    messages, merges delete positions with historical deletes, and reports the resulting delete
+//!    files to meta.
 
-mod dv_handler_impl;
-mod dv_merger;
+mod position_delete_handler_impl;
+mod position_delete_merger;
 mod writer;
 mod writer_impl;
 
-pub use dv_handler_impl::DvHandlerImpl;
-pub use dv_merger::DvMergerExecutor;
+pub use position_delete_handler_impl::PositionDeleteHandlerImpl;
+pub use position_delete_merger::PositionDeleteMergerExecutor;
 pub use writer::WriterExecutor;
 pub use writer_impl::IcebergWriterImpl;

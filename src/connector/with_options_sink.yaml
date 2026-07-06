@@ -57,6 +57,8 @@ BigQueryConfig:
     field_type: bool
     required: false
     default: Default::default
+    alias:
+    - create_table_if_not_exists
   - name: bigquery.credentials
     field_type: String
     required: false
@@ -238,7 +240,7 @@ DorisConfig:
     required: true
   - name: doris.stream_load.http.timeout.ms
     field_type: u64
-    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    comments: The timeout in milliseconds for stream load http request, defaults to 30 seconds.
     required: false
     default: 30 * 1000
     allow_alter_on_fly: true
@@ -501,6 +503,9 @@ IcebergConfig:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.endpoint
+    field_type: String
+    required: false
   - name: glue.id
     field_type: String
     comments: |-
@@ -526,6 +531,18 @@ IcebergConfig:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path
@@ -800,7 +817,8 @@ IcebergConfig:
     field_type: bool
     comments: |-
       Whether to enable PK index for upsert sink. Default is false.
-      It's used for V3 upsert iceberg sink to generate delete vectors.
+      For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+      position deletes instead of equality deletes.
     required: false
     default: Default::default
 KafkaConfig:
@@ -951,10 +969,41 @@ KafkaConfig:
     field_type: bool
     required: false
     allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.ms
+    field_type: usize
+    comments: |-
+      Initial backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.max.ms
+    field_type: usize
+    comments: |-
+      Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.socket.connection.setup.timeout.ms
+    field_type: usize
+    comments: |-
+      Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+      SSL/SASL handshakes.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
     default: 'true'
+  - name: properties.retry.backoff.ms
+    field_type: usize
+    comments: Initial backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.retry.backoff.max.ms
+    field_type: usize
+    comments: Maximum backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -997,11 +1046,6 @@ KafkaConfig:
   - name: properties.message.send.max.retries
     field_type: usize
     comments: How many times to retry sending a failing Message.
-    required: false
-    allow_alter_on_fly: true
-  - name: properties.retry.backoff.ms
-    field_type: usize
-    comments: The backoff time in milliseconds before retrying a protocol request.
     required: false
     allow_alter_on_fly: true
   - name: properties.batch.num.messages
@@ -1636,6 +1680,13 @@ SnowflakeV2Config:
     required: false
     default: '1800'
   - name: warehouse
+    field_type: String
+    required: false
+  - name: task.serverless
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: task.target_completion_interval
     field_type: String
     required: false
   - name: jdbc.url

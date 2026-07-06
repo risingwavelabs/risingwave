@@ -21,7 +21,8 @@ use iceberg::arrow::{
     RecordBatchPartitionSplitter, arrow_schema_to_schema, schema_to_arrow_schema,
 };
 use iceberg::spec::{
-    DataFile, FormatVersion, PartitionSpecRef, SchemaRef as IcebergSchemaRef, SerializedDataFile,
+    DataFile, FormatVersion, PartitionSpecRef, Schema, SchemaRef as IcebergSchemaRef,
+    SerializedDataFile, StructType,
 };
 use iceberg::table::Table;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -80,7 +81,9 @@ enum ProjectIdxVec {
 
 type DataFileWriterBuilderType =
     DataFileWriterBuilder<ParquetWriterBuilder, DefaultLocationGenerator, DefaultFileNameGenerator>;
-type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
+/// The concrete V2 position-delete Parquet writer builder type, shared by the
+/// iceberg sink writer and the pk-index position-delete merger.
+pub type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
     ParquetWriterBuilder,
     DefaultLocationGenerator,
     DefaultFileNameGenerator,
@@ -786,17 +789,7 @@ impl IcebergSinkWriterInner {
     }
 
     pub fn generate_commit_metadata(&self, data_files: Vec<DataFile>) -> Result<SinkMetadata> {
-        let format_version = self.table.metadata().format_version();
-        let partition_type = self.table.metadata().default_partition_type();
-        let serialized_data_files = data_files
-            .into_iter()
-            .map(|f| {
-                // Truncate large column statistics BEFORE serialization
-                let truncated = truncate_datafile(f);
-                let res = SerializedDataFile::try_from(truncated, partition_type, format_version)?;
-                Ok(res)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let serialized_data_files = serialize_data_files_default_spec(&self.table, data_files)?;
         SinkMetadata::try_from(&IcebergCommitResult {
             data_files: serialized_data_files,
             schema_id: self.table.metadata().current_schema_id(),
@@ -877,6 +870,54 @@ impl SinkWriter for IcebergSinkWriter {
 /// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
 /// that benefit from query optimization.
 const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
+
+/// Serializes `files` against the table's current default partition spec, after
+/// truncating oversized column statistics. Shared by the iceberg sink writer's
+/// commit-metadata generation and the pk-index merger's delete-file serialization.
+///
+/// Only the DEFAULT-spec path is shared here; callers that must serialize each
+/// file against its own (potentially older) partition spec keep their own logic.
+pub fn serialize_data_files_default_spec(
+    table: &Table,
+    files: Vec<DataFile>,
+) -> Result<Vec<SerializedDataFile>> {
+    let format_version = table.metadata().format_version();
+    let partition_type = table.metadata().default_partition_type();
+    files
+        .into_iter()
+        .map(|f| {
+            // Truncate large column statistics BEFORE serialization.
+            let truncated = truncate_datafile(f);
+            Ok(SerializedDataFile::try_from(
+                truncated,
+                partition_type,
+                format_version,
+            )?)
+        })
+        .collect()
+}
+
+/// Resolves a partition spec by id from the table metadata, with a consolidated
+/// error message. Shared spec-lookup mechanic for the pk-index merger, commit
+/// coordinator, and sink commit paths.
+pub fn resolve_partition_spec(table: &Table, spec_id: i32) -> Result<PartitionSpecRef> {
+    table
+        .metadata()
+        .partition_spec_by_id(spec_id)
+        .cloned()
+        .ok_or_else(|| SinkError::Iceberg(anyhow!("partition spec {} not found", spec_id)))
+}
+
+/// Resolves the partition [`StructType`] for the given `spec_id` against `schema`.
+///
+/// `schema` is passed explicitly (rather than read from the table) so callers can
+/// preserve their chosen schema, and `spec_id` is passed explicitly so callers can
+/// preserve their chosen spec (e.g. a file's own spec vs. the default spec).
+pub fn resolve_partition_type(table: &Table, spec_id: i32, schema: &Schema) -> Result<StructType> {
+    resolve_partition_spec(table, spec_id)?
+        .partition_type(schema)
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+}
 
 /// Truncate large column statistics from `DataFile` BEFORE serialization.
 ///

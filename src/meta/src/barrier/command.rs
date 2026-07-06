@@ -854,7 +854,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             truncate_tables,
-            iceberg_v3_sink_metadata,
+            iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos = match &barrier_info.post_collect_command {
@@ -943,8 +943,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
-        task.iceberg_v3_sink_metadata
-            .extend(iceberg_v3_sink_metadata);
+        task.iceberg_pk_index_sink_metadata
+            .extend(iceberg_pk_index_sink_metadata);
     }
 }
 

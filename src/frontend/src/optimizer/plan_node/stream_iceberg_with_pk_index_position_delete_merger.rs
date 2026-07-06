@@ -14,7 +14,7 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::stream_plan::IcebergWithPkIndexDvMergerNode;
+use risingwave_pb::stream_plan::IcebergWithPkIndexPositionDeleteMergerNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
@@ -26,20 +26,21 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// `StreamIcebergWithPkIndexDvMerger` is the stateless singleton executor for the Iceberg
+/// `StreamIcebergWithPkIndexPositionDeleteMerger` is the stateless singleton executor for the Iceberg
 /// with pk index sink. It merges delete-position messages from the upstream `WriterExecutor`
-/// with historical deletion vectors and writes merged DV files.
+/// with existing position deletes and writes the resulting delete file (a V3 Puffin deletion
+/// vector or a V2 file-scoped Parquet position-delete file, depending on the table format version).
 ///
 /// This node shardes the input stream by `file_path` (the first column) to ensure all messages
 /// for the same file are processed by the same merger instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamIcebergWithPkIndexDvMerger {
+pub struct StreamIcebergWithPkIndexPositionDeleteMerger {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
     pub sink_desc: SinkDesc,
 }
 
-impl StreamIcebergWithPkIndexDvMerger {
+impl StreamIcebergWithPkIndexPositionDeleteMerger {
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
         debug_assert_eq!(input.schema().len(), 2); // Expecting `[file_path, position]` from the Writer.
         let input = RequiredDist::shard_by_key(2, &[0])
@@ -65,13 +66,13 @@ impl StreamIcebergWithPkIndexDvMerger {
     }
 }
 
-impl Distill for StreamIcebergWithPkIndexDvMerger {
+impl Distill for StreamIcebergWithPkIndexPositionDeleteMerger {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamIcebergWithPkIndexDvMerger", vec![])
+        childless_record("StreamIcebergWithPkIndexPositionDeleteMerger", vec![])
     }
 }
 
-impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexDvMerger {
+impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexPositionDeleteMerger {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -81,16 +82,18 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexDvMerger {
     }
 }
 
-impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexDvMerger }
+impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexPositionDeleteMerger }
 
-impl StreamNode for StreamIcebergWithPkIndexDvMerger {
+impl StreamNode for StreamIcebergWithPkIndexPositionDeleteMerger {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
-        NodeBody::IcebergWithPkIndexDvMerger(Box::new(IcebergWithPkIndexDvMergerNode {
-            sink_desc: Some(self.sink_desc.to_proto()),
-        }))
+        NodeBody::IcebergWithPkIndexPositionDeleteMerger(Box::new(
+            IcebergWithPkIndexPositionDeleteMergerNode {
+                sink_desc: Some(self.sink_desc.to_proto()),
+            },
+        ))
     }
 }
 
-impl ExprRewritable<Stream> for StreamIcebergWithPkIndexDvMerger {}
+impl ExprRewritable<Stream> for StreamIcebergWithPkIndexPositionDeleteMerger {}
 
-impl ExprVisitable for StreamIcebergWithPkIndexDvMerger {}
+impl ExprVisitable for StreamIcebergWithPkIndexPositionDeleteMerger {}
