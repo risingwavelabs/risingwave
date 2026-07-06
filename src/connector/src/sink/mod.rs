@@ -59,7 +59,7 @@ pub mod prelude {
     };
 }
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
@@ -95,6 +95,7 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
+use serde::de::DeserializeOwned;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -250,6 +251,91 @@ pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 /// same downstream primary key instead of compacting them into one final-state update within a
 /// barrier. Upstream changes under the same stream key may still be compacted earlier.
 pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
+
+pub trait UnknownFields {
+    /// Unrecognized fields in the `WITH` clause.
+    fn unknown_fields(&self) -> HashMap<String, String>;
+}
+
+impl UnknownFields for () {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
+}
+
+#[macro_export]
+macro_rules! impl_sink_unknown_fields {
+    ($config_type:ty) => {
+        impl $crate::sink::UnknownFields for $config_type {
+            fn unknown_fields(&self) -> std::collections::HashMap<String, String> {
+                self.unknown_fields.clone()
+            }
+        }
+    };
+}
+
+fn validate_sink_options_with_config<C>(properties: BTreeMap<String, String>) -> Result<()>
+where
+    C: DeserializeOwned + UnknownFields,
+{
+    let config = serde_json::from_value::<C>(serde_json::to_value(properties).unwrap())
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+    let mut unknown_fields = config.unknown_fields();
+    // These options are consumed by the sink DDL/planner layer. They are valid for sink creation
+    // even if a connector-specific config does not declare them.
+    for key in [
+        CONNECTOR_TYPE_KEY,
+        SINK_TYPE_OPTION,
+        SINK_SNAPSHOT_OPTION,
+        SINK_USER_IGNORE_DELETE_OPTION,
+        SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        "primary_key",
+    ] {
+        unknown_fields.remove(key);
+    }
+    if unknown_fields.is_empty() {
+        Ok(())
+    } else {
+        Err(SinkError::Config(anyhow!(
+            "Unknown fields in the WITH clause: {:?}",
+            unknown_fields
+        )))
+    }
+}
+
+macro_rules! validate_sink_options_for_type {
+    ({$({$variant_name:ident, $sink_type:ty, $config_type:ty}),*}, $connector:expr, $properties:expr) => {{
+        match $connector {
+            $(
+                <$sink_type>::SINK_NAME => {
+                    validate_sink_options_with_config::<$config_type>($properties.clone())
+                },
+            )*
+            other => Err(SinkError::Config(anyhow!(
+                "unsupported sink connector {}",
+                other
+            ))),
+        }
+    }};
+}
+
+/// Validate raw `CREATE SINK` `WITH` options against the selected sink config.
+///
+/// Runtime and recovery paths intentionally keep using [`build_sink`] without this validation, so
+/// old catalog entries with unknown options remain compatible after upgrade.
+pub fn validate_sink_options_on_create(properties: &BTreeMap<String, String>) -> Result<()> {
+    let connector = properties
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?
+        .to_lowercase();
+
+    let mut properties = properties.clone();
+    if connector == self::http::HTTP_SINK {
+        properties.retain(|key, _| !key.starts_with("header."));
+    }
+
+    for_all_sinks! { validate_sink_options_for_type, { connector.as_str() }, properties }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
@@ -1130,6 +1216,66 @@ impl From<sea_orm::DbErr> for SinkError {
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
         SinkError::File(error.to_report_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn test_validate_sink_options_on_create() {
+        validate_sink_options_on_create(&btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("primary_key", "id"),
+            ("redis.url", "redis://127.0.0.1:6379"),
+        ]))
+        .unwrap();
+
+        let err = validate_sink_options_on_create(&btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("redis.url", "redis://127.0.0.1:6379"),
+            ("bogus_with", "1"),
+        ]))
+        .unwrap_err();
+        let report = err.to_report_string();
+        assert!(report.contains("bogus_with"), "{report}");
+
+        validate_sink_options_on_create(&btreemap([
+            (CONNECTOR_TYPE_KEY, "snowflake_v2"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            (
+                "jdbc.url",
+                "jdbc:snowflake://account.snowflakecomputing.com",
+            ),
+            ("database", "db"),
+            ("schema", "public"),
+            ("warehouse", "wh"),
+            ("username", "user"),
+            ("password", "password"),
+            ("auto.schema.change", "true"),
+        ]))
+        .unwrap();
+
+        let err = validate_sink_options_on_create(&btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("redis.url", "redis://127.0.0.1:6379"),
+            ("auto.schema.change", "true"),
+        ]))
+        .unwrap_err();
+        assert!(err.to_report_string().contains("auto.schema.change"));
     }
 }
 

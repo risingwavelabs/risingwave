@@ -463,7 +463,12 @@ pub struct IcebergConfig {
         deserialize_with = "deserialize_bool_from_string"
     )]
     pub enable_pk_index: bool,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(IcebergConfig);
 
 impl EnforceSecret for IcebergConfig {
     fn enforce_secret<'a>(

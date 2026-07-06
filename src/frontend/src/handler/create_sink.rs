@@ -42,7 +42,7 @@ use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink, validate_sink_options_on_create,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -194,6 +194,10 @@ pub async fn gen_sink_plan(
     } else {
         OptimizerContext::from_handler_args(handler_args.clone())
     };
+    let sink_options_for_validation = resolved_with_options.as_plaintext().clone();
+    if sink_options_for_validation.contains_key(CONNECTOR_TYPE_KEY) {
+        validate_sink_options_on_create(&sink_options_for_validation)?;
+    }
 
     let is_auto_schema_change = resolved_with_options
         .remove(AUTO_SCHEMA_CHANGE_KEY)

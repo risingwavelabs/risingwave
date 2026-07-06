@@ -234,7 +234,12 @@ impl RedisCommon {
 pub struct RedisConfig {
     #[serde(flatten)]
     pub common: RedisCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(RedisConfig);
 
 impl EnforceSecret for RedisConfig {
     fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {

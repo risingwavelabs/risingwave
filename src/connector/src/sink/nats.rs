@@ -53,7 +53,12 @@ pub struct NatsConfig {
     pub common: NatsCommon,
     // accept "append-only"
     pub r#type: String,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(NatsConfig);
 
 #[derive(Clone, Debug)]
 pub struct NatsSink {

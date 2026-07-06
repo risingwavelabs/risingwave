@@ -252,7 +252,12 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(KafkaConfig);
 
 impl EnforceSecret for KafkaConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

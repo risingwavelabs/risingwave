@@ -65,7 +65,12 @@ pub struct MqttConfig {
     // if set, will use a field value as the topic name, if topic is also set it will be used as a fallback
     #[serde(rename = "topic.field")]
     pub topic_field: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(MqttConfig);
 
 impl EnforceSecret for MqttConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

@@ -96,7 +96,12 @@ pub struct DorisConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(DorisConfig);
 
 impl EnforceSecret for DorisConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
