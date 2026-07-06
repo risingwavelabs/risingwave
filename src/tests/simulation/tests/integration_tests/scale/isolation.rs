@@ -166,17 +166,14 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
         .await?;
 
     // Adding a serving compute node rebuilds serving vnode mappings and pushes the full
-    // replacement to both existing and new serving nodes.
+    // replacement to both existing and new serving nodes. The existing serving worker's
+    // assignment may stay unchanged for some deterministic seeds, so only require it to
+    // converge to the current meta-owned mapping.
     let expected_serving_before_add_node =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
             .await?;
-    let serving_before_add_node = wait_serving_refill_on_compute(
-        &cluster,
-        COMPUTE_2_HOST,
-        &expected_serving_before_add_node,
-        None,
-    )
-    .await?;
+    wait_serving_refill_on_compute(&cluster, COMPUTE_2_HOST, &expected_serving_before_add_node)
+        .await?;
     create_compute_node(&cluster, 4, "serving");
     wait_until(
         &mut session,
@@ -187,25 +184,15 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     let expected_serving_on_old_worker =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
             .await?;
-    wait_serving_refill_on_compute(
-        &cluster,
-        COMPUTE_2_HOST,
-        &expected_serving_on_old_worker,
-        Some(&serving_before_add_node),
-    )
-    .await?;
+    wait_serving_refill_on_compute(&cluster, COMPUTE_2_HOST, &expected_serving_on_old_worker)
+        .await?;
     wait_refill_policy_on_compute(&cluster, COMPUTE_4_HOST, &internal_table_ids, Some("both"))
         .await?;
     let expected_serving_on_new_worker =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_4_HOST, "s3")
             .await?;
-    wait_serving_refill_on_compute(
-        &cluster,
-        COMPUTE_4_HOST,
-        &expected_serving_on_new_worker,
-        None,
-    )
-    .await?;
+    wait_serving_refill_on_compute(&cluster, COMPUTE_4_HOST, &expected_serving_on_new_worker)
+        .await?;
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
     assert!(!database_recovery_events.contains_key(&group2_database_id));
@@ -755,7 +742,11 @@ fn serving_refill_matches(
     serving_vnodes: &HashMap<u32, Vec<u16>>,
     expected: &HashMap<u32, Vec<u16>>,
 ) -> bool {
-    serving_vnodes == expected
+    // The monitor reports all serving mappings held by this worker. This test only cares
+    // about the target sink's internal tables, so tolerate unrelated table mappings.
+    expected
+        .iter()
+        .all(|(table_id, expected_vnodes)| serving_vnodes.get(table_id) == Some(expected_vnodes))
 }
 
 fn normalize_serving_refill_vnodes(
@@ -817,16 +808,17 @@ async fn wait_serving_refill_on_compute(
     cluster: &Cluster,
     worker_host: &str,
     expected: &HashMap<u32, Vec<u16>>,
-    previous: Option<&HashMap<u32, Vec<u16>>>,
 ) -> Result<HashMap<u32, Vec<u16>>> {
+    let mut last_observed = None;
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
             if let Ok(serving_vnodes) = serving_refill_vnodes_on_compute(cluster, worker_host).await
                 && let Ok(serving_vnodes) = normalize_serving_refill_vnodes(serving_vnodes)
-                && serving_refill_matches(&serving_vnodes, expected)
-                && previous.is_none_or(|previous| &serving_vnodes != previous)
             {
-                return Ok::<_, anyhow::Error>(serving_vnodes);
+                if serving_refill_matches(&serving_vnodes, expected) {
+                    return Ok::<_, anyhow::Error>(serving_vnodes);
+                }
+                last_observed = Some(serving_vnodes);
             }
             sleep(Duration::from_secs(1)).await;
         }
@@ -834,9 +826,10 @@ async fn wait_serving_refill_on_compute(
     .await
     .map_err(|_| {
         anyhow!(
-            "timed out waiting for serving refill vnodes on {} to match {:?}",
+            "timed out waiting for serving refill vnodes on {} to match {:?}, last observed {:?}",
             worker_host,
-            expected
+            expected,
+            last_observed
         )
     })?
 }
