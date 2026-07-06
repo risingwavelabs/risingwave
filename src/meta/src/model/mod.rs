@@ -23,7 +23,6 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 pub use error::*;
 pub use risingwave_common::id::{ActorId, FragmentId, SubscriptionId};
-use sea_orm::ConnectionTrait;
 pub use stream::*;
 use uuid::Uuid;
 
@@ -66,7 +65,7 @@ impl Deref for ClusterId {
 }
 
 #[async_trait]
-pub trait Transactional<TXN: ConnectionTrait> {
+pub trait Transactional<TXN> {
     async fn upsert_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
     async fn delete_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
 }
@@ -143,7 +142,6 @@ where
 impl<TXN, T> ValTransaction<TXN> for VarTransaction<'_, T>
 where
     T: Transactional<TXN> + PartialEq,
-    TXN: ConnectionTrait,
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if let Some(new_value) = &self.new_value {
@@ -415,8 +413,6 @@ impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>> InMemValTra
 
 impl<K: Ord + Debug, V: Transactional<TXN> + Clone, P: DerefMut<Target = BTreeMap<K, V>>, TXN>
     ValTransaction<TXN> for BTreeMapTransactionInner<K, V, P>
-where
-    TXN: ConnectionTrait,
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         // Add the staging operation to txn
@@ -501,8 +497,6 @@ impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, 
 
 impl<K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
     for BTreeMapEntryTransaction<'_, K, V>
-where
-    TXN: ConnectionTrait,
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)

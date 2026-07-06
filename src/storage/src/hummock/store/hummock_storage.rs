@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -349,7 +349,7 @@ impl HummockStorageReadSnapshot {
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
                 .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
-            let version = HummockVersion::from_rpc_protobuf(&pb_version);
+            let version = LocalHummockVersion::from_rpc_protobuf(&pb_version);
             let (tx, _rx) = unbounded_channel();
             Ok(PinnedVersion::new(version, tx))
         };
@@ -990,11 +990,14 @@ impl HummockStorage {
     }
 
     /// Used in the compaction test tool
+    #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
         self._version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(Box::new(version)))
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                version.into(),
+            )))
             .unwrap();
         loop {
             if self.recent_versions.load().latest_version().id() >= version_id {

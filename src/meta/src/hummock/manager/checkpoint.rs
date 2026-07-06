@@ -179,16 +179,8 @@ impl HummockManager {
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let current_version_object_ids = current_version
-            .get_object_ids()
-            .chain(
-                versioning
-                    .table_change_log
-                    .values()
-                    .flat_map(|l| l.get_object_ids()),
-            )
-            .collect();
-        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
+        let removed_object_ids =
+            &versions_object_ids - &current_version.get_object_ids(false).collect();
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {

@@ -22,7 +22,7 @@ use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppressor;
 use risingwave_hummock_sdk::level::{Level, Levels};
-use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
+use risingwave_hummock_sdk::version::LocalHummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -97,21 +97,20 @@ impl Deref for PinnedVersion {
 
 impl PinnedVersion {
     pub fn new(
-        version: HummockVersion,
+        version: LocalHummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let local_version = LocalHummockVersion::from(version);
         PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
+    pub fn new_pin_version(&self, version: LocalHummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -122,13 +121,12 @@ impl PinnedVersion {
             return None;
         }
         let version_id = version.id;
-        let local_version = LocalHummockVersion::from(version);
         Some(PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         })
     }
 

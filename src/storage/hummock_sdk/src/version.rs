@@ -29,7 +29,7 @@ use tracing::warn;
 use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
-use crate::level::LevelsCommon;
+use crate::level::{LevelCommon, LevelsCommon};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::vector_index::{VectorIndex, VectorIndexDelta};
@@ -220,7 +220,6 @@ pub struct HummockVersionCommon<T, L = T> {
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
-    #[deprecated]
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,
@@ -228,7 +227,89 @@ pub struct HummockVersionCommon<T, L = T> {
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
 
-pub type LocalHummockVersion = HummockVersionCommon<SstableInfo, ()>;
+#[derive(Debug, Clone)]
+pub struct LocalHummockVersion {
+    pub id: HummockVersionId,
+    pub levels: HashMap<CompactionGroupId, LevelsCommon<SstableInfo>>,
+    pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    pub state_table_info: HummockVersionStateTableInfo,
+    pub vector_indexes: HashMap<TableId, VectorIndex>,
+}
+
+impl From<HummockVersion> for LocalHummockVersion {
+    fn from(version: HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version.levels,
+            table_watermarks: version.table_watermarks,
+            state_table_info: version.state_table_info,
+            vector_indexes: version.vector_indexes,
+        }
+    }
+}
+
+impl LocalHummockVersion {
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
+    }
+
+    pub fn from_version(version: &HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version.levels.clone(),
+            table_watermarks: version.table_watermarks.clone(),
+            state_table_info: version.state_table_info.clone(),
+            vector_indexes: version.vector_indexes.clone(),
+        }
+    }
+
+    pub fn to_protobuf(&self) -> PbHummockVersion {
+        #[expect(deprecated)]
+        HummockVersion {
+            id: self.id,
+            levels: self.levels.clone(),
+            max_committed_epoch: 0,
+            table_watermarks: self.table_watermarks.clone(),
+            table_change_log: Default::default(),
+            state_table_info: self.state_table_info.clone(),
+            vector_indexes: self.vector_indexes.clone(),
+        }
+        .into()
+    }
+
+    pub fn from_rpc_protobuf(pb_version: &PbHummockVersion) -> Self {
+        Self {
+            id: pb_version.id,
+            levels: pb_version
+                .levels
+                .iter()
+                .map(|(group_id, levels)| (*group_id, LevelsCommon::from(levels)))
+                .collect(),
+            table_watermarks: pb_version
+                .table_watermarks
+                .iter()
+                .map(|(table_id, table_watermark)| {
+                    (*table_id, Arc::new(TableWatermarks::from(table_watermark)))
+                })
+                .collect(),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(
+                &pb_version.state_table_info,
+            ),
+            vector_indexes: pb_version
+                .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
+        }
+    }
+
+    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<SstableInfo>> + '_ {
+        HummockVersionCommon::<_, ()>::get_combined_levels_common(&self.levels)
+    }
+}
 
 impl Default for HummockVersion {
     fn default() -> Self {
@@ -259,7 +340,6 @@ where
 }
 
 impl HummockVersion {
-    #[expect(deprecated)]
     pub fn estimated_encode_len(&self) -> usize {
         self.levels.len() * size_of::<CompactionGroupId>()
             + self
@@ -479,48 +559,6 @@ impl HummockVersion {
             state_table_info_delta: Default::default(),
             vector_index_delta: Default::default(),
         }
-    }
-
-    #[expect(deprecated)]
-    pub fn split_change_log(self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
-        let HummockVersionCommon {
-            id,
-            levels,
-            max_committed_epoch,
-            table_watermarks,
-            table_change_log,
-            state_table_info,
-            vector_indexes,
-        } = self;
-
-        let local_table_change_log = table_change_log
-            .iter()
-            .map(|(table_id, log)| {
-                let epoch_new_change_logs =
-                    log.iter()
-                        .map(|epoch_new_change_log| EpochNewChangeLogCommon {
-                            new_value: Vec::new(),
-                            old_value: Vec::new(),
-                            non_checkpoint_epochs: epoch_new_change_log
-                                .non_checkpoint_epochs
-                                .clone(),
-                            checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
-                        });
-                (*table_id, TableChangeLogCommon::new(epoch_new_change_logs))
-            })
-            .collect();
-
-        let local_version = LocalHummockVersion {
-            id,
-            levels,
-            max_committed_epoch,
-            table_watermarks,
-            table_change_log: local_table_change_log,
-            state_table_info,
-            vector_indexes,
-        };
-
-        (local_version, table_change_log)
     }
 }
 

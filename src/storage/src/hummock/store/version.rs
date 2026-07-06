@@ -1408,7 +1408,7 @@ mod tests {
             &HashSet::new(),
         );
 
-        let pinned_version = PinnedVersion::new(version, unbounded_channel().0);
+        let pinned_version = PinnedVersion::new(version.into(), unbounded_channel().0);
         let reader = HummockVersionReader::new(
             mock_sstable_store().await,
             Arc::new(HummockStateStoreMetrics::unused()),

@@ -137,7 +137,6 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
                 snapshot.metadata.hummock_version_ref(),
                 snapshot.format_version,
                 remarks,
-                snapshot.metadata.table_change_log_object_ids().into_iter(),
             ));
             manifest
         })
