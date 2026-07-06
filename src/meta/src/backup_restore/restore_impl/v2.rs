@@ -152,7 +152,7 @@ impl TableRows {
 
     fn from_models<T: Serialize>(models: Vec<T>) -> BackupResult<Self> {
         let count = u32::try_from(models.len())
-            .map_err(|_| BackupError::Other(anyhow!("too many metadata rows").into()))?;
+            .map_err(|_| BackupError::Other(anyhow!("too many metadata rows")))?;
         let mut rows = Self::empty(count)?;
         for model in models {
             let bytes = serde_json::to_vec(&model)?;
@@ -170,9 +170,8 @@ impl TableRows {
     }
 
     fn write_row(&mut self, bytes: &[u8]) -> BackupResult<()> {
-        let len = u64::try_from(bytes.len()).map_err(|_| {
-            BackupError::Other(anyhow!("cannot convert {} into u64", bytes.len()).into())
-        })?;
+        let len = u64::try_from(bytes.len())
+            .map_err(|_| BackupError::Other(anyhow!("cannot convert {} into u64", bytes.len())))?;
         self.file
             .as_file_mut()
             .write_all(&len.to_le_bytes())
@@ -207,9 +206,8 @@ impl TableRows {
             .as_file_mut()
             .read_exact(&mut len_bytes)
             .map_err(map_io_err)?;
-        let len = usize::try_from(u64::from_le_bytes(len_bytes)).map_err(|_| {
-            BackupError::Other(anyhow!("cannot convert row length into usize").into())
-        })?;
+        let len = usize::try_from(u64::from_le_bytes(len_bytes))
+            .map_err(|_| BackupError::Other(anyhow!("cannot convert row length into usize")))?;
         let mut bytes = vec![0; len];
         self.file
             .as_file_mut()
@@ -289,9 +287,8 @@ async fn read_len_prefixed_json_bytes(
     reader: &mut MetaSnapshotStreamingReader,
 ) -> BackupResult<Vec<u8>> {
     let len = match reader.read_u32_le().await? {
-        0 => usize::try_from(reader.read_u64_le().await?).map_err(|_| {
-            BackupError::Other(anyhow!("cannot convert row length into usize").into())
-        })?,
+        0 => usize::try_from(reader.read_u64_le().await?)
+            .map_err(|_| BackupError::Other(anyhow!("cannot convert row length into usize")))?,
         len => len as usize,
     };
     Ok(reader.read_bytes(len).await?.to_vec())
@@ -570,13 +567,10 @@ fn storage_url_from_system_parameters(
         .strip_prefix("hummock+")
         .map(|s| s.to_owned())
         .ok_or_else(|| {
-            BackupError::Other(
-                anyhow!(
-                    "invalid state_store from metadata snapshot: {}",
-                    storage_url_from_snapshot
-                )
-                .into(),
-            )
+            BackupError::Other(anyhow!(
+                "invalid state_store from metadata snapshot: {}",
+                storage_url_from_snapshot
+            ))
         })
 }
 
