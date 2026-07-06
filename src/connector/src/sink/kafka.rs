@@ -347,6 +347,8 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(
             &self.format_desc,

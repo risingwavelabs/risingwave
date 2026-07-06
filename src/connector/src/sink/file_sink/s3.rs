@@ -179,17 +179,6 @@ impl OpendalSinkBackend for S3Sink {
 pub struct SnowflakeConfig {
     #[serde(flatten)]
     pub inner: S3Config,
-
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
-}
-
-impl crate::sink::UnknownFields for SnowflakeConfig {
-    fn unknown_fields(&self) -> HashMap<String, String> {
-        let mut unknown_fields = crate::sink::UnknownFields::unknown_fields(&self.inner);
-        unknown_fields.extend(self.unknown_fields.clone());
-        unknown_fields
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

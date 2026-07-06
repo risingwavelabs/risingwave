@@ -581,6 +581,9 @@ impl IcebergConfig {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
+        config
+            .unknown_fields
+            .retain(|key, _| key != "connector" && !key.starts_with("catalog."));
 
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(

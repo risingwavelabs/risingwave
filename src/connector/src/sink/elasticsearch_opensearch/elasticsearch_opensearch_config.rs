@@ -42,24 +42,14 @@ pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 pub struct ElasticSearchConfig {
     #[serde(flatten)]
     pub inner: ElasticSearchOpenSearchConfig,
-
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::HashMap<String, String>,
 }
-
-crate::impl_sink_unknown_fields!(ElasticSearchConfig);
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct OpenSearchConfig {
     #[serde(flatten)]
     pub inner: ElasticSearchOpenSearchConfig,
-
-    #[serde(flatten)]
-    pub unknown_fields: std::collections::HashMap<String, String>,
 }
-
-crate::impl_sink_unknown_fields!(OpenSearchConfig);
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -86,6 +76,9 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(rename = "routing_column")]
     pub routing_column: Option<String>,
 
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
+
     #[serde(rename = "retry_on_conflict")]
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default = "default_retry_on_conflict")]
@@ -109,6 +102,8 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(default = "default_type")]
     pub r#type: String,
 }
+
+crate::impl_sink_unknown_fields!(ElasticSearchOpenSearchConfig);
 
 impl EnforceSecret for ElasticSearchOpenSearchConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {

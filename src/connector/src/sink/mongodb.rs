@@ -266,6 +266,8 @@ impl Sink for MongodbSink {
 
     const SINK_NAME: &'static str = MONGODB_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             if self.pk_indices.is_empty() {

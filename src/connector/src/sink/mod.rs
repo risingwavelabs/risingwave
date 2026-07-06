@@ -95,7 +95,6 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
-use serde::de::DeserializeOwned;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -263,6 +262,12 @@ impl UnknownFields for () {
     }
 }
 
+impl UnknownFields for HashMap<String, String> {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.clone()
+    }
+}
+
 #[macro_export]
 macro_rules! impl_sink_unknown_fields {
     ($config_type:ty) => {
@@ -274,35 +279,17 @@ macro_rules! impl_sink_unknown_fields {
     };
 }
 
-pub trait SinkConfig {
-    type Config: DeserializeOwned + UnknownFields;
-}
-
-macro_rules! impl_sink_config {
-    ({ $({ $variant_name:ident, $sink_type:ty, $config_type:ty }),* }) => {
-        $(
-            impl $crate::sink::SinkConfig for $sink_type {
-                type Config = $config_type;
-            }
-        )*
+#[macro_export]
+macro_rules! impl_validate_sink_unknown_fields {
+    () => {
+        fn validate_unknown_fields(&self) -> $crate::sink::Result<()> {
+            $crate::sink::validate_sink_unknown_fields(&self.config)
+        }
     };
 }
 
-for_all_sinks! { impl_sink_config }
-
-pub fn validate_sink_options_with_config<C>(
-    properties: BTreeMap<String, String>,
-    deny_unknown_fields: bool,
-) -> Result<()>
-where
-    C: DeserializeOwned + UnknownFields,
-{
-    let config = serde_json::from_value::<C>(serde_json::to_value(properties).unwrap())
-        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+pub fn validate_sink_unknown_fields(config: &impl UnknownFields) -> Result<()> {
     let mut unknown_fields = config.unknown_fields();
-    if !deny_unknown_fields {
-        return Ok(());
-    }
     // These options are consumed by the sink DDL/planner layer. They are valid for sink creation
     // even if a connector-specific config does not declare them.
     for key in [
@@ -311,7 +298,9 @@ where
         SINK_SNAPSHOT_OPTION,
         SINK_USER_IGNORE_DELETE_OPTION,
         SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        "backfill_rate_limit",
         "primary_key",
+        "sink_rate_limit",
     ] {
         unknown_fields.remove(key);
     }
@@ -844,6 +833,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         Ok(())
     }
 
+    fn validate_unknown_fields(&self) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -1003,6 +996,10 @@ impl SinkImpl {
 
     pub fn is_coordinated_sink(&self) -> bool {
         dispatch_sink!(self, sink, sink.is_coordinated_sink())
+    }
+
+    pub fn validate_unknown_fields(&self) -> Result<()> {
+        dispatch_sink!(self, sink, sink.validate_unknown_fields())
     }
 }
 
@@ -1221,88 +1218,33 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_sink_options_with_config() {
-        validate_sink_options_with_config::<crate::sink::redis::RedisConfig>(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "redis"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                ("primary_key", "id"),
-                ("redis.url", "redis://127.0.0.1:6379"),
-            ]),
-            true,
-        )
+    fn test_validate_sink_unknown_fields() {
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("primary_key", "id"),
+            ("redis.url", "redis://127.0.0.1:6379"),
+        ]))
         .unwrap();
+        validate_sink_unknown_fields(&config).unwrap();
 
-        let err = validate_sink_options_with_config::<crate::sink::redis::RedisConfig>(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "redis"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                ("redis.url", "redis://127.0.0.1:6379"),
-                ("bogus_with", "1"),
-            ]),
-            true,
-        )
-        .unwrap_err();
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("redis.url", "redis://127.0.0.1:6379"),
+            ("bogus_with", "1"),
+        ]))
+        .unwrap();
+        let err = validate_sink_unknown_fields(&config).unwrap_err();
         let report = err.to_report_string();
         assert!(report.contains("bogus_with"), "{report}");
 
-        validate_sink_options_with_config::<
-            crate::sink::snowflake_redshift::snowflake::SnowflakeV2Config,
-        >(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "snowflake_v2"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                (
-                    "jdbc.url",
-                    "jdbc:snowflake://account.snowflakecomputing.com",
-                ),
-                ("database", "db"),
-                ("schema", "public"),
-                ("warehouse", "wh"),
-                ("username", "user"),
-                ("password", "password"),
-                ("auto.schema.change", "true"),
-            ]),
-            true,
-        )
-        .unwrap();
-
-        let err = validate_sink_options_with_config::<crate::sink::redis::RedisConfig>(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "redis"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                ("redis.url", "redis://127.0.0.1:6379"),
-                ("auto.schema.change", "true"),
-            ]),
-            true,
-        )
+        let err = crate::sink::kafka::KafkaConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "kafka"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+        ]))
         .unwrap_err();
-        assert!(err.to_report_string().contains("auto.schema.change"));
-
-        validate_sink_options_with_config::<crate::sink::redis::RedisConfig>(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "redis"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                ("redis.url", "redis://127.0.0.1:6379"),
-                ("bogus_with", "1"),
-            ]),
-            false,
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn test_sink_config_associated_type_matches_registry() {
-        validate_sink_options_with_config::<<crate::sink::redis::RedisSink as SinkConfig>::Config>(
-            btreemap([
-                (CONNECTOR_TYPE_KEY, "redis"),
-                (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-                ("primary_key", "id"),
-                ("redis.url", "redis://127.0.0.1:6379"),
-            ]),
-            true,
-        )
-        .unwrap();
+        assert!(err.to_report_string().contains("missing field `topic`"));
     }
 }
 
