@@ -704,21 +704,7 @@ impl DataCacheRefillTaskGenerator<'_> {
             return tasks;
         }
 
-        // Filter by recent filter.
         let total_block_count: u64 = self.ssts.iter().map(|sst| sst.block_count() as u64).sum();
-        if refill_kind == DataCacheRefillPath::Normal && !self.context.config.skip_recent_filter {
-            let refill = self.filter_by_recent_filter();
-            if refill {
-                GLOBAL_CACHE_REFILL_METRICS
-                    .data_refill_block_unfiltered_total
-                    .inc_by(total_block_count);
-            } else {
-                GLOBAL_CACHE_REFILL_METRICS
-                    .data_refill_filtered_total
-                    .inc_by(total_block_count);
-                return tasks;
-            }
-        }
 
         // Split tasks by unit.
         let unit = self.context.config.unit;
@@ -733,15 +719,6 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
         }
 
-        // Filter by inheritance filter, also requires recent filter enabled.
-        if refill_kind == DataCacheRefillPath::Normal
-            && self.delta.insert_sst_level != 0
-            && !self.context.config.skip_recent_filter
-            && !self.context.config.skip_inheritance_filter
-        {
-            tasks = self.filter_by_inheritance_filter(tasks).await;
-        }
-
         // Filter by table cache refill policy and vnodes.
         tasks = match refill_kind {
             DataCacheRefillPath::Normal => self.filter_by_table_cache_refill_policy(tasks),
@@ -749,6 +726,41 @@ impl DataCacheRefillTaskGenerator<'_> {
                 self.filter_insert_only_by_table_cache_refill_policy(tasks)
             }
         };
+        if tasks.is_empty() {
+            return tasks;
+        }
+
+        // For normal insert+delete refill, table policy is evaluated before the
+        // recent filter so policy/vnode ownership defines the refill responsibility
+        // first. However, a policy hit is not an implicit skip of recent admission:
+        // when `skip_recent_filter` is false, a recent miss still terminates normal
+        // data refill. The inheritance filter is only a further narrowing after
+        // recent admission succeeds. L0 insert-only is separate because it has no
+        // deleted SSTs as recent-filter evidence.
+        let recent_filter_hit = refill_kind == DataCacheRefillPath::Normal
+            && (self.context.config.skip_recent_filter || self.filter_by_recent_filter());
+        if refill_kind == DataCacheRefillPath::Normal {
+            if recent_filter_hit {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .data_refill_block_unfiltered_total
+                    .inc_by(total_block_count);
+            } else {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .data_refill_filtered_total
+                    .inc_by(total_block_count);
+                return vec![];
+            }
+        }
+
+        // Filter by inheritance filter, also requires a recent-filter hit.
+        if refill_kind == DataCacheRefillPath::Normal
+            && self.delta.insert_sst_level != 0
+            && recent_filter_hit
+            && !self.context.config.skip_recent_filter
+            && !self.context.config.skip_inheritance_filter
+        {
+            tasks = self.filter_by_inheritance_filter(tasks).await;
+        }
 
         tasks
     }
@@ -1142,10 +1154,10 @@ mod tests {
     use risingwave_common::config::streaming::CacheRefillPolicy;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
     use risingwave_pb::hummock::PbHummockVersion;
     use risingwave_pb::id::TableId;
     use tokio::sync::mpsc::unbounded_channel;
@@ -1155,12 +1167,16 @@ mod tests {
         DataCacheRefillTaskGenerator, SpawnRefillTask, SstDeltaInfo,
         classify_data_cache_refill_path, vnode_range_overlaps_bitmap,
     };
-    use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_table_key_of, mock_sstable_store, mock_sstable_store_with_recent_filter,
+    };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::recent_filter::simple::SimpleRecentFilter;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_table_ids,
     };
     use crate::hummock::value::HummockValue;
+    use crate::hummock::{RecentFilter, RecentFilterTrait, SstableStoreRef, TableHolder};
 
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         CacheRefillConfig {
@@ -1181,6 +1197,113 @@ mod tests {
             HummockVersion::from(PbHummockVersion::default()),
             unbounded_channel().0,
         )
+    }
+
+    async fn gen_test_sst(
+        table_id: TableId,
+        sstable_store: SstableStoreRef,
+    ) -> (TableHolder, SstableInfo) {
+        gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            (0..2).map(|idx| {
+                (
+                    FullKey {
+                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
+                            table_id,
+                            iterator_test_table_key_of(idx),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(vec![idx as u8]),
+                )
+            }),
+            sstable_store,
+            vec![table_id.as_raw_id()],
+        )
+        .await
+    }
+
+    struct DataRefillGeneratorTestFixture {
+        table_id: TableId,
+        sstable_store: SstableStoreRef,
+        sst: TableHolder,
+        sst_info: SstableInfo,
+    }
+
+    impl DataRefillGeneratorTestFixture {
+        async fn new(
+            recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+        ) -> Self {
+            let table_id = TableId::from(233);
+            let sstable_store = match recent_filter {
+                Some(recent_filter) => mock_sstable_store_with_recent_filter(recent_filter).await,
+                None => mock_sstable_store().await,
+            };
+            let (sst, sst_info) = gen_test_sst(table_id, sstable_store.clone()).await;
+            Self {
+                table_id,
+                sstable_store,
+                sst,
+                sst_info,
+            }
+        }
+
+        fn context(
+            &self,
+            policy: CacheRefillPolicy,
+            streaming_vnode_bitmap: Option<Bitmap>,
+            serving_vnode_bitmap: Option<Bitmap>,
+            configure: impl FnOnce(&mut CacheRefillConfig),
+        ) -> CacheRefillContext {
+            let mut config = test_refill_config(policy);
+            config.data_refill_levels.insert(0);
+            configure(&mut config);
+            CacheRefillContext {
+                config: Arc::new(config),
+                meta_refill_concurrency: None,
+                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
+                sstable_store: self.sstable_store.clone(),
+                table_cache_refill_context_map: Arc::new(HashMap::from([(
+                    self.table_id,
+                    super::TableCacheRefillContext {
+                        streaming_vnode_bitmap,
+                        serving_vnode_bitmap,
+                        policy,
+                    },
+                )])),
+            }
+        }
+
+        fn normal_l0_delta(&self) -> SstDeltaInfo {
+            SstDeltaInfo {
+                insert_sst_infos: vec![self.sst_info.clone()],
+                delete_sst_object_ids: vec![self.sst_info.object_id],
+                insert_sst_level: 0,
+            }
+        }
+
+        fn l0_insert_only_delta(&self) -> SstDeltaInfo {
+            SstDeltaInfo {
+                insert_sst_infos: vec![self.sst_info.clone()],
+                delete_sst_object_ids: vec![],
+                insert_sst_level: 0,
+            }
+        }
+
+        async fn generate(
+            &self,
+            context: &CacheRefillContext,
+            delta: &SstDeltaInfo,
+        ) -> Vec<super::DataCacheRefillTask> {
+            DataCacheRefillTaskGenerator {
+                context,
+                delta,
+                ssts: std::slice::from_ref(&self.sst),
+            }
+            .generate()
+            .await
+        }
     }
 
     #[tokio::test]
@@ -1341,76 +1464,85 @@ mod tests {
 
     #[tokio::test]
     async fn test_l0_normal_data_refill_applies_table_cache_refill_policy() {
-        let table_id = TableId::from(233);
-        let sstable_store = mock_sstable_store().await;
-        let (sst, sst_info) = gen_test_sstable_with_table_ids(
-            default_builder_opt_for_test(),
-            1,
-            (0..2).map(|idx| {
-                (
-                    FullKey {
-                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
-                            table_id,
-                            iterator_test_table_key_of(idx),
-                        ),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                    },
-                    HummockValue::put(vec![idx as u8]),
-                )
-            }),
-            sstable_store.clone(),
-            vec![table_id.as_raw_id()],
-        )
-        .await;
-        let sst_object_id = sst_info.object_id;
-        let build_context = |policy| {
-            let mut config = test_refill_config(policy);
-            config.data_refill_levels.insert(0);
-            CacheRefillContext {
-                config: Arc::new(config),
-                meta_refill_concurrency: None,
-                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
-                sstable_store: sstable_store.clone(),
-                table_cache_refill_context_map: Arc::new(HashMap::from([(
-                    table_id,
-                    super::TableCacheRefillContext {
-                        streaming_vnode_bitmap: None,
-                        serving_vnode_bitmap: None,
-                        policy,
-                    },
-                )])),
-            }
-        };
-        let delta = SstDeltaInfo {
-            insert_sst_infos: vec![sst_info],
-            delete_sst_object_ids: vec![sst_object_id],
-            insert_sst_level: 0,
-        };
-        let enabled_context = build_context(CacheRefillPolicy::Enabled);
-        let enabled_tasks = DataCacheRefillTaskGenerator {
-            context: &enabled_context,
-            delta: &delta,
-            ssts: std::slice::from_ref(&sst),
-        }
-        .generate()
-        .await;
+        let fixture = DataRefillGeneratorTestFixture::new(None).await;
+        let delta = fixture.normal_l0_delta();
+        let enabled_context = fixture.context(CacheRefillPolicy::Enabled, None, None, |_| {});
+        let enabled_tasks = fixture.generate(&enabled_context, &delta).await;
         assert!(
             !enabled_tasks.is_empty(),
             "L0 refill should reach task generation before the table policy filter"
         );
 
-        let disabled_context = build_context(CacheRefillPolicy::Disabled);
-        let disabled_tasks = DataCacheRefillTaskGenerator {
-            context: &disabled_context,
-            delta: &delta,
-            ssts: std::slice::from_ref(&sst),
-        }
-        .generate()
-        .await;
+        let disabled_context = fixture.context(CacheRefillPolicy::Disabled, None, None, |_| {});
+        let disabled_tasks = fixture.generate(&disabled_context, &delta).await;
 
         assert!(
             disabled_tasks.is_empty(),
             "L0 should skip inheritance filter but still apply table cache refill policy"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_normal_refill_orders_policy_before_recent_admission() {
+        let recent_filter = SimpleRecentFilter::new(1, Duration::from_secs(60));
+        let fixture =
+            DataRefillGeneratorTestFixture::new(Some(Arc::new(recent_filter.clone().into()))).await;
+        let delta = fixture.normal_l0_delta();
+
+        let enabled_context = fixture.context(CacheRefillPolicy::Enabled, None, None, |config| {
+            config.skip_recent_filter = false;
+        });
+        assert!(
+            fixture.generate(&enabled_context, &delta).await.is_empty(),
+            "default Enabled must remain gated by the recent filter"
+        );
+
+        let streaming_context = fixture.context(
+            CacheRefillPolicy::Streaming,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            None,
+            |config| {
+                config.skip_recent_filter = false;
+            },
+        );
+        assert!(
+            fixture
+                .generate(&streaming_context, &delta)
+                .await
+                .is_empty(),
+            "explicit Streaming policy is not an implicit skip_recent_filter"
+        );
+
+        let serving_context = fixture.context(
+            CacheRefillPolicy::Serving,
+            None,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            |config| {
+                config.skip_recent_filter = false;
+            },
+        );
+        assert!(
+            fixture.generate(&serving_context, &delta).await.is_empty(),
+            "explicit Serving policy is not an implicit skip_recent_filter"
+        );
+
+        let disabled_context = fixture.context(
+            CacheRefillPolicy::Disabled,
+            None,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            |config| {
+                config.skip_recent_filter = false;
+            },
+        );
+        assert!(
+            fixture.generate(&disabled_context, &delta).await.is_empty(),
+            "Disabled policy still has the highest priority"
+        );
+
+        recent_filter.insert((fixture.sst_info.object_id, usize::MAX));
+        assert!(
+            !fixture.generate(&serving_context, &delta).await.is_empty(),
+            "explicit Serving policy should produce tasks after recent admission hits"
         );
     }
 
@@ -1459,94 +1591,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_l0_insert_only_refill_requires_serving_ownership() {
-        let table_id = TableId::from(233);
-        let sstable_store = mock_sstable_store().await;
-        let (sst, sst_info) = gen_test_sstable_with_table_ids(
-            default_builder_opt_for_test(),
-            1,
-            (0..2).map(|idx| {
-                (
-                    FullKey {
-                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
-                            table_id,
-                            iterator_test_table_key_of(idx),
-                        ),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                    },
-                    HummockValue::put(vec![idx as u8]),
-                )
-            }),
-            sstable_store.clone(),
-            vec![table_id.as_raw_id()],
-        )
-        .await;
+        let fixture = DataRefillGeneratorTestFixture::new(None).await;
         let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let build_context = |policy, streaming_vnode_bitmap, serving_vnode_bitmap| {
-            let mut config = test_refill_config(policy);
-            config.data_refill_levels.insert(0);
-            CacheRefillContext {
-                config: Arc::new(config),
-                meta_refill_concurrency: None,
-                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
-                sstable_store: sstable_store.clone(),
-                table_cache_refill_context_map: Arc::new(HashMap::from([(
-                    table_id,
-                    super::TableCacheRefillContext {
-                        streaming_vnode_bitmap,
-                        serving_vnode_bitmap,
-                        policy,
-                    },
-                )])),
-            }
-        };
-        let delta = SstDeltaInfo {
-            insert_sst_infos: vec![sst_info],
-            delete_sst_object_ids: vec![],
-            insert_sst_level: 0,
-        };
+        let delta = fixture.l0_insert_only_delta();
 
-        let enabled_without_serving = build_context(CacheRefillPolicy::Enabled, None, None);
-        let enabled_without_serving_tasks = DataCacheRefillTaskGenerator {
-            context: &enabled_without_serving,
-            delta: &delta,
-            ssts: std::slice::from_ref(&sst),
-        }
-        .generate()
-        .await;
+        let enabled_without_serving =
+            fixture.context(CacheRefillPolicy::Enabled, None, None, |_| {});
+        let enabled_without_serving_tasks =
+            fixture.generate(&enabled_without_serving, &delta).await;
         assert!(
             enabled_without_serving_tasks.is_empty(),
             "default Enabled must not unconditionally refill L0 insert-only SSTs"
         );
 
-        let streaming_context = build_context(
+        let streaming_context = fixture.context(
             CacheRefillPolicy::Streaming,
             Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
             None,
+            |_| {},
         );
-        let streaming_tasks = DataCacheRefillTaskGenerator {
-            context: &streaming_context,
-            delta: &delta,
-            ssts: std::slice::from_ref(&sst),
-        }
-        .generate()
-        .await;
+        let streaming_tasks = fixture.generate(&streaming_context, &delta).await;
         assert!(
             streaming_tasks.is_empty(),
             "pure streaming L0 insert-only SSTs are already warmed by the uploader"
         );
 
-        let enabled_serving_context = build_context(
+        let enabled_serving_context = fixture.context(
             CacheRefillPolicy::Enabled,
             None,
             Some(serving_vnodes.clone()),
+            |_| {},
         );
-        let enabled_serving_tasks = DataCacheRefillTaskGenerator {
-            context: &enabled_serving_context,
-            delta: &delta,
-            ssts: std::slice::from_ref(&sst),
-        }
-        .generate()
-        .await;
+        let enabled_serving_tasks = fixture.generate(&enabled_serving_context, &delta).await;
         assert!(
             !enabled_serving_tasks.is_empty(),
             "Enabled is table-level allow, but L0 insert-only still needs serving ownership"
@@ -1556,26 +1632,7 @@ mod tests {
     #[tokio::test]
     async fn test_l0_insert_only_block_refill_decision_uses_serving_ownership() {
         let table_id = TableId::from(233);
-        let sstable_store = mock_sstable_store().await;
-        let (sst, _) = gen_test_sstable_with_table_ids(
-            default_builder_opt_for_test(),
-            1,
-            (0..2).map(|idx| {
-                (
-                    FullKey {
-                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
-                            table_id,
-                            iterator_test_table_key_of(idx),
-                        ),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
-                    },
-                    HummockValue::put(vec![idx as u8]),
-                )
-            }),
-            sstable_store,
-            vec![table_id.as_raw_id()],
-        )
-        .await;
+        let (sst, _) = gen_test_sst(table_id, mock_sstable_store().await).await;
         let build_context =
             |policy, streaming_vnode_bitmap, serving_vnode_bitmap| super::TableCacheRefillContext {
                 streaming_vnode_bitmap,
