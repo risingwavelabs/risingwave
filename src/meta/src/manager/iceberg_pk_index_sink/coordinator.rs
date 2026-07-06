@@ -58,7 +58,7 @@ use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::timeout;
 
-use super::backfill::backfill_dv_partitions;
+use super::backfill::backfill_delete_file_partitions;
 use crate::manager::exactly_once_util::{
     clean_aborted_records, commit_and_prune_epoch, list_sink_states_ordered_by_epoch,
     persist_pre_commit_metadata,
@@ -166,7 +166,7 @@ impl IcebergPkIndexSinkCoordinator {
                 prev_epoch
             );
         }
-        let (merged, materialized_add_files) = self.backfill_dv_partitions(merged)?;
+        let (merged, materialized_add_files) = self.backfill_delete_file_partitions(merged)?;
         let merged = Arc::new(merged);
 
         let snapshot_id = FastAppendAction::generate_snapshot_id(&self.table);
@@ -228,7 +228,7 @@ impl IcebergPkIndexSinkCoordinator {
     /// referenced data files. Returns the updated aggregate (with the backfilled delete files
     /// re-serialized for persistence) and, when backfill ran, the data + delete files already
     /// materialized as `DataFile`s so the commit can reuse them instead of deserializing again.
-    fn backfill_dv_partitions(
+    fn backfill_delete_file_partitions(
         &self,
         merged: IcebergPkIndexSinkAggResult,
     ) -> Result<(IcebergPkIndexSinkAggResult, Option<Vec<DataFile>>)> {
@@ -255,7 +255,7 @@ impl IcebergPkIndexSinkCoordinator {
             .into_iter()
             .map(|f| f.try_into(merged.partition_spec_id, &partition_type, schema))
             .try_collect::<Vec<DataFile>>()?;
-        backfill_dv_partitions(&data_files, &mut delete_files)?;
+        backfill_delete_file_partitions(&data_files, &mut delete_files)?;
 
         let format_version = self.table.metadata().format_version();
         let serialized_delete_files = delete_files

@@ -486,7 +486,7 @@ async fn load_delete_vectors(
 
     let mut result: HashMap<String, LoadedDeleteVectorEntry> = HashMap::with_capacity(paths.len());
 
-    scan_existing_dvs(
+    scan_existing_delete_files(
         table,
         sink_id,
         partitioned,
@@ -504,11 +504,12 @@ async fn load_delete_vectors(
     Ok(result)
 }
 
-/// Pass 1: scan delete manifests for DV puffin files referencing any path in
-/// `paths`. On hit, removes the path from `paths`, loads the DV, captures the
-/// partition key (for partitioned tables), and records the existing DV file as
+/// Pass 1: scan delete manifests for existing position-delete files (V3 Puffin
+/// deletion vectors or V2 Parquet position-delete files) referencing any path in
+/// `paths`. On hit, removes the path from `paths`, loads the deletes, captures the
+/// partition key (for partitioned tables), and records the existing delete file as
 /// the overwrite target.
-async fn scan_existing_dvs(
+async fn scan_existing_delete_files(
     table: &Table,
     sink_id: SinkId,
     partitioned: bool,
@@ -551,8 +552,15 @@ async fn scan_existing_dvs(
                 DataFileFormat::Puffin => {
                     read_dv_positions_from_data_file(table.file_io(), data_file, sink_id).await?
                 }
-                _ => {
+                DataFileFormat::Parquet => {
                     read_v2_positions_from_delete_file(table.file_io(), data_file, sink_id).await?
+                }
+                // Unreachable: the guard above only admits Puffin/Parquet delete files.
+                other => {
+                    return Err(StreamExecutorError::sink_error(
+                        anyhow::anyhow!("unexpected delete file format {:?}", other),
+                        sink_id,
+                    ));
                 }
             };
             let partition_key = if partitioned {
