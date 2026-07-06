@@ -22,6 +22,7 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::{JobId, SinkId};
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
+use risingwave_meta_model::prelude::Sink;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -34,7 +35,9 @@ use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
+use crate::barrier::checkpoint::independent_job::{
+    BatchRefreshCheckpointPolicy, BatchRefreshJobTriggerContext, BatchRefreshLogEpoch,
+};
 use crate::barrier::command::{
     PostCollectCommand, ResumeBackfillTarget, SinceTimestampResolvedEpoch,
 };
@@ -557,9 +560,10 @@ impl GlobalBarrierWorkerContextImpl {
         last_committed_epoch: u64,
     ) -> MetaResult<BatchRefreshJobTriggerContext> {
         use itertools::Itertools;
-        use sea_orm::TransactionTrait;
+        use sea_orm::{EntityTrait, TransactionTrait};
 
         use crate::controller::scale::load_fragment_context_for_jobs;
+        use crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink;
 
         // Load metadata from the catalog under a single transaction.
         let inner = self
@@ -597,6 +601,12 @@ impl GlobalBarrierWorkerContextImpl {
             .remove(&job_id)
             .ok_or_else(|| anyhow::anyhow!("extra info not found for job {}", job_id))?
             .job_definition;
+        let checkpoint_policy = match Sink::find_by_id(job_id.as_sink_id()).one(&txn).await? {
+            Some(sink) if is_iceberg_pk_index_sink(sink.properties.inner_ref()) => {
+                BatchRefreshCheckpointPolicy::iceberg_pk_index_default()
+            }
+            _ => BatchRefreshCheckpointPolicy::UpstreamCheckpoint,
+        };
 
         // 3. Get fragments from fragment_context and load downstream relations.
         let fragments = fragment_context
@@ -636,7 +646,7 @@ impl GlobalBarrierWorkerContextImpl {
             .hummock_manager
             .on_current_version_and_table_change_log(|version, table_change_log| {
                 let mut target_upstream_epoch = last_committed_epoch;
-                let mut log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>> = HashMap::new();
+                let mut log_epochs: HashMap<TableId, Vec<BatchRefreshLogEpoch>> = HashMap::new();
 
                 for &upstream_table_id in &upstream_table_ids {
                     let upstream_committed_epoch = version
@@ -662,10 +672,17 @@ impl GlobalBarrierWorkerContextImpl {
                         let epochs = change_log
                             .filter_epoch((last_committed_epoch, upstream_committed_epoch))
                             .map(|epoch_log| {
-                                (
-                                    epoch_log.non_checkpoint_epochs.clone(),
-                                    epoch_log.checkpoint_epoch,
-                                )
+                                let changelog_sst_size = epoch_log
+                                    .change_log_ssts()
+                                    .map(|sst| sst.sst_size)
+                                    .sum();
+                                BatchRefreshLogEpoch {
+                                    non_checkpoint_epochs: epoch_log
+                                        .non_checkpoint_epochs
+                                        .clone(),
+                                    checkpoint_epoch: epoch_log.checkpoint_epoch,
+                                    changelog_sst_size,
+                                }
                             })
                             .collect_vec();
                         if !epochs.is_empty() {
@@ -692,6 +709,7 @@ impl GlobalBarrierWorkerContextImpl {
             definition,
             database_resource_group,
             upstream_table_log_epochs,
+            checkpoint_policy,
             target_upstream_epoch,
         })
     }

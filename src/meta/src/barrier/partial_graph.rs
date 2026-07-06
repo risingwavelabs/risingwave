@@ -596,6 +596,15 @@ impl PartialGraphManager {
             .any(|info| info.barrier_info.kind.is_checkpoint())
     }
 
+    pub(super) fn has_inflight_checkpoint_barrier(&self, partial_graph_id: PartialGraphId) -> bool {
+        let graph = self.running_graph(partial_graph_id);
+        graph.completing_epoch.is_some()
+            || graph
+                .barrier_item_collector
+                .iter_infos()
+                .any(|info| info.barrier_info.kind.is_checkpoint())
+    }
+
     pub(super) fn start_recover(&mut self) -> PartialGraphRecoverer<'_> {
         PartialGraphRecoverer {
             added_partial_graphs: Default::default(),
