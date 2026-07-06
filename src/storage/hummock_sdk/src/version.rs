@@ -26,9 +26,7 @@ use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::*;
 use tracing::warn;
 
-use crate::change_log::{
-    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
-};
+use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::level::LevelsCommon;
@@ -222,6 +220,7 @@ pub struct HummockVersionCommon<T, L = T> {
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    #[deprecated]
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,
@@ -260,6 +259,7 @@ where
 }
 
 impl HummockVersion {
+    #[expect(deprecated)]
     pub fn estimated_encode_len(&self) -> usize {
         self.levels.len() * size_of::<CompactionGroupId>()
             + self
