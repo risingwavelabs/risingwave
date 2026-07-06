@@ -41,6 +41,7 @@ use risingwave_common::types::JsonbVal;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
 use crate::connector_common::{
@@ -211,7 +212,7 @@ impl SplitMetaData for IcebergSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone())
             .unwrap_or_else(|err| {
-                tracing::error!(error = %err, "failed to encode iceberg split");
+                tracing::error!(error = %err.as_report(), "failed to encode iceberg split");
                 serde_json::Value::Null
             })
             .into()
