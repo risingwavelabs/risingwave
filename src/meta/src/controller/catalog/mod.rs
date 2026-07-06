@@ -73,6 +73,7 @@ use sea_orm::{
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
     SelectColumns, TransactionTrait, Value,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
@@ -760,7 +761,7 @@ impl CatalogController {
             .await;
             if let Err(err) = sync_result {
                 tracing::warn!(
-                    error = %err,
+                    error = %err.as_report(),
                     table_id = %table.table_id,
                     sink_id = %sink.id,
                     sink_name = %sink.name,

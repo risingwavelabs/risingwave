@@ -57,6 +57,7 @@ use risingwave_sqlparser::ast::{
     ObjectName, Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
@@ -865,7 +866,7 @@ async fn create_sink_or_replace(
         .await
         {
             tracing::warn!(
-                error = %err,
+                error = %err.as_report(),
                 sink_id = %sink.id,
                 sink_name = %sink.name,
                 "failed to sync Iceberg comments after creating sink; keeping RisingWave catalog changes"
