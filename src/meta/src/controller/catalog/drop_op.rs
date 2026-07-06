@@ -219,18 +219,20 @@ impl CatalogController {
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
-        // Collect Iceberg V3 sink ids among dropped sinks so the V3 sink manager
+        // Collect Iceberg pk-index sink ids among dropped sinks so the pk-index sink manager
         // can tear down their per-sink commit workers. Unlike the iceberg-table
-        // cleanup above, V3 sinks are user-created with arbitrary names, so we
+        // cleanup above, pk-index sinks are user-created with arbitrary names, so we
         // identify them by inspecting properties rather than by name prefix.
-        let removed_iceberg_v3_sink_ids: Vec<SinkId> = Sink::find()
+        let removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Sink::find()
             .filter(sink::Column::SinkId.is_in(removed_object_ids.clone()))
             .all(&txn)
             .await?
             .into_iter()
             .filter_map(|sink| {
-                crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(sink.properties.inner_ref())
-                    .then_some(sink.sink_id)
+                crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    sink.properties.inner_ref(),
+                )
+                .then_some(sink.sink_id)
             })
             .collect();
 
@@ -446,7 +448,7 @@ impl CatalogController {
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
-                removed_iceberg_v3_sink_ids,
+                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))

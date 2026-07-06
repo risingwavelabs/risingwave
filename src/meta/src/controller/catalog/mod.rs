@@ -147,10 +147,10 @@ pub struct ReleaseContext {
     /// Dropped iceberg table sinks
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 
-    /// Dropped Iceberg V3 sink ids. Used to unregister per-sink commit workers
-    /// owned by `IcebergV3SinkManager`. Filtered via `is_iceberg_v3_sink` on
-    /// the sink properties so user-created V3 sinks (any name) are included.
-    pub(crate) removed_iceberg_v3_sink_ids: Vec<SinkId>,
+    /// Dropped Iceberg pk-index sink ids. Used to unregister per-sink commit workers
+    /// owned by `IcebergPkIndexSinkManager`. Filtered via `is_iceberg_pk_index_sink` on
+    /// the sink properties so user-created pk-index sinks (any name) are included.
+    pub(crate) removed_iceberg_pk_index_sink_ids: Vec<SinkId>,
 }
 
 #[derive(Default)]

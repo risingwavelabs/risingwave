@@ -15,20 +15,22 @@
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::id::SinkId;
-use risingwave_pb::stream_plan::IcebergWithPkIndexDvMergerNode;
+use risingwave_pb::stream_plan::IcebergWithPkIndexPositionDeleteMergerNode;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::{DvHandlerImpl, DvMergerExecutor, Executor, StreamExecutorError};
+use crate::executor::{
+    Executor, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, StreamExecutorError,
+};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
-pub struct IcebergWithPkIndexDvMergerExecutorBuilder;
+pub struct IcebergWithPkIndexPositionDeleteMergerExecutorBuilder;
 
-impl_stream_node_body!(IcebergWithPkIndexDvMerger(IcebergWithPkIndexDvMergerNode) => IcebergWithPkIndexDvMergerExecutorBuilder);
+impl_stream_node_body!(IcebergWithPkIndexPositionDeleteMerger(IcebergWithPkIndexPositionDeleteMergerNode) => IcebergWithPkIndexPositionDeleteMergerExecutorBuilder);
 
-impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
-    type Node = IcebergWithPkIndexDvMergerNode;
+impl ExecutorBuilder for IcebergWithPkIndexPositionDeleteMergerExecutorBuilder {
+    type Node = IcebergWithPkIndexPositionDeleteMergerNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
@@ -46,9 +48,10 @@ impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
         )?;
         let config = IcebergConfig::from_btreemap(properties_with_secret.clone())
             .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
-        let handler = DvHandlerImpl::new(config, params.actor_context.id, sink_id).await?;
+        let handler =
+            PositionDeleteHandlerImpl::new(config, params.actor_context.id, sink_id).await?;
 
-        let exec = DvMergerExecutor::new(
+        let exec = PositionDeleteMergerExecutor::new(
             params.actor_context.id,
             sink_id,
             params.local_barrier_manager.clone(),

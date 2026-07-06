@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use educe::Educe;
-use futures::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
@@ -31,8 +30,7 @@ use risingwave_pb::expr::window_frame::PbSessionFrameBounds;
 use super::FrameBoundsImpl;
 use crate::Result;
 use crate::expr::{
-    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
-    build_func,
+    InputRefExpression, LiteralExpression, SyncExpression, SyncExpressionBoxExt, build_func,
 };
 
 /// To implement Session Window in a similar way to Range Frame, we define a similar frame bounds
@@ -141,7 +139,7 @@ pub struct SessionFrameGap {
     gap: ScalarImpl,
     /// Built expression for `$0 + gap`.
     #[educe(PartialEq(ignore), Hash(ignore))]
-    add_expr: Option<Arc<BoxedExpression>>,
+    add_expr: Option<Arc<dyn SyncExpression>>,
 }
 
 impl Deref for SessionFrameGap {
@@ -165,11 +163,15 @@ impl SessionFrameGap {
 
         let input_expr = InputRefExpression::new(order_data_type.clone(), 0);
         let gap_expr = LiteralExpression::new(gap_data_type.clone(), Some(self.gap.clone()));
-        self.add_expr = Some(Arc::new(build_func(
+        let add_expr = build_func(
             PbExprType::Add,
             order_data_type.clone(),
             vec![input_expr.boxed(), gap_expr.boxed()],
-        )?));
+        )?;
+        let crate::expr::BoxedExpression::Sync(add_expr) = add_expr else {
+            bail!("session frame gap add expression must be sync");
+        };
+        self.add_expr = Some(add_expr);
         Ok(())
     }
 
@@ -193,7 +195,7 @@ impl SessionFrameGap {
 #[derive(Debug, Educe)]
 #[educe(Clone, Copy)]
 struct SessionFrameGapRef<'a> {
-    add_expr: &'a dyn Expression,
+    add_expr: &'a dyn SyncExpression,
 }
 
 impl SessionFrameGapRef<'_> {
@@ -201,8 +203,6 @@ impl SessionFrameGapRef<'_> {
         let row = OwnedRow::new(vec![end_order_value.to_owned_datum()]);
         self.add_expr
             .eval_row(&row)
-            .now_or_never()
-            .expect("frame bound calculation should finish immediately")
             .expect("just simple calculation, should succeed") // TODO(rc): handle overflow
     }
 }

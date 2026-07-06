@@ -41,7 +41,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
 use super::commit_retry::{self, CommitError};
-use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch};
+use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch, resolve_partition_type};
 use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 use crate::sink::catalog::SinkId;
 use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommitCoordinator};
@@ -159,14 +159,14 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for Vec<u8> {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
-pub struct IcebergDvMergerCommitResult {
+pub struct IcebergPositionDeleteMergerCommitResult {
     pub schema_id: i32,
     pub partition_spec_id: i32,
     pub delete_files: Vec<SerializedDataFile>,
     pub overwrite_files: Vec<SerializedDataFile>,
 }
 
-impl<'a> TryFrom<&'a SinkMetadata> for IcebergDvMergerCommitResult {
+impl<'a> TryFrom<&'a SinkMetadata> for IcebergPositionDeleteMergerCommitResult {
     type Error = SinkError;
 
     fn try_from(value: &'a SinkMetadata) -> Result<Self> {
@@ -179,10 +179,10 @@ impl<'a> TryFrom<&'a SinkMetadata> for IcebergDvMergerCommitResult {
     }
 }
 
-impl<'a> TryFrom<&'a IcebergDvMergerCommitResult> for SinkMetadata {
+impl<'a> TryFrom<&'a IcebergPositionDeleteMergerCommitResult> for SinkMetadata {
     type Error = SinkError;
 
-    fn try_from(value: &'a IcebergDvMergerCommitResult) -> Result<SinkMetadata> {
+    fn try_from(value: &'a IcebergPositionDeleteMergerCommitResult) -> Result<SinkMetadata> {
         let bytes = serde_json::to_vec(value)
             .context("Can't serialize iceberg dv merger commit result to metadata")?;
         Ok(SinkMetadata {
@@ -532,21 +532,7 @@ impl IcebergSinkCommitter {
                 expect_schema_id
             )));
         };
-        let Some(partition_spec) = self
-            .table
-            .metadata()
-            .partition_spec_by_id(expect_partition_spec_id)
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Can't find partition spec by id {}",
-                expect_partition_spec_id
-            )));
-        };
-        let partition_type = partition_spec
-            .as_ref()
-            .clone()
-            .partition_type(schema)
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        let partition_type = resolve_partition_type(&self.table, expect_partition_spec_id, schema)?;
 
         let data_files = write_results
             .into_iter()

@@ -48,7 +48,7 @@ insert into t(id, name) values(2, 'yyy');
 statement ok
 FLUSH;
 
-query ?? retry 6 backoff 1s
+query ?? rowsort retry 6 backoff 1s
 select * from t;
 ----
 1 xxx

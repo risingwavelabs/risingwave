@@ -41,7 +41,7 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -155,7 +155,7 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+    IcebergWriterImpl, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
@@ -1269,7 +1269,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &NonStrictExpression<impl Expression>,
+        expr: &NonStrictExpression,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
