@@ -187,6 +187,8 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(

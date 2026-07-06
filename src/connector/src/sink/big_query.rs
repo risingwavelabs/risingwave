@@ -524,6 +524,8 @@ impl Sink for BigQuerySink {
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -1134,6 +1136,7 @@ mod test {
                     msk_signer_timeout_sec: None,
                 },
                 r#type: "append-only".to_owned(),
+                unknown_fields: Default::default(),
             },
             schema: Schema {
                 fields: vec![Field::with_name(DataType::Decimal, "capitalizedcost")],

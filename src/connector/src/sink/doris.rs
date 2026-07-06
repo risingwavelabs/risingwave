@@ -253,6 +253,8 @@ impl Sink for DorisSink {
 
     const SINK_NAME: &'static str = DORIS_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(DorisSinkWriter::new(
             self.config.clone(),
@@ -576,14 +578,16 @@ mod tests {
 
     #[test]
     fn test_jsonb_can_write_to_variant() {
-        assert!(DorisSink::check_and_correct_column_type(&DataType::Jsonb, "VARIANT".into())
-            .unwrap());
+        assert!(
+            DorisSink::check_and_correct_column_type(&DataType::Jsonb, "VARIANT".into()).unwrap()
+        );
     }
 
     #[test]
     fn test_varchar_can_write_to_variant() {
-        assert!(DorisSink::check_and_correct_column_type(&DataType::Varchar, "VARIANT".into())
-            .unwrap());
+        assert!(
+            DorisSink::check_and_correct_column_type(&DataType::Varchar, "VARIANT".into()).unwrap()
+        );
     }
 }
 

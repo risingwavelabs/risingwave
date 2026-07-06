@@ -127,6 +127,8 @@ impl Sink for NatsSink {
 
     const SINK_NAME: &'static str = NATS_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(

@@ -537,6 +537,8 @@ impl Sink for ClickHouseSink {
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {

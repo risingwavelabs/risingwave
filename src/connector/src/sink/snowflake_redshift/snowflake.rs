@@ -492,6 +492,8 @@ impl Sink for SnowflakeV2Sink {
 
     const SINK_NAME: &'static str = SNOWFLAKE_SINK_V2;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::SnowflakeSink
             .check_available()

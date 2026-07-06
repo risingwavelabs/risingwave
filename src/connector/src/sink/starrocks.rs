@@ -329,6 +329,8 @@ impl Sink for StarrocksSink {
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(

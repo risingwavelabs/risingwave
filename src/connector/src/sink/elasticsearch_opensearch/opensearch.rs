@@ -66,6 +66,10 @@ impl Sink for OpenSearchSink {
 
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
 
+    fn validate_unknown_fields(&self) -> Result<()> {
+        crate::sink::validate_sink_unknown_fields(&self.config)
+    }
+
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::OpenSearchSink
             .check_available()

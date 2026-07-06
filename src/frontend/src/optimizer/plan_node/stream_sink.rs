@@ -27,14 +27,12 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::http::HTTP_SINK;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_USER_IGNORE_DELETE_OPTION, SinkConfig, validate_sink_options_with_config,
-    SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
+    SINK_USER_IGNORE_DELETE_OPTION, SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
 };
 use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
@@ -593,13 +591,6 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink_desc.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            let mut properties = sink_desc.properties.clone();
-                            if connector_type == HTTP_SINK {
-                                properties.retain(|key, _| !key.starts_with("header."));
-                            }
-                            validate_sink_options_with_config::<<SinkType as SinkConfig>::Config>(
-                                properties, true,
-                            )?;
                             sink_desc.properties.remove(AUTO_SCHEMA_CHANGE_KEY);
                             SinkType::set_default_commit_checkpoint_interval(
                                 &mut sink_desc,

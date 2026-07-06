@@ -152,6 +152,8 @@ impl Sink for DynamoDbSink {
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::DynamoDbSink
             .check_available()

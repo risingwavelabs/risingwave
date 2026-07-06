@@ -195,6 +195,8 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         // Reduce async state machine size (see `clippy::large_futures`).
         let writer = Box::pin(PulsarSinkWriter::new(

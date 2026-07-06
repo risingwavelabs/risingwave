@@ -307,6 +307,8 @@ impl Sink for RedisSink {
 
     const SINK_NAME: &'static str = "redis";
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RedisSinkWriter::new(
             self.config.clone(),

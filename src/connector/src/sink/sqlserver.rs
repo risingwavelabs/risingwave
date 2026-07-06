@@ -176,6 +176,8 @@ impl Sink for SqlServerSink {
 
     const SINK_NAME: &'static str = SQLSERVER_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::SqlServerSink
             .check_available()
