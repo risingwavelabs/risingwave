@@ -19,7 +19,6 @@ use anyhow::anyhow;
 use futures::TryStreamExt;
 use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
-use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -31,8 +30,9 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::{PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope};
 use thiserror_ext::AsReport;
 
-use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
-use crate::backup_restore::restore_impl::{Loader, Writer};
+use crate::backup_restore::restore_impl::v2::{
+    LoaderV2, RestoreOverwrite, WriterModelV2ToMetaStoreV2,
+};
 use crate::backup_restore::utils::{get_backup_store, get_meta_store};
 use crate::controller::SqlMetaStore;
 use crate::hummock::compress_payload;
@@ -202,11 +202,11 @@ async fn restore_impl(
     Ok(())
 }
 
-async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
+async fn dispatch(
     target_id: MetaSnapshotId,
     opts: &RestoreOpts,
-    loader: L,
-    writer: W,
+    loader: LoaderV2,
+    writer: WriterModelV2ToMetaStoreV2,
 ) -> BackupResult<()> {
     // Validate parameters.
     if opts.overwrite_hummock_storage_endpoint
@@ -217,7 +217,7 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     }
 
     // Restore meta store.
-    let target_snapshot = loader.load(target_id).await?;
+    let mut target_snapshot = loader.load_spooled(target_id).await?;
     if !opts.overwrite_hummock_storage_endpoint {
         let storage_url = target_snapshot.metadata.storage_url()?;
         if storage_url != opts.hummock_storage_url {
@@ -241,18 +241,22 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
         tracing::info!("Complete dry run.");
         return Ok(());
     }
-    let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
-    writer.write(target_snapshot).await?;
-    if opts.overwrite_hummock_storage_endpoint {
-        writer
-            .overwrite(
-                &format!("hummock+{}", opts.hummock_storage_url),
-                &opts.hummock_storage_directory,
-                opts.overwrite_backup_storage_url.as_ref().unwrap(),
-                opts.overwrite_backup_storage_directory.as_ref().unwrap(),
-            )
-            .await?;
-    }
+    let hummock_version = target_snapshot.metadata.hummock_version.clone();
+    let new_storage_url;
+    let overwrite = if opts.overwrite_hummock_storage_endpoint {
+        new_storage_url = format!("hummock+{}", opts.hummock_storage_url);
+        Some(RestoreOverwrite {
+            new_storage_url: &new_storage_url,
+            new_storage_dir: &opts.hummock_storage_directory,
+            new_backup_url: opts.overwrite_backup_storage_url.as_ref().unwrap(),
+            new_backup_dir: opts.overwrite_backup_storage_directory.as_ref().unwrap(),
+        })
+    } else {
+        None
+    };
+    writer
+        .write_spooled(&mut target_snapshot.metadata, overwrite)
+        .await?;
 
     // Restore object store.
     restore_hummock_version(

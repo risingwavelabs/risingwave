@@ -68,7 +68,7 @@ fn for_all_metadata_models_v2_should_cover_all_required_meta_model_tables() {
     //
     // - If yes:
     //   1. append it to `for_all_metadata_models_v2` in `src/storage/backup/src/meta_snapshot_v2.rs`.
-    //   2. add `insert_models` before `update_auto_inc` in `src/meta/src/backup_restore/restore_impl/v2.rs`.
+    //   2. add its spooled insert in `src/meta/src/backup_restore/restore_impl/v2.rs`.
     // - If no (runtime/derived table): add it to the `excluded` set below with a short comment.
 
     let meta_model_lib_rs = include_str!("../../../meta/model/src/lib.rs");

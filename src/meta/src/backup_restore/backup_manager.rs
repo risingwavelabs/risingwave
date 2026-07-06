@@ -353,18 +353,24 @@ impl BackupWorker {
                     .await
             };
             let meta_store = backup_manager_clone.env.meta_store();
-            let mut snapshot_builder =
-                meta_snapshot_builder::MetaSnapshotV2Builder::new(meta_store);
+            let snapshot_builder = meta_snapshot_builder::MetaSnapshotV2Builder::new(meta_store);
+            let backup_store = backup_manager_clone.backup_store.load().0.clone();
             // Reuse job id as snapshot id.
-            snapshot_builder
-                .build(job_id, hummock_version_builder)
+            let mut uploader = backup_store
+                .begin_snapshot_upload(job_id, meta_snapshot_builder::VERSION)
                 .await?;
-            let snapshot = snapshot_builder.finish()?;
-            backup_manager_clone
-                .backup_store
-                .load()
-                .0
-                .create(&snapshot, remarks)
+            let snapshot_info = snapshot_builder
+                .build_streaming(&mut uploader, hummock_version_builder)
+                .await?;
+            uploader.finish().await?;
+            backup_store
+                .commit_snapshot_metadata(
+                    job_id,
+                    &snapshot_info.hummock_version,
+                    meta_snapshot_builder::VERSION,
+                    remarks,
+                    snapshot_info.table_change_log_object_ids.into_iter(),
+                )
                 .await?;
             Ok(BackupJobResult::Succeeded)
         };

@@ -13,13 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::hash::Hasher;
+use std::mem::size_of;
 use std::sync::Arc;
 
+use anyhow::anyhow;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::config::ObjectStoreConfig;
+use risingwave_hummock_sdk::HummockRawObjectId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{
-    InMemObjectStore, MonitoredObjectStore, ObjectError, ObjectStoreImpl, ObjectStoreRef,
+    InMemObjectStore, MonitoredObjectStore, MonitoredStreamingReader, ObjectError, ObjectStoreImpl,
+    ObjectStoreRef, ObjectStreamingUploader,
 };
 use tokio::sync::RwLock;
 
@@ -29,6 +36,122 @@ use crate::{
 };
 
 pub type MetaSnapshotStorageRef = Arc<ObjectStoreMetaSnapshotStorage>;
+
+pub struct MetaSnapshotStreamingUploader {
+    inner: ObjectStreamingUploader,
+    checksum: twox_hash::XxHash64,
+}
+
+pub struct MetaSnapshotStreamingReader {
+    inner: MonitoredStreamingReader,
+    buffered: BytesMut,
+    checksum: twox_hash::XxHash64,
+    expected_checksum: u64,
+}
+
+impl MetaSnapshotStreamingUploader {
+    fn new(inner: ObjectStreamingUploader) -> Self {
+        Self {
+            inner,
+            checksum: twox_hash::XxHash64::with_seed(0),
+        }
+    }
+
+    pub async fn write_bytes(&mut self, data: Bytes) -> BackupResult<()> {
+        self.checksum.write(&data);
+        self.inner.write_bytes(data).await?;
+        Ok(())
+    }
+
+    pub async fn write_u32_le(&mut self, value: u32) -> BackupResult<()> {
+        let mut buf = Vec::with_capacity(size_of::<u32>());
+        buf.put_u32_le(value);
+        self.write_bytes(buf.into()).await
+    }
+
+    pub async fn write_u64_le(&mut self, value: u64) -> BackupResult<()> {
+        let mut buf = Vec::with_capacity(size_of::<u64>());
+        buf.put_u64_le(value);
+        self.write_bytes(buf.into()).await
+    }
+
+    pub async fn finish(mut self) -> BackupResult<()> {
+        let checksum = self.checksum.finish();
+        let mut buf = Vec::with_capacity(size_of::<u64>());
+        buf.put_u64_le(checksum);
+        self.inner.write_bytes(buf.into()).await?;
+        self.inner.finish().await?;
+        Ok(())
+    }
+}
+
+impl MetaSnapshotStreamingReader {
+    fn new(inner: MonitoredStreamingReader, expected_checksum: u64) -> Self {
+        Self {
+            inner,
+            buffered: BytesMut::new(),
+            checksum: twox_hash::XxHash64::with_seed(0),
+            expected_checksum,
+        }
+    }
+
+    pub async fn read_bytes(&mut self, len: usize) -> BackupResult<Bytes> {
+        while self.buffered.len() < len {
+            let bytes = match self.inner.read_bytes().await {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(e)) => return Err(e.into()),
+                None => {
+                    return Err(BackupError::Decoding(
+                        anyhow!(
+                            "unexpected end of metadata snapshot: need {} bytes, buffered {}",
+                            len,
+                            self.buffered.len()
+                        )
+                        .into(),
+                    ));
+                }
+            };
+            self.checksum.write(&bytes);
+            self.buffered.extend_from_slice(&bytes);
+        }
+        Ok(self.buffered.split_to(len).freeze())
+    }
+
+    pub async fn read_u32_le(&mut self) -> BackupResult<u32> {
+        Ok(self.read_bytes(size_of::<u32>()).await?.get_u32_le())
+    }
+
+    pub async fn read_u64_le(&mut self) -> BackupResult<u64> {
+        Ok(self.read_bytes(size_of::<u64>()).await?.get_u64_le())
+    }
+
+    pub async fn finish(mut self) -> BackupResult<()> {
+        if !self.buffered.is_empty() {
+            return Err(BackupError::Decoding(
+                anyhow!(
+                    "metadata snapshot has {} trailing bytes before checksum",
+                    self.buffered.len()
+                )
+                .into(),
+            ));
+        }
+
+        if self.inner.read_bytes().await.transpose()?.is_some() {
+            return Err(BackupError::Decoding(
+                anyhow!("metadata snapshot has trailing bytes before checksum").into(),
+            ));
+        }
+
+        let found = self.checksum.finish();
+        if found != self.expected_checksum {
+            return Err(BackupError::ChecksumMismatch {
+                expected: self.expected_checksum,
+                found,
+            });
+        }
+        Ok(())
+    }
+}
 
 #[async_trait::async_trait]
 pub trait MetaSnapshotStorage: 'static + Sync + Send {
@@ -119,6 +242,68 @@ impl ObjectStoreMetaSnapshotStorage {
             .parse::<MetaSnapshotId>()
             .expect("valid meta snapshot id")
     }
+
+    pub async fn begin_snapshot_upload(
+        &self,
+        id: MetaSnapshotId,
+        format_version: u32,
+    ) -> BackupResult<MetaSnapshotStreamingUploader> {
+        let path = self.get_snapshot_path(id);
+        let mut uploader =
+            MetaSnapshotStreamingUploader::new(self.store.streaming_upload(&path).await?);
+        uploader.write_u32_le(format_version).await?;
+        uploader.write_u64_le(id).await?;
+        Ok(uploader)
+    }
+
+    pub async fn begin_snapshot_read(
+        &self,
+        id: MetaSnapshotId,
+    ) -> BackupResult<MetaSnapshotStreamingReader> {
+        let path = self.get_snapshot_path(id);
+        let object_metadata = self.store.metadata(&path).await?;
+        if object_metadata.total_size < size_of::<u32>() + size_of::<u64>() + size_of::<u64>() {
+            return Err(BackupError::Decoding(
+                anyhow!(
+                    "metadata snapshot {} is too small: {} bytes",
+                    id,
+                    object_metadata.total_size
+                )
+                .into(),
+            ));
+        }
+
+        let checksum_offset = object_metadata.total_size - size_of::<u64>();
+        let mut checksum_bytes = self
+            .store
+            .read(&path, checksum_offset..object_metadata.total_size)
+            .await?;
+        let expected_checksum = checksum_bytes.get_u64_le();
+        let reader = self.store.streaming_read(&path, 0..checksum_offset).await?;
+        Ok(MetaSnapshotStreamingReader::new(reader, expected_checksum))
+    }
+
+    pub async fn commit_snapshot_metadata(
+        &self,
+        id: MetaSnapshotId,
+        hummock_version: &HummockVersion,
+        format_version: u32,
+        remarks: Option<String>,
+        table_change_log_object_ids: impl Iterator<Item = HummockRawObjectId>,
+    ) -> BackupResult<()> {
+        self.update_manifest(|mut manifest: MetaSnapshotManifest| {
+            manifest.manifest_id += 1;
+            manifest.snapshot_metadata.push(MetaSnapshotMetadata::new(
+                id,
+                hummock_version,
+                format_version,
+                remarks,
+                table_change_log_object_ids,
+            ));
+            manifest
+        })
+        .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -202,4 +387,59 @@ pub async fn unused() -> ObjectStoreMetaSnapshotStorage {
     )
     .await
     .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meta_snapshot::Metadata;
+    use crate::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
+
+    #[tokio::test]
+    async fn test_streaming_snapshot_upload_matches_legacy_encode() {
+        let store = unused().await;
+        let snapshot = MetaSnapshotV2 {
+            format_version: 2,
+            id: 42,
+            metadata: MetadataV2::default(),
+        };
+
+        let mut uploader = store
+            .begin_snapshot_upload(snapshot.id, snapshot.format_version)
+            .await
+            .unwrap();
+        let mut metadata = Vec::new();
+        snapshot.metadata.encode_to(&mut metadata).unwrap();
+        uploader.write_bytes(metadata.into()).await.unwrap();
+        uploader.finish().await.unwrap();
+
+        let uploaded = store
+            .store
+            .read(&store.get_snapshot_path(snapshot.id), ..)
+            .await
+            .unwrap();
+        assert_eq!(uploaded.as_ref(), snapshot.encode().unwrap().as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_streaming_snapshot_read_matches_legacy_encode() {
+        let store = unused().await;
+        let snapshot = MetaSnapshotV2 {
+            format_version: 2,
+            id: 43,
+            metadata: MetadataV2::default(),
+        };
+        store.create(&snapshot, None).await.unwrap();
+
+        let encoded = snapshot.encode().unwrap();
+        let mut reader = store.begin_snapshot_read(snapshot.id).await.unwrap();
+        assert_eq!(reader.read_u32_le().await.unwrap(), snapshot.format_version);
+        assert_eq!(reader.read_u64_le().await.unwrap(), snapshot.id);
+        let metadata_len = encoded.len() - size_of::<u32>() - size_of::<u64>() - size_of::<u64>();
+        assert_eq!(
+            reader.read_bytes(metadata_len).await.unwrap().as_ref(),
+            &encoded[size_of::<u32>() + size_of::<u64>()..encoded.len() - size_of::<u64>()],
+        );
+        reader.finish().await.unwrap();
+    }
 }

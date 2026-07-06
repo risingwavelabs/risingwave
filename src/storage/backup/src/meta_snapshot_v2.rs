@@ -79,6 +79,9 @@ macro_rules! for_all_metadata_models_v2 {
     };
 }
 
+/// Legacy v2 snapshot layout stores the singleton Hummock version after the first metadata table.
+pub const HUMMOCK_VERSION_ENCODING_INDEX: usize = 1;
+
 macro_rules! define_metadata_v2 {
     ($({ $name:ident, $mod_path:ident::$mod_name:ident }),*) => {
         #[derive(Default)]
@@ -101,7 +104,7 @@ macro_rules! define_encode_metadata {
         ) -> BackupResult<()> {
             let mut _idx = 0;
             $(
-                if _idx == 1 {
+                if _idx == HUMMOCK_VERSION_ENCODING_INDEX {
                     put_1(buf, &metadata.hummock_version.to_protobuf())?;
                 }
                 put_n(buf, &metadata.$name)?;
@@ -122,7 +125,7 @@ macro_rules! define_decode_metadata {
         ) -> BackupResult<()> {
             let mut _idx = 0;
             $(
-                if _idx == 1 {
+                if _idx == HUMMOCK_VERSION_ENCODING_INDEX {
                     metadata.hummock_version = HummockVersion::from_persisted_protobuf_owned(get_1(&mut buf)?);
                 }
                 metadata.$name = get_n(&mut buf)?;
