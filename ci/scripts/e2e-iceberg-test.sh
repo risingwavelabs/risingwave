@@ -46,7 +46,7 @@ poetry update --quiet
 poetry run python main.py
 
 echo "--- Running pure slt tests"
-risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
+risedev slt './e2e_test/iceberg/test_case/pure_slt/**/*.slt'
 
 # Run benchmarks separately (not parallelized)
 echo "--- Running benchmarks"

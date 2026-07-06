@@ -133,8 +133,7 @@ pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
-pub(super) const PARQUET_CREATED_BY: &str =
-    concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
+pub const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -456,7 +455,8 @@ pub struct IcebergConfig {
     pub write_parquet_max_row_group_bytes: Option<usize>,
 
     /// Whether to enable PK index for upsert sink. Default is false.
-    /// It's used for V3 upsert iceberg sink to generate delete vectors.
+    /// For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+    /// position deletes instead of equality deletes.
     #[serde(
         rename = "enable_pk_index",
         default,
@@ -513,9 +513,9 @@ impl IcebergConfig {
             )));
         }
 
-        if self.format_version < FormatVersion::V3 {
+        if self.format_version < FormatVersion::V2 {
             return Err(SinkError::Config(anyhow!(
-                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 3"
+                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 2"
             )));
         }
 

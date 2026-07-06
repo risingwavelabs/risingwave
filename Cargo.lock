@@ -13131,6 +13131,7 @@ dependencies = [
  "moka",
  "multimap",
  "parking_lot 0.12.5",
+ "parquet",
  "paste",
  "pin-project",
  "pretty_assertions",

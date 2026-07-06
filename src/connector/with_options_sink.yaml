@@ -817,7 +817,8 @@ IcebergConfig:
     field_type: bool
     comments: |-
       Whether to enable PK index for upsert sink. Default is false.
-      It's used for V3 upsert iceberg sink to generate delete vectors.
+      For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+      position deletes instead of equality deletes.
     required: false
     default: Default::default
 KafkaConfig:

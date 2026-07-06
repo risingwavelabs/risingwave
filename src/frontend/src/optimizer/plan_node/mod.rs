@@ -1091,7 +1091,7 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_iceberg_with_pk_index_dv_merger;
+mod stream_iceberg_with_pk_index_position_delete_merger;
 mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
@@ -1236,7 +1236,7 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_iceberg_with_pk_index_dv_merger::StreamIcebergWithPkIndexDvMerger;
+pub use stream_iceberg_with_pk_index_position_delete_merger::StreamIcebergWithPkIndexPositionDeleteMerger;
 pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
@@ -1417,7 +1417,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcGapFill }
             , { Stream, GapFill }
             , { Stream, IcebergWithPkIndexWriter }
-            , { Stream, IcebergWithPkIndexDvMerger }
+            , { Stream, IcebergWithPkIndexPositionDeleteMerger }
             $(,$rest)*
         }
     };

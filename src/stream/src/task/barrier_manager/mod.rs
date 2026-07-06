@@ -22,7 +22,7 @@ use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
-use risingwave_pb::stream_service::PbIcebergV3SinkRole;
+use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -86,11 +86,11 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         source_id: SourceId,
     },
-    ReportIcebergV3SinkMetadata {
+    ReportIcebergPkIndexSinkMetadata {
         epoch: EpochPair,
         sink_id: SinkId,
         actor_id: ActorId,
-        role: PbIcebergV3SinkRole,
+        role: PbIcebergPkIndexSinkRole,
         metadata: Option<SinkMetadata>,
     },
 }
@@ -251,15 +251,15 @@ impl LocalBarrierManager {
         });
     }
 
-    pub fn report_iceberg_v3_sink_metadata(
+    pub fn report_iceberg_pk_index_sink_metadata(
         &self,
         epoch: EpochPair,
         sink_id: risingwave_common::id::SinkId,
         actor_id: ActorId,
-        role: PbIcebergV3SinkRole,
+        role: PbIcebergPkIndexSinkRole,
         metadata: Option<SinkMetadata>,
     ) {
-        self.send_event(LocalBarrierEvent::ReportIcebergV3SinkMetadata {
+        self.send_event(LocalBarrierEvent::ReportIcebergPkIndexSinkMetadata {
             epoch,
             sink_id,
             actor_id,
