@@ -15,7 +15,7 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -331,7 +331,8 @@ async fn instrument_scan_task_stream(
     scan_tasks: iceberg::scan::FileScanTaskStream,
     metrics: Option<IcebergScanMetricsLabels>,
 ) {
-    let list_start = std::time::Instant::now();
+    let mut list_duration = Duration::default();
+    let mut active_since = Instant::now();
     let mut stats = IcebergScanPlanStats::default();
 
     let mut scan_tasks = scan_tasks;
@@ -341,11 +342,14 @@ async fn instrument_scan_task_stream(
             stats.record_task(&scan_task);
             metrics.record_delete_files_per_data_file(scan_task.deletes.len());
         }
+        list_duration += active_since.elapsed();
         yield scan_task;
+        active_since = Instant::now();
     }
+    list_duration += active_since.elapsed();
 
     if let Some(metrics) = &metrics {
-        metrics.record_list_duration(list_start.elapsed());
+        metrics.record_list_duration(list_duration);
         metrics.record_file_counts(&stats);
     }
 }
