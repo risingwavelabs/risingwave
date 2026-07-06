@@ -21,9 +21,7 @@ use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
-use crate::HummockObjectId;
 use crate::sstable_info::SstableInfo;
-use crate::version::ObjectIdReader;
 
 const CLONE_OPTIMIZED_VEC_DEQUE_CHUNK_SIZE: usize = 256;
 
@@ -216,30 +214,10 @@ impl<T> TableChangeLogCommon<T> {
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
-        self.0
-            .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
-    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
 pub type TableChangeLogs = HashMap<TableId, TableChangeLog>;
-
-impl TableChangeLog {
-    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
-        self.0.iter().flat_map(|c| {
-            c.old_value
-                .iter()
-                .chain(c.new_value.iter())
-                .map(|t| HummockObjectId::Sstable(t.object_id()))
-        })
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLogCommon<T> {
