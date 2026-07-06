@@ -302,36 +302,56 @@ fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> 
 }
 
 impl TableCacheRefillContext {
-    /// Check whether the given sstable block should be refilled according to the vnode mapping.
-    fn check_table_refill_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
-        let block_smallest_key =
-            FullKey::decode(&sstable.meta.block_metas[block_index].smallest_key);
-        let block_largest_key = FullKey::decode(
-            sstable
-                .meta
-                .block_metas
-                .get(block_index + 1)
-                .map(|b| &b.smallest_key)
-                .unwrap_or_else(|| &sstable.meta.largest_key),
-        );
+    fn allows_normal_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
+        if self.policy.is_unscoped_enabled() {
+            return true;
+        }
 
-        let table_key_range = (
-            Bound::Included(block_smallest_key.user_key.table_key),
-            Bound::Excluded(block_largest_key.user_key.table_key),
-        );
-        let vnode_range = vnode_range(&table_key_range);
-        if let Some(streaming_bitmap) = &self.streaming_vnode_bitmap
-            && vnode_range_overlaps_bitmap(vnode_range, streaming_bitmap)
-        {
-            return true;
-        }
-        if let Some(serving_bitmap) = &self.serving_vnode_bitmap
-            && vnode_range_overlaps_bitmap(vnode_range, serving_bitmap)
-        {
-            return true;
-        }
-        false
+        (self.policy.is_streaming_scoped()
+            && self.check_table_refill_streaming_vnodes(sstable, block_index))
+            || (self.policy.is_serving_scoped()
+                && self.check_table_refill_serving_vnodes(sstable, block_index))
     }
+
+    fn allows_insert_only_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
+        // Insert-only deltas have no delete-side evidence for recent/inheritance filters.
+        // Only serving-owned blocks need refill, because streaming writers already populated
+        // their local cache.
+        (self.policy.is_unscoped_enabled() || self.policy.is_serving_scoped())
+            && self.check_table_refill_serving_vnodes(sstable, block_index)
+    }
+
+    fn check_table_refill_streaming_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
+        self.streaming_vnode_bitmap.as_ref().is_some_and(|bitmap| {
+            let vnode_range = block_vnode_range(sstable, block_index);
+            vnode_range_overlaps_bitmap(vnode_range, bitmap)
+        })
+    }
+
+    fn check_table_refill_serving_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
+        self.serving_vnode_bitmap.as_ref().is_some_and(|bitmap| {
+            let vnode_range = block_vnode_range(sstable, block_index);
+            vnode_range_overlaps_bitmap(vnode_range, bitmap)
+        })
+    }
+}
+
+fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
+    let block_smallest_key = FullKey::decode(&sstable.meta.block_metas[block_index].smallest_key);
+    let block_largest_key = FullKey::decode(
+        sstable
+            .meta
+            .block_metas
+            .get(block_index + 1)
+            .map(|b| &b.smallest_key)
+            .unwrap_or_else(|| &sstable.meta.largest_key),
+    );
+
+    let table_key_range = (
+        Bound::Included(block_smallest_key.user_key.table_key),
+        Bound::Excluded(block_largest_key.user_key.table_key),
+    );
+    vnode_range(&table_key_range)
 }
 
 /// A cache refiller for hummock data.
@@ -496,12 +516,31 @@ impl CacheRefiller {
             .copied()
             .unwrap_or(self.default_policy);
 
-        let streaming_vnode_bitmap = (self.role.for_streaming() && policy.for_streaming())
+        if policy.is_streaming_scoped() && !self.role.for_streaming() {
+            tracing::warn!(
+                ?table_id,
+                ?policy,
+                role = ?self.role,
+                "skip materializing streaming vnode bitmap because worker role cannot provide streaming ownership evidence",
+            );
+        }
+        let streaming_vnode_bitmap = (self.role.for_streaming() && policy.is_streaming_scoped())
             .then(|| self.streaming_table_vnode_mapping.get(&table_id).cloned())
             .flatten();
-        let serving_vnode_bitmap = (self.role.for_serving() && policy.for_serving())
-            .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
-            .flatten();
+        if policy.is_serving_scoped() && !self.role.for_serving() {
+            tracing::warn!(
+                ?table_id,
+                ?policy,
+                role = ?self.role,
+                "skip materializing serving vnode bitmap because worker role cannot provide serving ownership evidence",
+            );
+        }
+        // `Enabled` normally does not use bitmap filtering. The only exception is L0
+        // insert-only refill, where serving workers still need serving-locality evidence.
+        let serving_vnode_bitmap = (self.role.for_serving()
+            && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
+        .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
+        .flatten();
 
         if self.table_cache_refill_policies.contains_key(&table_id)
             || streaming_vnode_bitmap.is_some()
@@ -617,6 +656,31 @@ struct DataCacheRefillTaskGenerator<'a> {
     ssts: &'a [TableHolder],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DataCacheRefillPath {
+    Normal,
+    L0InsertOnly,
+}
+
+fn classify_data_cache_refill_path(delta: &SstDeltaInfo) -> Option<DataCacheRefillPath> {
+    if delta.insert_sst_infos.is_empty() {
+        return None;
+    }
+
+    if delta.delete_sst_object_ids.is_empty() {
+        // CN-written L0 SSTs have no deleted SSTs. Streaming writers already warm their local
+        // cache through upload, but serving workers still need a chance to refill serving-owned
+        // blocks from the inserted SSTs.
+        if delta.insert_sst_level == 0 {
+            Some(DataCacheRefillPath::L0InsertOnly)
+        } else {
+            None
+        }
+    } else {
+        Some(DataCacheRefillPath::Normal)
+    }
+}
+
 impl DataCacheRefillTaskGenerator<'_> {
     async fn generate(&self) -> Vec<DataCacheRefillTask> {
         let mut tasks = Vec::new();
@@ -626,10 +690,9 @@ impl DataCacheRefillTaskGenerator<'_> {
             return tasks;
         }
 
-        // Return if no data to refill.
-        if self.delta.insert_sst_infos.is_empty() || self.delta.delete_sst_object_ids.is_empty() {
+        let Some(refill_kind) = classify_data_cache_refill_path(self.delta) else {
             return tasks;
-        }
+        };
 
         // Return if the target level is not in the refill levels
         if !self
@@ -643,7 +706,7 @@ impl DataCacheRefillTaskGenerator<'_> {
 
         // Filter by recent filter.
         let total_block_count: u64 = self.ssts.iter().map(|sst| sst.block_count() as u64).sum();
-        if !self.context.config.skip_recent_filter {
+        if refill_kind == DataCacheRefillPath::Normal && !self.context.config.skip_recent_filter {
             let refill = self.filter_by_recent_filter();
             if refill {
                 GLOBAL_CACHE_REFILL_METRICS
@@ -671,7 +734,8 @@ impl DataCacheRefillTaskGenerator<'_> {
         }
 
         // Filter by inheritance filter, also requires recent filter enabled.
-        if self.delta.insert_sst_level != 0
+        if refill_kind == DataCacheRefillPath::Normal
+            && self.delta.insert_sst_level != 0
             && !self.context.config.skip_recent_filter
             && !self.context.config.skip_inheritance_filter
         {
@@ -679,7 +743,12 @@ impl DataCacheRefillTaskGenerator<'_> {
         }
 
         // Filter by table cache refill policy and vnodes.
-        tasks = self.filter_by_table_cache_refill_policy(tasks);
+        tasks = match refill_kind {
+            DataCacheRefillPath::Normal => self.filter_by_table_cache_refill_policy(tasks),
+            DataCacheRefillPath::L0InsertOnly => {
+                self.filter_insert_only_by_table_cache_refill_policy(tasks)
+            }
+        };
 
         tasks
     }
@@ -799,16 +868,28 @@ impl DataCacheRefillTaskGenerator<'_> {
                 let Some(context) = table_cache_refill_context_map.get(&table_id) else {
                     continue;
                 };
-                match context.policy {
-                    CacheRefillPolicy::Enabled => return true,
-                    CacheRefillPolicy::Streaming
-                    | CacheRefillPolicy::Serving
-                    | CacheRefillPolicy::Both
-                        if context.check_table_refill_vnodes(&task.sst, blk) =>
-                    {
-                        return true;
-                    }
-                    _ => {}
+                if context.allows_normal_data_refill_block(&task.sst, blk) {
+                    return true;
+                }
+            }
+            false
+        };
+        tasks.retain(check);
+        tasks
+    }
+
+    fn filter_insert_only_by_table_cache_refill_policy(
+        &self,
+        mut tasks: Vec<DataCacheRefillTask>,
+    ) -> Vec<DataCacheRefillTask> {
+        let table_cache_refill_context_map = &self.context.table_cache_refill_context_map;
+        let check = |task: &DataCacheRefillTask| {
+            for blk in task.blks.start..task.blks.end {
+                let table_id = task.sst.meta.block_metas[blk].table_id();
+                if let Some(context) = table_cache_refill_context_map.get(&table_id)
+                    && context.allows_insert_only_data_refill_block(&task.sst, blk)
+                {
+                    return true;
                 }
             }
             false
@@ -1070,8 +1151,9 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
-        CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
-        SpawnRefillTask, SstDeltaInfo, vnode_range_overlaps_bitmap,
+        CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillPath,
+        DataCacheRefillTaskGenerator, SpawnRefillTask, SstDeltaInfo,
+        classify_data_cache_refill_path, vnode_range_overlaps_bitmap,
     };
     use crate::hummock::iterator::test_utils::{iterator_test_table_key_of, mock_sstable_store};
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1213,6 +1295,10 @@ mod tests {
             (explicit_table_id, CacheRefillPolicy::Serving),
             (excluded_table_id, CacheRefillPolicy::Serving),
         ]));
+        refiller.update_streaming_table_vnodes(
+            default_table_id,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+        );
         refiller.replace_serving_table_vnode_mapping(HashMap::from([
             (explicit_table_id, serving_vnodes.clone()),
             (excluded_table_id, serving_vnodes.clone()),
@@ -1254,7 +1340,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_l0_data_refill_applies_table_cache_refill_policy() {
+    async fn test_l0_normal_data_refill_applies_table_cache_refill_policy() {
         let table_id = TableId::from(233);
         let sstable_store = mock_sstable_store().await;
         let (sst, sst_info) = gen_test_sstable_with_table_ids(
@@ -1288,9 +1374,9 @@ mod tests {
                 table_cache_refill_context_map: Arc::new(HashMap::from([(
                     table_id,
                     super::TableCacheRefillContext {
-                        policy,
                         streaming_vnode_bitmap: None,
                         serving_vnode_bitmap: None,
+                        policy,
                     },
                 )])),
             }
@@ -1326,6 +1412,250 @@ mod tests {
             disabled_tasks.is_empty(),
             "L0 should skip inheritance filter but still apply table cache refill policy"
         );
+    }
+
+    #[test]
+    fn test_data_cache_refill_path_classifies_delta_shape() {
+        let table_id = TableId::from(233);
+        let sst_info = SstableInfo::from(SstableInfoInner {
+            object_id: 233.into(),
+            table_ids: vec![table_id],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            classify_data_cache_refill_path(&SstDeltaInfo {
+                insert_sst_infos: vec![],
+                delete_sst_object_ids: vec![],
+                insert_sst_level: 0,
+            }),
+            None
+        );
+        assert_eq!(
+            classify_data_cache_refill_path(&SstDeltaInfo {
+                insert_sst_infos: vec![sst_info.clone()],
+                delete_sst_object_ids: vec![],
+                insert_sst_level: 1,
+            }),
+            None
+        );
+        assert_eq!(
+            classify_data_cache_refill_path(&SstDeltaInfo {
+                insert_sst_infos: vec![sst_info.clone()],
+                delete_sst_object_ids: vec![],
+                insert_sst_level: 0,
+            }),
+            Some(DataCacheRefillPath::L0InsertOnly)
+        );
+        assert_eq!(
+            classify_data_cache_refill_path(&SstDeltaInfo {
+                insert_sst_infos: vec![sst_info.clone()],
+                delete_sst_object_ids: vec![sst_info.object_id],
+                insert_sst_level: 0,
+            }),
+            Some(DataCacheRefillPath::Normal)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_l0_insert_only_refill_requires_serving_ownership() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let (sst, sst_info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            (0..2).map(|idx| {
+                (
+                    FullKey {
+                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
+                            table_id,
+                            iterator_test_table_key_of(idx),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(vec![idx as u8]),
+                )
+            }),
+            sstable_store.clone(),
+            vec![table_id.as_raw_id()],
+        )
+        .await;
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let build_context = |policy, streaming_vnode_bitmap, serving_vnode_bitmap| {
+            let mut config = test_refill_config(policy);
+            config.data_refill_levels.insert(0);
+            CacheRefillContext {
+                config: Arc::new(config),
+                meta_refill_concurrency: None,
+                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
+                sstable_store: sstable_store.clone(),
+                table_cache_refill_context_map: Arc::new(HashMap::from([(
+                    table_id,
+                    super::TableCacheRefillContext {
+                        streaming_vnode_bitmap,
+                        serving_vnode_bitmap,
+                        policy,
+                    },
+                )])),
+            }
+        };
+        let delta = SstDeltaInfo {
+            insert_sst_infos: vec![sst_info],
+            delete_sst_object_ids: vec![],
+            insert_sst_level: 0,
+        };
+
+        let enabled_without_serving = build_context(CacheRefillPolicy::Enabled, None, None);
+        let enabled_without_serving_tasks = DataCacheRefillTaskGenerator {
+            context: &enabled_without_serving,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
+        }
+        .generate()
+        .await;
+        assert!(
+            enabled_without_serving_tasks.is_empty(),
+            "default Enabled must not unconditionally refill L0 insert-only SSTs"
+        );
+
+        let streaming_context = build_context(
+            CacheRefillPolicy::Streaming,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            None,
+        );
+        let streaming_tasks = DataCacheRefillTaskGenerator {
+            context: &streaming_context,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
+        }
+        .generate()
+        .await;
+        assert!(
+            streaming_tasks.is_empty(),
+            "pure streaming L0 insert-only SSTs are already warmed by the uploader"
+        );
+
+        let enabled_serving_context = build_context(
+            CacheRefillPolicy::Enabled,
+            None,
+            Some(serving_vnodes.clone()),
+        );
+        let enabled_serving_tasks = DataCacheRefillTaskGenerator {
+            context: &enabled_serving_context,
+            delta: &delta,
+            ssts: std::slice::from_ref(&sst),
+        }
+        .generate()
+        .await;
+        assert!(
+            !enabled_serving_tasks.is_empty(),
+            "Enabled is table-level allow, but L0 insert-only still needs serving ownership"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_l0_insert_only_block_refill_decision_uses_serving_ownership() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let (sst, _) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            (0..2).map(|idx| {
+                (
+                    FullKey {
+                        user_key: risingwave_hummock_sdk::key::UserKey::for_test(
+                            table_id,
+                            iterator_test_table_key_of(idx),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(vec![idx as u8]),
+                )
+            }),
+            sstable_store,
+            vec![table_id.as_raw_id()],
+        )
+        .await;
+        let build_context =
+            |policy, streaming_vnode_bitmap, serving_vnode_bitmap| super::TableCacheRefillContext {
+                streaming_vnode_bitmap,
+                serving_vnode_bitmap,
+                policy,
+            };
+
+        let cases = [
+            (
+                "Enabled + serving overlap",
+                build_context(
+                    CacheRefillPolicy::Enabled,
+                    None,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                ),
+                true,
+            ),
+            (
+                "Enabled + streaming overlap only",
+                build_context(
+                    CacheRefillPolicy::Enabled,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    None,
+                ),
+                false,
+            ),
+            (
+                "Serving + serving overlap",
+                build_context(
+                    CacheRefillPolicy::Serving,
+                    None,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                ),
+                true,
+            ),
+            (
+                "Streaming + streaming overlap",
+                build_context(
+                    CacheRefillPolicy::Streaming,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    None,
+                ),
+                false,
+            ),
+            (
+                "Both + streaming overlap + serving empty",
+                build_context(
+                    CacheRefillPolicy::Both,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    Some(Bitmap::zeros(VirtualNode::COUNT_FOR_TEST)),
+                ),
+                false,
+            ),
+            (
+                "Both + serving overlap",
+                build_context(
+                    CacheRefillPolicy::Both,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                ),
+                true,
+            ),
+            (
+                "Disabled + serving overlap",
+                build_context(
+                    CacheRefillPolicy::Disabled,
+                    None,
+                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                ),
+                false,
+            ),
+        ];
+
+        for (name, context, expected) in cases {
+            assert_eq!(
+                context.allows_insert_only_data_refill_block(&sst, 0),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]

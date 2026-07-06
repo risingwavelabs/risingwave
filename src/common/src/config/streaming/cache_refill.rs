@@ -74,11 +74,17 @@ impl CacheRefillPolicy {
         }
     }
 
-    pub fn for_streaming(&self) -> bool {
+    /// Legacy/default table-level allow policy. Normal refill is not scoped by
+    /// streaming or serving vnode ownership under this policy.
+    pub fn is_unscoped_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    pub fn is_streaming_scoped(self) -> bool {
         matches!(self, Self::Streaming | Self::Both)
     }
 
-    pub fn for_serving(&self) -> bool {
+    pub fn is_serving_scoped(self) -> bool {
         matches!(self, Self::Serving | Self::Both)
     }
 }
