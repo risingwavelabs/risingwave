@@ -564,4 +564,74 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_drop_table_cascade_drops_dependent_subscription() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let table_id = table_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            table_id,
+            "subscription_dep_table",
+            TableType::Table,
+            None,
+            "CREATE TABLE subscription_dep_table (v1 INT)",
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let mut pb_subscription = PbSubscription {
+            name: "subscription_to_drop_with_table".to_owned(),
+            definition:
+                "CREATE SUBSCRIPTION subscription_to_drop_with_table FROM subscription_dep_table"
+                    .to_owned(),
+            retention_seconds: 86400,
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            dependent_table_id: table_id,
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Created as _,
+            ..Default::default()
+        };
+        mgr.create_subscription_catalog(&mut pb_subscription)
+            .await?;
+
+        mgr.drop_object(ObjectType::Table, table_id, DropMode::Cascade)
+            .await?;
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Table::find_by_id(table_id).one(db).await?.is_none());
+        assert!(
+            Object::find_by_id(table_id.as_object_id())
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Subscription::find_by_id(pb_subscription.id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Object::find_by_id(pb_subscription.id.as_object_id())
+                .one(db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
 }
