@@ -24,8 +24,8 @@ pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
 
 pub(crate) use batch_refresh_job::{
-    BatchRefreshJobCheckpointControl, BatchRefreshJobTriggerContext, BatchRefreshLogicalFragments,
-    BatchRefreshRenderResult,
+    BatchRefreshCheckpointPolicy, BatchRefreshJobCheckpointControl, BatchRefreshJobTriggerContext,
+    BatchRefreshLogEpoch, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
 };
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
