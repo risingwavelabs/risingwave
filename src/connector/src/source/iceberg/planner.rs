@@ -17,6 +17,7 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
@@ -382,7 +383,10 @@ fn default_case_sensitive() -> bool {
 
 impl PersistedFileScanTask {
     pub fn decode(jsonb_ref: JsonbRef<'_>) -> ConnectorResult<FileScanTask> {
-        let persisted_task: Self = serde_json::from_value(jsonb_ref.to_owned_scalar().take())?;
+        let json = jsonb_ref.to_owned_scalar().take();
+        let persisted_task: Self = serde_json::from_value(json.clone()).with_context(|| {
+            format!("failed to decode persisted iceberg file scan task from json `{json}`")
+        })?;
         Ok(Self::to_task(persisted_task))
     }
 
@@ -652,7 +656,7 @@ impl IcebergScanTaskPlanner {
 
         impl PartialEq for FileScanTaskGroup {
             fn eq(&self, other: &Self) -> bool {
-                self.total_length == other.total_length
+                self.total_length == other.total_length && self.idx == other.idx
             }
         }
 
