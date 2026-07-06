@@ -1229,6 +1229,7 @@ mod tests {
         sstable_store: SstableStoreRef,
         sst: TableHolder,
         sst_info: SstableInfo,
+        deleted_sst_object_id: HummockSstableObjectId,
     }
 
     impl DataRefillGeneratorTestFixture {
@@ -1246,6 +1247,7 @@ mod tests {
                 sstable_store,
                 sst,
                 sst_info,
+                deleted_sst_object_id: 2330.into(),
             }
         }
 
@@ -1278,7 +1280,7 @@ mod tests {
         fn normal_l0_delta(&self) -> SstDeltaInfo {
             SstDeltaInfo {
                 insert_sst_infos: vec![self.sst_info.clone()],
-                delete_sst_object_ids: vec![self.sst_info.object_id],
+                delete_sst_object_ids: vec![self.deleted_sst_object_id],
                 insert_sst_level: 0,
             }
         }
@@ -1539,7 +1541,7 @@ mod tests {
             "Disabled policy still has the highest priority"
         );
 
-        recent_filter.insert((fixture.sst_info.object_id, usize::MAX));
+        recent_filter.insert((fixture.deleted_sst_object_id, usize::MAX));
         assert!(
             !fixture.generate(&serving_context, &delta).await.is_empty(),
             "explicit Serving policy should produce tasks after recent admission hits"
