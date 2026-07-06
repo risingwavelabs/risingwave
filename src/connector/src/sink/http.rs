@@ -46,7 +46,12 @@ pub struct HttpConfig {
 
     /// Sink type, must be "append-only".
     pub r#type: String,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(HttpConfig);
 
 impl EnforceSecret for HttpConfig {}
 

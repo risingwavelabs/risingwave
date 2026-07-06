@@ -122,7 +122,12 @@ pub struct RedShiftConfig {
 
     #[serde(flatten)]
     pub s3_inner: Option<S3Common>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(RedShiftConfig);
 
 fn default_target_interval_schedule() -> u64 {
     3600 // Default to 1 hour

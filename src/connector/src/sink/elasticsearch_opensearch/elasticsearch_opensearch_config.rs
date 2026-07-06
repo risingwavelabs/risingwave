@@ -42,14 +42,24 @@ pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 pub struct ElasticSearchConfig {
     #[serde(flatten)]
     pub inner: ElasticSearchOpenSearchConfig,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(ElasticSearchConfig);
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct OpenSearchConfig {
     #[serde(flatten)]
     pub inner: ElasticSearchOpenSearchConfig,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(OpenSearchConfig);
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]

@@ -260,7 +260,12 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(BigQueryConfig);
 
 impl EnforceSecret for BigQueryConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

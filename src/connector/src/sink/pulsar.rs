@@ -126,7 +126,12 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(PulsarConfig);
 
 impl EnforceSecret for PulsarConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

@@ -79,7 +79,12 @@ pub struct PostgresConfig {
 
     #[serde(flatten)]
     pub tcp_keepalive: Option<TcpKeepaliveConfig>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(PostgresConfig);
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize)]

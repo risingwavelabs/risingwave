@@ -201,7 +201,12 @@ pub struct DeltaLakeConfig {
     /// Whether to use the Delta transaction log to deduplicate replayed epoch commits.
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(DeltaLakeConfig);
 
 impl EnforceSecret for DeltaLakeConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

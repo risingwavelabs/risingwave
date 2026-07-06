@@ -68,7 +68,12 @@ pub struct SqlServerConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(SqlServerConfig);
 
 pub fn sql_server_default_schema() -> String {
     "dbo".to_owned()

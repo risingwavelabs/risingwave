@@ -97,7 +97,12 @@ pub struct GooglePubSubConfig {
     /// `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(GooglePubSubConfig);
 
 impl EnforceSecret for GooglePubSubConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {

@@ -331,7 +331,12 @@ pub struct ClickHouseConfig {
     pub common: ClickHouseCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(ClickHouseConfig);
 
 impl EnforceSecret for ClickHouseConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
