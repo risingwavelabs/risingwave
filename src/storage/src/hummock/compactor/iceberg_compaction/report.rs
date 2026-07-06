@@ -38,8 +38,10 @@ pub(crate) enum ReportSendResult {
 
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
+    total_plans: usize,
     remaining_plans: usize,
     successful_plans: usize,
+    failed_plans: usize,
     first_error: Option<String>,
 }
 
@@ -47,8 +49,10 @@ impl IcebergTaskTracker {
     pub(crate) fn new(sink_id: u32, remaining_plans: usize) -> Self {
         Self {
             sink_id,
+            total_plans: remaining_plans,
             remaining_plans,
             successful_plans: 0,
+            failed_plans: 0,
             first_error: None,
         }
     }
@@ -57,6 +61,7 @@ impl IcebergTaskTracker {
         debug_assert!(self.remaining_plans > 0);
         self.remaining_plans -= 1;
         if let Some(error_message) = error_message {
+            self.failed_plans += 1;
             if self.first_error.is_none() {
                 self.first_error = Some(error_message);
             }
@@ -67,6 +72,22 @@ impl IcebergTaskTracker {
 
     pub(crate) fn is_finished(&self) -> bool {
         self.remaining_plans == 0
+    }
+
+    pub(crate) fn sink_id(&self) -> u32 {
+        self.sink_id
+    }
+
+    pub(crate) fn total_plans(&self) -> usize {
+        self.total_plans
+    }
+
+    pub(crate) fn successful_plans(&self) -> usize {
+        self.successful_plans
+    }
+
+    pub(crate) fn failed_plans(&self) -> usize {
+        self.failed_plans
     }
 
     pub(crate) fn into_report(self, task_id: u64) -> IcebergTaskReport {
@@ -113,10 +134,12 @@ pub(crate) fn send_iceberg_task_report(
             .as_millis() as u64,
     }) {
         tracing::warn!(
+            iceberg_component = "compaction_worker",
+            iceberg_operation = "report_task",
             error = %e.as_report(),
             task_id = report_event.task_id,
             sink_id = report_event.sink_id,
-            "Failed to report iceberg compaction task result - will retry on stream restart"
+            "iceberg_compaction_task_report_send_failed",
         );
         return Err(report_event);
     }
