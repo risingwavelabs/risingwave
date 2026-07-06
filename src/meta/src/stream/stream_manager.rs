@@ -425,11 +425,14 @@ impl GlobalStreamManager {
                             );
 
                             let cancel_result: MetaResult<()> = async {
-                                let cancel_command = self.metadata_manager.catalog_controller
-                                    .build_cancel_command(&job_fragments)
-                                    .await?;
-                                let cleanup_state_table_ids =
-                                    job_fragments.all_table_ids().collect_vec();
+                                let Some((cancel_command, cleanup_state_table_ids)) = self
+                                    .metadata_manager
+                                    .catalog_controller
+                                    .build_cancel_command(job_id)
+                                    .await?
+                                else {
+                                    return Ok(());
+                                };
                                 self.metadata_manager.catalog_controller
                                     .try_abort_creating_streaming_job(job_id, true)
                                     .await?;
@@ -664,16 +667,12 @@ impl GlobalStreamManager {
     pub async fn drop_streaming_jobs(
         &self,
         database_id: DatabaseId,
-        removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<JobId>,
         state_table_ids: Vec<TableId>,
         fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
-        if !removed_actors.is_empty()
-            || !streaming_job_ids.is_empty()
-            || !state_table_ids.is_empty()
-        {
+        if !streaming_job_ids.is_empty() || !state_table_ids.is_empty() {
             let cleanup_streaming_job_ids = streaming_job_ids.clone();
             let cleanup_state_table_ids = state_table_ids.clone();
             let run_result = self
@@ -682,7 +681,7 @@ impl GlobalStreamManager {
                     database_id,
                     Command::DropStreamingJobs {
                         streaming_job_ids: streaming_job_ids.into_iter().collect(),
-                        actors: removed_actors,
+                        actors: vec![],
                         unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
                         unregistered_fragment_ids: fragment_ids,
                         dropped_sink_fragment_by_targets,
@@ -742,27 +741,14 @@ impl GlobalStreamManager {
         // NOTE(kwannoel): For background_job_ids stream jobs that not tracked in streaming manager,
         // we can directly cancel them by running the barrier command.
         let futures = background_job_ids.into_iter().map(|id| async move {
-            let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
-            if fragment.is_created() {
-                tracing::warn!(
-                    "streaming job {} is already created, ignore cancel request",
-                    id
-                );
-                return Ok(None);
-            }
-            if fragment.is_created() {
-                Err(MetaError::invalid_parameter(format!(
-                    "streaming job {} is already created",
-                    id
-                )))?;
-            }
-
-            let cancel_command = self
+            let Some((cancel_command, cleanup_state_table_ids)) = self
                 .metadata_manager
                 .catalog_controller
-                .build_cancel_command(&fragment)
-                .await?;
-            let cleanup_state_table_ids = fragment.all_table_ids().collect_vec();
+                .build_cancel_command(id)
+                .await?
+            else {
+                return Ok(None);
+            };
 
             let (_, database_id) = self
                 .metadata_manager
