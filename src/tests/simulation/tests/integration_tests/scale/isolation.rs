@@ -172,8 +172,13 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     let expected_serving_before_add_node =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
             .await?;
-    wait_serving_refill_on_compute(&cluster, COMPUTE_2_HOST, &expected_serving_before_add_node)
-        .await?;
+    wait_serving_refill_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &internal_table_ids,
+        &expected_serving_before_add_node,
+    )
+    .await?;
     create_compute_node(&cluster, 4, "serving");
     wait_until(
         &mut session,
@@ -184,15 +189,25 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     let expected_serving_on_old_worker =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
             .await?;
-    wait_serving_refill_on_compute(&cluster, COMPUTE_2_HOST, &expected_serving_on_old_worker)
-        .await?;
+    wait_serving_refill_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &internal_table_ids,
+        &expected_serving_on_old_worker,
+    )
+    .await?;
     wait_refill_policy_on_compute(&cluster, COMPUTE_4_HOST, &internal_table_ids, Some("both"))
         .await?;
     let expected_serving_on_new_worker =
         expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_4_HOST, "s3")
             .await?;
-    wait_serving_refill_on_compute(&cluster, COMPUTE_4_HOST, &expected_serving_on_new_worker)
-        .await?;
+    wait_serving_refill_on_compute(
+        &cluster,
+        COMPUTE_4_HOST,
+        &internal_table_ids,
+        &expected_serving_on_new_worker,
+    )
+    .await?;
 
     let mut database_recovery_events = database_recovery_events(&mut session).await?;
     assert!(!database_recovery_events.contains_key(&group2_database_id));
@@ -738,15 +753,20 @@ fn refill_policy_matches(
     })
 }
 
-fn serving_refill_matches(
+fn target_serving_refill_vnodes(
     serving_vnodes: &HashMap<u32, Vec<u16>>,
-    expected: &HashMap<u32, Vec<u16>>,
-) -> bool {
+    target_table_ids: &[u32],
+) -> HashMap<u32, Vec<u16>> {
     // The monitor reports all serving mappings held by this worker. This test only cares
-    // about the target sink's internal tables, so tolerate unrelated table mappings.
-    expected
+    // about the target sink's internal tables, so filter unrelated table mappings out.
+    target_table_ids
         .iter()
-        .all(|(table_id, expected_vnodes)| serving_vnodes.get(table_id) == Some(expected_vnodes))
+        .filter_map(|table_id| {
+            serving_vnodes
+                .get(table_id)
+                .map(|vnodes| (*table_id, vnodes.clone()))
+        })
+        .collect()
 }
 
 fn normalize_serving_refill_vnodes(
@@ -807,6 +827,7 @@ async fn wait_refill_policy_on_compute(
 async fn wait_serving_refill_on_compute(
     cluster: &Cluster,
     worker_host: &str,
+    target_table_ids: &[u32],
     expected: &HashMap<u32, Vec<u16>>,
 ) -> Result<HashMap<u32, Vec<u16>>> {
     let mut last_observed = None;
@@ -815,10 +836,12 @@ async fn wait_serving_refill_on_compute(
             if let Ok(serving_vnodes) = serving_refill_vnodes_on_compute(cluster, worker_host).await
                 && let Ok(serving_vnodes) = normalize_serving_refill_vnodes(serving_vnodes)
             {
-                if serving_refill_matches(&serving_vnodes, expected) {
+                let target_serving_vnodes =
+                    target_serving_refill_vnodes(&serving_vnodes, target_table_ids);
+                if &target_serving_vnodes == expected {
                     return Ok::<_, anyhow::Error>(serving_vnodes);
                 }
-                last_observed = Some(serving_vnodes);
+                last_observed = Some(target_serving_vnodes);
             }
             sleep(Duration::from_secs(1)).await;
         }
