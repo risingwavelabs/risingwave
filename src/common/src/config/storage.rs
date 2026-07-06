@@ -414,6 +414,9 @@ pub struct CacheRefillConfig {
 
     /// Skip checking inheritance filter on data refill.
     ///
+    /// The inheritance filter only runs after recent-filter admission, so this
+    /// option has no effect when `skip_recent_filter` is enabled.
+    ///
     /// This option is suitable for a single compute node or debugging.
     #[serde(default = "default::cache_refill::skip_inheritance_filter")]
     pub skip_inheritance_filter: bool,

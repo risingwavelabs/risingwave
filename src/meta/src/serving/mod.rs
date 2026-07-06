@@ -57,13 +57,10 @@ impl ServingVnodeMapping {
         streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
-    ) -> (
-        HashMap<FragmentId, WorkerSlotMapping>,
-        HashMap<FragmentId, FragmentParallelismInfo>,
-    ) {
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
-        let mut failed: HashMap<FragmentId, FragmentParallelismInfo> = HashMap::default();
+        let mut failed: HashSet<FragmentId> = HashSet::default();
         for (fragment_id, info) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(fragment_id);
@@ -78,7 +75,7 @@ impl ServingVnodeMapping {
             match new_mapping {
                 None => {
                     serving_vnode_mappings.remove(fragment_id as _);
-                    failed.insert(*fragment_id, info.clone());
+                    failed.insert(*fragment_id);
                 }
                 Some(mapping) => {
                     serving_vnode_mappings.insert(*fragment_id, mapping.clone());
@@ -291,7 +288,7 @@ pub fn start_serving_vnode_mapping_worker(
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.keys().cloned())}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.iter().cloned())}));
                                     }
                                     sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,

@@ -34,7 +34,6 @@ use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::LocalHummockVersionDelta;
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
-use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::meta::{PbServingTableVnodeMappings, PbTableRefillRuntimeConfig};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -339,7 +338,6 @@ pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
-    pending_observer_events: VecDeque<HummockObserverEvent>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_versions: LocalReadVersions,
@@ -468,7 +466,7 @@ impl HummockEventHandler {
 
     fn new_inner(
         role: Role,
-        mut observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
+        observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -508,32 +506,12 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let mut refiller =
-            CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
-        let mut pending_observer_events = VecDeque::new();
-        while let Ok(event) = observer_event_rx.try_recv() {
-            pending_observer_events.push_back(event);
-        }
-        if matches!(
-            pending_observer_events.front(),
-            Some(HummockObserverEvent::TableRefillRuntimeConfig(
-                Operation::Snapshot,
-                _
-            ))
-        ) {
-            let Some(HummockObserverEvent::TableRefillRuntimeConfig(_, config)) =
-                pending_observer_events.pop_front()
-            else {
-                unreachable!();
-            };
-            Self::apply_table_refill_runtime_config(&mut refiller, config);
-        }
+        let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
 
         Self {
             hummock_event_tx,
             hummock_event_rx,
             observer_event_rx,
-            pending_observer_events,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
@@ -875,10 +853,6 @@ impl HummockEventHandler {
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
-            if let Some(event) = self.pending_observer_events.pop_front() {
-                self.handle_observer_event(event);
-                continue;
-            }
             tokio::select! {
                 ssts = self.uploader.next_uploaded_ssts() => {
                     self.handle_uploaded_ssts(ssts);
@@ -1304,24 +1278,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initial_cache_refill_serving_mapping_applied() {
+    async fn test_table_refill_runtime_config_applies_from_observer_event() {
         let table_id = TableId::new(233);
         let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let initial_version = pinned_version_for_test(1);
-        let (observer_event_tx, observer_event_rx) = unbounded_channel();
-        observer_event_tx
-            .send(HummockObserverEvent::TableRefillRuntimeConfig(
-                Operation::Snapshot,
-                table_refill_runtime_config_for_test(
-                    [(table_id, CacheRefillPolicy::Serving)],
-                    HashMap::from([(table_id, serving_vnodes.clone())]),
-                ),
-            ))
-            .unwrap();
+        let (_observer_event_tx, observer_event_rx) = unbounded_channel();
         let storage_opt = default_opts_for_test();
         let metrics = Arc::new(HummockStateStoreMetrics::unused());
 
-        let event_handler = HummockEventHandler::new_inner(
+        let mut event_handler = HummockEventHandler::new_inner(
             Role::Serving,
             observer_event_rx,
             mock_sstable_store().await,
@@ -1332,81 +1297,26 @@ mod tests {
             Arc::new(|_, _| spawn(async { unreachable!("upload task should not be spawned") })),
             CacheRefiller::default_spawn_refill_task(),
         );
+
+        assert!(
+            event_handler
+                .table_cache_refill_context_map()
+                .read()
+                .get(&table_id)
+                .is_none()
+        );
+        event_handler.handle_observer_event(HummockObserverEvent::TableRefillRuntimeConfig(
+            Operation::Snapshot,
+            table_refill_runtime_config_for_test(
+                [(table_id, CacheRefillPolicy::Serving)],
+                HashMap::from([(table_id, serving_vnodes.clone())]),
+            ),
+        ));
 
         let context_map = event_handler.table_cache_refill_context_map().read();
         let context = context_map.get(&table_id).unwrap();
         assert_eq!(context.policy, CacheRefillPolicy::Serving);
         assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
-    }
-
-    #[tokio::test]
-    async fn test_initial_table_refill_config_keeps_pending_observer_event_order() {
-        let table_id = TableId::new(233);
-        let initial_version = pinned_version_for_test(1);
-        let (observer_event_tx, observer_event_rx) = unbounded_channel();
-        observer_event_tx
-            .send(HummockObserverEvent::TableRefillRuntimeConfig(
-                Operation::Snapshot,
-                table_refill_runtime_config_for_test(
-                    [(table_id, CacheRefillPolicy::Serving)],
-                    HashMap::new(),
-                ),
-            ))
-            .unwrap();
-        observer_event_tx
-            .send(HummockObserverEvent::VersionUpdate(
-                super::HummockVersionUpdate::PinnedVersion(Box::new(
-                    HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                        id: 2.into(),
-                        ..Default::default()
-                    }),
-                )),
-            ))
-            .unwrap();
-        observer_event_tx
-            .send(HummockObserverEvent::TableRefillRuntimeConfig(
-                Operation::Update,
-                PbTableRefillRuntimeConfig {
-                    table_cache_refill_policies: Some(TableCacheRefillPolicies {
-                        policies: vec![PbTableCacheRefillPolicy {
-                            table_id: table_id.as_raw_id(),
-                            policy: PbCacheRefillPolicy::Disabled as i32,
-                        }],
-                    }),
-                    ..Default::default()
-                },
-            ))
-            .unwrap();
-
-        let storage_opt = default_opts_for_test();
-        let metrics = Arc::new(HummockStateStoreMetrics::unused());
-        let event_handler = HummockEventHandler::new_inner(
-            Role::Serving,
-            observer_event_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
-            CacheRefillConfig::from_storage_opts(&storage_opt),
-            RecentVersions::new(initial_version, 10, metrics.clone()),
-            BufferTracker::from_storage_opts(&storage_opt, &metrics),
-            Arc::new(|_, _| spawn(async { unreachable!("upload task should not be spawned") })),
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        let context_map = event_handler.table_cache_refill_context_map().read();
-        let context = context_map.get(&table_id).unwrap();
-        assert_eq!(context.policy, CacheRefillPolicy::Serving);
-        drop(context_map);
-        assert!(matches!(
-            event_handler.pending_observer_events.front(),
-            Some(HummockObserverEvent::VersionUpdate(_))
-        ));
-        assert!(matches!(
-            event_handler.pending_observer_events.get(1),
-            Some(HummockObserverEvent::TableRefillRuntimeConfig(
-                Operation::Update,
-                _
-            ))
-        ));
     }
 
     #[tokio::test]
