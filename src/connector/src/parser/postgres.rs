@@ -111,7 +111,6 @@ pub fn postgres_cell_to_scalar_impl(
         | DataType::Timestamp
         | DataType::Timestamptz
         | DataType::Jsonb
-        | DataType::Variant
         | DataType::Interval
         | DataType::Bytea => {
             // ScalarAdapter is also fine. But ScalarImpl is more efficient
@@ -193,7 +192,7 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Struct(_) | DataType::Serial | DataType::Map(_) | DataType::Variant => {
             // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");
