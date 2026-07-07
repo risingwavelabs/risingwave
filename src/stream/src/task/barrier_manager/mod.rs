@@ -92,6 +92,9 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         role: PbIcebergPkIndexSinkRole,
         metadata: Option<SinkMetadata>,
+        /// Only meaningful for `RemapDone` reports (the durable remap id being acknowledged); `0`
+        /// for `Writer` / `PositionDeleteMerger` reports, which meta ignores.
+        remap_id: u64,
     },
 }
 
@@ -258,6 +261,7 @@ impl LocalBarrierManager {
         actor_id: ActorId,
         role: PbIcebergPkIndexSinkRole,
         metadata: Option<SinkMetadata>,
+        remap_id: u64,
     ) {
         self.send_event(LocalBarrierEvent::ReportIcebergPkIndexSinkMetadata {
             epoch,
@@ -265,6 +269,7 @@ impl LocalBarrierManager {
             actor_id,
             role,
             metadata,
+            remap_id,
         });
     }
 }

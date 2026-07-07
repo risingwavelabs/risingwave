@@ -26,6 +26,7 @@ use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
+use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -415,6 +416,33 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         reports: Vec<PbIcebergPkIndexSinkMetadata>,
     ) -> MetaResult<Vec<SinkId>> {
+        // Branch out `REMAP_DONE` reports BEFORE the aggregate/commit path: they carry no files and
+        // only acknowledge that a writer durably applied a pk-index remap. Each clears the matching
+        // durable `iceberg_pk_index_pending_remap` record. The mutation is broadcast and applied
+        // deterministically by every writer actor at the same barrier, so all `REMAP_DONE` reports
+        // for a `(sink_id, remap_id)` arrive together here; clearing is idempotent, so the first one
+        // (and any duplicate) is safe. Best-effort: a clear failure leaves the durable record, which
+        // is re-triggered on the next recovery and re-cleared — never fail the barrier over it.
+        let (remap_done, reports): (Vec<_>, Vec<_>) = reports
+            .into_iter()
+            .partition(|r| r.role == PbIcebergPkIndexSinkRole::RemapDone as i32);
+        for r in remap_done {
+            let sink_id = r.sink_id;
+            let remap_id = r.remap_id;
+            if let Err(e) = self
+                .iceberg_pk_index_sink_manager
+                .clear_pending_remap(sink_id, remap_id as i64)
+                .await
+            {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    %sink_id,
+                    remap_id,
+                    "failed to clear pk-index pending remap on REMAP_DONE report",
+                );
+            }
+        }
+
         let grouped = group_reports_by_sink(reports)?;
         let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
         let futs = FuturesUnordered::new();

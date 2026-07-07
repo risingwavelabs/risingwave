@@ -1484,10 +1484,12 @@ impl DatabaseCheckpointControl {
             Some(Command::IcebergPkIndexRemap {
                 sink_id,
                 mapping_paths,
+                remap_id,
             }) => {
                 let mutation = Some(Command::iceberg_pk_index_remap_to_mutation(
                     sink_id,
                     &mapping_paths,
+                    remap_id,
                 ));
                 self.apply_simple_command(mutation, "IcebergPkIndexRemap")
             }

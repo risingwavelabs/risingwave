@@ -1213,7 +1213,7 @@ impl IcebergCompactionManager {
                 // The writer remap is idempotent, so a re-injected mutation that already applied is a
                 // no-op. This enqueue is therefore best-effort: a failure is logged, not fatal.
                 if let Err(e) = self
-                    .schedule_pk_index_remap(sink_id, remap_mapping_paths)
+                    .schedule_pk_index_remap(sink_id, remap_mapping_paths, task_id)
                     .await
                 {
                     // The remap failing to enqueue does not undo a successful commit; log and keep
@@ -1246,6 +1246,7 @@ impl IcebergCompactionManager {
         &self,
         sink_id: SinkId,
         mapping_paths: Vec<String>,
+        remap_id: u64,
     ) -> MetaResult<()> {
         let database_id = self
             .metadata_manager
@@ -1257,6 +1258,7 @@ impl IcebergCompactionManager {
             Command::IcebergPkIndexRemap {
                 sink_id,
                 mapping_paths,
+                remap_id,
             },
         )?;
         Ok(())

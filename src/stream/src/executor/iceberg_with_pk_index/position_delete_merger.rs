@@ -117,6 +117,7 @@ where
                                 self.actor_id,
                                 PbIcebergPkIndexSinkRole::PositionDeleteMerger,
                                 Some(metadata),
+                                0,
                             );
                     }
 

@@ -592,6 +592,9 @@ pub enum Command {
     IcebergPkIndexRemap {
         sink_id: SinkId,
         mapping_paths: Vec<String>,
+        /// Durable id of this remap (the compaction task id). Rides the mutation so the writer can
+        /// echo it back in its `REMAP_DONE` report, letting meta clear the exact durable record.
+        remap_id: u64,
     },
 }
 
@@ -694,10 +697,12 @@ impl std::fmt::Display for Command {
             Command::IcebergPkIndexRemap {
                 sink_id,
                 mapping_paths,
+                remap_id,
             } => write!(
                 f,
-                "IcebergPkIndexRemap: {} ({} mapping paths)",
+                "IcebergPkIndexRemap: {} (remap {}, {} mapping paths)",
                 sink_id,
+                remap_id,
                 mapping_paths.len()
             ),
         }
@@ -1551,10 +1556,12 @@ impl Command {
     pub(super) fn iceberg_pk_index_remap_to_mutation(
         sink_id: SinkId,
         mapping_paths: &[String],
+        remap_id: u64,
     ) -> Mutation {
         Mutation::IcebergPkIndexRemap(risingwave_pb::stream_plan::IcebergPkIndexRemapMutation {
             sink_id: sink_id.as_raw_id(),
             mapping_paths: mapping_paths.to_vec(),
+            remap_id,
         })
     }
 

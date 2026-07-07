@@ -82,12 +82,13 @@ pub struct PendingRemapReTrigger {
     pub mapping_paths: Vec<String>,
 }
 
-/// In-memory mirror of a durable pending-remap row, kept so a steady-state commit can self-heal
-/// (clear) it once the remap is provably applied — i.e. once none of its input files is still
-/// referenced by any live data file or position-delete in the current snapshot.
+/// In-memory mirror of a durable pending-remap row. A record is cleared (here and in the durable
+/// `iceberg_pk_index_pending_remap` table) ONLY when the writer reports `REMAP_DONE` for its
+/// `remap_id` — i.e. when the writer has durably applied the remap. It is never cleared by
+/// inspecting the iceberg snapshot: the overwrite removes the input files immediately, long before
+/// the writer remaps, so a snapshot-based clear would drop the record while the index is still stale.
 struct PendingRemapState {
     remap_id: i64,
-    input_files: HashSet<String>,
 }
 
 /// Bound the init phase so a register call can't hang forever if the iceberg endpoint is unreachable;
@@ -121,9 +122,10 @@ pub struct IcebergPkIndexSinkCoordinator {
     /// The epoch pre-committed but not yet committed, carried from `pre_commit` to the next `commit`.
     waiting_commit: Option<EpochCommit>,
     prev_committed_epoch: Option<u64>,
-    /// Durable pending compaction remaps not yet proven applied. Populated at `init` (from the
-    /// `iceberg_pk_index_pending_remap` table) and by `commit_compaction_overwrite`; drained by the
-    /// self-heal check after a steady-state commit.
+    /// Durable pending compaction remaps not yet acknowledged by a writer `REMAP_DONE`. Populated
+    /// at `init` (from the `iceberg_pk_index_pending_remap` table) and by
+    /// `commit_compaction_overwrite`; drained only by `clear_pending_remap`, driven by the writer's
+    /// `REMAP_DONE` report routed through meta.
     pending_remaps: Vec<PendingRemapState>,
 }
 
@@ -178,9 +180,10 @@ impl IcebergPkIndexSinkCoordinator {
                 .with_context(|| format!("drain recovered pending epoch for sink {}", sink_id))?;
         }
 
-        // Reload durable pending compaction remaps. Already-applied ones (inputs fully drained from
-        // the current snapshot) are self-healed away here; the rest are re-injected as barrier
-        // mutations by the recovery caller (which owns the barrier scheduler).
+        // Reload durable pending compaction remaps. A record persists until the writer reports
+        // `REMAP_DONE`, so every still-present record is re-injected as a barrier mutation by the
+        // recovery caller (which owns the barrier scheduler). The writer remap is idempotent, so
+        // re-running an already-applied remap is a no-op, and its `REMAP_DONE` then clears the record.
         let re_trigger = coordinator
             .reload_pending_remaps()
             .await
@@ -189,35 +192,33 @@ impl IcebergPkIndexSinkCoordinator {
         Ok((coordinator, re_trigger))
     }
 
-    /// Load every durable pending remap for this sink, clear the ones already applied (self-heal),
-    /// keep the rest in memory, and return the list that must be re-injected as barrier mutations.
+    /// Load every durable pending remap for this sink, keep them all in memory, and return the full
+    /// list to be re-injected as barrier mutations. Records are cleared ONLY by a writer `REMAP_DONE`
+    /// (see [`Self::clear_pending_remap`]); recovery never infers completion from the snapshot, so it
+    /// re-triggers all of them unconditionally (idempotent on the writer side).
     async fn reload_pending_remaps(&mut self) -> Result<Vec<PendingRemapReTrigger>> {
         let records = list_pending_remaps(&self.db, self.sink_id).await?;
-        if records.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let live_paths = collect_live_referenced_paths(&self.table, &self.target_branch).await?;
-
-        let mut re_trigger = Vec::new();
+        let mut re_trigger = Vec::with_capacity(records.len());
         for record in records {
-            let input_files: HashSet<String> = record.input_files.into_iter().collect();
-            if is_pending_remap_satisfied(&input_files, &live_paths) {
-                // Inputs fully drained from the current snapshot: the remap is provably complete.
-                // Drop the durable record instead of re-triggering it.
-                clear_pending_remap(&self.db, self.sink_id, record.remap_id).await?;
-                continue;
-            }
             re_trigger.push(PendingRemapReTrigger {
                 remap_id: record.remap_id,
                 mapping_paths: record.mapping_paths,
             });
             self.pending_remaps.push(PendingRemapState {
                 remap_id: record.remap_id,
-                input_files,
             });
         }
         Ok(re_trigger)
+    }
+
+    /// Clear a durable pending remap once its writer has reported `REMAP_DONE` (the remap's rewrites
+    /// are durably applied). This is the ONLY place a pending remap is cleared. Idempotent: clearing
+    /// a missing `(sink_id, remap_id)` is a harmless no-op, so a duplicate `REMAP_DONE` — or one for
+    /// a record already cleared on a prior run — costs nothing.
+    pub async fn clear_pending_remap(&mut self, remap_id: i64) -> Result<()> {
+        clear_pending_remap(&self.db, self.sink_id, remap_id).await?;
+        self.pending_remaps.retain(|p| p.remap_id != remap_id);
+        Ok(())
     }
 
     pub async fn pre_commit(
@@ -291,36 +292,6 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
-
-        // Self-heal: after the commit refreshed `self.table`, clear any pending remap whose input
-        // files are no longer referenced by a live data file or position-delete in the current
-        // snapshot (the writer has drained them). Best-effort — a failure here is logged and retried
-        // on the next commit / next recovery, and never fails the epoch commit.
-        if let Err(e) = self.self_heal_pending_remaps().await {
-            tracing::warn!(
-                error = %e.as_report(),
-                sink_id = %self.sink_id,
-                "failed to self-heal pk-index pending remaps after commit",
-            );
-        }
-        Ok(())
-    }
-
-    /// Clear pending remaps that are provably applied against the current `self.table` snapshot.
-    async fn self_heal_pending_remaps(&mut self) -> Result<()> {
-        if self.pending_remaps.is_empty() {
-            return Ok(());
-        }
-        let live_paths = collect_live_referenced_paths(&self.table, &self.target_branch).await?;
-        let mut still_pending = Vec::with_capacity(self.pending_remaps.len());
-        for pending in std::mem::take(&mut self.pending_remaps) {
-            if is_pending_remap_satisfied(&pending.input_files, &live_paths) {
-                clear_pending_remap(&self.db, self.sink_id, pending.remap_id).await?;
-            } else {
-                still_pending.push(pending);
-            }
-        }
-        self.pending_remaps = still_pending;
         Ok(())
     }
 
@@ -394,8 +365,9 @@ impl IcebergPkIndexSinkCoordinator {
         // Durably record the pending remap BEFORE returning to the caller (which then enqueues the
         // `IcebergPkIndexRemap` barrier mutation). This persist-before-enqueue ordering makes a crash
         // in the window between the overwrite commit and the mutation delivery recoverable: on meta
-        // startup `reload_pending_remaps` re-injects the mutation. The writer remap is idempotent, so
-        // a re-injected mutation that already applied is a no-op.
+        // startup `reload_pending_remaps` re-injects the mutation. The record is cleared only when the
+        // writer reports `REMAP_DONE`; the writer remap is idempotent, so a re-injected mutation that
+        // already applied is a no-op and still produces the `REMAP_DONE` that clears the record.
         persist_pending_remap(
             &self.db,
             self.sink_id,
@@ -410,10 +382,7 @@ impl IcebergPkIndexSinkCoordinator {
                 remap_id, self.sink_id
             )
         })?;
-        self.pending_remaps.push(PendingRemapState {
-            remap_id,
-            input_files: input_file_paths.into_iter().collect(),
-        });
+        self.pending_remaps.push(PendingRemapState { remap_id });
         Ok(())
     }
 
@@ -471,54 +440,6 @@ impl IcebergPkIndexSinkCoordinator {
 
         Ok((merged, Some(materialized_add_files)))
     }
-}
-
-/// Walk the current snapshot on `target_branch` and collect the set of paths that any live entry
-/// references: every live data/delete file's own `file_path`, plus every live position-delete's
-/// `referenced_data_file`. Used by the pending-remap self-heal check — a remap is complete once none
-/// of its input files appears in this set.
-async fn collect_live_referenced_paths(
-    table: &Table,
-    target_branch: &str,
-) -> Result<HashSet<String>> {
-    let mut live_paths = HashSet::new();
-    let Some(snapshot) = table.metadata().snapshot_for_ref(target_branch) else {
-        return Ok(live_paths);
-    };
-    let manifest_list = snapshot
-        .load_manifest_list(table.file_io(), table.metadata())
-        .await
-        .map_err(|e| anyhow!(e).context("load manifest list for pending-remap self-heal"))?;
-    for manifest_file in manifest_list.entries() {
-        let manifest = manifest_file
-            .load_manifest(table.file_io())
-            .await
-            .map_err(|e| anyhow!(e).context("load manifest for pending-remap self-heal"))?;
-        for entry in manifest.entries() {
-            if !entry.is_alive() {
-                continue;
-            }
-            let data_file = entry.data_file();
-            live_paths.insert(data_file.file_path().to_owned());
-            if data_file.content_type() == DataContentType::PositionDeletes
-                && let Some(referenced) = data_file.referenced_data_file()
-            {
-                live_paths.insert(referenced);
-            }
-        }
-    }
-    Ok(live_paths)
-}
-
-/// A pending remap is provably applied (self-heal complete) once none of its input files is still
-/// referenced by any live entry in the current snapshot: the overwrite removed the input data files
-/// and their DVs, and no live position-delete points at them. Pure so it is unit-testable; the async
-/// walk that builds `live_referenced_paths` is [`collect_live_referenced_paths`].
-fn is_pending_remap_satisfied(
-    input_files: &HashSet<String>,
-    live_referenced_paths: &HashSet<String>,
-) -> bool {
-    input_files.is_disjoint(live_referenced_paths)
 }
 
 async fn load_catalog_and_table(
@@ -1093,7 +1014,15 @@ fn aggregate_reports(
                 delete_files.extend(commit_result.delete_files);
                 overwrite_files.extend(commit_result.overwrite_files);
             }
-            _ => unreachable!(),
+            PbIcebergPkIndexSinkRole::RemapDone => {
+                // `REMAP_DONE` reports are stripped at the meta routing layer
+                // (`pre_commit_iceberg_pk_index_sink_metadata`) and must never reach the aggregate.
+                bail!(
+                    "unexpected RemapDone report in aggregate_reports; it should be routed to \
+                     clear_pending_remap before reaching pre-commit"
+                );
+            }
+            PbIcebergPkIndexSinkRole::Unspecified => unreachable!("filtered above"),
         }
     }
 
@@ -1241,44 +1170,5 @@ mod tests {
         let mapping = mapping(&[("in-a.parquet", 0, "out-0.parquet", 5)]);
         let dead = compute_dead_out_positions(&mapping, Vec::new());
         assert!(dead.is_empty());
-    }
-
-    fn set(items: &[&str]) -> HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    /// A pending remap whose input files are absent from the live-referenced set is satisfied
-    /// (the overwrite drained them and no live delete points at them).
-    #[test]
-    fn pending_remap_satisfied_when_inputs_absent() {
-        let input_files = set(&["in-a.parquet", "in-b.parquet"]);
-        let live = set(&["out-0.parquet", "out-1.parquet"]);
-        assert!(is_pending_remap_satisfied(&input_files, &live));
-    }
-
-    /// A live data file still carrying an input path keeps the remap unsatisfied.
-    #[test]
-    fn pending_remap_unsatisfied_when_input_data_file_live() {
-        let input_files = set(&["in-a.parquet", "in-b.parquet"]);
-        let live = set(&["in-b.parquet", "out-0.parquet"]);
-        assert!(!is_pending_remap_satisfied(&input_files, &live));
-    }
-
-    /// A live position-delete whose `referenced_data_file` is an input path (folded into the live
-    /// set by the walker) also keeps the remap unsatisfied.
-    #[test]
-    fn pending_remap_unsatisfied_when_input_referenced_by_live_delete() {
-        let input_files = set(&["in-a.parquet"]);
-        // The walker inserts the DV's own path and its referenced input data file.
-        let live = set(&["delete-vector.puffin", "in-a.parquet", "out-0.parquet"]);
-        assert!(!is_pending_remap_satisfied(&input_files, &live));
-    }
-
-    /// An empty input set (degenerate) is trivially satisfied.
-    #[test]
-    fn pending_remap_satisfied_when_no_input_files() {
-        let input_files = set(&[]);
-        let live = set(&["out-0.parquet"]);
-        assert!(is_pending_remap_satisfied(&input_files, &live));
     }
 }

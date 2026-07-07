@@ -15,6 +15,10 @@ enum PbIcebergPkIndexSinkRole {
   PB_ICEBERG_PK_INDEX_SINK_ROLE_UNSPECIFIED = 0;
   PB_ICEBERG_PK_INDEX_SINK_ROLE_WRITER = 1;
   PB_ICEBERG_PK_INDEX_SINK_ROLE_POSITION_DELETE_MERGER = 2;
+  // A writer finished (and durably committed) a pk-index remap for `remap_id`.
+  // Carries no files; meta routes it to `clear_pending_remap(sink_id, remap_id)`
+  // instead of the aggregate/commit path.
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_REMAP_DONE = 3;
 }
 
 message InjectBarrierRequest {
@@ -140,6 +144,9 @@ message BarrierCompleteResponse {
     uint64 prev_epoch = 3;
     PbIcebergPkIndexSinkRole role = 4;
     connector_service.SinkMetadata metadata = 5;
+    // Only set for `REMAP_DONE` reports: the durable remap id (compaction task
+    // id) this report acknowledges. Ignored for Writer / PositionDeleteMerger.
+    uint64 remap_id = 6;
   }
   repeated IcebergPkIndexSinkMetadata iceberg_pk_index_sink_metadata = 18;
 }

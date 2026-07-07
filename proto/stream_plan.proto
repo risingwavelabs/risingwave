@@ -187,6 +187,10 @@ message IcebergPkIndexRemapMutation {
   // <table.location>/_rw_pk_index_compaction/). The writer reads these via the
   // table's FileIO; the distinct `input_file`s form the scan-filter set.
   repeated string mapping_paths = 2;
+  // Durable id of the pending remap (the compaction task id). The writer echoes
+  // it back in its `REMAP_DONE` report so meta can clear the exact
+  // `iceberg_pk_index_pending_remap` record once the remap is durably applied.
+  uint64 remap_id = 3;
 }
 
 message BarrierMutation {

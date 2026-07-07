@@ -168,6 +168,11 @@ where
     /// Iceberg connection config, used to lazily build a `FileIO` for reading the row-provenance
     /// mapping files when an [`Mutation::IcebergPkIndexRemap`] barrier mutation arrives.
     iceberg_config: IcebergConfig,
+    /// Remap ids applied (via [`Self::remap_pk_index`]) since the last checkpoint, pending a
+    /// `REMAP_DONE` acknowledgement. A remap's state-table rewrites are only durable once a
+    /// checkpoint commits, so the report is deferred to the next checkpoint barrier. Meta clears the
+    /// durable `iceberg_pk_index_pending_remap` record on that report.
+    pending_remap_done_ids: Vec<u64>,
 }
 
 impl<S, W> WriterExecutor<S, W>
@@ -198,6 +203,7 @@ where
             sink_id,
             local_barrier_manager,
             iceberg_config,
+            pending_remap_done_ids: Vec::new(),
         }
     }
 
@@ -397,10 +403,16 @@ where
                     if let Some(Mutation::IcebergPkIndexRemap {
                         sink_id,
                         mapping_paths,
+                        remap_id,
                     }) = barrier.mutation.as_deref()
                         && *sink_id == self.sink_id
                     {
                         self.remap_pk_index(mapping_paths).await?;
+                        // Defer the `REMAP_DONE` acknowledgement to the next checkpoint: the
+                        // rewrites above are only durable once the state table checkpoints, so
+                        // reporting earlier could let meta clear the durable record before the
+                        // remap is persisted.
+                        self.pending_remap_done_ids.push(*remap_id);
                     }
 
                     let mut metadata = None;
@@ -429,7 +441,26 @@ where
                                 self.ctx.id,
                                 PbIcebergPkIndexSinkRole::Writer,
                                 Some(metadata),
+                                0,
                             );
+                    }
+
+                    // Acknowledge any remaps whose rewrites this checkpoint just made durable. Meta
+                    // clears the matching durable `iceberg_pk_index_pending_remap` record on this
+                    // report. Idempotent: a duplicate `REMAP_DONE` for an already-cleared record is a
+                    // harmless no-op, and a re-triggered remap after restart re-emits it.
+                    if barrier.is_checkpoint() && !self.pending_remap_done_ids.is_empty() {
+                        for remap_id in self.pending_remap_done_ids.drain(..) {
+                            self.local_barrier_manager
+                                .report_iceberg_pk_index_sink_metadata(
+                                    epoch,
+                                    self.sink_id,
+                                    self.ctx.id,
+                                    PbIcebergPkIndexSinkRole::RemapDone,
+                                    None,
+                                    remap_id,
+                                );
+                        }
                     }
 
                     yield Message::Barrier(barrier);

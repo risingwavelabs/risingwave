@@ -523,7 +523,12 @@ impl GlobalBarrierWorkerContextImpl {
             match res {
                 Ok(remaps) => {
                     for remap in remaps {
-                        pending_remaps.push((id, sink_database_id, remap.mapping_paths));
+                        pending_remaps.push((
+                            id,
+                            sink_database_id,
+                            remap.mapping_paths,
+                            remap.remap_id,
+                        ));
                     }
                 }
                 Err(e) => {
@@ -535,16 +540,18 @@ impl GlobalBarrierWorkerContextImpl {
 
         // Re-trigger the recovered remaps. Broadcast within the sink's database; the writer
         // self-filters by `sink_id` and applies the remap idempotently.
-        for (sink_id, sink_database_id, mapping_paths) in pending_remaps {
+        for (sink_id, sink_database_id, mapping_paths, remap_id) in pending_remaps {
             self.barrier_scheduler.run_command_no_wait(
                 sink_database_id,
                 Command::IcebergPkIndexRemap {
                     sink_id,
                     mapping_paths,
+                    remap_id: remap_id as u64,
                 },
             )?;
             tracing::info!(
                 %sink_id,
+                remap_id,
                 "re-triggered pk-index remap mutation for recovered pending remap",
             );
         }

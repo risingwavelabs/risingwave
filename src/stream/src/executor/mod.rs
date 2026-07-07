@@ -406,6 +406,9 @@ pub enum Mutation {
     IcebergPkIndexRemap {
         sink_id: SinkId,
         mapping_paths: Vec<String>,
+        /// Durable id of this remap (the compaction task id). The writer echoes it back in its
+        /// `REMAP_DONE` report so meta can clear the exact durable pending-remap record.
+        remap_id: u64,
     },
 }
 
@@ -998,10 +1001,12 @@ impl Mutation {
             Mutation::IcebergPkIndexRemap {
                 sink_id,
                 mapping_paths,
+                remap_id,
             } => PbMutation::IcebergPkIndexRemap(
                 risingwave_pb::stream_plan::IcebergPkIndexRemapMutation {
                     sink_id: sink_id.as_raw_id(),
                     mapping_paths: mapping_paths.clone(),
+                    remap_id: *remap_id,
                 },
             ),
         }
@@ -1185,6 +1190,7 @@ impl Mutation {
             PbMutation::IcebergPkIndexRemap(remap) => Mutation::IcebergPkIndexRemap {
                 sink_id: SinkId::from(remap.sink_id),
                 mapping_paths: remap.mapping_paths.clone(),
+                remap_id: remap.remap_id,
             },
         };
         Ok(mutation)

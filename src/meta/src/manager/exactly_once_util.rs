@@ -183,6 +183,10 @@ pub async fn list_sink_states_ordered_by_epoch(
 pub struct PendingRemapRecord {
     pub remap_id: i64,
     pub mapping_paths: Vec<String>,
+    // TODO(B4-window): consumed by the coordinator-side window fix-up (not yet implemented), which
+    // remaps stray position-deletes against these removed input DATA file paths. Persisted and
+    // decoded now so the durable schema is stable; unread until that lands.
+    #[expect(dead_code, reason = "persisted for the B4-window fix-up; not yet read")]
     pub input_files: Vec<String>,
 }
 
@@ -279,5 +283,97 @@ pub async fn clear_pending_remap(
             );
             Err(e.into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_meta_model::object::ObjectType;
+    use risingwave_meta_model::{ObjectId, SinkId, UserId, object};
+
+    use super::*;
+    use crate::manager::MetaSrvEnv;
+
+    fn remap_ids(records: &[PendingRemapRecord]) -> Vec<i64> {
+        let mut ids: Vec<i64> = records.iter().map(|r| r.remap_id).collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Insert a minimal `SINK` object so the `iceberg_pk_index_pending_remap.sink_id -> object.oid`
+    /// foreign key is satisfied. `owner_id = 1` (the `root` user seeded by the init migration).
+    async fn seed_sink_object(db: &DatabaseConnection, oid: u32) {
+        let obj = object::ActiveModel {
+            oid: Set(ObjectId::new(oid)),
+            obj_type: Set(ObjectType::Sink),
+            owner_id: Set(UserId::new(1)),
+            schema_id: Set(None),
+            database_id: Set(None),
+            initialized_at: Default::default(),
+            created_at: Default::default(),
+            initialized_at_cluster_version: Set(None),
+            created_at_cluster_version: Set(None),
+        };
+        object::Entity::insert(obj).exec(db).await.unwrap();
+    }
+
+    /// A durable pending remap is cleared ONLY by [`clear_pending_remap`] (driven by the writer's
+    /// `REMAP_DONE` signal), and that clear is scoped to a single `(sink_id, remap_id)` and
+    /// idempotent. There is deliberately no snapshot-based self-heal: a record survives every list
+    /// (i.e. every recovery re-trigger) until its own `REMAP_DONE` arrives.
+    #[tokio::test]
+    async fn test_pending_remap_cleared_only_by_remap_id_signal() {
+        let env = MetaSrvEnv::for_test().await;
+        let db = env.meta_store_ref().conn.clone();
+        seed_sink_object(&db, 9001).await;
+        let sink_id = SinkId::new(9001);
+
+        persist_pending_remap(&db, sink_id, 100, &["m-100".into()], &["in-a".into()])
+            .await
+            .unwrap();
+        persist_pending_remap(&db, sink_id, 200, &["m-200".into()], &["in-b".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            remap_ids(&list_pending_remaps(&db, sink_id).await.unwrap()),
+            vec![100, 200]
+        );
+
+        // A `REMAP_DONE` for remap 100 clears exactly that record; the disjoint remap 200 survives
+        // (it is NOT cleared merely because the overwrite already dropped its input files).
+        clear_pending_remap(&db, sink_id, 100).await.unwrap();
+        assert_eq!(
+            remap_ids(&list_pending_remaps(&db, sink_id).await.unwrap()),
+            vec![200]
+        );
+
+        // Idempotent: a duplicate `REMAP_DONE` for the already-cleared record is a harmless no-op.
+        clear_pending_remap(&db, sink_id, 100).await.unwrap();
+        assert_eq!(
+            remap_ids(&list_pending_remaps(&db, sink_id).await.unwrap()),
+            vec![200]
+        );
+
+        // The surviving record is removed only by its own `REMAP_DONE`.
+        clear_pending_remap(&db, sink_id, 200).await.unwrap();
+        assert!(list_pending_remaps(&db, sink_id).await.unwrap().is_empty());
+    }
+
+    /// Persisting the same `(sink_id, remap_id)` twice (e.g. a re-driven compaction report) does not
+    /// duplicate the durable record.
+    #[tokio::test]
+    async fn test_persist_pending_remap_idempotent() {
+        let env = MetaSrvEnv::for_test().await;
+        let db = env.meta_store_ref().conn.clone();
+        seed_sink_object(&db, 9002).await;
+        let sink_id = SinkId::new(9002);
+
+        persist_pending_remap(&db, sink_id, 7, &["a".into()], &["b".into()])
+            .await
+            .unwrap();
+        persist_pending_remap(&db, sink_id, 7, &["a".into()], &["b".into()])
+            .await
+            .unwrap();
+        assert_eq!(list_pending_remaps(&db, sink_id).await.unwrap().len(), 1);
     }
 }

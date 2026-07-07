@@ -963,9 +963,10 @@ impl PartialGraphState {
                     actor_id,
                     role,
                     metadata,
+                    remap_id,
                 } => {
                     self.report_iceberg_pk_index_sink_metadata(
-                        epoch, sink_id, actor_id, role, metadata,
+                        epoch, sink_id, actor_id, role, metadata, remap_id,
                     );
                 }
             }
@@ -1121,6 +1122,7 @@ impl PartialGraphState {
         actor_id: ActorId,
         role: PbIcebergPkIndexSinkRole,
         metadata: Option<SinkMetadata>,
+        remap_id: u64,
     ) {
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && actor_state.inflight_barriers.contains(&epoch.prev)
@@ -1135,6 +1137,7 @@ impl PartialGraphState {
                     prev_epoch: epoch.prev,
                     role: role as i32,
                     metadata,
+                    remap_id,
                 });
         } else {
             tracing::warn!(

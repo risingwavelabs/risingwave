@@ -133,6 +133,15 @@ impl IcebergPkIndexSinkManager {
             .await
     }
 
+    /// Clear a durable pending compaction remap for `sink_id`, called when a writer reports
+    /// `REMAP_DONE` for `remap_id` (the remap's rewrites are durably applied). Idempotent: clearing
+    /// an already-cleared or unknown `(sink_id, remap_id)` is a harmless no-op. Fails only if the
+    /// coordinator is not registered (treated as best-effort by the caller).
+    pub async fn clear_pending_remap(&self, sink_id: SinkId, remap_id: i64) -> anyhow::Result<()> {
+        let coordinator = self.coordinator(sink_id)?;
+        coordinator.lock().await.clear_pending_remap(remap_id).await
+    }
+
     /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown
     /// `sink_id` is a no-op.
     pub fn unregister_sinks(&self, sink_ids: Vec<SinkId>) {
