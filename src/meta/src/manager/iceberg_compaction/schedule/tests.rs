@@ -1165,6 +1165,9 @@ async fn test_handle_report_task_routes_pk_index_payload_and_finishes_track() {
             pk_index_output_files: Some(pk_index_output_files),
             pk_index_input_files: Some(pk_index_input_files),
             pk_index_read_snapshot_id: Some(777),
+            pk_index_mapping_path: Some(
+                serde_json::to_string(&vec!["m-0.jsonl".to_owned()]).unwrap(),
+            ),
         })
         .await;
 
@@ -1199,6 +1202,7 @@ async fn test_handle_report_task_malformed_pk_index_payload_still_finishes_track
             pk_index_output_files: Some(b"not valid json".to_vec()),
             pk_index_input_files: None,
             pk_index_read_snapshot_id: Some(1),
+            pk_index_mapping_path: None,
         })
         .await;
 

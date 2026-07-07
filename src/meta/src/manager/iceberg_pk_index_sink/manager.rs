@@ -113,13 +113,19 @@ impl IcebergPkIndexSinkManager {
         sink_id: SinkId,
         output_files: Vec<SerializedDataFile>,
         input_file_paths: Vec<String>,
+        mapping_paths: Vec<String>,
         read_snapshot_id: i64,
     ) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
         coordinator
             .lock()
             .await
-            .commit_compaction_overwrite(output_files, input_file_paths, read_snapshot_id)
+            .commit_compaction_overwrite(
+                output_files,
+                input_file_paths,
+                mapping_paths,
+                read_snapshot_id,
+            )
             .await
     }
 

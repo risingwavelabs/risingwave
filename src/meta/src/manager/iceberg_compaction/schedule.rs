@@ -1152,9 +1152,40 @@ impl IcebergCompactionManager {
             }
         };
 
+        // The row-provenance mapping paths (a JSON array of per-plan NDJSON paths) drive B3 dead-row
+        // masking. A coordinated report that carries output files MUST carry them too: without the
+        // mapping the coordinator cannot mask rows deleted during the compaction window, so a missing
+        // or malformed value fails the route (fail-closed) rather than committing unmasked output.
+        let Some(mapping_path_json) = &report.pk_index_mapping_path else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "pk-index compaction report carries output files but no mapping path; treating as failure"
+            );
+            return false;
+        };
+        let mapping_paths: Vec<String> = match serde_json::from_str(mapping_path_json) {
+            Ok(paths) => paths,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e,
+                    "Failed to deserialize pk_index_mapping_path from compaction report; treating as failure"
+                );
+                return false;
+            }
+        };
+
         match self
             .iceberg_pk_index_sink_manager
-            .commit_compaction_overwrite(sink_id, output_files, input_file_paths, read_snapshot_id)
+            .commit_compaction_overwrite(
+                sink_id,
+                output_files,
+                input_file_paths,
+                mapping_paths,
+                read_snapshot_id,
+            )
             .await
         {
             Ok(()) => true,

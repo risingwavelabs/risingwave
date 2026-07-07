@@ -34,21 +34,29 @@
 //! meta-recovery path drops the coordinator, re-registers it (re-running `init`), and retries from the
 //! persisted `pending_sink_state` rows.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use iceberg::Catalog;
-use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::delete_vector::DeleteVector;
+use iceberg::spec::{
+    DataContentType, DataFile, DataFileFormat, ManifestContentType, PartitionKey,
+    SerializedDataFile,
+};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
+use iceberg::writer::file_writer::location_generator::{
+    DefaultFileNameGenerator, DefaultLocationGenerator,
+};
 use prost::Message;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError};
 use risingwave_connector::sink::iceberg::{
-    IcebergCommitResult, IcebergConfig, IcebergPositionDeleteMergerCommitResult, commit_branch,
-    resolve_partition_type,
+    IcebergCommitResult, IcebergConfig, IcebergPositionDeleteMergerCommitResult,
+    RowProvenanceEntry, commit_branch, read_dv_positions_from_data_file, resolve_partition_spec,
+    resolve_partition_type, write_dv_puffin_file,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::PbIcebergPkIndexPreCommitState;
@@ -58,6 +66,7 @@ use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 use super::backfill::backfill_delete_file_partitions;
 use crate::manager::exactly_once_util::{
@@ -239,14 +248,16 @@ impl IcebergPkIndexSinkCoordinator {
     /// commit is aborted rather than silently adding the output files without removing all inputs,
     /// which would otherwise duplicate rows.
     ///
-    /// TODO(B3/B4): this assumes no concurrent position/equality deletes landed on the input files
-    /// between `read_snapshot_id` and commit time (no dead-row masking / index remap yet); it only
-    /// guards against the input files themselves having disappeared, not against their rows having
-    /// been independently marked deleted in the meantime.
+    /// `mapping_paths` are the per-plan spilled row-provenance NDJSON files (each line an
+    /// `{input_file, input_pos, output_file, output_pos}` mapping). They drive B3 dead-row masking:
+    /// any row deleted on an input file between `read_snapshot_id` and commit time is remapped to its
+    /// output position and masked with an OUTPUT position-delete (DV) file folded into the same
+    /// overwrite commit. See [`commit_compaction_overwrite_once`].
     pub async fn commit_compaction_overwrite(
         &mut self,
         output_files: Vec<SerializedDataFile>,
         input_file_paths: Vec<String>,
+        mapping_paths: Vec<String>,
         read_snapshot_id: i64,
     ) -> Result<()> {
         let schema_id = self.table.metadata().current_schema_id();
@@ -264,6 +275,7 @@ impl IcebergPkIndexSinkCoordinator {
             |table| {
                 let output_files = output_files.clone();
                 let input_file_paths = input_file_paths.clone();
+                let mapping_paths = mapping_paths.clone();
                 let target_branch = target_branch.clone();
                 let catalog = catalog.clone();
                 async move {
@@ -273,6 +285,7 @@ impl IcebergPkIndexSinkCoordinator {
                         target_branch,
                         output_files,
                         input_file_paths,
+                        mapping_paths,
                     )
                     .await
                 }
@@ -515,22 +528,40 @@ async fn commit_one_epoch(
     .map_err(CommitError::Commit)
 }
 
-/// Run one attempt of the pk-index compaction overwrite against the freshly-reloaded `table`.
-/// Walks the target branch's CURRENT manifest list to find the live [`DataFile`] entries matching
-/// `input_file_paths` (matched by path, regardless of content type — data compaction can also
-/// replace delete files). Only entries with `is_alive() == true` are matched, so a path whose
-/// entry has been marked `Deleted` by a racing commit does not count as found; fails if any
-/// requested path is no longer present among the live entries (see
-/// [`IcebergPkIndexSinkCoordinator::commit_compaction_overwrite`] for the rationale).
+/// Run one attempt of the pk-index compaction overwrite against the freshly-reloaded `table`
+/// (snapshot `N`). Everything below runs against this single reloaded snapshot so the input-file
+/// resolution, the DV read at `N`, the dead-row masking, and the overwrite are all consistent per
+/// attempt.
+///
+/// Steps:
+/// 1. Walk `N`'s manifest list for the live [`DataFile`] entries matching `input_file_paths`
+///    (matched by path, regardless of content type). Only `is_alive()` entries match, so a path a
+///    racing commit already marked `Deleted` does not count as found; abort if any requested path
+///    is no longer present (see [`IcebergPkIndexSinkCoordinator::commit_compaction_overwrite`]).
+/// 2. **B3 dead-row masking:** collect the Puffin position-delete (DV) files at `N` that reference
+///    the input data files, read their deleted positions, and remap each to its output position via
+///    the spilled row-provenance `mapping_paths`. A deleted input position with NO mapping entry was
+///    already dead when the rewrite read snapshot `R` (its row was never written to any output), so
+///    it is skipped; a deleted input position WITH a mapping entry is a row that was alive at `R`
+///    (hence written to output) but deleted during `(R, N]`, so it must be masked. Author one output
+///    DV Puffin file per output data file with dead rows and fold them into the same overwrite.
+/// 3. Also remove those input DV files (they reference the removed input data files and must not
+///    dangle), deduped against the input files already resolved in step 1.
 async fn commit_compaction_overwrite_once(
     table: Table,
     catalog: Arc<dyn Catalog>,
     target_branch: String,
     output_files: Vec<SerializedDataFile>,
     input_file_paths: Vec<String>,
+    mapping_paths: Vec<String>,
 ) -> std::result::Result<Table, CommitError> {
     let mut remaining: HashSet<&str> = input_file_paths.iter().map(String::as_str).collect();
     let mut removed: Vec<DataFile> = Vec::with_capacity(input_file_paths.len());
+    // Puffin DV files at N that reference one of the input data files. Both read for masking and
+    // removed from the overwrite so they don't dangle after their referenced data files go away.
+    let mut input_dv_files: Vec<DataFile> = Vec::new();
+
+    let input_paths: HashSet<&str> = input_file_paths.iter().map(String::as_str).collect();
 
     if let Some(snapshot) = table.metadata().snapshot_for_ref(&target_branch) {
         let manifest_list = snapshot
@@ -538,23 +569,33 @@ async fn commit_compaction_overwrite_once(
             .await
             .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest list")))?;
 
-        'outer: for manifest_file in manifest_list.entries() {
+        for manifest_file in manifest_list.entries() {
             let manifest = manifest_file
                 .load_manifest(table.file_io())
                 .await
                 .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest")))?;
             for entry in manifest.entries() {
-                // Only match entries that are still alive on this branch: a `Deleted` entry
-                // keeps the same `file_path()` as when it was live, so without this guard a
-                // racing commit that already removed one of our input files would be masked —
-                // the stale `Deleted` entry would satisfy `remaining`, the "abort if missing"
-                // check below would never fire, and we'd add the compaction outputs on top of
-                // rows the racing commit already rewrote, duplicating them.
-                if entry.is_alive() && remaining.remove(entry.file_path()) {
-                    removed.push(entry.data_file().clone());
+                if !entry.is_alive() {
+                    continue;
                 }
-                if remaining.is_empty() {
-                    break 'outer;
+                let data_file = entry.data_file();
+                // Step 1: match input files by path. A `Deleted` entry keeps the same
+                // `file_path()` as when it was live, so the `is_alive()` guard above prevents a
+                // racing commit's stale entry from masking an already-removed input (which would
+                // otherwise let us add the compaction outputs on top of rewritten rows).
+                if remaining.remove(data_file.file_path()) {
+                    removed.push(data_file.clone());
+                }
+                // Step 2/3: collect Puffin DV files (at N) referencing an input data file. These
+                // include DVs created during (R, N] that are NOT in `input_file_paths` (the plan
+                // only saw R-era files), so this is a separate collection from step 1.
+                if manifest_file.content == ManifestContentType::Deletes
+                    && data_file.content_type() == DataContentType::PositionDeletes
+                    && data_file.file_format() == DataFileFormat::Puffin
+                    && let Some(referenced) = data_file.referenced_data_file()
+                    && input_paths.contains(referenced.as_str())
+                {
+                    input_dv_files.push(data_file.clone());
                 }
             }
         }
@@ -578,7 +619,7 @@ async fn commit_compaction_overwrite_once(
     let partition_spec_id = table.metadata().default_partition_spec_id();
     let partition_type = resolve_partition_type(&table, partition_spec_id, schema)
         .map_err(|e| CommitError::Commit(anyhow!(e)))?;
-    let add_files: Vec<DataFile> = output_files
+    let mut add_files: Vec<DataFile> = output_files
         .into_iter()
         .map(|f| {
             f.try_into(partition_spec_id, &partition_type, schema)
@@ -589,6 +630,25 @@ async fn commit_compaction_overwrite_once(
                 })
         })
         .collect::<std::result::Result<_, _>>()?;
+
+    // --- B3: author output DV files masking rows deleted on the inputs during (R, N]. ---
+    let mapping = read_row_provenance_mapping(&table, &mapping_paths).await?;
+    let deleted_inputs = read_input_dv_positions(&table, &input_dv_files).await?;
+    let dead_by_output = compute_dead_out_positions(&mapping, deleted_inputs);
+    if !dead_by_output.is_empty() {
+        let output_dv_files = author_output_dv_files(&table, &add_files, dead_by_output).await?;
+        add_files.extend(output_dv_files);
+    }
+
+    // Remove the input DV files too (they reference the now-removed input data files). Some may
+    // already be in `removed` if they were R-era DVs listed in `input_file_paths`; dedup by path.
+    let already_removed: HashSet<String> =
+        removed.iter().map(|f| f.file_path().to_owned()).collect();
+    for dv in input_dv_files {
+        if !already_removed.contains(dv.file_path()) {
+            removed.push(dv);
+        }
+    }
 
     let txn = Transaction::new(&table);
     let action = txn
@@ -606,6 +666,151 @@ async fn commit_compaction_overwrite_once(
             anyhow!(err).context("commit iceberg pk-index compaction overwrite transaction"),
         )
     })
+}
+
+/// Reads and merges the per-plan spilled row-provenance NDJSON files into a lookup keyed by
+/// `(input_file, input_pos)` → `(output_file, output_pos)`. Read through the coordinator's own
+/// `FileIO` (same catalog/table the compactor spilled through).
+async fn read_row_provenance_mapping(
+    table: &Table,
+    mapping_paths: &[String],
+) -> std::result::Result<HashMap<(String, u64), (String, u64)>, CommitError> {
+    let mut mapping: HashMap<(String, u64), (String, u64)> = HashMap::new();
+    for path in mapping_paths {
+        let input = table.file_io().new_input(path).map_err(|e| {
+            CommitError::Commit(anyhow!(e).context(format!("open row-provenance file {}", path)))
+        })?;
+        let bytes = input.read().await.map_err(|e| {
+            CommitError::Commit(anyhow!(e).context(format!("read row-provenance file {}", path)))
+        })?;
+        for line in bytes.split(|b| *b == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let entry: RowProvenanceEntry = serde_json::from_slice(line).map_err(|e| {
+                CommitError::Commit(
+                    anyhow!(e).context(format!("parse row-provenance entry in {}", path)),
+                )
+            })?;
+            mapping.insert(
+                (entry.input_file, entry.input_pos),
+                (entry.output_file, entry.output_pos),
+            );
+        }
+    }
+    Ok(mapping)
+}
+
+/// Reads the deleted positions from the given input DV Puffin files, returning `(input_file, pos)`
+/// pairs (`DV_N` restricted to the input data files). Each file's `referenced_data_file` is the input
+/// data file the positions belong to (guaranteed set by the collection in
+/// [`commit_compaction_overwrite_once`]).
+async fn read_input_dv_positions(
+    table: &Table,
+    input_dv_files: &[DataFile],
+) -> std::result::Result<Vec<(String, u64)>, CommitError> {
+    let mut deleted_inputs = Vec::new();
+    for dv in input_dv_files {
+        let referenced = dv
+            .referenced_data_file()
+            .expect("collected input DV file must carry referenced_data_file");
+        let positions = read_dv_positions_from_data_file(table.file_io(), dv)
+            .await
+            .map_err(|e| {
+                CommitError::Commit(anyhow!(e).context("read input DV positions for masking"))
+            })?;
+        for pos in positions.iter() {
+            deleted_inputs.push((referenced.clone(), pos));
+        }
+    }
+    Ok(deleted_inputs)
+}
+
+/// Pure remap: group the deleted input `(file, pos)` positions by the output file/position they map
+/// to. An input position with no mapping entry was already dead at read snapshot `R` (pre-`R`
+/// delete) — its row was never written to any output file — and is skipped.
+fn compute_dead_out_positions(
+    mapping: &HashMap<(String, u64), (String, u64)>,
+    deleted_inputs: impl IntoIterator<Item = (String, u64)>,
+) -> HashMap<String, DeleteVector> {
+    let mut dead_by_output: HashMap<String, DeleteVector> = HashMap::new();
+    for (input_file, input_pos) in deleted_inputs {
+        if let Some((output_file, output_pos)) = mapping.get(&(input_file, input_pos)) {
+            dead_by_output
+                .entry(output_file.clone())
+                .or_default()
+                .insert(*output_pos);
+        }
+    }
+    dead_by_output
+}
+
+/// Authors one output DV Puffin file per output data file that has dead rows, referencing the
+/// output data file so the masked positions are excluded on read. The output data files are fresh
+/// (just written by the rewrite), so there is no existing DV to merge.
+async fn author_output_dv_files(
+    table: &Table,
+    output_data_files: &[DataFile],
+    dead_by_output: HashMap<String, DeleteVector>,
+) -> std::result::Result<Vec<DataFile>, CommitError> {
+    let location_generator =
+        DefaultLocationGenerator::new(table.metadata().clone()).map_err(|e| {
+            CommitError::Commit(anyhow!(e).context("build location generator for output DV"))
+        })?;
+    let file_name_generator = DefaultFileNameGenerator::new(
+        "pk-index-compaction".to_owned(),
+        Some(format!("delvec-{}", Uuid::now_v7())),
+        DataFileFormat::Puffin,
+    );
+    let partitioned = !table.metadata().default_partition_spec().is_unpartitioned();
+
+    // Map output data file path -> its materialized DataFile (for the partition key of the DV).
+    let by_path: HashMap<&str, &DataFile> = output_data_files
+        .iter()
+        .map(|f| (f.file_path(), f))
+        .collect();
+
+    let mut output_dv_files = Vec::with_capacity(dead_by_output.len());
+    for (output_file, delete_vector) in dead_by_output {
+        let data_file = by_path.get(output_file.as_str()).ok_or_else(|| {
+            // Every mapping output_file must be one of the rewrite's output data files.
+            CommitError::Commit(anyhow!(
+                "pk-index compaction masking: output file {} referenced by row-provenance mapping \
+                 is not among the rewrite output files",
+                output_file
+            ))
+        })?;
+        let partition_key = if partitioned {
+            Some(build_partition_key(table, data_file)?)
+        } else {
+            None
+        };
+        let dv_file = write_dv_puffin_file(
+            table,
+            &location_generator,
+            &file_name_generator,
+            output_file,
+            delete_vector,
+            partition_key.as_ref(),
+        )
+        .await
+        .map_err(|e| CommitError::Commit(anyhow!(e).context("author output DV puffin file")))?;
+        output_dv_files.push(dv_file);
+    }
+    Ok(output_dv_files)
+}
+
+fn build_partition_key(
+    table: &Table,
+    data_file: &DataFile,
+) -> std::result::Result<PartitionKey, CommitError> {
+    let partition_spec = resolve_partition_spec(table, data_file.partition_spec_id())
+        .map_err(|e| CommitError::Commit(anyhow!(e).context("resolve partition spec for DV")))?;
+    Ok(PartitionKey::new(
+        partition_spec.as_ref().clone(),
+        table.metadata().current_schema().clone(),
+        data_file.partition().clone(),
+    ))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -727,4 +932,73 @@ fn decode_pre_commit_state(blob: &[u8]) -> Result<(Arc<IcebergPkIndexSinkAggResu
     let state = PbIcebergPkIndexPreCommitState::decode(blob)?;
     let agg_result = Arc::new(serde_json::from_slice(&state.agg_result)?);
     Ok((agg_result, state.snapshot_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mapping(entries: &[(&str, u64, &str, u64)]) -> HashMap<(String, u64), (String, u64)> {
+        entries
+            .iter()
+            .map(|(in_file, in_pos, out_file, out_pos)| {
+                (
+                    (in_file.to_string(), *in_pos),
+                    (out_file.to_string(), *out_pos),
+                )
+            })
+            .collect()
+    }
+
+    fn positions(dv: &DeleteVector) -> Vec<u64> {
+        dv.iter().collect()
+    }
+
+    /// A deleted input position that has a provenance mapping entry (a row alive at R, hence written
+    /// to output, then deleted during (R, N]) is remapped to its output position; positions are
+    /// grouped by output file.
+    #[test]
+    fn dead_out_remaps_and_groups_by_output_file() {
+        let mapping = mapping(&[
+            ("in-a.parquet", 0, "out-0.parquet", 5),
+            ("in-a.parquet", 1, "out-0.parquet", 6),
+            ("in-b.parquet", 0, "out-1.parquet", 2),
+        ]);
+        let deleted_inputs = vec![
+            ("in-a.parquet".to_owned(), 0),
+            ("in-a.parquet".to_owned(), 1),
+            ("in-b.parquet".to_owned(), 0),
+        ];
+
+        let dead = compute_dead_out_positions(&mapping, deleted_inputs);
+
+        assert_eq!(dead.len(), 2);
+        assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![5, 6]);
+        assert_eq!(positions(dead.get("out-1.parquet").unwrap()), vec![2]);
+    }
+
+    /// A deleted input position with NO mapping entry was already dead at read snapshot R (pre-R
+    /// delete); its row was never written to any output, so it must be skipped (not masked).
+    #[test]
+    fn dead_out_skips_deleted_input_without_mapping_entry() {
+        let mapping = mapping(&[("in-a.parquet", 0, "out-0.parquet", 5)]);
+        let deleted_inputs = vec![
+            ("in-a.parquet".to_owned(), 0), // mapped -> masked
+            ("in-a.parquet".to_owned(), 7), // pre-R delete, no mapping entry -> skipped
+            ("in-c.parquet".to_owned(), 3), // unrelated input file, no mapping entry -> skipped
+        ];
+
+        let dead = compute_dead_out_positions(&mapping, deleted_inputs);
+
+        assert_eq!(dead.len(), 1);
+        assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![5]);
+    }
+
+    /// No concurrent deletes -> nothing to mask.
+    #[test]
+    fn dead_out_empty_when_no_deleted_inputs() {
+        let mapping = mapping(&[("in-a.parquet", 0, "out-0.parquet", 5)]);
+        let dead = compute_dead_out_positions(&mapping, Vec::new());
+        assert!(dead.is_empty());
+    }
 }
