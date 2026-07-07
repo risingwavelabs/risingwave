@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::trivial::BLACKHOLE_SINK;
@@ -37,9 +38,15 @@ pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     )
 }
 
-/// No sink connector supports encoding VARIANT values yet, so reject them uniformly at creation
-/// time (including VARIANT nested in composite types) instead of failing or silently writing
-/// nulls per row at runtime. Support can be added per connector on demand later.
+/// Returns the first column whose type contains VARIANT (nested included). No sink connector can
+/// encode variant values yet, so callers reject such columns at creation time.
+pub fn first_variant_column(columns: &[ColumnCatalog]) -> Option<&ColumnCatalog> {
+    columns
+        .iter()
+        .find(|column| column.data_type().contains_variant())
+}
+
+/// Reject sinks that carry VARIANT columns at creation time.
 fn reject_variant_sink(sink_catalog: &SinkCatalog) -> MetaResult<()> {
     // Sinks into tables and blackhole sinks do not serialize values with an external encoder.
     if sink_catalog.target_table.is_some() {
@@ -51,11 +58,7 @@ fn reject_variant_sink(sink_catalog: &SinkCatalog) -> MetaResult<()> {
         return Ok(());
     }
 
-    if let Some(column) = sink_catalog
-        .full_columns()
-        .iter()
-        .find(|column| column.data_type().contains_variant())
-    {
+    if let Some(column) = first_variant_column(sink_catalog.full_columns()) {
         return Err(MetaError::invalid_parameter(format!(
             "sinking VARIANT columns is not supported yet: column `{}`",
             column.name_with_hidden()
@@ -130,5 +133,32 @@ mod tests {
         let mut sink_into_table = make_sink("table", DataType::Variant);
         sink_into_table.target_table = Some(1.into());
         reject_variant_sink(&sink_into_table).unwrap();
+    }
+
+    fn column(name: &str, data_type: DataType) -> ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::new(0), data_type))
+    }
+
+    #[test]
+    fn test_first_variant_column() {
+        assert!(first_variant_column(&[]).is_none());
+        assert!(
+            first_variant_column(&[column("a", DataType::Int32), column("b", DataType::Jsonb)])
+                .is_none()
+        );
+
+        for data_type in [
+            DataType::Variant,
+            DataType::list(DataType::Variant),
+            DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
+        ] {
+            let columns = [
+                column("a", DataType::Int32),
+                column("v", data_type.clone()),
+                column("z", DataType::Variant),
+            ];
+            let found = first_variant_column(&columns).expect("should find variant column");
+            assert_eq!(found.name(), "v", "{data_type:?}");
+        }
     }
 }

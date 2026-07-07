@@ -55,3 +55,26 @@ drop materialized view variant_state_mv;
 
 statement ok
 drop table variant_stream_t;
+
+# Nested VARIANT must not reach a streaming operator's storage key.
+statement ok
+create table variant_nested_t (
+    id int primary key,
+    s struct<v variant>
+);
+
+# TopN order key contains a nested VARIANT.
+statement error VARIANT column
+create materialized view variant_bad_topn as
+select count(*) from (select * from variant_nested_t order by s limit 10);
+
+# Over window partition key contains a nested VARIANT.
+statement error VARIANT column
+create materialized view variant_bad_over_window as
+select id from (
+    select id, rank() over (partition by s order by id) as rank
+    from variant_nested_t)
+where rank <= 2;
+
+statement ok
+drop table variant_nested_t;

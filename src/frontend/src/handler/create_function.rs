@@ -118,6 +118,15 @@ pub async fn handle_create_function(
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
+    // Non-SQL UDFs exchange data via Arrow, which does not support VARIANT yet.
+    if return_type.contains_variant() || arg_types.iter().any(|t| t.contains_variant()) {
+        return Err(ErrorCode::NotSupported(
+            "VARIANT type in function signature".to_owned(),
+            "VARIANT is not supported in UDFs yet".to_owned(),
+        )
+        .into());
+    }
+
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();

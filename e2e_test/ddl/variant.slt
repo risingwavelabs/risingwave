@@ -220,8 +220,7 @@ drop table variant_full_type_t;
 statement ok
 drop table variant_table_definition;
 
-# VARIANT only has byte-wise equality and ordering, so it must be rejected from
-# every storage key: table pk, index keys, and MV ORDER BY.
+# VARIANT must be rejected from storage keys: table pk, index keys, and MV ORDER BY.
 
 statement error is part of the storage primary key
 create table variant_pk_t (v variant primary key);
@@ -241,3 +240,39 @@ select payload from variant_key_source_t order by payload;
 
 statement ok
 drop table variant_key_source_t;
+
+# VARIANT columns are rejected for row encodings without variant parser support.
+
+statement error is not supported for this source encoding yet
+create table variant_json_encode_t (id int, payload variant)
+with (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp',
+    match_pattern = '*.json'
+) format plain encode json;
+
+# Nested VARIANT is rejected too.
+
+statement error is not supported for this source encoding yet
+create table variant_json_encode_arr_t (id int, payloads variant[])
+with (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp',
+    match_pattern = '*.json'
+) format plain encode json;
+
+statement error is not supported for this source encoding yet
+create table variant_json_encode_struct_t (id int, s struct<v variant>)
+with (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp',
+    match_pattern = '*.json'
+) format plain encode json;
+
+# VARIANT is rejected in non-SQL UDF signatures (both argument and return types).
+
+statement error VARIANT is not supported in UDFs yet
+create function variant_arg_udf(variant) returns int as 'variant_arg_udf' using link 'http://localhost:8815';
+
+statement error VARIANT is not supported in UDFs yet
+create function variant_ret_udf(int) returns variant as 'variant_ret_udf' using link 'http://localhost:8815';
