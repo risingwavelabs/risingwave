@@ -12,17 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
+use std::collections::HashMap;
+use std::ops::Bound;
+
+use anyhow::{Context, anyhow};
 use iceberg::writer::PositionDeleteInput;
 use risingwave_common::array::DataChunk;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SinkId;
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::iceberg::{IcebergConfig, RowProvenanceEntry};
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::change_buffer::output_kind;
 use crate::common::compact_chunk::{InconsistencyBehavior, compact_chunk_inline};
@@ -40,6 +46,74 @@ fn append_row(builder: &mut DataChunkBuilder, file_path: &str, position: i64) ->
         Some(ScalarRefImpl::Utf8(file_path)),
         Some(ScalarRefImpl::Int64(position)),
     ])
+}
+
+/// Sequentially scan a pk-index state-table shard over ALL owned vnodes and rewrite, in place,
+/// every entry whose `(file_path, position)` value appears in `mapping` to the mapped
+/// `(output_file, output_pos)`. Entries absent from the mapping are left untouched.
+///
+/// The row layout is `[pk.., file_path: Varchar, position: Int64]`, so `file_path` is the
+/// second-to-last column and `position` the last. The PK (key columns) is unchanged by a remap, so
+/// each rewrite is an in-place `update` of the two value columns.
+///
+/// A state table cannot be mutated while an iterator borrows it, so matches are buffered per vnode
+/// and applied after the vnode's iterator is dropped. Returns the number of entries remapped.
+///
+/// This is the pure remap core (given a mapping and the state table) and is unit-tested directly;
+/// reading the mapping files via `FileIO` is exercised by the B5 SLT.
+async fn remap_state_table_shard<S: StateStore>(
+    state_table: &mut StateTable<S>,
+    mapping: &HashMap<(String, i64), (String, i64)>,
+) -> StreamExecutorResult<usize> {
+    if mapping.is_empty() {
+        return Ok(0);
+    }
+    let mut remapped = 0usize;
+    // Clone the owned-vnode bitmap so iteration does not borrow `state_table` (we mutate it below).
+    let vnodes = state_table.vnodes().clone();
+    for vnode in vnodes.iter_vnodes() {
+        // Buffer `(old_row, output_file, output_pos)` for this vnode; the iterator borrows
+        // `state_table`, so collect first, then drop the iterator, then apply the rewrites.
+        let mut rewrites: Vec<(OwnedRow, String, i64)> = Vec::new();
+        {
+            let iter = state_table
+                .iter_with_vnode(
+                    vnode,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::prefetch_for_large_range_scan(),
+                )
+                .await?;
+            pin_mut!(iter);
+            while let Some(row) = iter.next().await {
+                let row = row?;
+                let num_cols = row.len();
+                let file_path = row
+                    .datum_at(num_cols - 2)
+                    .context("pk-index file_path should not be null")?
+                    .into_utf8();
+                let position = row
+                    .datum_at(num_cols - 1)
+                    .context("pk-index position should not be null")?
+                    .into_int64();
+                if let Some((output_file, output_pos)) =
+                    mapping.get(&(file_path.to_owned(), position))
+                {
+                    rewrites.push((row.clone(), output_file.clone(), *output_pos));
+                }
+            }
+        }
+
+        for (old_row, output_file, output_pos) in rewrites {
+            let num_cols = old_row.len();
+            let mut new_row_data = old_row.as_inner().to_vec();
+            new_row_data[num_cols - 2] = Some(ScalarImpl::Utf8(output_file.into()));
+            new_row_data[num_cols - 1] = Some(ScalarImpl::Int64(output_pos));
+            let new_row = OwnedRow::new(new_row_data);
+            state_table.update(old_row, new_row);
+            remapped += 1;
+        }
+    }
+    Ok(remapped)
 }
 
 /// Trait abstracting the Iceberg data file writing for testability.
@@ -91,6 +165,9 @@ where
     chunk_size: usize,
     sink_id: SinkId,
     local_barrier_manager: LocalBarrierManager,
+    /// Iceberg connection config, used to lazily build a `FileIO` for reading the row-provenance
+    /// mapping files when an [`Mutation::IcebergPkIndexRemap`] barrier mutation arrives.
+    iceberg_config: IcebergConfig,
 }
 
 impl<S, W> WriterExecutor<S, W>
@@ -108,6 +185,7 @@ where
         chunk_size: usize,
         sink_id: SinkId,
         local_barrier_manager: LocalBarrierManager,
+        iceberg_config: IcebergConfig,
     ) -> Self {
         Self {
             ctx,
@@ -119,7 +197,63 @@ where
             chunk_size,
             sink_id,
             local_barrier_manager,
+            iceberg_config,
         }
+    }
+
+    /// Handle an [`Mutation::IcebergPkIndexRemap`] addressed to this writer: read the spilled
+    /// row-provenance mapping files via the table's `FileIO`, then sequentially scan the pk-index
+    /// shard and rewrite every entry whose `(file_path, position)` was compacted away to the mapped
+    /// `(output_file, output_pos)`.
+    ///
+    /// Called at the barrier boundary before the state table commits, so the rewrites are persisted
+    /// at this barrier's checkpoint. Idempotent: a re-delivered remap re-scans, but entries already
+    /// remapped no longer point at the removed input files, so they are absent from the mapping and
+    /// left untouched.
+    async fn remap_pk_index(&mut self, mapping_paths: &[String]) -> StreamExecutorResult<()> {
+        // Lazily load the table to obtain a `FileIO`. The remap is rare (post-compaction), so the
+        // load cost is acceptable and avoids threading a `FileIO` through the writer trait.
+        let table = self
+            .iceberg_config
+            .load_table()
+            .await
+            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
+        let file_io = table.file_io();
+
+        // Merge all per-plan NDJSON mapping files into a lookup keyed by `(input_file, input_pos)`.
+        // Positions are stored as `Int64` in the pk-index state table, so key on `i64` directly.
+        let mut mapping: HashMap<(String, i64), (String, i64)> = HashMap::new();
+        for path in mapping_paths {
+            let input = file_io
+                .new_input(path)
+                .map_err(|e| anyhow!(e).context(format!("open row-provenance file {}", path)))?;
+            let bytes = input
+                .read()
+                .await
+                .map_err(|e| anyhow!(e).context(format!("read row-provenance file {}", path)))?;
+            for line in bytes.split(|b| *b == b'\n') {
+                if line.is_empty() {
+                    continue;
+                }
+                let entry: RowProvenanceEntry = serde_json::from_slice(line)
+                    .map_err(|e| anyhow!(e).context(format!("parse row-provenance in {}", path)))?;
+                mapping.insert(
+                    (entry.input_file, entry.input_pos as i64),
+                    (entry.output_file, entry.output_pos as i64),
+                );
+            }
+        }
+
+        let remapped = remap_state_table_shard(&mut self.pk_index_state_table, &mapping).await?;
+        tracing::info!(
+            sink_id = self.sink_id.as_raw_id(),
+            actor_id = self.ctx.id.as_raw_id(),
+            mapping_files = mapping_paths.len(),
+            mapping_entries = mapping.len(),
+            remapped,
+            "applied pk-index remap after coordinated compaction"
+        );
+        Ok(())
     }
 
     async fn delete_existing_row(
@@ -257,6 +391,18 @@ where
                     }
                 }
                 Message::Barrier(barrier) => {
+                    // Apply an addressed pk-index remap before advancing the state table so the
+                    // rewrites are persisted at this barrier's commit. Self-filter by `sink_id`;
+                    // other sinks' writers ignore this mutation.
+                    if let Some(Mutation::IcebergPkIndexRemap {
+                        sink_id,
+                        mapping_paths,
+                    }) = barrier.mutation.as_deref()
+                        && *sink_id == self.sink_id
+                    {
+                        self.remap_pk_index(mapping_paths).await?;
+                    }
+
                     let mut metadata = None;
                     if barrier.is_checkpoint() {
                         if let Some(chunk) = self
@@ -310,6 +456,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
 
     use iceberg::writer::PositionDeleteInput;
@@ -318,7 +465,7 @@ mod tests {
     use risingwave_common::id::SinkId;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -329,6 +476,24 @@ mod tests {
 
     const CHUNK_SIZE: usize = 1024;
     const TEST_FILE_PATH: &str = "file1.parquet";
+
+    /// A minimal valid `IcebergConfig` for tests. The harness never triggers a remap, so the config
+    /// is only constructed, never used to load a table.
+    fn test_iceberg_config() -> IcebergConfig {
+        let props: BTreeMap<String, String> = [
+            ("type", "upsert"),
+            ("primary_key", "v1"),
+            ("warehouse.path", "s3://test-bucket/warehouse"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "demo_db"),
+            ("table.name", "demo_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        IcebergConfig::from_btreemap(props).unwrap()
+    }
 
     struct IcebergWriterMock {
         file_path: String,
@@ -448,6 +613,7 @@ mod tests {
                 CHUNK_SIZE,
                 SinkId::new(0),
                 lbm,
+                test_iceberg_config(),
             )
             .boxed()
             .execute();
@@ -739,5 +905,87 @@ mod tests {
 
         harness.expect_barrier().await;
         assert!(harness.written_chunks().is_empty());
+    }
+
+    fn index_row(pk: i64, file_path: &str, position: i64) -> OwnedRow {
+        OwnedRow::new(vec![
+            Some(ScalarImpl::Int64(pk)),
+            Some(ScalarImpl::Utf8(file_path.into())),
+            Some(ScalarImpl::Int64(position)),
+        ])
+    }
+
+    async fn read_index_entry(
+        state_table: &StateTable<MemoryStateStore>,
+        pk: i64,
+    ) -> Option<(String, i64)> {
+        let row = state_table
+            .get_row(&OwnedRow::new(vec![Some(ScalarImpl::Int64(pk))]))
+            .await
+            .unwrap()?;
+        let file_path = row.datum_at(1).unwrap().into_utf8().to_owned();
+        let position = row.datum_at(2).unwrap().into_int64();
+        Some((file_path, position))
+    }
+
+    /// The remap core rewrites only the entries whose `(file_path, position)` appears in the
+    /// mapping (i.e. rows in the compacted-away input files); entries pointing at other files are
+    /// left untouched. Positions absent from the index but present in the mapping are ignored.
+    #[tokio::test]
+    async fn test_remap_state_table_shard() {
+        let store = MemoryStateStore::new();
+        let mut state_table = create_pk_index_state_table(store, TableId::new(7)).await;
+        state_table
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+            .await
+            .unwrap();
+
+        // pk=1,2 point at a compacted-away input file; pk=3 points at an unrelated file.
+        state_table.insert(index_row(1, "input.parquet", 0));
+        state_table.insert(index_row(2, "input.parquet", 5));
+        state_table.insert(index_row(3, "other.parquet", 9));
+
+        let mapping: HashMap<(String, i64), (String, i64)> = HashMap::from([
+            (
+                ("input.parquet".to_owned(), 0),
+                ("output.parquet".to_owned(), 100),
+            ),
+            (
+                ("input.parquet".to_owned(), 5),
+                ("output.parquet".to_owned(), 105),
+            ),
+            // A mapping entry whose position is not present in this shard's index: must be a no-op.
+            (
+                ("input.parquet".to_owned(), 42),
+                ("output.parquet".to_owned(), 142),
+            ),
+        ]);
+
+        let remapped = remap_state_table_shard(&mut state_table, &mapping)
+            .await
+            .unwrap();
+        assert_eq!(remapped, 2);
+
+        // Input-file entries rewritten to their mapped output location.
+        assert_eq!(
+            read_index_entry(&state_table, 1).await,
+            Some(("output.parquet".to_owned(), 100))
+        );
+        assert_eq!(
+            read_index_entry(&state_table, 2).await,
+            Some(("output.parquet".to_owned(), 105))
+        );
+        // Non-input entry untouched.
+        assert_eq!(
+            read_index_entry(&state_table, 3).await,
+            Some(("other.parquet".to_owned(), 9))
+        );
+
+        // Idempotency: a re-run finds no entries pointing at the removed input files, so it is a
+        // no-op (the already-remapped entries now point at output files absent from the mapping).
+        let remapped_again = remap_state_table_shard(&mut state_table, &mapping)
+            .await
+            .unwrap();
+        assert_eq!(remapped_again, 0);
     }
 }

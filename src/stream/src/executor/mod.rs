@@ -399,6 +399,14 @@ pub enum Mutation {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+    /// Tell the iceberg pk-index writer identified by `sink_id` to remap its pk-index state table
+    /// after a coordinated compaction overwrite committed. Broadcast within the database; the
+    /// writer self-filters by `sink_id`. `mapping_paths` are the spilled row-provenance NDJSON
+    /// paths the writer reads to rewrite surviving entries to their new `(output_file, output_pos)`.
+    IcebergPkIndexRemap {
+        sink_id: SinkId,
+        mapping_paths: Vec<String>,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -575,7 +583,8 @@ impl Barrier {
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
-            | Mutation::InjectSourceOffsets { .. } => false,
+            | Mutation::InjectSourceOffsets { .. }
+            | Mutation::IcebergPkIndexRemap { .. } => false,
         }
     }
 
@@ -986,6 +995,15 @@ impl Mutation {
                     split_offsets: split_offsets.clone(),
                 },
             ),
+            Mutation::IcebergPkIndexRemap {
+                sink_id,
+                mapping_paths,
+            } => PbMutation::IcebergPkIndexRemap(
+                risingwave_pb::stream_plan::IcebergPkIndexRemapMutation {
+                    sink_id: sink_id.as_raw_id(),
+                    mapping_paths: mapping_paths.clone(),
+                },
+            ),
         }
     }
 
@@ -1163,6 +1181,10 @@ impl Mutation {
             PbMutation::InjectSourceOffsets(inject) => Mutation::InjectSourceOffsets {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
+            },
+            PbMutation::IcebergPkIndexRemap(remap) => Mutation::IcebergPkIndexRemap {
+                sink_id: SinkId::from(remap.sink_id),
+                mapping_paths: remap.mapping_paths.clone(),
             },
         };
         Ok(mutation)
