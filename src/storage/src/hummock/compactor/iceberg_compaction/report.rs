@@ -15,6 +15,8 @@
 use std::collections::VecDeque;
 use std::time::SystemTime;
 
+use iceberg::spec::{DataFile, SerializedDataFile};
+use iceberg::table::Table;
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
@@ -22,11 +24,74 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
 use super::TaskKey;
+use crate::hummock::{HummockError, HummockResult};
+
+/// Per-plan result of a pk-index coordinated compaction run (rewrite without commit).
+///
+/// Produced by the compactor when the dispatched task has `pk_index_coordinated == true`. The
+/// actual iceberg commit is performed later by meta's iceberg pk-index sink coordinator, so the
+/// compactor only surfaces the rewrite output, the input file paths, and the snapshot it read
+/// from.
+#[derive(Clone)]
+pub(crate) struct PkIndexCompactionResult {
+    /// Newly written data files produced by the rewrite.
+    pub(crate) output_files: Vec<SerializedDataFile>,
+    /// Paths of all input files (data + delete) consumed by the rewrite, taken directly from the
+    /// compaction plan's `FileGroup`. No manifest walk required.
+    pub(crate) input_file_paths: Vec<String>,
+    /// Snapshot the rewrite plan read from.
+    pub(crate) read_snapshot_id: i64,
+}
+
+// Manual Debug: `SerializedDataFile` does not implement `Debug`.
+impl std::fmt::Debug for PkIndexCompactionResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PkIndexCompactionResult")
+            .field("output_file_count", &self.output_files.len())
+            .field("input_file_count", &self.input_file_paths.len())
+            .field("read_snapshot_id", &self.read_snapshot_id)
+            .finish()
+    }
+}
+
+/// Builds the pk-index coordinated report payload from a no-commit rewrite.
+///
+/// - Output files come from `data_files` (the rewrite's output, taken from `CompactionResult`)
+///   and are converted to [`SerializedDataFile`] for JSON serialization, using `table`'s partition
+///   type and format version.
+/// - `input_file_paths` and `read_snapshot_id` must be captured by the caller *before* the
+///   compaction plan is consumed by `compact_with_plan` (the plan's `FileGroup` already carries
+///   each input file's path via `FileScanTask::data_file_path` — no manifest walk needed).
+pub(crate) fn build_pk_index_compaction_result(
+    table: &Table,
+    data_files: Vec<DataFile>,
+    input_file_paths: Vec<String>,
+    read_snapshot_id: i64,
+) -> HummockResult<PkIndexCompactionResult> {
+    let partition_type = table.metadata().default_partition_type();
+    let format_version = table.metadata().format_version();
+
+    let output_files = data_files
+        .into_iter()
+        .map(|data_file| {
+            SerializedDataFile::try_from(data_file, partition_type, format_version)
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))
+        })
+        .collect::<HummockResult<Vec<_>>>()?;
+
+    Ok(PkIndexCompactionResult {
+        output_files,
+        input_file_paths,
+        read_snapshot_id,
+    })
+}
 
 #[derive(Debug)]
 pub(crate) struct IcebergPlanCompletion {
     pub(crate) task_key: TaskKey,
     pub(crate) error_message: Option<String>,
+    /// Present only for pk-index coordinated plans that completed successfully.
+    pub(crate) pk_index_result: Option<PkIndexCompactionResult>,
 }
 
 pub(crate) type IcebergTaskReport = subscribe_iceberg_compaction_event_request::ReportTask;
@@ -41,6 +106,9 @@ pub(crate) struct IcebergTaskTracker {
     remaining_plans: usize,
     successful_plans: usize,
     first_error: Option<String>,
+    /// Pk-index coordinated rewrite results, aggregated across all plans of the task. Empty for
+    /// non-coordinated tasks.
+    pk_index_results: Vec<PkIndexCompactionResult>,
 }
 
 impl IcebergTaskTracker {
@@ -50,10 +118,15 @@ impl IcebergTaskTracker {
             remaining_plans,
             successful_plans: 0,
             first_error: None,
+            pk_index_results: Vec::new(),
         }
     }
 
-    pub(crate) fn record_completion(&mut self, error_message: Option<String>) {
+    pub(crate) fn record_completion(
+        &mut self,
+        error_message: Option<String>,
+        pk_index_result: Option<PkIndexCompactionResult>,
+    ) {
         debug_assert!(self.remaining_plans > 0);
         self.remaining_plans -= 1;
         if let Some(error_message) = error_message {
@@ -62,6 +135,9 @@ impl IcebergTaskTracker {
             }
         } else {
             self.successful_plans += 1;
+            if let Some(pk_index_result) = pk_index_result {
+                self.pk_index_results.push(pk_index_result);
+            }
         }
     }
 
@@ -78,8 +154,65 @@ impl IcebergTaskTracker {
                     .unwrap_or_else(|| "All admitted iceberg compaction plans failed".to_owned()),
             )
         };
-        build_iceberg_task_report(task_id, self.sink_id, error_message)
+        let mut report = build_iceberg_task_report(task_id, self.sink_id, error_message);
+        populate_pk_index_report_fields(&mut report, self.pk_index_results);
+        report
     }
+}
+
+/// Flattens the per-plan pk-index coordinated results into the `ReportTask` payload fields.
+fn populate_pk_index_report_fields(
+    report: &mut IcebergTaskReport,
+    pk_index_results: Vec<PkIndexCompactionResult>,
+) {
+    if pk_index_results.is_empty() {
+        return;
+    }
+
+    let read_snapshot_id = pk_index_results[0].read_snapshot_id;
+    // The planner builds all plans of a task from one branch snapshot, so they must agree.
+    // Guard against a future planner change silently reporting the wrong snapshot.
+    debug_assert!(
+        pk_index_results
+            .iter()
+            .all(|r| r.read_snapshot_id == read_snapshot_id),
+        "pk-index coordinated compaction plans for one task must share a single read snapshot id"
+    );
+
+    let mut output_files: Vec<SerializedDataFile> = Vec::new();
+    let mut input_file_paths: Vec<String> = Vec::new();
+    for pk_index_result in pk_index_results {
+        output_files.extend(pk_index_result.output_files);
+        input_file_paths.extend(pk_index_result.input_file_paths);
+    }
+
+    match serde_json::to_vec(&output_files) {
+        Ok(bytes) => report.pk_index_output_files = Some(bytes),
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                task_id = report.task_id,
+                sink_id = report.sink_id,
+                "Failed to serialize pk_index_output_files; skipping pk-index payload in report"
+            );
+            return;
+        }
+    }
+    // Input files are serialized as a JSON array of path strings.
+    match serde_json::to_vec(&input_file_paths) {
+        Ok(bytes) => report.pk_index_input_files = Some(bytes),
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                task_id = report.task_id,
+                sink_id = report.sink_id,
+                "Failed to serialize pk_index_input_files; skipping pk-index payload in report"
+            );
+            report.pk_index_output_files = None;
+            return;
+        }
+    }
+    report.pk_index_read_snapshot_id = Some(read_snapshot_id);
 }
 
 pub(crate) fn build_iceberg_task_report(
@@ -96,6 +229,7 @@ pub(crate) fn build_iceberg_task_report(
             subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32
         },
         error_message,
+        ..Default::default()
     }
 }
 
@@ -171,7 +305,7 @@ mod tests {
     #[test]
     fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
         let mut tracker = IcebergTaskTracker::new(9, 1);
-        tracker.record_completion(None);
+        tracker.record_completion(None, None);
 
         let report = tracker.into_report(7);
 
@@ -183,10 +317,56 @@ mod tests {
     }
 
     #[test]
+    fn test_into_report_populates_pk_index_fields_when_pk_index_result_present() {
+        let mut tracker = IcebergTaskTracker::new(9, 2);
+        tracker.record_completion(
+            None,
+            Some(PkIndexCompactionResult {
+                output_files: vec![],
+                input_file_paths: vec![],
+                read_snapshot_id: 42,
+            }),
+        );
+        tracker.record_completion(
+            None,
+            Some(PkIndexCompactionResult {
+                output_files: vec![],
+                input_file_paths: vec![],
+                read_snapshot_id: 42,
+            }),
+        );
+
+        let report = tracker.into_report(7);
+
+        // Empty file vectors still serialize to a JSON array, and the snapshot id is surfaced.
+        assert_eq!(
+            report.pk_index_output_files.as_deref(),
+            Some(b"[]".as_slice())
+        );
+        assert_eq!(
+            report.pk_index_input_files.as_deref(),
+            Some(b"[]".as_slice())
+        );
+        assert_eq!(report.pk_index_read_snapshot_id, Some(42));
+    }
+
+    #[test]
+    fn test_into_report_leaves_pk_index_fields_none_for_non_pk_index_task() {
+        let mut tracker = IcebergTaskTracker::new(9, 1);
+        tracker.record_completion(None, None);
+
+        let report = tracker.into_report(7);
+
+        assert!(report.pk_index_output_files.is_none());
+        assert!(report.pk_index_input_files.is_none());
+        assert!(report.pk_index_read_snapshot_id.is_none());
+    }
+
+    #[test]
     fn test_build_iceberg_task_result_fails_if_all_admitted_plans_fail() {
         let mut tracker = IcebergTaskTracker::new(9, 2);
-        tracker.record_completion(Some("first failure".to_owned()));
-        tracker.record_completion(Some("second failure".to_owned()));
+        tracker.record_completion(Some("first failure".to_owned()), None);
+        tracker.record_completion(Some("second failure".to_owned()), None);
 
         let report = tracker.into_report(7);
 

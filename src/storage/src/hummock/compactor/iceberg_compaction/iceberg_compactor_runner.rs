@@ -44,7 +44,7 @@ use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::IcebergTaskMeta;
+use super::{IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_result};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
@@ -126,6 +126,9 @@ pub struct IcebergCompactionPlanRunner {
     pub task_type: TaskType,
     branch: String,
     compaction_plan: CompactionPlan,
+    /// When true, run the rewrite without committing and report the result back to meta for
+    /// pk-index coordinated compaction. When false, behavior is unchanged (rewrite + commit).
+    pk_index_coordinated: bool,
 }
 
 impl IcebergCompactionPlanRunner {
@@ -177,7 +180,10 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
-    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
+    pub async fn compact(
+        self,
+        shutdown_rx: Receiver<()>,
+    ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
         let task_id = self.task_id;
         let unique_ident = self.unique_ident();
         let now = std::time::Instant::now();
@@ -193,6 +199,7 @@ impl IcebergCompactionPlanRunner {
             self.task_type,
             self.branch,
             self.compaction_plan,
+            self.pk_index_coordinated,
         );
 
         tokio::select! {
@@ -206,7 +213,7 @@ impl IcebergCompactionPlanRunner {
             }
             result = compact_task => {
                 match &result {
-                    Ok(stats) => {
+                    Ok((stats, _pk_index_result)) => {
                         tracing::info!(
                             task_id = task_id,
                             unique_ident = %unique_ident,
@@ -229,6 +236,7 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn compact_impl(
         task_id: u64,
         plan_index: usize,
@@ -240,7 +248,8 @@ impl IcebergCompactionPlanRunner {
         task_type: TaskType,
         branch: String,
         compaction_plan: CompactionPlan,
-    ) -> HummockResult<RewriteFilesStat> {
+        pk_index_coordinated: bool,
+    ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
         if !compaction_plan.has_files() {
             tracing::info!(
                 task_id,
@@ -248,7 +257,7 @@ impl IcebergCompactionPlanRunner {
                 table = %table_ident,
                 "skip empty iceberg compaction plan"
             );
-            return Ok(RewriteFilesStat::default());
+            return Ok((RewriteFilesStat::default(), None));
         }
 
         let statistics = analyze_task_statistics(&compaction_plan);
@@ -309,6 +318,22 @@ impl IcebergCompactionPlanRunner {
             },
         );
 
+        // Capture plan-derived report inputs before `compact_with_plan` consumes `compaction_plan`.
+        // Only used by the pk-index coordinated (no-commit) path below.
+        let pk_index_read_snapshot_id = compaction_plan.snapshot_id;
+        let pk_index_input_file_paths: Vec<String> = if pk_index_coordinated {
+            compaction_plan
+                .file_group
+                .data_files
+                .iter()
+                .chain(compaction_plan.file_group.position_delete_files.iter())
+                .chain(compaction_plan.file_group.equality_delete_files.iter())
+                .map(|task| task.data_file_path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         let compaction_result = compaction
             .compact_with_plan(compaction_plan, &compaction_execution_config)
             .await
@@ -324,6 +349,31 @@ impl IcebergCompactionPlanRunner {
             stats,
             table,
         } = compaction_result;
+
+        if pk_index_coordinated {
+            // pk-index coordinated compaction: the rewrite above already ran without committing
+            // (`compact_with_plan` only commits when we explicitly call `overwrite_files` below,
+            // which we skip here). Meta's iceberg pk-index sink coordinator performs the actual
+            // commit later, so we only report the rewrite output, input files, and read snapshot.
+            //
+            // TODO(B3/B4): dead-row masking + index remap not yet applied. This report instructs
+            // meta to replace `pk_index_input_file_paths` with `data_files` as-is, which is only
+            // correct when no deletes landed on the input files during `(R, N]`.
+            let committed_table = table.ok_or_else(|| {
+                HummockError::compaction_executor(anyhow::anyhow!(
+                    "compact_with_plan returned no table for a pk-index-coordinated compaction task"
+                ))
+            })?;
+
+            let pk_index_result = build_pk_index_compaction_result(
+                &committed_table,
+                data_files,
+                pk_index_input_file_paths,
+                pk_index_read_snapshot_id,
+            )?;
+
+            return Ok((stats, Some(pk_index_result)));
+        }
 
         if let Some(committed_table) = table
             && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
@@ -396,7 +446,7 @@ impl IcebergCompactionPlanRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         }
 
-        Ok(stats)
+        Ok((stats, None))
     }
 }
 
@@ -444,7 +494,7 @@ pub async fn create_task_execution(
         sink_id,
         props,
         task_type,
-        ..
+        pk_index_coordinated,
     } = iceberg_compaction_task;
 
     let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
@@ -597,6 +647,7 @@ pub async fn create_task_execution(
             task_type: parsed_task_type,
             branch: branch.clone(),
             compaction_plan,
+            pk_index_coordinated,
         });
     }
 

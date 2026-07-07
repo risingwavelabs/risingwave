@@ -506,6 +506,7 @@ pub fn start_iceberg_compactor(
                     Some(plan_completion) = task_completion_rx.recv() => {
                         let task_key = plan_completion.task_key;
                         let error_message = plan_completion.error_message;
+                        let pk_index_result = plan_completion.pk_index_result;
                         tracing::debug!(
                             task_id = task_key.0,
                             plan_index = task_key.1,
@@ -520,7 +521,9 @@ pub fn start_iceberg_compactor(
                         else {
                             continue 'consume_stream;
                         };
-                        tracker_entry.get_mut().record_completion(error_message);
+                        tracker_entry
+                            .get_mut()
+                            .record_completion(error_message, pk_index_result);
                         if !tracker_entry.get().is_finished() {
                             continue 'consume_stream;
                         }
@@ -1412,9 +1415,10 @@ fn schedule_queued_tasks(
             let result = Box::pin(runner.compact(rx)).await;
 
             let completion = match result {
-                Ok(_) => IcebergPlanCompletion {
+                Ok((_stats, pk_index_result)) => IcebergPlanCompletion {
                     task_key,
                     error_message: None,
+                    pk_index_result,
                 },
                 Err(e) => {
                     if is_cancelled_iceberg_compaction_error(&e) {
@@ -1434,6 +1438,7 @@ fn schedule_queued_tasks(
                     IcebergPlanCompletion {
                         task_key,
                         error_message: Some(e.to_report_string()),
+                        pk_index_result: None,
                     }
                 }
             };

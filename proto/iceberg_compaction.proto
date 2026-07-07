@@ -27,6 +27,22 @@ message SubscribeIcebergCompactionEventRequest {
     Status status = 3;
     reserved 4, 5;
     optional string error_message = 6;
+
+    // The following three fields are populated only for pk-index coordinated
+    // (no-commit) compaction tasks: the compactor performs the rewrite
+    // without committing and reports the result here so that meta's
+    // iceberg pk-index sink coordinator can perform the actual commit.
+    // Absent for all other tasks.
+
+    // serde_json-encoded `Vec<iceberg::spec::SerializedDataFile>` of the newly
+    // written output data files produced by the rewrite.
+    optional bytes pk_index_output_files = 7;
+    // serde_json-encoded `Vec<String>` of the paths of all input files (data +
+    // delete) consumed by the rewrite.
+    optional bytes pk_index_input_files = 8;
+    // The snapshot id the rewrite plan read from, used by the coordinator's
+    // commit for optimistic-concurrency validation.
+    optional int64 pk_index_read_snapshot_id = 9;
   }
 
   oneof event {
