@@ -1,0 +1,203 @@
+# End-to-end coverage for pk-index coordinated iceberg compaction's
+# concurrent-mutation window (B3 masking + B4 remap).
+#
+# `VACUUM FULL` blocks until the coordinator's overwrite_files commit has
+# landed (see `trigger_manual_compaction` awaiting the compaction waiter in
+# src/meta/src/manager/iceberg_compaction/manual.rs), so by the time the
+# statement returns, the new (compacted) iceberg snapshot is durable.
+# However, the writer's pk-index remap is delivered separately: meta sends
+# a fire-and-forget `IcebergPkIndexRemap` barrier mutation
+# (`schedule_pk_index_remap` in src/meta/src/manager/iceberg_compaction/
+# schedule.rs) that only takes effect on the writer's *next* barrier. A
+# DELETE/UPDATE issued on the same table immediately after `VACUUM FULL`
+# returns therefore races that remap: it can be processed by the writer
+# before the writer has switched its pk-index bookkeeping over from the
+# old (now-removed) input files to the new compacted output file.
+#
+# Without the in-window fix-up (this is what B4 guarantees), such a
+# delete/update would resolve its target row against a file compaction
+# just removed, the resulting position-delete would be silently
+# ineffective, and the "deleted"/"updated" row would resurrect with its
+# stale, pre-compaction value. This test issues the mutations with no
+# artificial sleep after `VACUUM FULL` returns, to land as close to that
+# window as achievable from SQL, and asserts the mutation is -- and stays
+# -- correctly visible.
+
+statement ok
+create secret pk_index_concurrent_delete_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection pk_index_concurrent_delete_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_pk_index_concurrent_delete',
+    s3.access.key = secret pk_index_concurrent_delete_secret,
+    s3.secret.key = secret pk_index_concurrent_delete_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.pk_index_concurrent_delete_conn';
+
+# Non-partitioned pk-index table: each insert below is flushed on its own
+# checkpoint, so the table accumulates several small data files before we
+# trigger compaction.
+statement ok
+create table t_pk_index_concurrent_delete(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 1,
+    format_version = 2,
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+statement ok
+insert into t_pk_index_concurrent_delete values(1, 'alice', 100), (2, 'bob', 200);
+
+statement ok
+flush;
+
+sleep 1s
+
+statement ok
+insert into t_pk_index_concurrent_delete values(3, 'charlie', 300), (4, 'diana', 400);
+
+statement ok
+flush;
+
+sleep 1s
+
+statement ok
+insert into t_pk_index_concurrent_delete values(5, 'eve', 500), (6, 'frank', 600);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_concurrent_delete;
+----
+1 alice 100
+2 bob 200
+3 charlie 300
+4 diana 400
+5 eve 500
+6 frank 600
+
+# Several small data files should have accumulated from the inserts above.
+query T retry 6 backoff 1s
+select count(*) > 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_concurrent_delete'
+  and content = 'Data';
+----
+t
+
+# Trigger compaction. VACUUM FULL blocks until the coordinated commit
+# lands, but (per the header comment above) the writer's pk-index remap
+# barrier mutation is fire-and-forget and only takes effect on the
+# writer's next barrier -- so the DML immediately below can race it.
+statement ok
+VACUUM FULL t_pk_index_concurrent_delete;
+
+# Issued with no sleep so it has a real chance to land in the remap
+# window: delete a row that survived compaction (id = 3). If the pk-index
+# had not been remapped yet, this delete would resolve id = 3's location
+# against a now-removed input file and be silently dropped, letting id = 3
+# remain in (or resurrect back into) subsequent reads.
+statement ok
+delete from t_pk_index_concurrent_delete where id = 3;
+
+# Also update another surviving row (id = 5) in the same window. Updates
+# on the pk-index path are delete+insert, so this must be reflected as
+# v1 = 550 and must never revert to the pre-compaction value of 500.
+statement ok
+update t_pk_index_concurrent_delete set v1 = 550 where id = 5;
+
+statement ok
+flush;
+
+# The delete/update must be observed -- if the pk-index remap were missing
+# or incomplete, id = 3 could remain visible (or reappear) and id = 5
+# could keep/revert to its stale value.
+query ??? rowsort retry 10 backoff 1s
+select * from t_pk_index_concurrent_delete;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+5 eve 550
+6 frank 600
+
+sleep 2s
+
+# Re-assert after a pause with no further mutation, to catch any
+# resurrection that only manifests once the read path catches up to a
+# later manifest/snapshot.
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_concurrent_delete;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+5 eve 550
+6 frank 600
+
+# A follow-up VACUUM FULL must converge cleanly: the previously-deleted
+# row must not resurrect, and the updated row must keep its new value.
+statement ok
+VACUUM FULL t_pk_index_concurrent_delete;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_concurrent_delete;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+5 eve 550
+6 frank 600
+
+query T retry 6 backoff 1s
+select count(*) = 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_concurrent_delete'
+  and content = 'Data';
+----
+t
+
+query T retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_concurrent_delete'
+  and content in ('PositionDeletes', 'EqualityDeletes');
+----
+t
+
+# The table must remain fully usable after the coordinated commit and the
+# in-window mutations: further writes still round-trip correctly.
+statement ok
+insert into t_pk_index_concurrent_delete values(7, 'grace', 700);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_concurrent_delete;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+5 eve 550
+6 frank 600
+7 grace 700
+
+statement ok
+DROP TABLE t_pk_index_concurrent_delete;
+
+statement ok
+DROP CONNECTION pk_index_concurrent_delete_conn;
+
+statement ok
+DROP SECRET pk_index_concurrent_delete_secret;
