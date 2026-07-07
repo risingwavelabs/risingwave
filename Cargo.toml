@@ -417,6 +417,13 @@ opt-level = 2
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Override madsim-tonic and madsim-tonic-build with v0.5.2 (rev 66e049aff3) to add zstd compression support.
 # v0.5.2+0.12.0 adds gzip/zstd encoding features while remaining compatible with workspace version ^0.5.1.
+# Keep the whole madsim family pinned to the same rev, otherwise two copies of `madsim`
+# (crates.io + git) get linked and its `#[no_mangle]` libc interceptors collide.
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim-aws-sdk-s3 = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim-macros = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim-rdkafka = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim-tokio = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
 madsim-tonic = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
 madsim-tonic-build = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
 # Patch third-party crates for deterministic simulation.

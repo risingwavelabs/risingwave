@@ -7673,38 +7673,6 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
-dependencies = [
- "ahash 0.8.11",
- "async-channel 2.5.0",
- "async-stream",
- "async-task",
- "bincode 1.3.3",
- "bytes",
- "downcast-rs 1.2.1",
- "errno",
- "futures-util",
- "lazy_static",
- "libc",
- "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "naive-timer",
- "panic-message",
- "rand 0.8.5",
- "rand_xoshiro",
- "rustversion",
- "serde",
- "spin 0.9.8",
- "tokio",
- "tokio-util",
- "toml 0.9.11+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "madsim"
-version = "0.2.34"
 source = "git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875#66e049aff3b50536db1a7973e2ee0d497bb21875"
 dependencies = [
  "ahash 0.8.11",
@@ -7718,7 +7686,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros 0.2.12 (git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875)",
+ "madsim-macros",
  "naive-timer",
  "panic-message",
  "rand 0.8.5",
@@ -7736,8 +7704,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b442215f0047e7e7df7b98991129c43ee5fb186ce899e8f7e27515bc99de508"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875#66e049aff3b50536db1a7973e2ee0d497bb21875"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -7746,21 +7713,9 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.4.0",
- "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim",
  "spin 0.9.8",
  "tracing",
-]
-
-[[package]]
-name = "madsim-macros"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
-dependencies = [
- "darling 0.14.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -7777,8 +7732,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875#66e049aff3b50536db1a7973e2ee0d497bb21875"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7786,7 +7740,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -7801,10 +7755,9 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875#66e049aff3b50536db1a7973e2ee0d497bb21875"
 dependencies = [
- "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim",
  "spin 0.9.8",
  "tokio",
 ]
@@ -7817,7 +7770,7 @@ dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim 0.2.34 (git+https://github.com/risingwavelabs/madsim.git?rev=66e049aff3b50536db1a7973e2ee0d497bb21875)",
+ "madsim",
  "tokio",
  "tonic 0.12.3",
  "tower 0.4.13",
@@ -12428,7 +12381,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "itertools 0.14.0",
- "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal 0.53.3",
@@ -12582,7 +12535,7 @@ dependencies = [
  "glob",
  "indexmap 2.12.0",
  "itertools 0.14.0",
- "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim",
  "madsim-rdkafka",
  "madsim-tokio",
  "maplit",
