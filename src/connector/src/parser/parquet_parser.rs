@@ -147,7 +147,7 @@ impl ParquetParser {
                             .type_from_field(parquet_field)
                             .is_ok_and(|inferred| &inferred == rw_data_type)
                         {
-                            // Extension-typed match (e.g. variant → jsonb): only the
+                            // Extension-typed match (e.g. variant): only the
                             // parquet-side field carries the metadata to convert.
                             parquet_field.as_ref().clone()
                         } else {

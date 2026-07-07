@@ -18,11 +18,10 @@ use std::ops::Div;
 use std::sync::{Arc, LazyLock};
 
 use arrow_array::ArrayRef;
+use arrow_array::cast::AsArray;
 use arrow_schema::extension::ExtensionType;
 use num_traits::abs;
-use parquet_variant::Variant;
 use parquet_variant_compute::{VariantArray, VariantType};
-use parquet_variant_json::VariantToJson;
 use thiserror_ext::AsReport;
 
 pub use super::arrow_58::{
@@ -31,9 +30,9 @@ pub use super::arrow_58::{
 };
 use crate::array::{
     Array, ArrayBuilder, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
-    JsonbArrayBuilder,
+    VariantArrayBuilder,
 };
-use crate::types::StructType;
+use crate::types::{Scalar, StructType, VariantVal};
 
 pub struct IcebergArrowConvert;
 
@@ -141,12 +140,9 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
-            // TODO(#25165): support Iceberg variant.
-            DataType::Variant => {
-                return Err(ArrayError::to_arrow(
-                    "VARIANT is not supported for Iceberg yet",
-                ));
-            }
+            // Schema-only mapping: converting variant arrays to Arrow (the write path)
+            // is still unsupported.
+            DataType::Variant => return Ok(variant_arrow_field(name)),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
@@ -237,7 +233,7 @@ impl FromArrow for IcebergArrowConvert {
         physical_type: &arrow_schema::DataType,
     ) -> Result<DataType, ArrayError> {
         match (type_name, physical_type) {
-            (VariantType::NAME, arrow_schema::DataType::Struct(_)) => Ok(DataType::Jsonb),
+            (VariantType::NAME, arrow_schema::DataType::Struct(_)) => Ok(DataType::Variant),
             _ => DefaultIcebergFromArrow.from_extension_type(type_name, physical_type),
         }
     }
@@ -248,13 +244,33 @@ impl FromArrow for IcebergArrowConvert {
         array: &arrow_array::ArrayRef,
     ) -> Result<ArrayImpl, ArrayError> {
         match type_name {
-            VariantType::NAME => variant_array_to_jsonb(array),
+            VariantType::NAME => variant_array_to_variant(array),
             _ => DefaultIcebergFromArrow.from_extension_array(type_name, array),
         }
     }
 }
 
-fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
+/// The Arrow field layout of an unshredded variant column, tagged with the
+/// `arrow.parquet.variant` extension.
+fn variant_arrow_field(name: &str) -> arrow_schema::Field {
+    let fields = [
+        Arc::new(arrow_schema::Field::new(
+            "metadata",
+            arrow_schema::DataType::Binary,
+            false,
+        )),
+        Arc::new(arrow_schema::Field::new(
+            "value",
+            arrow_schema::DataType::Binary,
+            false,
+        )),
+    ]
+    .into();
+    arrow_schema::Field::new(name, arrow_schema::DataType::Struct(fields), true)
+        .with_extension_type(VariantType)
+}
+
+fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
     use arrow_array::Array as _;
 
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
@@ -267,7 +283,7 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
     }
     let metadata_array = variant_array.metadata_field();
     let value_array = variant_array.value_field();
-    let mut builder = JsonbArrayBuilder::new(variant_array.len());
+    let mut builder = VariantArrayBuilder::new(variant_array.len());
 
     for idx in 0..variant_array.len() {
         if variant_array.is_null(idx) {
@@ -275,20 +291,28 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             continue;
         }
 
-        // `try_value` panics on corrupt bytes; decode via the fully-validating
-        // `Variant::try_new` so bad external data surfaces as an error.
+        // `from_parts` fully validates the untrusted bytes and re-encodes them into
+        // RW's canonical form, which the byte-wise `Eq`/`Ord` of VARIANT relies on.
         // TODO: rows of a batch virtually always share one metadata dictionary;
         // cache the validated metadata instead of re-validating it per row.
         let variant_result = match value_array {
             Some(value) if value.is_valid(idx) => {
-                Variant::try_new(metadata_array.value(idx), value.value(idx))
+                match (
+                    binary_array_value(metadata_array, idx),
+                    binary_array_value(value, idx),
+                ) {
+                    (Some(metadata), Some(value)) => VariantVal::from_parts(metadata, value),
+                    _ => Err(anyhow::anyhow!(
+                        "variant metadata/value is not a binary array"
+                    )),
+                }
             }
             // Per spec, a missing `value` means variant null.
-            _ => Ok(Variant::Null),
+            _ => Ok(VariantVal::null()),
         };
 
-        match variant_result.and_then(|variant| variant.to_json_value()) {
-            Ok(json_value) => builder.append_owned(Some(json_value.into())),
+        match variant_result {
+            Ok(variant) => builder.append(Some(variant.as_scalar_ref())),
             Err(err) => {
                 tracing::warn!(
                     error = %err.as_report(),
@@ -300,7 +324,19 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
         }
     }
 
-    Ok(ArrayImpl::Jsonb(builder.finish()))
+    Ok(ArrayImpl::Variant(builder.finish()))
+}
+
+/// Reads the raw bytes at `index` from a binary-like Arrow array, returning `None` if the array
+/// is not one of the binary physical layouts a parquet reader may produce for variant fields.
+fn binary_array_value(array: &ArrayRef, index: usize) -> Option<&[u8]> {
+    use arrow_schema::DataType;
+    match array.data_type() {
+        DataType::Binary => Some(array.as_binary::<i32>().value(index)),
+        DataType::LargeBinary => Some(array.as_binary::<i64>().value(index)),
+        DataType::BinaryView => Some(array.as_binary_view().value(index)),
+        _ => None,
+    }
 }
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
@@ -393,10 +429,10 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
-            // TODO(#25165): support Iceberg variant.
+            // TODO: support creating Iceberg tables with VARIANT columns.
             DataType::Variant => {
                 return Err(ArrayError::to_arrow(
-                    "VARIANT is not supported for Iceberg yet",
+                    "VARIANT is not supported for Iceberg table creation yet",
                 ));
             }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
@@ -426,7 +462,7 @@ mod test {
     use super::arrow_schema::DataType as ArrowDataType;
     use super::*;
     use crate::array::{Decimal, DecimalArray};
-    use crate::types::{MapType, ScalarRef};
+    use crate::types::{MapType, ToText};
 
     #[test]
     fn decimal() {
@@ -591,7 +627,7 @@ mod test {
     }
 
     #[test]
-    fn all_variant_internal_types_convert_to_jsonb() {
+    fn all_variant_internal_types_convert_to_variant() {
         let long_string = "x".repeat(64);
         let binary_bytes = [0x0a_u8, 0x0b, 0x0c, 0x0d];
         let object_and_list_json = Arc::new(arrow_array::StringArray::from(vec![
@@ -655,7 +691,7 @@ mod test {
 
         assert_eq!(
             IcebergArrowConvert.type_from_field(&field).unwrap(),
-            DataType::Jsonb
+            DataType::Variant
         );
 
         let array = Arc::new(variant_array.into_inner()) as ArrayRef;
@@ -664,9 +700,9 @@ mod test {
             .array_from_arrow_array(&field, &array)
             .unwrap();
         let values = converted
-            .into_jsonb()
+            .into_variant()
             .iter()
-            .map(|value| value.map(|value| value.to_owned_scalar()))
+            .map(|value| value.map(|value| value.to_text()))
             .collect::<Vec<_>>();
 
         let timestamp_micros_json =
@@ -687,30 +723,30 @@ mod test {
             values,
             vec![
                 None, // null Arrow row
-                Some("null".parse().unwrap()),
-                Some("true".parse().unwrap()),
-                Some("false".parse().unwrap()),
-                Some("34".parse().unwrap()),
-                Some("1234".parse().unwrap()),
-                Some("100000".parse().unwrap()),
-                Some("5000000000".parse().unwrap()),
-                Some("3.5".parse().unwrap()),
-                Some("14.25".parse().unwrap()),
-                Some("12345".parse().unwrap()),
-                Some("1234567890123".parse().unwrap()),
-                Some("1234567890123456789".parse().unwrap()),
-                Some(r#""2024-11-07""#.parse().unwrap()),
-                Some(timestamp_micros_json.parse().unwrap()),
-                Some(timestamp_ntz_micros_json.parse().unwrap()),
-                Some(timestamp_nanos_json.parse().unwrap()),
-                Some(timestamp_ntz_nanos_json.parse().unwrap()),
-                Some(time_json.parse().unwrap()),
-                Some(binary_json.parse().unwrap()),
-                Some(short_string_json.parse().unwrap()),
-                Some(long_string_json.parse().unwrap()),
-                Some(uuid_json.parse().unwrap()),
-                Some(r#"{"a":1,"b":[true,null]}"#.parse().unwrap()),
-                Some(r#"[1,{"x":2},"tail"]"#.parse().unwrap()),
+                Some("null".to_owned()),
+                Some("true".to_owned()),
+                Some("false".to_owned()),
+                Some("34".to_owned()),
+                Some("1234".to_owned()),
+                Some("100000".to_owned()),
+                Some("5000000000".to_owned()),
+                Some("3.5".to_owned()),
+                Some("14.25".to_owned()),
+                Some("12345".to_owned()),
+                Some("1234567890123".to_owned()),
+                Some("1234567890123456789".to_owned()),
+                Some(r#""2024-11-07""#.to_owned()),
+                Some(timestamp_micros_json),
+                Some(timestamp_ntz_micros_json),
+                Some(timestamp_nanos_json),
+                Some(timestamp_ntz_nanos_json),
+                Some(time_json),
+                Some(binary_json),
+                Some(short_string_json),
+                Some(long_string_json),
+                Some(uuid_json),
+                Some(r#"{"a":1,"b":[true,null]}"#.to_owned()),
+                Some(r#"[1,{"x":2},"tail"]"#.to_owned()),
             ],
         );
     }
@@ -721,10 +757,10 @@ mod test {
             "payload",
             ArrowDataType::Struct(
                 vec![
-                    Arc::new(variant_arrow_field("top_variant", true)),
+                    Arc::new(variant_arrow_field("top_variant")),
                     Arc::new(arrow_schema::Field::new(
                         "variant_list",
-                        ArrowDataType::List(Arc::new(variant_arrow_field("element", true))),
+                        ArrowDataType::List(Arc::new(variant_arrow_field("element"))),
                         true,
                     )),
                     Arc::new(arrow_schema::Field::new(
@@ -739,7 +775,7 @@ mod test {
                                             ArrowDataType::Utf8,
                                             false,
                                         )),
-                                        Arc::new(variant_arrow_field("value", true)),
+                                        Arc::new(variant_arrow_field("value")),
                                     ]
                                     .into(),
                                 ),
@@ -758,11 +794,11 @@ mod test {
         assert_eq!(
             IcebergArrowConvert.type_from_field(&payload_field).unwrap(),
             DataType::Struct(StructType::new(vec![
-                ("top_variant", DataType::Jsonb),
-                ("variant_list", DataType::list(DataType::Jsonb)),
+                ("top_variant", DataType::Variant),
+                ("variant_list", DataType::list(DataType::Variant)),
                 (
                     "variant_map",
-                    DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                    DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Variant)),
                 ),
             ])),
         );
@@ -777,7 +813,7 @@ mod test {
                     "entries",
                     ArrowDataType::Struct(
                         vec![
-                            Arc::new(variant_arrow_field("key", false)),
+                            Arc::new(variant_arrow_field("key")),
                             Arc::new(arrow_schema::Field::new("value", ArrowDataType::Utf8, true)),
                         ]
                         .into(),
@@ -790,12 +826,12 @@ mod test {
         );
 
         let err = IcebergArrowConvert.type_from_field(&field).unwrap_err();
-        assert!(err.to_string().contains("invalid map key type: jsonb"));
+        assert!(err.to_string().contains("invalid map key type: variant"));
     }
 
     #[test]
     fn invalid_variant_value_decodes_to_null() {
-        let field = variant_arrow_field("variant_col", true);
+        let field = variant_arrow_field("variant_col");
         // Row 0 is a valid variant string "HI"; row 1 has a corrupt value byte.
         let array = Arc::new(arrow_array::StructArray::from(vec![
             (
@@ -826,17 +862,17 @@ mod test {
             .array_from_arrow_array(&field, &array)
             .unwrap();
         let values = converted
-            .into_jsonb()
+            .into_variant()
             .iter()
-            .map(|value| value.map(|value| value.to_owned_scalar()))
+            .map(|value| value.map(|value| value.to_text()))
             .collect::<Vec<_>>();
 
-        assert_eq!(values, vec![Some(r#""HI""#.parse().unwrap()), None]);
+        assert_eq!(values, vec![Some(r#""HI""#.to_owned()), None]);
     }
 
     #[test]
     fn shredded_variant_is_rejected() {
-        let field = variant_arrow_field("variant_col", true);
+        let field = variant_arrow_field("variant_col");
         let array = Arc::new(arrow_array::StructArray::from(vec![
             (
                 Arc::new(arrow_schema::Field::new(
@@ -884,18 +920,11 @@ mod test {
             (Arc::new(variant_field), variant_child),
         ])) as ArrayRef;
 
-        // Declared as struct<v jsonb>: the parquet struct is a superset, so conversion
-        // goes through the projected path, which must decode the variant child to jsonb.
+        // Declared as struct<v variant>: the parquet struct is a superset, so conversion
+        // goes through the projected path, which must decode the variant child.
         let declared_field = arrow_schema::Field::new(
             "s",
-            ArrowDataType::Struct(
-                vec![Arc::new(arrow_schema::Field::new(
-                    "v",
-                    ArrowDataType::Utf8,
-                    true,
-                ))]
-                .into(),
-            ),
+            ArrowDataType::Struct(vec![Arc::new(variant_arrow_field("v"))].into()),
             true,
         );
         let converted = IcebergArrowConvert
@@ -903,30 +932,7 @@ mod test {
             .unwrap();
         assert_eq!(
             converted.data_type(),
-            DataType::Struct(StructType::new(vec![("v", DataType::Jsonb)])),
+            DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
         );
-    }
-
-    fn variant_arrow_field(name: &str, nullable: bool) -> arrow_schema::Field {
-        arrow_schema::Field::new(
-            name,
-            ArrowDataType::Struct(
-                vec![
-                    Arc::new(arrow_schema::Field::new(
-                        "metadata",
-                        ArrowDataType::Binary,
-                        false,
-                    )),
-                    Arc::new(arrow_schema::Field::new(
-                        "value",
-                        ArrowDataType::Binary,
-                        true,
-                    )),
-                ]
-                .into(),
-            ),
-            nullable,
-        )
-        .with_extension_type(VariantType)
     }
 }
