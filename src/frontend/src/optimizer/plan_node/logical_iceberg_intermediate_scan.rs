@@ -119,11 +119,6 @@ pub struct LogicalIcebergIntermediateScan {
     /// Info needed only when rewriting to a Hummock row-store scan.
     #[educe(Hash(ignore))]
     pub hummock_rewrite: HummockRewriteInfo,
-    /// Schema fields carrying the iceberg-side column types (before the engine-table
-    /// Hummock type remapping), for predicate pushdown. Kept aligned with
-    /// `core.column_catalog` through column pruning.
-    #[educe(Hash(ignore))]
-    iceberg_side_fields: Vec<Field>,
 }
 
 impl Eq for LogicalIcebergIntermediateScan {}
@@ -141,12 +136,6 @@ impl LogicalIcebergIntermediateScan {
     ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
 
-        let iceberg_side_fields = logical_source
-            .core
-            .column_catalog
-            .iter()
-            .map(|col| Field::new(col.name().to_owned(), col.data_type().clone()))
-            .collect();
         let mut core = logical_source.core.clone();
         // Apply type remapping: change the source column types to Hummock table types
         // so that the output schema has Hummock types.
@@ -165,12 +154,34 @@ impl LogicalIcebergIntermediateScan {
             time_travel_info,
             table_column_type_mapping,
             hummock_rewrite,
-            iceberg_side_fields,
         }
     }
 
     pub fn source_catalog(&self) -> Option<&SourceCatalog> {
         self.core.catalog.as_deref()
+    }
+
+    /// Fields carrying the iceberg-side column types (before the engine-table Hummock
+    /// type remapping), for predicate pushdown. Derived from the source catalog, which
+    /// the remapping never touches.
+    fn iceberg_side_fields(&self) -> Vec<Field> {
+        let catalog = self
+            .core
+            .catalog
+            .as_ref()
+            .expect("iceberg intermediate scan must have a source catalog");
+        self.core
+            .column_catalog
+            .iter()
+            .map(|col| {
+                let source_col = catalog
+                    .columns
+                    .iter()
+                    .find(|c| c.name() == col.name())
+                    .expect("output column must exist in the source catalog");
+                Field::from(&source_col.column_desc)
+            })
+            .collect()
     }
 
     pub fn output_columns(&self) -> impl ExactSizeIterator<Item = &str> {
@@ -215,10 +226,6 @@ impl LogicalIcebergIntermediateScan {
             time_travel_info: self.time_travel_info.clone(),
             table_column_type_mapping: self.table_column_type_mapping.clone(),
             hummock_rewrite: self.hummock_rewrite.prune_columns(required_cols),
-            iceberg_side_fields: required_cols
-                .iter()
-                .map(|idx| self.iceberg_side_fields[*idx].clone())
-                .collect(),
         }
     }
 }
@@ -275,7 +282,7 @@ impl PredicatePushdown for LogicalIcebergIntermediateScan {
             iceberg_predicate,
             extracted_condition,
             remaining_condition,
-        } = extract_iceberg_predicate(predicate, &self.iceberg_side_fields);
+        } = extract_iceberg_predicate(predicate, &self.iceberg_side_fields());
         let plan = self
             .add_predicate(iceberg_predicate, extracted_condition)
             .into();
