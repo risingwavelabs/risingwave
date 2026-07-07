@@ -114,7 +114,7 @@ impl Hash for VariantVal {
 
 impl PartialEq for VariantRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        (self.metadata(), self.value()) == (other.metadata(), other.value())
+        self.data == other.data
     }
 }
 
@@ -122,7 +122,7 @@ impl Eq for VariantRef<'_> {}
 
 impl Hash for VariantRef<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (self.metadata(), self.value()).hash(state);
+        self.data.hash(state);
     }
 }
 
@@ -146,7 +146,10 @@ impl PartialOrd for VariantRef<'_> {
 
 impl Ord for VariantRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.metadata(), self.value()).cmp(&(other.metadata(), other.value()))
+        // Must agree with `memcmp_serialize`, which encodes the whole tagged buffer as a
+        // memcomparable byte string. Comparing `(metadata, value)` instead would diverge on the
+        // little-endian metadata length prefix inside the buffer.
+        self.data.cmp(other.data)
     }
 }
 
@@ -209,10 +212,6 @@ impl VariantVal {
         }
     }
 
-    pub fn from_metadata_value(metadata: Vec<u8>, value: Vec<u8>) -> anyhow::Result<Self> {
-        Self::from_parts(&metadata, &value)
-    }
-
     pub fn from_parquet_variant(variant: ParquetVariant<'_, '_>) -> anyhow::Result<Self> {
         let field_names = collect_variant_field_names(variant.clone())?;
         let mut builder = canonical_builder(&field_names);
@@ -258,7 +257,7 @@ impl VariantVal {
             .ok_or_else(|| memcomparable::Error::Message("invalid variant".into()))
     }
 
-    pub fn from_jsonb(jsonb: JsonbVal) -> anyhow::Result<Self> {
+    pub fn from_jsonb(jsonb: JsonbRef<'_>) -> anyhow::Result<Self> {
         Self::from_json_value(&serde_json::Value::from_str(&jsonb.to_string())?)
     }
 
@@ -350,69 +349,45 @@ impl<'a> VariantRef<'a> {
         }
     }
 
-    pub fn access_object_field(self, key: &str) -> Option<VariantVal> {
-        self.parquet_variant()
-            .get_object_field(key)
-            .and_then(|variant| VariantVal::from_parquet_variant(variant).ok())
-    }
-
-    pub fn access_array_element(self, index: i32) -> Option<VariantVal> {
-        let variant = self.parquet_variant();
-        let list = variant.as_list()?.clone();
-        let len = list.len();
-        let index = if index >= 0 {
-            index as usize
-        } else {
-            len.checked_sub(index.unsigned_abs() as usize)?
-        };
-        list.get(index)
-            .and_then(|variant| VariantVal::from_parquet_variant(variant).ok())
-    }
-
     pub fn access_path(self, path: &str) -> Option<VariantVal> {
         self.access_path_strict(path).ok().flatten()
     }
 
     pub fn access_path_strict(self, path: &str) -> anyhow::Result<Option<VariantVal>> {
-        let mut value = self.to_owned_scalar();
+        // Walk the whole path on borrowed variants sharing the same metadata, and canonicalize
+        // (re-encode) only the final leaf.
+        let mut variant = self.parquet_variant();
         for token in parse_path(path)? {
-            value = match token {
-                PathToken::Field(field) => {
-                    match value.as_scalar_ref().access_object_field(&field) {
-                        Some(value) => value,
-                        None => return Ok(None),
+            let next = match token {
+                PathToken::Field(field) => variant.get_object_field(&field),
+                // Pattern-match instead of `as_list`, whose `&'m self` receiver would keep
+                // `variant` borrowed and forbid the reassignment below.
+                PathToken::Index(index) => match &variant {
+                    ParquetVariant::List(list) => {
+                        let index = if index >= 0 {
+                            Some(index as usize)
+                        } else {
+                            list.len().checked_sub(index.unsigned_abs() as usize)
+                        };
+                        index.and_then(|index| list.get(index))
                     }
-                }
-                PathToken::Index(index) => {
-                    match value.as_scalar_ref().access_array_element(index) {
-                        Some(value) => value,
-                        None => return Ok(None),
-                    }
-                }
+                    _ => None,
+                },
             };
+            match next {
+                Some(next) => variant = next,
+                None => return Ok(None),
+            }
         }
-        Ok(Some(value))
+        VariantVal::from_parquet_variant(variant).map(Some)
     }
 
-    pub fn to_jsonb(self) -> JsonbVal {
-        let json = self.to_text();
-        JsonbVal::from_str(&json).expect("variant JSON representation should be valid jsonb")
-    }
-}
-
-impl From<JsonbVal> for VariantVal {
-    fn from(value: JsonbVal) -> Self {
-        Self::from_jsonb(value).expect("jsonb should be convertible to variant")
-    }
-}
-
-impl From<JsonbRef<'_>> for VariantVal {
-    fn from(value: JsonbRef<'_>) -> Self {
-        Self::from_json_value(
-            &serde_json::Value::from_str(&value.to_string())
-                .expect("jsonb string should be valid JSON"),
-        )
-        .expect("jsonb should be convertible to variant")
+    pub fn to_jsonb(self) -> anyhow::Result<JsonbVal> {
+        let json = self
+            .parquet_variant()
+            .to_json_value()
+            .context("failed to convert variant to jsonb")?;
+        Ok(json.into())
     }
 }
 
@@ -536,6 +511,9 @@ fn collect_variant_field_names(
     Ok(field_names)
 }
 
+/// Besides collecting object field names, this walk also validates that the input satisfies
+/// RisingWave's canonical variant invariants (currently: no non-finite floats), since it visits
+/// every value of an untrusted variant exactly once before re-encoding.
 fn collect_variant_field_names_inner(
     variant: ParquetVariant<'_, '_>,
     field_names: &mut BTreeSet<String>,
@@ -555,6 +533,12 @@ fn collect_variant_field_names_inner(
                     field_names,
                 )?;
             }
+        }
+        ParquetVariant::Float(v) if !v.is_finite() => {
+            bail!("non-finite float cannot be converted to variant")
+        }
+        ParquetVariant::Double(v) if !v.is_finite() => {
+            bail!("non-finite float cannot be converted to variant")
         }
         _ => {}
     }
@@ -893,6 +877,15 @@ mod tests {
                 .to_string(),
             "7"
         );
+        assert_eq!(
+            v.as_scalar_ref()
+                .access_path("$.a[-1].b")
+                .unwrap()
+                .to_string(),
+            "7"
+        );
+        assert!(v.as_scalar_ref().access_path("$.a[-2]").is_none());
+        assert!(v.as_scalar_ref().access_path("$.a[0].b[0]").is_none());
         assert!(
             v.as_scalar_ref()
                 .access_path_strict("$.missing")
@@ -901,6 +894,68 @@ mod tests {
         );
         assert!(v.as_scalar_ref().access_path_strict("$.").is_err());
         assert!(v.as_scalar_ref().access_path("$.").is_none());
+    }
+
+    #[test]
+    fn ord_matches_memcmp_encoding_order() {
+        fn memcmp_encode(v: &VariantVal) -> Vec<u8> {
+            let mut serializer = Serializer::new(vec![]);
+            v.as_scalar_ref().memcmp_serialize(&mut serializer).unwrap();
+            serializer.into_inner()
+        }
+
+        // Values with different metadata lengths: comparing `(metadata, value)` tuples would
+        // disagree with the encoded order on the metadata length prefix.
+        let values: Vec<VariantVal> = [
+            "1",
+            r#""short""#,
+            r#"{"b":1,"c":1}"#,
+            r#"{"aaaaaaaaaa":1}"#,
+            r#"{"a":1}"#,
+            "[1,2,3]",
+        ]
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+        for a in &values {
+            for b in &values {
+                assert_eq!(
+                    a.cmp(b),
+                    memcmp_encode(a).cmp(&memcmp_encode(b)),
+                    "Ord and memcmp encoding disagree for {a} vs {b}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deep_jsonb_to_variant_returns_error() {
+        let shallow = JsonbVal::from(serde_json::Value::from(1));
+        assert!(VariantVal::from_jsonb(shallow.as_scalar_ref()).is_ok());
+
+        // serde_json's parser is limited to 128 nesting levels, while jsonb values from other
+        // sources can be deeper. The conversion must fail cleanly instead of panicking.
+        let mut json = serde_json::Value::from(1);
+        for _ in 0..200 {
+            json = serde_json::Value::Array(vec![json]);
+        }
+        let deep = JsonbVal::from(json);
+        assert!(VariantVal::from_jsonb(deep.as_scalar_ref()).is_err());
+    }
+
+    #[test]
+    fn rejects_non_finite_double_from_parquet_variant() {
+        let mut builder = VariantBuilder::new();
+        builder.append_value(f64::NAN);
+        let (metadata, value) = builder.finish();
+
+        // The import boundary (e.g. Arrow `struct<metadata, value>` payloads) must reject
+        // non-finite doubles, which RisingWave's own construction paths never produce.
+        assert!(VariantVal::from_parts(&metadata, &value).is_err());
+
+        // Even if such a value slipped through, converting it to jsonb must error, not panic.
+        let v = VariantVal::from_canonical_parts(&metadata, &value);
+        assert!(v.as_scalar_ref().to_jsonb().is_err());
     }
 
     #[test]

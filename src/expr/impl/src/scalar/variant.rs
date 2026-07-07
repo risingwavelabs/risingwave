@@ -50,6 +50,8 @@ fn variant_typeof(value: VariantRef<'_>, writer: &mut impl std::fmt::Write) {
 }
 
 #[function("variant_to_jsonb(variant) -> jsonb")]
-fn variant_to_jsonb(value: VariantRef<'_>) -> JsonbVal {
-    value.to_jsonb()
+fn variant_to_jsonb(value: VariantRef<'_>) -> Result<JsonbVal> {
+    value
+        .to_jsonb()
+        .map_err(|e| ExprError::Parse(e.to_report_string().into()))
 }

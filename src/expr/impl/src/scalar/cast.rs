@@ -154,13 +154,14 @@ where
 }
 
 #[function("cast(jsonb) -> variant")]
-pub fn jsonb_to_variant(elem: JsonbRef<'_>) -> VariantVal {
-    elem.into()
+pub fn jsonb_to_variant(elem: JsonbRef<'_>) -> Result<VariantVal> {
+    VariantVal::from_jsonb(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))
 }
 
 #[function("cast(variant) -> jsonb")]
-pub fn variant_to_jsonb(elem: VariantRef<'_>) -> JsonbVal {
+pub fn variant_to_jsonb(elem: VariantRef<'_>) -> Result<JsonbVal> {
     elem.to_jsonb()
+        .map_err(|e| ExprError::Parse(e.to_report_string().into()))
 }
 
 /// Extract the timestamp from row id.
