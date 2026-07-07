@@ -22,7 +22,7 @@ use super::prelude::*;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchFilter, BatchIcebergScan, PlanTreeNodeUnary};
-use crate::utils::Condition;
+use crate::utils::{Condition, is_iceberg_predicate_pushable_column_type};
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
 /// zone-map is used to evaluate predicates on iceberg tables.
@@ -205,7 +205,9 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                     }
                 }
                 ExprType::IsNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
+                    ExprImpl::InputRef(lhs)
+                        if is_iceberg_predicate_pushable_column_type(&lhs.return_type()) =>
+                    {
                         let column_name = &fields[lhs.index].name;
                         let reference = Reference::new(column_name);
                         Some(reference.is_null())
@@ -213,7 +215,9 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                     _ => None,
                 },
                 ExprType::IsNotNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
+                    ExprImpl::InputRef(lhs)
+                        if is_iceberg_predicate_pushable_column_type(&lhs.return_type()) =>
+                    {
                         let column_name = &fields[lhs.index].name;
                         let reference = Reference::new(column_name);
                         Some(reference.is_not_null())
