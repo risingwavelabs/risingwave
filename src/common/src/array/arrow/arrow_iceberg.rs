@@ -28,7 +28,8 @@ pub use super::arrow_58::{
     is_parquet_schema_match_source_schema,
 };
 use crate::array::{
-    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray, JsonbArray,
+    Array, ArrayBuilder, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+    JsonbArrayBuilder,
 };
 use crate::types::StructType;
 
@@ -253,11 +254,11 @@ impl FromArrow for IcebergArrowConvert {
 
 fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
-    let mut values = Vec::with_capacity(variant_array.len());
+    let mut builder = JsonbArrayBuilder::new(variant_array.len());
 
     for idx in 0..variant_array.len() {
         if variant_array.is_null(idx) {
-            values.push(None);
+            builder.append_null();
             continue;
         }
 
@@ -265,19 +266,19 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             .try_value(idx)
             .and_then(|variant| variant.to_json_value())
         {
-            Ok(json_value) => values.push(Some(json_value.into())),
+            Ok(json_value) => builder.append_owned(Some(json_value.into())),
             Err(err) => {
                 tracing::warn!(
                     "failed to decode iceberg variant value at index {}: {}. It will be replaced with null.",
                     idx,
                     err
                 );
-                values.push(None);
+                builder.append_null();
             }
         }
     }
 
-    Ok(ArrayImpl::Jsonb(JsonbArray::from_iter(values)))
+    Ok(ArrayImpl::Jsonb(builder.finish()))
 }
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
