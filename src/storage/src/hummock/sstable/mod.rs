@@ -192,14 +192,6 @@ impl Sstable {
         !self.filter_reader.is_empty()
     }
 
-    pub fn calculate_block_info(&self, block_index: usize) -> (Range<usize>, usize) {
-        let block_meta = &self.meta.block_metas[block_index];
-        let range =
-            block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
-        let uncompressed_capacity = block_meta.uncompressed_size as usize;
-        (range, uncompressed_capacity)
-    }
-
     #[inline(always)]
     pub fn hash_for_filter(dist_key: &[u8], table_id: u32) -> u64 {
         let dist_key_hash = xxh64::xxh64(dist_key, 0);
