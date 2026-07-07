@@ -154,6 +154,47 @@ services:
       timeout: 5s
       retries: 5
 
+  keycloak_oidc:
+    image: quay.io/keycloak/keycloak:26.3.3
+    command:
+      - start-dev
+      - --import-realm
+      - --hostname=http://keycloak_oidc:8080
+      - --http-enabled=true
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    expose:
+      - "8080"
+    volumes:
+      - ./kafka-oidc/keycloak/realms:/opt/keycloak/data/import:ro
+
+  message_queue_oidc:
+    image: quay.io/strimzi/kafka:0.47.0-kafka-4.0.0
+    depends_on:
+      - keycloak_oidc
+    entrypoint:
+      - /bin/bash
+      - /opt/kafka-oidc/start.sh
+    expose:
+      - "9091"
+      - "9092"
+    environment:
+      KEYCLOAK_HOST: keycloak_oidc
+      KEYCLOAK_URI: http://keycloak_oidc:8080
+      REALM: demo
+      LOG_DIR: /tmp/kafka-logs
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      OAUTH_CLIENT_ID: kafka-broker
+      OAUTH_CLIENT_SECRET: kafka-broker-secret
+      OAUTH_TOKEN_ENDPOINT_URI: http://keycloak_oidc:8080/realms/demo/protocol/openid-connect/token
+      OAUTH_VALID_ISSUER_URI: http://keycloak_oidc:8080/realms/demo
+      OAUTH_JWKS_ENDPOINT_URI: http://keycloak_oidc:8080/realms/demo/protocol/openid-connect/certs
+      OAUTH_USERNAME_CLAIM: preferred_username
+    volumes:
+      - ./kafka-oidc/kafka:/opt/kafka-oidc:ro
+
   rabbitmq-server:
     image: rabbitmq:3-management
     ports:
@@ -218,6 +259,15 @@ services:
       - vault-server
       - message_queue_sasl_1
       - message_queue_sasl_2
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  kafka-oidc-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - keycloak_oidc
+      - message_queue_oidc
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

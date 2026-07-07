@@ -1,0 +1,165 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS kafka_oidc_sink;
+
+statement ok
+DROP TABLE IF EXISTS kafka_oidc_sink_input;
+
+statement ok
+DROP TABLE IF EXISTS kafka_oidc_source_inline;
+
+statement ok
+DROP TABLE IF EXISTS kafka_oidc_source_conn;
+
+statement ok
+DROP CONNECTION IF EXISTS kafka_oidc_conn;
+
+statement ok
+DROP SECRET IF EXISTS kafka_oidc_producer_secret;
+
+statement ok
+DROP SECRET IF EXISTS kafka_oidc_consumer_secret;
+
+system ok
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py recreate-topic perf293_oidc_source 1
+
+
+system ok
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py recreate-topic perf293_oidc_sink 1
+
+
+system ok
+cat << EOF | python3 e2e_test/kafka-oidc/kafka_oidc_admin.py produce-lines perf293_oidc_source
+{"id":101,"payload":"rw_oidc_alpha"}
+{"id":102,"payload":"rw_oidc_beta"}
+{"id":103,"payload":"rw_oidc_gamma"}
+EOF
+
+
+statement ok
+CREATE SECRET kafka_oidc_consumer_secret WITH (backend = 'meta') AS '${KAFKA_OIDC_CONSUMER_CLIENT_SECRET}';
+
+statement ok
+CREATE SECRET kafka_oidc_producer_secret WITH (backend = 'meta') AS '${KAFKA_OIDC_PRODUCER_CLIENT_SECRET}';
+
+statement ok
+CREATE CONNECTION kafka_oidc_conn WITH (
+    type = 'kafka',
+    properties.bootstrap.server = '${KAFKA_OIDC_BOOTSTRAP_SERVERS}',
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'OAUTHBEARER',
+    properties.sasl.oauthbearer.method = 'oidc',
+    properties.sasl.oauthbearer.client.id = '${KAFKA_OIDC_CONSUMER_CLIENT_ID}',
+    properties.sasl.oauthbearer.client.secret = SECRET kafka_oidc_consumer_secret,
+    properties.sasl.oauthbearer.token.endpoint.url = '${KAFKA_OIDC_TOKEN_ENDPOINT_URL}'
+);
+
+statement ok
+CREATE TABLE kafka_oidc_source_conn (
+    id int,
+    payload varchar
+) WITH (
+    connector = 'kafka',
+    connection = kafka_oidc_conn,
+    topic = 'perf293_oidc_source',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE kafka_oidc_source_inline (
+    id int,
+    payload varchar
+) WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = '${KAFKA_OIDC_BOOTSTRAP_SERVERS}',
+    topic = 'perf293_oidc_source',
+    scan.startup.mode = 'earliest',
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'OAUTHBEARER',
+    properties.sasl.oauthbearer.method = 'oidc',
+    properties.sasl.oauthbearer.client.id = '${KAFKA_OIDC_CONSUMER_CLIENT_ID}',
+    properties.sasl.oauthbearer.client.secret = SECRET kafka_oidc_consumer_secret,
+    properties.sasl.oauthbearer.token.endpoint.url = '${KAFKA_OIDC_TOKEN_ENDPOINT_URL}'
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 2s
+
+query IT rowsort retry 10 backoff 2s
+SELECT id, payload FROM kafka_oidc_source_conn;
+----
+101 rw_oidc_alpha
+102 rw_oidc_beta
+103 rw_oidc_gamma
+
+
+query IT rowsort retry 10 backoff 2s
+SELECT id, payload FROM kafka_oidc_source_inline;
+----
+101 rw_oidc_alpha
+102 rw_oidc_beta
+103 rw_oidc_gamma
+
+
+statement ok
+CREATE TABLE kafka_oidc_sink_input (
+    id int primary key,
+    payload varchar
+);
+
+statement ok
+INSERT INTO kafka_oidc_sink_input VALUES (201, 'sink_alpha'), (202, 'sink_beta');
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SINK kafka_oidc_sink FROM kafka_oidc_sink_input WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = '${KAFKA_OIDC_BOOTSTRAP_SERVERS}',
+    topic = 'perf293_oidc_sink',
+    type = 'append-only',
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'OAUTHBEARER',
+    properties.sasl.oauthbearer.method = 'oidc',
+    properties.sasl.oauthbearer.client.id = '${KAFKA_OIDC_PRODUCER_CLIENT_ID}',
+    properties.sasl.oauthbearer.client.secret = SECRET kafka_oidc_producer_secret,
+    properties.sasl.oauthbearer.token.endpoint.url = '${KAFKA_OIDC_TOKEN_ENDPOINT_URL}'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only = 'true'
+);
+
+system ok
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py consume-values perf293_oidc_sink 2 20
+----
+{"id":201,"payload":"sink_alpha"}
+{"id":202,"payload":"sink_beta"}
+
+
+statement ok
+DROP SINK kafka_oidc_sink;
+
+statement ok
+DROP TABLE kafka_oidc_sink_input;
+
+statement ok
+DROP TABLE kafka_oidc_source_inline;
+
+statement ok
+DROP TABLE kafka_oidc_source_conn;
+
+statement ok
+DROP CONNECTION kafka_oidc_conn;
+
+statement ok
+DROP SECRET kafka_oidc_producer_secret;
+
+statement ok
+DROP SECRET kafka_oidc_consumer_secret;
+
+system ok
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py delete-topic perf293_oidc_source
+
+
+system ok
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py delete-topic perf293_oidc_sink
