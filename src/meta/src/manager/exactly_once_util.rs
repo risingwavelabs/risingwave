@@ -178,15 +178,12 @@ pub async fn list_sink_states_ordered_by_epoch(
 // on meta restart) and self-heal them once the remap is provably applied.
 
 /// A recovered pending remap: the `remap_id` plus the decoded `mapping_paths` (row-provenance NDJSON
-/// paths for the writer to remap against) and `input_files` (removed input DATA/DV paths used by the
-/// satisfied check).
+/// paths for the writer to remap against) and `input_files` (removed input DATA/DV paths). The
+/// coordinator-side window fix-up (`remap_in_window_position_deletes`) matches stray in-flight
+/// position-deletes against these removed input DATA file paths and remaps them via `mapping_paths`.
 pub struct PendingRemapRecord {
     pub remap_id: i64,
     pub mapping_paths: Vec<String>,
-    // TODO(B4-window): consumed by the coordinator-side window fix-up (not yet implemented), which
-    // remaps stray position-deletes against these removed input DATA file paths. Persisted and
-    // decoded now so the durable schema is stable; unread until that lands.
-    #[expect(dead_code, reason = "persisted for the B4-window fix-up; not yet read")]
     pub input_files: Vec<String>,
 }
 

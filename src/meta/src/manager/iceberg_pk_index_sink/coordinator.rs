@@ -87,8 +87,28 @@ pub struct PendingRemapReTrigger {
 /// `remap_id` — i.e. when the writer has durably applied the remap. It is never cleared by
 /// inspecting the iceberg snapshot: the overwrite removes the input files immediately, long before
 /// the writer remaps, so a snapshot-based clear would drop the record while the index is still stale.
+///
+/// While the record is present the steady-state commit path uses `input_files` + `mapping_paths` to
+/// remap in-window stray position-delete DVs (see [`remap_in_window_position_deletes`]): a delete of
+/// a just-compacted PK before the writer remaps still resolves the pk-index to a REMOVED input file,
+/// so the writer emits a DV against that removed file. Left as-is it masks nothing and the deleted
+/// row resurrects; the fix-up rewrites it into an OUTPUT DV.
 struct PendingRemapState {
     remap_id: i64,
+    /// Removed input file paths of this remap (DATA + R-era DV paths; only DATA paths ever match a
+    /// stray DV's `referenced_data_file`). Used to detect stray in-window DVs.
+    input_files: HashSet<String>,
+    /// Row-provenance NDJSON paths, read lazily by the fix-up only when a stray DV is found.
+    mapping_paths: Vec<String>,
+}
+
+/// The subset of a [`PendingRemapState`] the steady-state commit needs to remap in-window stray
+/// position-delete DVs. Built from `pending_remaps` and passed into [`commit_one_epoch`]; cloned per
+/// retry attempt so each attempt runs against its own freshly-reloaded snapshot.
+#[derive(Clone)]
+struct PendingRemapFixup {
+    input_files: HashSet<String>,
+    mapping_paths: Vec<String>,
 }
 
 /// Bound the init phase so a register call can't hang forever if the iceberg endpoint is unreachable;
@@ -202,10 +222,12 @@ impl IcebergPkIndexSinkCoordinator {
         for record in records {
             re_trigger.push(PendingRemapReTrigger {
                 remap_id: record.remap_id,
-                mapping_paths: record.mapping_paths,
+                mapping_paths: record.mapping_paths.clone(),
             });
             self.pending_remaps.push(PendingRemapState {
                 remap_id: record.remap_id,
+                input_files: record.input_files.into_iter().collect(),
+                mapping_paths: record.mapping_paths,
             });
         }
         Ok(re_trigger)
@@ -258,12 +280,24 @@ impl IcebergPkIndexSinkCoordinator {
             return Ok(());
         };
 
+        // Snapshot the still-pending compaction remaps for the in-window fix-up. Empty in the
+        // common steady state, in which case `commit_one_epoch` short-circuits with zero overhead.
+        let pending_remaps: Vec<PendingRemapFixup> = self
+            .pending_remaps
+            .iter()
+            .map(|p| PendingRemapFixup {
+                input_files: p.input_files.clone(),
+                mapping_paths: p.mapping_paths.clone(),
+            })
+            .collect();
+
         let refreshed_table = commit_one_epoch(
             self.catalog.clone(),
             self.table.identifier().clone(),
             self.target_branch.clone(),
             &commit,
             self.retry_num,
+            pending_remaps,
         )
         .await
         .map_err(|err| {
@@ -382,7 +416,11 @@ impl IcebergPkIndexSinkCoordinator {
                 remap_id, self.sink_id
             )
         })?;
-        self.pending_remaps.push(PendingRemapState { remap_id });
+        self.pending_remaps.push(PendingRemapState {
+            remap_id,
+            input_files: input_file_paths.iter().cloned().collect(),
+            mapping_paths,
+        });
         Ok(())
     }
 
@@ -526,6 +564,7 @@ async fn commit_one_epoch(
     target_branch: String,
     commit: &EpochCommit,
     retry_num: usize,
+    pending_remaps: Vec<PendingRemapFixup>,
 ) -> Result<Table, CommitError> {
     let merged = commit.merged.clone();
     let snapshot_id = commit.snapshot_id;
@@ -542,6 +581,7 @@ async fn commit_one_epoch(
             let catalog = catalog.clone();
             let target_branch = target_branch.clone();
             let materialized_add_files = materialized_add_files.clone();
+            let pending_remaps = pending_remaps.clone();
             async move {
                 // Idempotency: if iceberg already saw this `snapshot_id`, skip the overwrite_files transaction.
                 if table
@@ -581,11 +621,28 @@ async fn commit_one_epoch(
                         .map(&materialize)
                         .collect::<Result<Vec<_>, _>>()?,
                 };
-                let overwrite_files: Vec<DataFile> = merged
+                let mut overwrite_files: Vec<DataFile> = merged
                     .overwrite_files
                     .iter()
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
+
+                // In-window fix-up: while a compaction remap is pending, a delete of a
+                // just-compacted PK still resolves the pk-index to a REMOVED input file, so the
+                // writer emits a position-delete DV against that removed file. Committed as-is it
+                // masks nothing (the file is gone) and the deleted row resurrects. Rewrite each such
+                // stray DV into an OUTPUT DV masking the remapped positions on the live output data
+                // file. Returns the fixed `add_files` plus any pre-existing output DVs to supersede
+                // (merged into the new DV so a data file never ends up with two DVs). Fast path:
+                // with no pending remap this returns immediately, adding zero steady-state overhead.
+                let (add_files, superseded) = remap_in_window_position_deletes(
+                    &table,
+                    &target_branch,
+                    add_files,
+                    &pending_remaps,
+                )
+                .await?;
+                overwrite_files.extend(superseded);
 
                 let txn = Transaction::new(&table);
                 let action = txn
@@ -887,6 +944,238 @@ fn compute_dead_out_positions(
     dead_by_output
 }
 
+/// A still-pending compaction remap's removed input file set + its parsed row-provenance mapping,
+/// as consumed by the pure in-window fix-up core [`plan_in_window_dv_remap`].
+struct PendingRemapMapping {
+    input_files: HashSet<String>,
+    mapping: HashMap<(String, u64), (String, u64)>,
+}
+
+/// If `data_file` is a position-delete DV whose referenced data file was removed by one of the
+/// pending remaps, return that remap's index. Returns `None` for data files, equality deletes, and
+/// DVs referencing a still-live (non-input) data file — those pass through the fix-up untouched.
+fn stray_dv_owner(data_file: &DataFile, input_sets: &[&HashSet<String>]) -> Option<usize> {
+    if data_file.content_type() != DataContentType::PositionDeletes {
+        return None;
+    }
+    let referenced = data_file.referenced_data_file()?;
+    input_sets
+        .iter()
+        .position(|s| s.contains(referenced.as_str()))
+}
+
+/// Pure core of the in-window position-delete fix-up. Splits `add_files` into the files to keep and
+/// the stray position-delete DVs (those referencing a REMOVED compaction input data file), and
+/// remaps each stray DV's deleted positions — supplied by `dv_positions`, keyed by the DV's file
+/// path — to OUTPUT positions via the owning remap's mapping. Returns the surviving `add_files`
+/// (stray DVs dropped) and the `output_file -> DeleteVector` mask to author as replacement DVs.
+///
+/// A stray position with no mapping entry was already dead at read snapshot `R` (its row was never
+/// written to any output) and is skipped — but its stray DV is still dropped: it must not be
+/// committed against a removed file. A DV referencing a still-live (non-input) data file, or any
+/// data file, is kept untouched. With no pending remap `stray_dv_owner` never matches, so every file
+/// is kept and the mask is empty (the async caller guards this even earlier).
+fn plan_in_window_dv_remap(
+    add_files: Vec<DataFile>,
+    pending: &[PendingRemapMapping],
+    dv_positions: &HashMap<String, Vec<u64>>,
+) -> (Vec<DataFile>, HashMap<String, DeleteVector>) {
+    let input_sets: Vec<&HashSet<String>> = pending.iter().map(|p| &p.input_files).collect();
+    let mut kept = Vec::with_capacity(add_files.len());
+    let mut dead_by_output: HashMap<String, DeleteVector> = HashMap::new();
+    for f in add_files {
+        let Some(idx) = stray_dv_owner(&f, &input_sets) else {
+            kept.push(f);
+            continue;
+        };
+        let referenced = f
+            .referenced_data_file()
+            .expect("stray_dv_owner guarantees referenced_data_file");
+        let positions = dv_positions.get(f.file_path()).cloned().unwrap_or_default();
+        let deleted_inputs = positions.into_iter().map(|pos| (referenced.clone(), pos));
+        for (out_file, dv) in compute_dead_out_positions(&pending[idx].mapping, deleted_inputs) {
+            let entry = dead_by_output.entry(out_file).or_default();
+            for pos in dv.iter() {
+                entry.insert(pos);
+            }
+        }
+        // Stray DV dropped (not pushed to `kept`).
+    }
+    (kept, dead_by_output)
+}
+
+/// Steady-state in-window fix-up. Rewrites any position-delete DV in `add_files` that still
+/// references a REMOVED compaction input data file (a delete that landed before the writer applied
+/// its pk-index remap) into an OUTPUT DV masking the remapped positions on the live output data
+/// file. Without this the stray DV commits against a file absent from the snapshot, masks nothing,
+/// and the deleted row resurrects.
+///
+/// Returns `(add_files, superseded)`: the rewritten add set (stray DVs dropped, replacement output
+/// DVs appended) and any pre-existing live output DVs that were merged into a replacement and must
+/// be superseded (added to the overwrite's delete set) so no output data file ends up referenced by
+/// two DVs.
+///
+/// Fast path: with no pending remap (the overwhelmingly common steady state) this returns after a
+/// single `is_empty` check — zero overhead on the hot path.
+async fn remap_in_window_position_deletes(
+    table: &Table,
+    target_branch: &str,
+    add_files: Vec<DataFile>,
+    pending: &[PendingRemapFixup],
+) -> std::result::Result<(Vec<DataFile>, Vec<DataFile>), CommitError> {
+    if pending.is_empty() {
+        return Ok((add_files, Vec::new()));
+    }
+
+    let input_sets: Vec<&HashSet<String>> = pending.iter().map(|p| &p.input_files).collect();
+
+    // Identify stray DVs and read their deleted positions; record which pending remaps own a stray
+    // so only their provenance mappings are read.
+    let mut dv_positions: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut owning: HashSet<usize> = HashSet::new();
+    for f in &add_files {
+        if let Some(idx) = stray_dv_owner(f, &input_sets) {
+            owning.insert(idx);
+            let positions = read_dv_positions_from_data_file(table.file_io(), f)
+                .await
+                .map_err(|e| {
+                    CommitError::Commit(anyhow!(e).context("read in-window stray DV positions"))
+                })?;
+            dv_positions.insert(f.file_path().to_owned(), positions.iter().collect());
+        }
+    }
+
+    if owning.is_empty() {
+        // A remap is pending but no in-flight DV references its removed inputs — nothing to do.
+        return Ok((add_files, Vec::new()));
+    }
+
+    // Read the row-provenance mapping only for the pending remaps that actually own a stray DV.
+    let mut parsed: Vec<PendingRemapMapping> = Vec::with_capacity(pending.len());
+    for (i, p) in pending.iter().enumerate() {
+        let mapping = if owning.contains(&i) {
+            read_row_provenance_mapping(table, &p.mapping_paths).await?
+        } else {
+            HashMap::new()
+        };
+        parsed.push(PendingRemapMapping {
+            input_files: p.input_files.clone(),
+            mapping,
+        });
+    }
+
+    let (mut kept, mut dead_by_output) = plan_in_window_dv_remap(add_files, &parsed, &dv_positions);
+
+    if dead_by_output.is_empty() {
+        // Every stray position was already dead at R (no mapping entry): the strays are dropped and
+        // there is nothing to mask.
+        return Ok((kept, Vec::new()));
+    }
+
+    // BIGGEST RISK resolution: the replacement DV must carry the OUTPUT data file's real
+    // partition/spec as it exists in the LIVE snapshot. The output files are NOT in this commit's
+    // `add_files` — they were committed by the earlier compaction overwrite — so resolve each from
+    // the current branch manifests (cloning the live manifest entry preserves its exact partition
+    // value + spec id, so this is correct for partitioned tables too, not just unpartitioned). Also
+    // collect any existing live DV already referencing an output file (a compaction-time B3 mask or
+    // an earlier in-window fix-up) so its positions are merged in and it is superseded — otherwise
+    // two DVs would reference one data file and a delete could be lost.
+    let needed: HashSet<String> = dead_by_output.keys().cloned().collect();
+    let (output_data_files, existing_dvs) =
+        resolve_output_files_and_existing_dvs(table, target_branch, &needed).await?;
+
+    for dv in &existing_dvs {
+        let referenced = dv
+            .referenced_data_file()
+            .expect("collected existing output DV must carry referenced_data_file");
+        let positions = read_dv_positions_from_data_file(table.file_io(), dv)
+            .await
+            .map_err(|e| {
+                CommitError::Commit(
+                    anyhow!(e).context("read existing output DV positions for in-window merge"),
+                )
+            })?;
+        let entry = dead_by_output.entry(referenced).or_default();
+        for pos in positions.iter() {
+            entry.insert(pos);
+        }
+    }
+
+    let resolved: Vec<DataFile> = output_data_files.into_values().collect();
+    let output_dv_files = author_output_dv_files(table, &resolved, dead_by_output).await?;
+    kept.extend(output_dv_files);
+
+    Ok((kept, existing_dvs))
+}
+
+/// Walk the CURRENT branch snapshot's manifests to resolve, for each path in `needed`, the live
+/// output data file's materialized [`DataFile`] (for the replacement DV's partition/spec) and any
+/// live position-delete DV already referencing it (to merge + supersede). Errors if a needed output
+/// data file is not live in the snapshot — it must be, since the compaction overwrite committed it.
+async fn resolve_output_files_and_existing_dvs(
+    table: &Table,
+    target_branch: &str,
+    needed: &HashSet<String>,
+) -> std::result::Result<(HashMap<String, DataFile>, Vec<DataFile>), CommitError> {
+    let mut out_files: HashMap<String, DataFile> = HashMap::new();
+    let mut existing_dvs: Vec<DataFile> = Vec::new();
+
+    if let Some(snapshot) = table.metadata().snapshot_for_ref(target_branch) {
+        let manifest_list = snapshot
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e| {
+                CommitError::Commit(
+                    anyhow!(e).context("load manifest list for output DV resolution"),
+                )
+            })?;
+        for manifest_file in manifest_list.entries() {
+            let manifest = manifest_file
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e| {
+                    CommitError::Commit(
+                        anyhow!(e).context("load manifest for output DV resolution"),
+                    )
+                })?;
+            for entry in manifest.entries() {
+                if !entry.is_alive() {
+                    continue;
+                }
+                let data_file = entry.data_file();
+                match data_file.content_type() {
+                    DataContentType::Data => {
+                        if needed.contains(data_file.file_path()) {
+                            out_files.insert(data_file.file_path().to_owned(), data_file.clone());
+                        }
+                    }
+                    DataContentType::PositionDeletes => {
+                        if let Some(referenced) = data_file.referenced_data_file()
+                            && needed.contains(referenced.as_str())
+                        {
+                            existing_dvs.push(data_file.clone());
+                        }
+                    }
+                    DataContentType::EqualityDeletes => {}
+                }
+            }
+        }
+    }
+
+    for path in needed {
+        if !out_files.contains_key(path) {
+            return Err(CommitError::Commit(anyhow!(
+                "pk-index in-window fix-up: output data file {} (target of a remapped in-flight \
+                 delete) is not live in the current snapshot on branch {}",
+                path,
+                target_branch,
+            )));
+        }
+    }
+
+    Ok((out_files, existing_dvs))
+}
+
 /// Authors one output DV Puffin file per output data file that has dead rows, referencing the
 /// output data file so the masked positions are excluded on read. The output data files are fresh
 /// (just written by the rewrite), so there is no existing DV to merge.
@@ -1086,7 +1375,46 @@ fn decode_pre_commit_state(blob: &[u8]) -> Result<(Arc<IcebergPkIndexSinkAggResu
 
 #[cfg(test)]
 mod tests {
+    use iceberg::spec::{DataFileBuilder, Struct};
+
     use super::*;
+
+    fn data_file(path: &str) -> DataFile {
+        DataFileBuilder::default()
+            .content(DataContentType::Data)
+            .file_path(path.to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .record_count(1)
+            .file_size_in_bytes(1)
+            .build()
+            .expect("data file build")
+    }
+
+    fn dv_file(path: &str, referenced: &str) -> DataFile {
+        DataFileBuilder::default()
+            .content(DataContentType::PositionDeletes)
+            .file_path(path.to_owned())
+            .file_format(DataFileFormat::Puffin)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .record_count(1)
+            .file_size_in_bytes(1)
+            .referenced_data_file(Some(referenced.to_owned()))
+            .build()
+            .expect("dv file build")
+    }
+
+    fn pending_remap(
+        input_files: &[&str],
+        mapping_entries: &[(&str, u64, &str, u64)],
+    ) -> PendingRemapMapping {
+        PendingRemapMapping {
+            input_files: input_files.iter().map(|s| s.to_string()).collect(),
+            mapping: mapping(mapping_entries),
+        }
+    }
 
     fn mapping(entries: &[(&str, u64, &str, u64)]) -> HashMap<(String, u64), (String, u64)> {
         entries
@@ -1170,5 +1498,105 @@ mod tests {
         let mapping = mapping(&[("in-a.parquet", 0, "out-0.parquet", 5)]);
         let dead = compute_dead_out_positions(&mapping, Vec::new());
         assert!(dead.is_empty());
+    }
+
+    fn kept_paths(kept: &[DataFile]) -> HashSet<&str> {
+        kept.iter().map(|f| f.file_path()).collect()
+    }
+
+    /// Core of the in-window fix-up: a stray position-delete DV referencing a REMOVED input data
+    /// file is dropped from `add_files` and its deleted position is remapped to the output file's
+    /// position to mask; a DV referencing a still-live (non-input) data file and a plain data file
+    /// are both kept untouched.
+    #[test]
+    fn in_window_remap_replaces_stray_dv_and_keeps_others() {
+        let add_files = vec![
+            data_file("out-0.parquet"),
+            dv_file("dv-stray.puff", "in-a.parquet"),
+            dv_file("dv-live.puff", "live-x.parquet"),
+        ];
+        let pending = vec![pending_remap(
+            &["in-a.parquet"],
+            &[("in-a.parquet", 3, "out-0.parquet", 9)],
+        )];
+        let dv_positions = HashMap::from([
+            ("dv-stray.puff".to_owned(), vec![3]),
+            ("dv-live.puff".to_owned(), vec![1]),
+        ]);
+
+        let (kept, dead) = plan_in_window_dv_remap(add_files, &pending, &dv_positions);
+
+        let paths = kept_paths(&kept);
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains("out-0.parquet"));
+        assert!(paths.contains("dv-live.puff"));
+        assert!(!paths.contains("dv-stray.puff"));
+
+        assert_eq!(dead.len(), 1);
+        assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![9]);
+    }
+
+    /// Fast path: with no pending remap the fix-up core is a no-op — every file is kept and there is
+    /// nothing to mask (the async caller short-circuits even earlier on the same emptiness).
+    #[test]
+    fn in_window_remap_fast_path_no_pending_is_noop() {
+        let add_files = vec![
+            data_file("out-0.parquet"),
+            dv_file("dv-a.puff", "in-a.parquet"),
+        ];
+        let dv_positions = HashMap::new();
+
+        let (kept, dead) = plan_in_window_dv_remap(add_files, &[], &dv_positions);
+
+        assert_eq!(kept_paths(&kept).len(), 2);
+        assert!(dead.is_empty());
+    }
+
+    /// A stray DV whose only deleted position has NO mapping entry (a delete of a row already dead
+    /// at R) is still dropped — it must not commit against a removed file — but contributes no mask.
+    #[test]
+    fn in_window_remap_drops_stray_with_only_pre_r_positions() {
+        let add_files = vec![dv_file("dv-stray.puff", "in-a.parquet")];
+        let pending = vec![pending_remap(
+            &["in-a.parquet"],
+            &[("in-a.parquet", 3, "out-0.parquet", 9)],
+        )];
+        let dv_positions = HashMap::from([("dv-stray.puff".to_owned(), vec![7])]);
+
+        let (kept, dead) = plan_in_window_dv_remap(add_files, &pending, &dv_positions);
+
+        assert!(kept.is_empty());
+        assert!(dead.is_empty());
+    }
+
+    /// Two disjoint pending remaps compose: each stray DV is remapped against whichever remap owns
+    /// its referenced input file.
+    #[test]
+    fn in_window_remap_composes_disjoint_pending_remaps() {
+        let add_files = vec![
+            dv_file("dv-a.puff", "in-a.parquet"),
+            dv_file("dv-b.puff", "in-b.parquet"),
+        ];
+        let pending = vec![
+            pending_remap(
+                &["in-a.parquet"],
+                &[("in-a.parquet", 0, "out-0.parquet", 5)],
+            ),
+            pending_remap(
+                &["in-b.parquet"],
+                &[("in-b.parquet", 1, "out-1.parquet", 8)],
+            ),
+        ];
+        let dv_positions = HashMap::from([
+            ("dv-a.puff".to_owned(), vec![0]),
+            ("dv-b.puff".to_owned(), vec![1]),
+        ]);
+
+        let (kept, dead) = plan_in_window_dv_remap(add_files, &pending, &dv_positions);
+
+        assert!(kept.is_empty());
+        assert_eq!(dead.len(), 2);
+        assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![5]);
+        assert_eq!(positions(dead.get("out-1.parquet").unwrap()), vec![8]);
     }
 }
