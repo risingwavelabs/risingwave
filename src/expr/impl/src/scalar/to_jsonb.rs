@@ -22,6 +22,7 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
+use thiserror_ext::AsReport;
 
 #[function("to_jsonb(*) -> jsonb")]
 fn to_jsonb(
@@ -230,7 +231,10 @@ impl ToJsonb for JsonbRef<'_> {
 
 impl ToJsonb for VariantRef<'_> {
     fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
-        builder.add_value(self.to_jsonb().as_scalar_ref().into());
+        let jsonb = self
+            .to_jsonb()
+            .map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
+        builder.add_value(jsonb.as_scalar_ref().into());
         Ok(())
     }
 }
