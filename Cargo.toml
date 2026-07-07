@@ -298,8 +298,9 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "0.9"
-tonic = { package = "madsim-tonic", version = "0.5.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.5" }
+# v0.5.2 adds gzip/zstd encoding features and updates the codegen API accordingly.
+tonic = { package = "madsim-tonic", version = "0.5.2", features = ["zstd"] }
+tonic-build = { package = "madsim-tonic-build", version = "0.5.2" }
 tracing-opentelemetry = "0.30"
 
 [workspace.lints.rust]
