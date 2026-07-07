@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 
-use crate::error::BackupResult;
+use crate::error::{BackupError, BackupResult};
 use crate::{MetaSnapshotId, xxhash64_checksum, xxhash64_verify};
 
 pub trait Metadata: Display + Send + Sync {
@@ -59,12 +59,12 @@ impl<T: Metadata> MetaSnapshot<T> {
         Ok(buf)
     }
 
-    pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
-        let checksum = (&buf[buf.len() - 8..]).get_u64_le();
-        xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
-        let format_version = buf.get_u32_le();
-        let id = buf.get_u64_le();
-        let metadata = T::decode(buf)?;
+    pub fn decode(buf: &[u8]) -> BackupResult<Self> {
+        let payload = verify_checksum_and_strip(buf)?;
+        let mut payload = payload;
+        let format_version = read_u32_le(&mut payload)?;
+        let id = read_u64_le(&mut payload)?;
+        let metadata = T::decode(payload)?;
         Ok(Self {
             format_version,
             id,
@@ -72,12 +72,41 @@ impl<T: Metadata> MetaSnapshot<T> {
         })
     }
 
-    pub fn decode_format_version(mut buf: &[u8]) -> BackupResult<u32> {
-        let checksum = (&buf[buf.len() - 8..]).get_u64_le();
-        xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
-        let format_version = buf.get_u32_le();
-        Ok(format_version)
+    pub fn decode_format_version(buf: &[u8]) -> BackupResult<u32> {
+        let mut payload = verify_checksum_and_strip(buf)?;
+        read_u32_le(&mut payload)
     }
+}
+
+pub(crate) fn verify_checksum_and_strip(snapshot: &[u8]) -> BackupResult<&[u8]> {
+    let payload_len = snapshot.len().checked_sub(8).ok_or_else(|| {
+        BackupError::Other(anyhow::anyhow!(
+            "metadata snapshot is too short: {} bytes",
+            snapshot.len()
+        ))
+    })?;
+    let mut checksum_buf = &snapshot[payload_len..];
+    let checksum = read_u64_le(&mut checksum_buf)?;
+    xxhash64_verify(&snapshot[..payload_len], checksum)?;
+    Ok(&snapshot[..payload_len])
+}
+
+pub(crate) fn read_u32_le(buf: &mut &[u8]) -> BackupResult<u32> {
+    if buf.remaining() < 4 {
+        return Err(BackupError::Other(anyhow::anyhow!(
+            "metadata snapshot is truncated while reading u32"
+        )));
+    }
+    Ok(buf.get_u32_le())
+}
+
+pub(crate) fn read_u64_le(buf: &mut &[u8]) -> BackupResult<u64> {
+    if buf.remaining() < 8 {
+        return Err(BackupError::Other(anyhow::anyhow!(
+            "metadata snapshot is truncated while reading u64"
+        )));
+    }
+    Ok(buf.get_u64_le())
 }
 
 impl<T: Metadata> Display for MetaSnapshot<T> {

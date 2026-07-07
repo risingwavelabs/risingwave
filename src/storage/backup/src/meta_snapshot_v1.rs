@@ -28,7 +28,7 @@ use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
 
 use crate::error::{BackupError, BackupResult};
-use crate::meta_snapshot::{MetaSnapshot, Metadata};
+use crate::meta_snapshot::{MetaSnapshot, Metadata, read_u32_le};
 
 // TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
@@ -229,7 +229,14 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let len = buf.get_u32_le() as usize;
+        let len = read_u32_le(buf)? as usize;
+        if buf.remaining() < len {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "prost payload length {} exceeds remaining buffer {}",
+                len,
+                buf.remaining()
+            )));
+        }
         let v = buf[..len].to_vec();
         buf.advance(len);
         T::decode(v.as_slice()).map_err(|e| BackupError::Decoding(e.into()))
@@ -246,7 +253,7 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let vec_len = buf.get_u32_le() as usize;
+        let vec_len = read_u32_le(buf)? as usize;
         let mut result = vec![];
         for _ in 0..vec_len {
             let v: T = Self::decode_prost_message(buf)?;
