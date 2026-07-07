@@ -876,6 +876,21 @@ profile:
         address: schemaregistry
         port: 8082
 
+  ci-kafka-oidc-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: kafka
+        user-managed: true
+        address: message_queue_oidc
+        port: 9092
+
   ci-source-cdc-test:
     config-path: src/config/ci-recovery.toml
     steps:

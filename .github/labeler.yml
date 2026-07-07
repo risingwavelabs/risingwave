@@ -110,7 +110,10 @@ labels:
 - label: "ci/run-e2e-kafka-source-tests"
   files:
   - "ci\\/scripts\\/e2e-source-kafka-test\\.sh"
+  - "ci\\/scripts\\/e2e-kafka-oidc-test\\.sh"
+  - "ci\\/kafka-oidc\\/.*"
   - "e2e_test\\/debug_mode_only\\/debug_splits\\.slt"
+  - "e2e_test\\/kafka-oidc\\/.*"
   - "e2e_test\\/kafka-sasl\\/.*"
   - "e2e_test\\/source_inline\\/connection\\/.*"
   - "e2e_test\\/source_inline\\/kafka\\/.*"
@@ -156,7 +159,10 @@ labels:
 # Split sink connector tests
 - label: "ci/run-e2e-kafka-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-kafka-oidc-test\\.sh"
   - "ci\\/scripts\\/e2e-kafka-sink-test\\.sh"
+  - "ci\\/kafka-oidc\\/.*"
+  - "e2e_test\\/kafka-oidc\\/.*"
   - "e2e_test\\/sink\\/bug_fixes\\/issue_24367\\.slt"
   - "e2e_test\\/sink\\/kafka\\/.*"
   - "src\\/connector\\/src\\/sink\\/kafka\\.rs"
