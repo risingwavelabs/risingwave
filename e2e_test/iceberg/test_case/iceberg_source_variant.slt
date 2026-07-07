@@ -148,11 +148,12 @@ select count(*) from file_scan(
 ----
 3
 
-query TTTT
+query TTTTT
 select
     pg_typeof(v_object),
     v_object = '{"a":1,"b":true}'::jsonb,
     (nested).top_variant = to_jsonb(cast('2024-11-08' as varchar)),
+    (nested).variant_list[1] = to_jsonb(cast(7 as smallint)),
     (nested).variant_map['k1'] = to_jsonb(cast(42 as integer))
 from file_scan(
     'parquet',
@@ -163,7 +164,37 @@ from file_scan(
     's3://icebergdata/demo/demo_db/test_variant_source/data/'
 ) where id = 1;
 ----
-jsonb t t t
+jsonb t t t t
+
+# Streaming parquet source with a declared subset + reordered struct: conversion goes
+# through the struct projection path, which must decode nested variants (incl. in map)
+# by the declared type.
+statement ok
+create table parquet_variant_projected (
+    id int,
+    nested struct<variant_map map(varchar, jsonb), top_variant jsonb>
+) with (
+    connector = 's3',
+    match_pattern = 'demo/demo_db/test_variant_source/data/*.parquet',
+    s3.region_name = 'us-east-1',
+    s3.bucket_name = 'icebergdata',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://127.0.0.1:9301',
+    refresh.interval.sec = 1
+) format plain encode parquet;
+
+query TT retry 11 backoff 1s
+select
+    (nested).top_variant = to_jsonb(cast('2024-11-08' as varchar)),
+    (nested).variant_map['k1'] = to_jsonb(cast(42 as integer))
+from parquet_variant_projected
+where id = 1;
+----
+t t
+
+statement ok
+drop table parquet_variant_projected;
 
 statement ok
 DROP SOURCE iceberg_variant_source;
