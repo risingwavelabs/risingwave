@@ -100,6 +100,40 @@ where id = 1;
 ----
 t t t t t t t t t
 
+query II
+select count(*), max(id) from iceberg_variant_source;
+----
+3 3
+
+query I
+select count(*) from iceberg_variant_source
+where id = 2
+  and v_null is null and v_true is null and v_false is null
+  and v_int8 is null and v_int16 is null and v_int32 is null and v_int64 is null
+  and v_float is null and v_double is null
+  and v_decimal4 is null and v_decimal8 is null and v_decimal16 is null
+  and v_date is null and v_timestamp is null and v_timestamp_ntz is null
+  and v_binary is null and v_short_string is null and v_long_string is null
+  and v_object is null and v_array is null and nested is null;
+----
+1
+
+# NaN is a valid variant double but has no JSON representation; it decodes to NULL.
+query TTTTTTTT
+select
+    v_object = '{}'::jsonb,
+    v_array = '[]'::jsonb,
+    v_double is null,
+    v_int8 is null,
+    (nested).top_variant = '{"a":{"b":[1,{"c":2}],"d":{},"e":[]}}'::jsonb,
+    (nested).variant_list[1] = '{}'::jsonb,
+    (nested).variant_list[2] = '[]'::jsonb,
+    (nested).variant_map['empty'] = '{}'::jsonb
+from iceberg_variant_source
+where id = 3;
+----
+t t t t t t t t
+
 statement ok
 DROP SOURCE iceberg_variant_source;
 
@@ -210,6 +244,40 @@ from iceberg_variant_batch_table
 where id = 1;
 ----
 t t t t t t t t t
+
+query II retry 11 backoff 1s
+select count(*), max(id) from iceberg_variant_batch_table;
+----
+3 3
+
+query I retry 11 backoff 1s
+select count(*) from iceberg_variant_batch_table
+where id = 2
+  and v_null is null and v_true is null and v_false is null
+  and v_int8 is null and v_int16 is null and v_int32 is null and v_int64 is null
+  and v_float is null and v_double is null
+  and v_decimal4 is null and v_decimal8 is null and v_decimal16 is null
+  and v_date is null and v_timestamp is null and v_timestamp_ntz is null
+  and v_binary is null and v_short_string is null and v_long_string is null
+  and v_object is null and v_array is null and nested is null;
+----
+1
+
+# NaN is a valid variant double but has no JSON representation; it decodes to NULL.
+query TTTTTTTT retry 11 backoff 1s
+select
+    v_object = '{}'::jsonb,
+    v_array = '[]'::jsonb,
+    v_double is null,
+    v_int8 is null,
+    (nested).top_variant = '{"a":{"b":[1,{"c":2}],"d":{},"e":[]}}'::jsonb,
+    (nested).variant_list[1] = '{}'::jsonb,
+    (nested).variant_list[2] = '[]'::jsonb,
+    (nested).variant_map['empty'] = '{}'::jsonb
+from iceberg_variant_batch_table
+where id = 3;
+----
+t t t t t t t t
 
 statement ok
 DROP TABLE iceberg_variant_batch_table;

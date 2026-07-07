@@ -63,6 +63,26 @@ init_sqls = [
             )
         )
     """,
+    """INSERT INTO demo_db.test_variant_source
+    SELECT
+        2,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL
+    UNION ALL
+    SELECT
+        3,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        CAST(CAST('NaN' AS DOUBLE) AS VARIANT),
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        parse_json('{}'),
+        parse_json('[]'),
+        named_struct(
+            'top_variant', parse_json('{"a":{"b":[1,{"c":2}],"d":{},"e":[]}}'),
+            'variant_list', array(parse_json('{}'), parse_json('[]')),
+            'variant_map', map('empty', parse_json('{}'))
+        )
+    """,
 ]
 
 slt = 'test_case/iceberg_source_variant.slt'
