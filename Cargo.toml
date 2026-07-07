@@ -168,14 +168,14 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9806a3e9a796fee65be2bb95b656057f8a1ffb89", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9806a3e9a796fee65be2bb95b656057f8a1ffb89" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9806a3e9a796fee65be2bb95b656057f8a1ffb89" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -470,14 +470,3 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
-
-# TEMPORARY: `iceberg-compaction-core` pins an older rev of `iceberg-rust`, which would
-# otherwise produce two copies of the `iceberg` crates in the dependency graph. Unify them
-# to the workspace rev. The `www.` prefix makes the patch source canonically different from
-# the patched source (cargo rejects same-source patches) while resolving to the same repo.
-# Remove this section once nimtable/iceberg-compaction bumps its iceberg-rust rev.
-[patch."https://github.com/risingwavelabs/iceberg-rust.git"]
-iceberg = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }
-iceberg-catalog-glue = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }
-iceberg-catalog-rest = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }
-iceberg-datafusion = { git = "https://www.github.com/risingwavelabs/iceberg-rust.git", rev = "d9575b8cac34b307d6857d7ef326ef0cfa7f8912" }

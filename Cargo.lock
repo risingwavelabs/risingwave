@@ -2069,7 +2069,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -6839,7 +6839,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://www.github.com/risingwavelabs/iceberg-rust.git?rev=d9575b8cac34b307d6857d7ef326ef0cfa7f8912#d9575b8cac34b307d6857d7ef326ef0cfa7f8912"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9806a3e9a796fee65be2bb95b656057f8a1ffb89#9806a3e9a796fee65be2bb95b656057f8a1ffb89"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6898,7 +6898,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.8.0"
-source = "git+https://www.github.com/risingwavelabs/iceberg-rust.git?rev=d9575b8cac34b307d6857d7ef326ef0cfa7f8912#d9575b8cac34b307d6857d7ef326ef0cfa7f8912"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9806a3e9a796fee65be2bb95b656057f8a1ffb89#9806a3e9a796fee65be2bb95b656057f8a1ffb89"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6913,7 +6913,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.8.0"
-source = "git+https://www.github.com/risingwavelabs/iceberg-rust.git?rev=d9575b8cac34b307d6857d7ef326ef0cfa7f8912#d9575b8cac34b307d6857d7ef326ef0cfa7f8912"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9806a3e9a796fee65be2bb95b656057f8a1ffb89#9806a3e9a796fee65be2bb95b656057f8a1ffb89"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6935,7 +6935,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=4c2bf2ecdf53cbe53aa4c82746682f5bf21bdcf8#4c2bf2ecdf53cbe53aa4c82746682f5bf21bdcf8"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=dc705e24d8309a7b6a9c29f8e5ef070f0516860b#dc705e24d8309a7b6a9c29f8e5ef070f0516860b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6964,7 +6964,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://www.github.com/risingwavelabs/iceberg-rust.git?rev=d9575b8cac34b307d6857d7ef326ef0cfa7f8912#d9575b8cac34b307d6857d7ef326ef0cfa7f8912"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9806a3e9a796fee65be2bb95b656057f8a1ffb89#9806a3e9a796fee65be2bb95b656057f8a1ffb89"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8849,7 +8849,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.11",
  "http 1.4.0",
@@ -9441,6 +9441,9 @@ dependencies = [
  "num-integer",
  "num-traits",
  "object_store",
+ "parquet-variant",
+ "parquet-variant-compute",
+ "parquet-variant-json",
  "paste",
  "seq-macro",
  "simdutf8",
@@ -10375,8 +10378,8 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "once_cell",
@@ -10394,8 +10397,8 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -10416,7 +10419,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -10428,7 +10431,7 @@ version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
