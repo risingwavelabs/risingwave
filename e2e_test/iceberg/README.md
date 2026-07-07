@@ -10,16 +10,12 @@
 ### 1. Start RisingWave with Minio
 
 ```bash
-./risedev d for-ctl
+./risedev k; ./risedev clean-data && ./risedev d for-ctl && ./risedev mc mb -p hummock-minio/icebergdata
 ```
 
-### 2. Create Minio Bucket
+Always restart with this full sequence: `for-ctl` uses an in-memory meta store, so a restart against stale minio data panics the meta node with `Data directory is already used by another cluster`.
 
-```bash
-./risedev mc mb -p hummock-minio/icebergdata
-```
-
-### 3. Start Spark Connect Server
+### 2. Start Spark Connect Server
 
 ```bash
 cd e2e_test/iceberg
@@ -28,34 +24,33 @@ bash start_spark_connect_server.sh
 
 This downloads Spark if needed, resolves Maven packages, and starts the server on port 15002.
 
-### 4. Install Python Dependencies
+If a long-running server fails writes with `Could not find any valid local directory for s3ablock`, macOS cleaned its /tmp buffer dir (and pid file, so the stop script no longer works). Kill it by port and restart:
 
 ```bash
-cd e2e_test/iceberg
-poetry install --quiet
+lsof -ti :15002 | xargs kill
+bash start_spark_connect_server.sh
 ```
 
-### 5. Run Tests
+### 3. Run Tests
 
-Run a single test case (in `e2e_test/iceberg`):
+In `e2e_test/iceberg` (`poetry install --quiet` on first run):
 
 ```bash
+# single test case
 poetry run python main.py -t ./test_case/no_partition_append_only.toml
-```
-
-Run all test cases (in `e2e_test/iceberg`):
-
-```bash
+# all test cases
 poetry run python main.py
 ```
 
-Run pure SLT tests (from repo root):
+Pure SLT tests, from the repo root:
 
 ```bash
 ./risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
 ```
 
-### 6. Cleanup
+`iceberg_engine.slt` needs the Java connector libs (`ENABLE_BUILD_RW_CONNECTOR=true` in `risedev-components.user.env`); without them, `CREATE TABLE ... ENGINE = iceberg` fails with `failed to read connector libs`.
+
+### 4. Cleanup
 
 ```bash
 # from e2e_test/iceberg
@@ -63,6 +58,10 @@ Run pure SLT tests (from repo root):
 # from the repo root
 cd ../.. && ./risedev k
 ```
+
+## CI
+
+CI runs `ci/scripts/e2e-iceberg-test.sh` with the `ci-iceberg-test` profile, which is not reproducible locally: it needs an external postgres for the meta store and prebuilt connector libs downloaded from CI artifacts. The steps above are the local equivalent.
 
 ## Key Config Files
 
