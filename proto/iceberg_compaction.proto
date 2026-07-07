@@ -82,8 +82,8 @@ message IcebergCompactionTask {
   // Whether this task should be routed through the meta-coordinated commit
   // path for iceberg pk-index sinks: the compactor performs the rewrite
   // without committing and reports the result back to meta instead.
-  // Always false unless the sink is a pk-index sink AND the
-  // `iceberg_pk_index_coordinated_compaction_enabled` meta config is on.
+  // True whenever the sink is a pk-index sink; coordinated compaction is
+  // unconditional for pk-index sinks.
   bool pk_index_coordinated = 5;
 }
 

@@ -405,15 +405,10 @@ impl CompactionTrack {
 /// meta-coordinated (no self-commit) path: the compactor performs the
 /// rewrite without committing and reports the result back to meta instead.
 ///
-/// This is the single choke point for the feature gate: with
-/// `config_enabled == false`, the result is always `false` regardless of
-/// `properties`, so non-pk-index sinks and the config-off case behave
-/// exactly as the direct-commit path does today.
-fn should_coordinate_pk_index_compaction(
-    config_enabled: bool,
-    properties: &BTreeMap<String, String>,
-) -> bool {
-    config_enabled && is_iceberg_pk_index_sink(properties)
+/// Coordinated compaction is unconditional for pk-index sinks: this is
+/// purely a predicate on the sink's properties.
+fn should_coordinate_pk_index_compaction(properties: &BTreeMap<String, String>) -> bool {
+    is_iceberg_pk_index_sink(properties)
 }
 
 pub(crate) struct IcebergCompactionHandle {
@@ -422,11 +417,6 @@ pub(crate) struct IcebergCompactionHandle {
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
     metadata_manager: MetadataManager,
     handle_success: bool,
-    /// Whether the `iceberg_pk_index_coordinated_compaction_enabled` meta
-    /// config is on. This is the single choke point gating the coordinated
-    /// (no-commit) compaction path: with it off, `pk_index_coordinated` on
-    /// the dispatched task is always `false` regardless of the sink kind.
-    pk_index_coordinated_compaction_enabled: bool,
 }
 
 impl IcebergCompactionHandle {
@@ -435,7 +425,6 @@ impl IcebergCompactionHandle {
         task_type: TaskType,
         inner: Arc<RwLock<IcebergCompactionManagerInner>>,
         metadata_manager: MetadataManager,
-        pk_index_coordinated_compaction_enabled: bool,
     ) -> Self {
         Self {
             sink_id,
@@ -443,7 +432,6 @@ impl IcebergCompactionHandle {
             inner,
             metadata_manager,
             handle_success: false,
-            pk_index_coordinated_compaction_enabled,
         }
     }
 
@@ -466,10 +454,7 @@ impl IcebergCompactionHandle {
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
-        let pk_index_coordinated = should_coordinate_pk_index_compaction(
-            self.pk_index_coordinated_compaction_enabled,
-            &param.properties,
-        );
+        let pk_index_coordinated = should_coordinate_pk_index_compaction(&param.properties);
 
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
@@ -973,9 +958,6 @@ impl IcebergCompactionManager {
                         task_type,
                         self.inner.clone(),
                         self.metadata_manager.clone(),
-                        self.env
-                            .opts
-                            .iceberg_pk_index_coordinated_compaction_enabled,
                     ))
                 })
                 .collect();

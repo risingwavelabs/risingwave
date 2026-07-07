@@ -1,9 +1,7 @@
-# End-to-end coverage for B1 of "pk-index coordinated iceberg compaction":
-# the compactor runs the rewrite without committing, reports the result to
-# meta, and the IcebergPkIndexSinkCoordinator performs the overwrite_files
-# commit. This is gated by the off-by-default meta config
-# `iceberg_pk_index_coordinated_compaction_enabled`, which the `ci-iceberg-test`
-# risedev profile turns on (see src/config/ci-iceberg-test.toml) so this test
+# End-to-end coverage for "pk-index coordinated iceberg compaction": the
+# compactor runs the rewrite without committing, reports the result to meta,
+# and the IcebergPkIndexSinkCoordinator performs the overwrite_files commit.
+# Coordinated compaction is unconditional for pk-index sinks, so this test
 # exercises the coordinated commit path, not just the compactor's own commit.
 #
 # Scope: NO delete lands during the compaction window (between the

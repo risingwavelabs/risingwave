@@ -401,9 +401,6 @@ pub fn start(
                 iceberg_compaction_config_refresh_interval_sec: config
                     .meta
                     .iceberg_compaction_config_refresh_interval_sec,
-                iceberg_pk_index_coordinated_compaction_enabled: config
-                    .meta
-                    .iceberg_pk_index_coordinated_compaction_enabled,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,

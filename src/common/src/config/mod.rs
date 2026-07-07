@@ -902,15 +902,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_iceberg_pk_index_coordinated_compaction_enabled_default_is_false() {
-        let config = MetaConfig::default();
-        assert!(
-            !config.iceberg_pk_index_coordinated_compaction_enabled,
-            "iceberg_pk_index_coordinated_compaction_enabled must default to false until B1-B4 land"
-        );
-    }
-
-    #[test]
     fn test_storage_iceberg_compaction_pull_interval_ms_must_be_positive() {
         let config = toml::from_str::<RwConfig>(
             r#"

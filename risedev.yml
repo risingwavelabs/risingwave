@@ -349,11 +349,7 @@ profile:
       - use: frontend
 
   ci-iceberg-test:
-    # Dedicated config (forked from ci.toml) rather than the shared ci.toml,
-    # because this profile turns on iceberg_pk_index_coordinated_compaction_enabled
-    # for e2e coverage of B1 coordinated compaction; ci.toml is reused by many
-    # other non-iceberg CI profiles that must not pick up this behavior change.
-    config-path: src/config/ci-iceberg-test.toml
+    config-path: src/config/ci.toml
     steps:
       - use: minio
       - use: moto
