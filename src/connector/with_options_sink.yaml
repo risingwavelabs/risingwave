@@ -386,7 +386,10 @@ FirestoreConfig:
     required: false
   - name: firestore.document_id_column
     field_type: String
-    comments: Primary key column name used as document ID
+    comments: |-
+      Column whose value is used as the Firestore document ID. Values must be unique and valid
+      Firestore document IDs. Duplicate values intentionally map multiple rows to the same
+      Firestore document.
     required: false
   - name: firestore.max_batch_size
     field_type: usize

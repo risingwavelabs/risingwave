@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, anyhow};
 use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use firestore::{FirestoreDb, FirestoreDbOptions};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -59,7 +60,9 @@ pub struct FirestoreConfig {
     #[serde(rename = "firestore.credentials")]
     pub credentials: Option<String>,
 
-    /// Primary key column name used as document ID
+    /// Column whose value is used as the Firestore document ID. Values must be unique and valid
+    /// Firestore document IDs. Duplicate values intentionally map multiple rows to the same
+    /// Firestore document.
     #[serde(rename = "firestore.document_id_column")]
     pub document_id_column: Option<String>,
 
@@ -158,6 +161,17 @@ impl Sink for FirestoreSink {
                 "firestore.max_batch_size must be greater than 0"
             )));
         }
+        if self.config.max_batch_size > DEFAULT_MAX_BATCH_SIZE {
+            return Err(SinkError::Config(anyhow!(
+                "firestore.max_batch_size must not exceed {}",
+                DEFAULT_MAX_BATCH_SIZE
+            )));
+        }
+        if self.config.max_future_send_nums == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "firestore.max_future_send_nums must be greater than 0"
+            )));
+        }
 
         // Validate connection by creating a client
         let _client: FirestoreDb = self
@@ -251,23 +265,29 @@ impl FirestoreSinkWriter {
             // Use specified document ID column
             let datum = row.datum_at(idx);
             match datum {
-                Some(scalar) => Ok(scalar.to_text()),
+                Some(scalar) => {
+                    let doc_id = scalar.to_text();
+                    validate_firestore_document_id(&doc_id)?;
+                    Ok(doc_id)
+                }
                 None => Err(SinkError::Firestore(anyhow!(
                     "document_id_column value is null"
                 ))),
             }
         } else {
-            // Use primary key(s) concatenated with "_"
-            let pk_values: Vec<String> = self
+            // Encode the PK tuple unambiguously. Joining text values is unsafe for
+            // composite keys because values may contain the separator.
+            let pk_values: Vec<JsonValue> = self
                 .pk_indices
                 .iter()
                 .map(|&idx| {
+                    let field = &self.schema.fields()[idx];
                     row.datum_at(idx)
-                        .map(|s| s.to_text())
-                        .unwrap_or_else(|| "null".to_owned())
+                        .map(|s| JsonValue::String(s.to_text_with_type(&field.data_type)))
+                        .unwrap_or(JsonValue::Null)
                 })
                 .collect();
-            Ok(pk_values.join("_"))
+            encode_pk_document_id(pk_values)
         }
     }
 
@@ -295,7 +315,7 @@ impl FirestoreSinkWriter {
                     operations.insert(doc_id.clone(), FirestoreOperation::Delete { doc_id });
                 }
                 Op::UpdateDelete => {
-                    // Skip UpdateDelete as it will be followed by UpdateInsert
+                    operations.insert(doc_id.clone(), FirestoreOperation::Delete { doc_id });
                 }
             }
         }
@@ -320,8 +340,9 @@ impl FirestoreSinkWriter {
                         )
                     })?;
                     let mut batch = batch_writer.new_batch();
+                    let mut write_contexts = Vec::with_capacity(chunk.len());
 
-                    for op in chunk {
+                    for op in &chunk {
                         match op {
                             FirestoreOperation::Upsert { doc_id, data } => {
                                 batch
@@ -332,6 +353,7 @@ impl FirestoreSinkWriter {
                                                 .context("failed to add upsert document to batch"),
                                         )
                                     })?;
+                                write_contexts.push(format!("upsert document '{}'", doc_id));
                             }
                             FirestoreOperation::Delete { doc_id } => {
                                 batch
@@ -342,15 +364,36 @@ impl FirestoreSinkWriter {
                                                 .context("failed to add delete document to batch"),
                                         )
                                     })?;
+                                write_contexts.push(format!("delete document '{}'", doc_id));
                             }
                         }
                     }
 
-                    batch.write().await.map_err(|e| {
+                    let response = batch.write().await.map_err(|e| {
                         SinkError::Firestore(
                             anyhow!(e).context("failed to execute Firestore batch write"),
                         )
                     })?;
+
+                    if response.statuses.len() != write_contexts.len() {
+                        return Err(SinkError::Firestore(anyhow!(
+                            "Firestore batch write returned {} statuses for {} writes",
+                            response.statuses.len(),
+                            write_contexts.len()
+                        )));
+                    }
+
+                    for (status, context) in response.statuses.iter().zip_eq_debug(&write_contexts)
+                    {
+                        if status.code != 0 {
+                            return Err(SinkError::Firestore(anyhow!(
+                                "Firestore batch write failed to {}: code={}, message={}",
+                                context,
+                                status.code,
+                                status.message
+                            )));
+                        }
+                    }
 
                     Ok::<(), SinkError>(())
                 }
@@ -416,7 +459,7 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         DataType::Varchar => JsonValue::String(scalar.into_utf8().to_owned()),
         DataType::Bytea => {
             let bytes = scalar.into_bytea();
-            JsonValue::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+            JsonValue::String(STANDARD.encode(bytes))
         }
         DataType::Jsonb => {
             let jsonb = scalar.into_jsonb();
@@ -453,6 +496,67 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
     Ok(value)
 }
 
+fn encode_pk_document_id(pk_values: Vec<JsonValue>) -> Result<String> {
+    Ok(URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&pk_values).map_err(|e| {
+            SinkError::Firestore(anyhow!(e).context("failed to encode primary key"))
+        })?,
+    ))
+}
+
+fn validate_firestore_document_id(doc_id: &str) -> Result<()> {
+    if doc_id.is_empty() {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore document ID must not be empty"
+        )));
+    }
+    if doc_id.contains('/') {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore document ID must not contain '/'"
+        )));
+    }
+    if doc_id == "." || doc_id == ".." {
+        return Err(SinkError::Firestore(anyhow!(
+            "Firestore document ID must not be '.' or '..'"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_pk_document_id_is_unambiguous_and_path_safe() -> Result<()> {
+        let first = encode_pk_document_id(vec![
+            JsonValue::String("a_b".to_owned()),
+            JsonValue::String("c".to_owned()),
+        ])?;
+        let second = encode_pk_document_id(vec![
+            JsonValue::String("a".to_owned()),
+            JsonValue::String("b_c".to_owned()),
+        ])?;
+        let third = encode_pk_document_id(vec![JsonValue::Null])?;
+        let fourth = encode_pk_document_id(vec![JsonValue::String("null".to_owned())])?;
+
+        assert_ne!(first, second);
+        assert_ne!(third, fourth);
+        assert!(!first.contains('/'));
+        assert!(!second.contains('/'));
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_explicit_document_id() {
+        assert!(validate_firestore_document_id("doc_1").is_ok());
+        assert!(validate_firestore_document_id("a/b").is_err());
+        assert!(validate_firestore_document_id("").is_err());
+        assert!(validate_firestore_document_id(".").is_err());
+        assert!(validate_firestore_document_id("..").is_err());
+    }
+}
+
 pub type FirestoreSinkDeliveryFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<(), SinkError>> + Send>>;
 
@@ -462,14 +566,9 @@ impl AsyncTruncateSinkWriter for FirestoreSinkWriter {
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let futures = self.write_chunk_inner(chunk)?;
-        let delivery_future: FirestoreSinkDeliveryFuture = Box::pin(async move {
-            futures.await?;
-            Ok(())
-        });
-        add_future.add_future_may_await(delivery_future).await?;
+        self.write_chunk_inner(chunk)?.await?;
         Ok(())
     }
 }
