@@ -146,9 +146,7 @@ impl PartialOrd for VariantRef<'_> {
 
 impl Ord for VariantRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Must agree with `memcmp_serialize`, which encodes the whole tagged buffer as a
-        // memcomparable byte string. Comparing `(metadata, value)` instead would diverge on the
-        // little-endian metadata length prefix inside the buffer.
+        // Must agree with `memcmp_serialize`, which encodes the whole tagged buffer.
         self.data.cmp(other.data)
     }
 }
@@ -194,7 +192,8 @@ impl VariantVal {
     }
 
     fn from_canonical_parts(metadata: &[u8], value: &[u8]) -> Self {
-        assert!(
+        // Builder output is trusted; untrusted bytes are validated in `from_parts` and friends.
+        debug_assert!(
             ParquetVariant::try_new(metadata, value).is_ok(),
             "canonical variant parts should be valid"
         );
@@ -243,10 +242,20 @@ impl VariantVal {
         Ok(Self::from_canonical_parts(&metadata, &value))
     }
 
+    /// Decodes a value produced by [`VariantRef::value_serialize`], checking structure only.
+    /// Use only on trusted bytes; external bytes must go through
+    /// [`Self::from_serialized_untrusted`] to re-establish the canonical invariants.
     pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
         let (metadata, value) = split_serialized_value(buf)?;
         ParquetVariant::try_new(metadata, value).ok()?;
         Some(Self { data: buf.into() })
+    }
+
+    /// Decodes a tagged buffer from an untrusted origin (e.g. pgwire binary parameters),
+    /// re-canonicalizing it so non-canonical or non-finite inputs cannot break `Eq`/`Hash`/`Ord`.
+    pub fn from_serialized_untrusted(buf: &[u8]) -> anyhow::Result<Self> {
+        let (metadata, value) = split_serialized_value(buf).context("invalid variant encoding")?;
+        Self::from_parts(metadata, value)
     }
 
     pub fn memcmp_deserialize(
@@ -441,12 +450,6 @@ impl ToSql for VariantRef<'_> {
     }
 }
 
-impl From<serde_json::Value> for VariantVal {
-    fn from(v: serde_json::Value) -> Self {
-        Self::from_json_value(&v).expect("JSON value should be convertible to variant")
-    }
-}
-
 fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     let buf = strip_current_encoding_tag(buf)?;
     if buf.len() < METADATA_LEN_SIZE {
@@ -511,9 +514,8 @@ fn collect_variant_field_names(
     Ok(field_names)
 }
 
-/// Besides collecting object field names, this walk also validates that the input satisfies
-/// RisingWave's canonical variant invariants (currently: no non-finite floats), since it visits
-/// every value of an untrusted variant exactly once before re-encoding.
+/// Collects object field names and, as the single walk over untrusted input, also rejects
+/// non-finite floats.
 fn collect_variant_field_names_inner(
     variant: ParquetVariant<'_, '_>,
     field_names: &mut BTreeSet<String>,
@@ -904,8 +906,7 @@ mod tests {
             serializer.into_inner()
         }
 
-        // Values with different metadata lengths: comparing `(metadata, value)` tuples would
-        // disagree with the encoded order on the metadata length prefix.
+        // Include values with different metadata lengths.
         let values: Vec<VariantVal> = [
             "1",
             r#""short""#,
@@ -933,8 +934,7 @@ mod tests {
         let shallow = JsonbVal::from(serde_json::Value::from(1));
         assert!(VariantVal::from_jsonb(shallow.as_scalar_ref()).is_ok());
 
-        // serde_json's parser is limited to 128 nesting levels, while jsonb values from other
-        // sources can be deeper. The conversion must fail cleanly instead of panicking.
+        // Deeper than serde_json's 128-level parser limit; must error, not panic.
         let mut json = serde_json::Value::from(1);
         for _ in 0..200 {
             json = serde_json::Value::Array(vec![json]);
@@ -949,13 +949,48 @@ mod tests {
         builder.append_value(f64::NAN);
         let (metadata, value) = builder.finish();
 
-        // The import boundary (e.g. Arrow `struct<metadata, value>` payloads) must reject
-        // non-finite doubles, which RisingWave's own construction paths never produce.
         assert!(VariantVal::from_parts(&metadata, &value).is_err());
 
         // Even if such a value slipped through, converting it to jsonb must error, not panic.
         let v = VariantVal::from_canonical_parts(&metadata, &value);
         assert!(v.as_scalar_ref().to_jsonb().is_err());
+    }
+
+    #[test]
+    fn untrusted_serialized_rejects_non_finite_double() {
+        let mut builder = VariantBuilder::new();
+        builder.append_value(f64::NAN);
+        let (metadata, value) = builder.finish();
+        let bytes = VariantVal::from_canonical_parts(&metadata, &value)
+            .as_scalar_ref()
+            .value_serialize();
+
+        assert!(VariantVal::from_serialized_untrusted(&bytes).is_err());
+        // The trusted decode path only checks structure.
+        assert!(VariantVal::value_deserialize(&bytes).is_some());
+    }
+
+    #[test]
+    fn untrusted_serialized_canonicalizes_unsorted_dictionary() {
+        // Structurally valid but non-canonical: unsorted metadata dictionary `["b", "a"]`.
+        let mut builder = VariantBuilder::new();
+        builder.add_field_name("b");
+        builder.add_field_name("a");
+        let mut object = builder.new_object();
+        object.insert("a", 1i64);
+        object.insert("b", 2i64);
+        object.finish();
+        let (metadata, value) = builder.finish();
+        let non_canonical = VariantVal::from_canonical_parts(&metadata, &value)
+            .as_scalar_ref()
+            .value_serialize();
+
+        let canonical: VariantVal = r#"{"a":1,"b":2}"#.parse().unwrap();
+        let canonical_bytes = canonical.as_scalar_ref().value_serialize();
+
+        assert_ne!(non_canonical, canonical_bytes);
+        let recanonicalized = VariantVal::from_serialized_untrusted(&non_canonical).unwrap();
+        assert_same_variant(&recanonicalized, &canonical);
     }
 
     #[test]
