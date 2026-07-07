@@ -27,6 +27,7 @@ mod manager;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+pub use coordinator::PendingRemapReTrigger;
 pub use manager::IcebergPkIndexSinkManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, IcebergConfig};

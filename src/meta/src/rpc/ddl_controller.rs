@@ -1343,7 +1343,9 @@ impl DdlController {
                 {
                     let iceberg_config =
                         crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
-                    self.iceberg_pk_index_sink_manager
+                    // A freshly created sink has no durable pending remaps to re-trigger.
+                    let _pending_remaps = self
+                        .iceberg_pk_index_sink_manager
                         .register_sink(sink.id, iceberg_config)
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;

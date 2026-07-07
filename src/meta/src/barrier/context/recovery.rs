@@ -40,6 +40,7 @@ use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
 };
+use crate::barrier::command::Command;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::to_partial_graph_id;
@@ -505,14 +506,47 @@ impl GlobalBarrierWorkerContextImpl {
                     )
                 })?;
             let manager = &self.iceberg_pk_index_sink_manager;
-            futs.push(async move { (pb_sink.id, manager.register_sink(pb_sink.id, config).await) });
+            let sink_database_id = pb_sink.database_id;
+            futs.push(async move {
+                (
+                    pb_sink.id,
+                    sink_database_id,
+                    manager.register_sink(pb_sink.id, config).await,
+                )
+            });
         }
 
-        while let Some((id, res)) = futs.next().await {
-            if let Err(e) = res {
-                let msg = format!("register iceberg v3 sink {} during recovery", id);
-                return Err(e.context(msg).into());
+        // Pending compaction remaps recovered from `init`, to be re-injected as barrier mutations
+        // once every sink has registered (so the durable record's remap is not lost across restart).
+        let mut pending_remaps = Vec::new();
+        while let Some((id, sink_database_id, res)) = futs.next().await {
+            match res {
+                Ok(remaps) => {
+                    for remap in remaps {
+                        pending_remaps.push((id, sink_database_id, remap.mapping_paths));
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("register iceberg v3 sink {} during recovery", id);
+                    return Err(e.context(msg).into());
+                }
             }
+        }
+
+        // Re-trigger the recovered remaps. Broadcast within the sink's database; the writer
+        // self-filters by `sink_id` and applies the remap idempotently.
+        for (sink_id, sink_database_id, mapping_paths) in pending_remaps {
+            self.barrier_scheduler.run_command_no_wait(
+                sink_database_id,
+                Command::IcebergPkIndexRemap {
+                    sink_id,
+                    mapping_paths,
+                },
+            )?;
+            tracing::info!(
+                %sink_id,
+                "re-triggered pk-index remap mutation for recovered pending remap",
+            );
         }
         Ok(())
     }

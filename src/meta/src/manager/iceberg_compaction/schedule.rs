@@ -1186,6 +1186,8 @@ impl IcebergCompactionManager {
             .iceberg_pk_index_sink_manager
             .commit_compaction_overwrite(
                 sink_id,
+                // Use the compaction task id as a stable, unique remap id (PK part with sink_id).
+                task_id as i64,
                 output_files,
                 input_file_paths,
                 mapping_paths,
@@ -1205,10 +1207,11 @@ impl IcebergCompactionManager {
                 // via `run_command_no_wait` mitigates but does not close it; the coordinator-side
                 // masking of window-deletes is handled in a separate B4-window step.
                 //
-                // TODO(B4-recovery): if meta restarts between the commit and mutation delivery, the
-                // pending remap is lost. The writer remap is idempotent (a re-run finds no entries
-                // pointing at the now-removed input files), so durable recovery only needs to
-                // re-inject the mutation; recording a durable "pending remap" is a separate step.
+                // B4-recovery: `commit_compaction_overwrite` durably recorded this pending remap
+                // (in `iceberg_pk_index_pending_remap`) BEFORE returning, so if meta restarts before
+                // the mutation below is delivered, `reload_pending_remaps` re-injects it on startup.
+                // The writer remap is idempotent, so a re-injected mutation that already applied is a
+                // no-op. This enqueue is therefore best-effort: a failure is logged, not fatal.
                 if let Err(e) = self
                     .schedule_pk_index_remap(sink_id, remap_mapping_paths)
                     .await

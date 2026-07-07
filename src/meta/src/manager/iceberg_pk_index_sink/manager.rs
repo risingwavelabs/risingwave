@@ -25,7 +25,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use super::coordinator::IcebergPkIndexSinkCoordinator;
+use super::coordinator::{IcebergPkIndexSinkCoordinator, PendingRemapReTrigger};
 
 type CoordinatorRef = Arc<Mutex<IcebergPkIndexSinkCoordinator>>;
 
@@ -60,9 +60,11 @@ impl IcebergPkIndexSinkManager {
         &self,
         sink_id: SinkId,
         iceberg_config: IcebergConfig,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<PendingRemapReTrigger>> {
         // Initialize (load + recover + drain) outside the map lock; this is the slow, fallible part.
-        let coordinator =
+        // `init` also reloads durable pending compaction remaps and returns the ones that must be
+        // re-injected as barrier mutations (the caller owns the barrier scheduler).
+        let (coordinator, pending_remaps) =
             IcebergPkIndexSinkCoordinator::init(sink_id, iceberg_config, self.inner.db.clone())
                 .await?;
 
@@ -76,7 +78,7 @@ impl IcebergPkIndexSinkManager {
             // own `Arc` until it finishes; the snapshot_id idempotency check guards against double-commit.
             warn!(%sink_id, "iceberg pk-index sink coordinator re-registered; replacing previous instance");
         }
-        Ok(())
+        Ok(pending_remaps)
     }
 
     /// Pre-commit phase for one epoch: persist the merged report under `pending_sink_state` (no iceberg IO).
@@ -111,6 +113,7 @@ impl IcebergPkIndexSinkManager {
     pub async fn commit_compaction_overwrite(
         &self,
         sink_id: SinkId,
+        remap_id: i64,
         output_files: Vec<SerializedDataFile>,
         input_file_paths: Vec<String>,
         mapping_paths: Vec<String>,
@@ -121,6 +124,7 @@ impl IcebergPkIndexSinkManager {
             .lock()
             .await
             .commit_compaction_overwrite(
+                remap_id,
                 output_files,
                 input_file_paths,
                 mapping_paths,
