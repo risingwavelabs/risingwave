@@ -111,18 +111,29 @@ impl CompleteBarrierTask {
             //   2. commit_epoch: advance hummock.
             //   3. commit: drive iceberg overwrite_files for queued epochs.
             let mut iceberg_pk_index_commit_sink_ids = Vec::new();
+            let mut iceberg_pk_index_remap_done = Vec::new();
             if !self.iceberg_pk_index_sink_metadata.is_empty() {
-                let res = context
+                let outcome = context
                     .pre_commit_iceberg_pk_index_sink_metadata(self.iceberg_pk_index_sink_metadata)
                     .await?;
-                iceberg_pk_index_commit_sink_ids = res;
+                iceberg_pk_index_commit_sink_ids = outcome.commit_sink_ids;
+                iceberg_pk_index_remap_done = outcome.remap_done;
             }
 
             let version_stats = context.commit_epoch(self.commit_info).await?;
 
-            if !iceberg_pk_index_commit_sink_ids.is_empty() {
+            // Drive the iceberg overwrite for queued epochs, then clear the `REMAP_DONE`
+            // pending-remap records — but only after that commit succeeds (done inside the call), so
+            // the same-barrier stray position-delete DVs are remapped by the in-window fix-up rather
+            // than committed raw against removed input files.
+            if !iceberg_pk_index_commit_sink_ids.is_empty()
+                || !iceberg_pk_index_remap_done.is_empty()
+            {
                 context
-                    .commit_iceberg_pk_index_sink_metadata(iceberg_pk_index_commit_sink_ids)
+                    .commit_iceberg_pk_index_sink_metadata(
+                        iceberg_pk_index_commit_sink_ids,
+                        iceberg_pk_index_remap_done,
+                    )
                     .await?;
             }
 

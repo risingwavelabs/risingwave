@@ -82,6 +82,18 @@ impl CreateSnapshotBackfillJobCommandInfo {
     }
 }
 
+/// Outcome of the pre-commit phase for iceberg pk-index sinks, threaded by the barrier-complete
+/// path from `pre_commit_iceberg_pk_index_sink_metadata` to `commit_iceberg_pk_index_sink_metadata`.
+pub(super) struct IcebergPkIndexPreCommitOutcome {
+    /// Sinks with queued epoch reports whose iceberg `overwrite_files` must be driven this barrier.
+    pub commit_sink_ids: Vec<SinkId>,
+    /// `(sink_id, remap_id)` pairs whose `REMAP_DONE` was reported this barrier. Their durable
+    /// pending-remap records must be cleared, but ONLY after this barrier's iceberg commit has
+    /// succeeded — otherwise the same-barrier stray position-delete DVs would miss the in-window
+    /// fix-up and resurrect compaction-surviving rows.
+    pub remap_done: Vec<(SinkId, i64)>,
+}
+
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
         &self,
@@ -164,11 +176,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
         reports: Vec<PbIcebergPkIndexSinkMetadata>,
-    ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
+    ) -> impl Future<Output = MetaResult<IcebergPkIndexPreCommitOutcome>> + Send + '_;
 
     fn commit_iceberg_pk_index_sink_metadata(
         &self,
         sink_ids: Vec<SinkId>,
+        remap_done: Vec<(SinkId, i64)>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 

@@ -1306,9 +1306,10 @@ fn aggregate_reports(
             PbIcebergPkIndexSinkRole::RemapDone => {
                 // `REMAP_DONE` reports are stripped at the meta routing layer
                 // (`pre_commit_iceberg_pk_index_sink_metadata`) and must never reach the aggregate.
+                // They only drive a deferred `clear_pending_remap`, run after this barrier's commit.
                 bail!(
-                    "unexpected RemapDone report in aggregate_reports; it should be routed to \
-                     clear_pending_remap before reaching pre-commit"
+                    "unexpected RemapDone report in aggregate_reports; it should be partitioned out \
+                     in pre-commit and drive clear_pending_remap only after commit"
                 );
             }
             PbIcebergPkIndexSinkRole::Unspecified => unreachable!("filtered above"),
@@ -1550,6 +1551,58 @@ mod tests {
 
         assert_eq!(kept_paths(&kept).len(), 2);
         assert!(dead.is_empty());
+    }
+
+    /// Regression for the window-tail resurrection bug. A writer applies its remap and emits
+    /// `REMAP_DONE` on the SAME checkpoint barrier at which it flushes the final pre-remap epoch's
+    /// position deletes, so a stray DV referencing a removed input file lands in that same barrier's
+    /// commit. The outcome hinges entirely on whether the pending-remap record is still present when
+    /// `commit_one_epoch` runs the in-window fix-up:
+    ///   - present (clear deferred to AFTER commit, the fixed ordering) -> the stray DV is dropped
+    ///     and its delete is remapped onto the output file, masking the surviving row. No resurrection.
+    ///   - already cleared (the old clear-before-commit ordering) -> `pending` is empty, the stray DV
+    ///     is committed raw against a removed input file, masks nothing, and the deleted row
+    ///     resurrects.
+    /// This asserts both branches over the identical inputs to pin the ordering requirement that the
+    /// meta-side `clear_pending_remap` must run only after the epoch's commit has succeeded.
+    #[test]
+    fn in_window_remap_masks_only_while_pending_present_pinning_clear_after_commit() {
+        let stray = || {
+            vec![
+                data_file("out-0.parquet"),
+                dv_file("dv-final-epoch.puff", "in-a.parquet"),
+            ]
+        };
+        let pending = vec![pending_remap(
+            &["in-a.parquet"],
+            &[("in-a.parquet", 4, "out-0.parquet", 12)],
+        )];
+        let dv_positions = HashMap::from([("dv-final-epoch.puff".to_owned(), vec![4])]);
+
+        // Fixed ordering: pending still present at commit -> stray DV remapped, row masked.
+        let (kept, dead) = plan_in_window_dv_remap(stray(), &pending, &dv_positions);
+        let paths = kept_paths(&kept);
+        assert!(paths.contains("out-0.parquet"));
+        assert!(
+            !paths.contains("dv-final-epoch.puff"),
+            "stray input-referencing DV must be dropped, not committed raw"
+        );
+        assert_eq!(
+            positions(dead.get("out-0.parquet").unwrap()),
+            vec![12],
+            "the deleted row must be masked at its output position"
+        );
+
+        // Buggy ordering (cleared before commit): pending empty -> stray DV kept raw -> resurrection.
+        let (kept_bug, dead_bug) = plan_in_window_dv_remap(stray(), &[], &dv_positions);
+        assert!(
+            kept_paths(&kept_bug).contains("dv-final-epoch.puff"),
+            "with pending already cleared the stray DV survives raw (the resurrection we prevent)"
+        );
+        assert!(
+            dead_bug.is_empty(),
+            "nothing gets masked once pending is gone"
+        );
     }
 
     /// A stray DV whose only deleted position has NO mapping entry (a delete of a row already dead

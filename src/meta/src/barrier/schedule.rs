@@ -960,13 +960,14 @@ mod tests {
             _reports: Vec<
                 risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
             >,
-        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+        ) -> MetaResult<crate::barrier::context::IcebergPkIndexPreCommitOutcome> {
             unimplemented!()
         }
 
         async fn commit_iceberg_pk_index_sink_metadata(
             &self,
             _sink_ids: Vec<risingwave_meta_model::SinkId>,
+            _remap_done: Vec<(risingwave_meta_model::SinkId, i64)>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

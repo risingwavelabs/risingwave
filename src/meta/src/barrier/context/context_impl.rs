@@ -39,7 +39,9 @@ use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{
     PostCollectCommand, ResumeBackfillTarget, SinceTimestampResolvedEpoch,
 };
-use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::context::{
+    GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl, IcebergPkIndexPreCommitOutcome,
+};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
@@ -415,33 +417,26 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
         reports: Vec<PbIcebergPkIndexSinkMetadata>,
-    ) -> MetaResult<Vec<SinkId>> {
-        // Branch out `REMAP_DONE` reports BEFORE the aggregate/commit path: they carry no files and
-        // only acknowledge that a writer durably applied a pk-index remap. Each clears the matching
-        // durable `iceberg_pk_index_pending_remap` record. The mutation is broadcast and applied
-        // deterministically by every writer actor at the same barrier, so all `REMAP_DONE` reports
-        // for a `(sink_id, remap_id)` arrive together here; clearing is idempotent, so the first one
-        // (and any duplicate) is safe. Best-effort: a clear failure leaves the durable record, which
-        // is re-triggered on the next recovery and re-cleared — never fail the barrier over it.
-        let (remap_done, reports): (Vec<_>, Vec<_>) = reports
+    ) -> MetaResult<IcebergPkIndexPreCommitOutcome> {
+        // Branch out `REMAP_DONE` reports from the aggregate/commit path: they carry no files and
+        // only acknowledge that a writer durably applied a pk-index remap. Each will clear the
+        // matching durable `iceberg_pk_index_pending_remap` record — but that clear MUST be deferred
+        // until after this barrier's iceberg commit has succeeded (see
+        // `commit_iceberg_pk_index_sink_metadata`). The writer applies its remap and emits
+        // `REMAP_DONE` on the same checkpoint barrier at which it flushes the final pre-remap epoch's
+        // position deletes, so those stray input-referencing DVs land in THIS pre-commit's `reports`
+        // and are only remapped by the in-window fix-up in `commit_one_epoch` while the pending-remap
+        // record is still present. Clearing here (before commit) would drop that fix-up and resurrect
+        // compaction-surviving rows. The mutation is broadcast and applied deterministically by every
+        // writer actor at the same barrier, so all `REMAP_DONE` reports for a `(sink_id, remap_id)`
+        // arrive together; clearing is idempotent, so a duplicate (or recovery re-clear) is safe.
+        let (remap_done_reports, reports): (Vec<_>, Vec<_>) = reports
             .into_iter()
             .partition(|r| r.role == PbIcebergPkIndexSinkRole::RemapDone as i32);
-        for r in remap_done {
-            let sink_id = r.sink_id;
-            let remap_id = r.remap_id;
-            if let Err(e) = self
-                .iceberg_pk_index_sink_manager
-                .clear_pending_remap(sink_id, remap_id as i64)
-                .await
-            {
-                tracing::warn!(
-                    error = %e.as_report(),
-                    %sink_id,
-                    remap_id,
-                    "failed to clear pk-index pending remap on REMAP_DONE report",
-                );
-            }
-        }
+        let remap_done: Vec<(SinkId, i64)> = remap_done_reports
+            .into_iter()
+            .map(|r| (r.sink_id, r.remap_id as i64))
+            .collect();
 
         let grouped = group_reports_by_sink(reports)?;
         let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
@@ -467,14 +462,21 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .filter_map(|(id, r)| r.err().map(|e| (id, e)))
             .collect();
         if errs.is_empty() {
-            Ok(success_ids)
+            Ok(IcebergPkIndexPreCommitOutcome {
+                commit_sink_ids: success_ids,
+                remap_done,
+            })
         } else {
             Err(aggregate_sink_errors("pre-commit", errs).into())
         }
     }
 
     #[await_tree::instrument]
-    async fn commit_iceberg_pk_index_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+    async fn commit_iceberg_pk_index_sink_metadata(
+        &self,
+        sink_ids: Vec<SinkId>,
+        remap_done: Vec<(SinkId, i64)>,
+    ) -> MetaResult<()> {
         let futs = FuturesUnordered::new();
         for sink_id in sink_ids {
             let manager = &self.iceberg_pk_index_sink_manager;
@@ -486,11 +488,34 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .into_iter()
             .filter_map(|(id, r)| r.err().map(|e| (id, e)))
             .collect();
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(aggregate_sink_errors("commit", errs).into())
+        if !errs.is_empty() {
+            // Commit failed: do NOT clear any pending-remap record. The barrier fails and recovery
+            // re-triggers the remap, so the in-window fix-up runs again against the still-uncommitted
+            // stray DVs. Clearing here would strand those DVs referencing removed input files.
+            return Err(aggregate_sink_errors("commit", errs).into());
         }
+
+        // Commit succeeded for every sink in this barrier. Only now is it safe to clear the durable
+        // pending-remap records acknowledged by this barrier's `REMAP_DONE` reports: the same-barrier
+        // stray position-delete DVs have been remapped onto the output files by `commit_one_epoch`'s
+        // in-window fix-up and are durably committed. Best-effort per record: a clear failure leaves
+        // the durable record, which is re-triggered on the next recovery and re-cleared (idempotent);
+        // never fail the barrier over it.
+        for (sink_id, remap_id) in remap_done {
+            if let Err(e) = self
+                .iceberg_pk_index_sink_manager
+                .clear_pending_remap(sink_id, remap_id)
+                .await
+            {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    %sink_id,
+                    remap_id,
+                    "failed to clear pk-index pending remap after commit on REMAP_DONE report",
+                );
+            }
+        }
+        Ok(())
     }
 }
 

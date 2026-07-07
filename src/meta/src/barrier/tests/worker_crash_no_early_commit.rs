@@ -44,8 +44,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
 use crate::barrier::command::PostCollectCommand;
-use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::context::recovery::LoadedRecoveryContext;
+use crate::barrier::context::{GlobalBarrierWorkerContext, IcebergPkIndexPreCommitOutcome};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
@@ -184,13 +184,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         _reports: Vec<
             risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
         >,
-    ) -> MetaResult<Vec<SinkId>> {
+    ) -> MetaResult<IcebergPkIndexPreCommitOutcome> {
         unimplemented!()
     }
 
     async fn commit_iceberg_pk_index_sink_metadata(
         &self,
         _sink_ids: Vec<SinkId>,
+        _remap_done: Vec<(SinkId, i64)>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
