@@ -444,6 +444,7 @@ pub async fn create_task_execution(
         sink_id,
         props,
         task_type,
+        ..
     } = iceberg_compaction_task;
 
     let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
