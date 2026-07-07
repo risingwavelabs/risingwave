@@ -1641,11 +1641,9 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
-/// Field-aware version of [`is_parquet_schema_match_source_schema`]: additionally matches a
-/// Parquet variant column (an `arrow.parquet.variant` extension over a struct) against
-/// RisingWave's `Jsonb`. The bare `DataType` check cannot see this case because extension
-/// names live in the field metadata. Prefer this function whenever an `arrow_schema::Field`
-/// is available.
+/// Field-aware version of [`is_parquet_schema_match_source_schema`]: additionally matches an
+/// `arrow.parquet.variant` struct against `Jsonb`, which requires the extension name in the
+/// field metadata. Prefer this whenever a `Field` is available.
 pub fn is_parquet_field_match_source_schema(
     arrow_field: &arrow_schema::Field,
     rw_data_type: &crate::types::DataType,
@@ -1771,6 +1769,93 @@ mod tests {
     /// A default-only `FromArrow` for exercising the shared decode logic.
     struct Dummy;
     impl FromArrow for Dummy {}
+
+    fn variant_field(name: &str) -> ArrowField {
+        use std::collections::HashMap;
+        ArrowField::new(
+            name,
+            ArrowType::Struct(
+                vec![
+                    ArrowField::new("metadata", ArrowType::Binary, false),
+                    ArrowField::new("value", ArrowType::Binary, true),
+                ]
+                .into(),
+            ),
+            true,
+        )
+        .with_metadata(HashMap::from([(
+            "ARROW:extension:name".to_owned(),
+            "arrow.parquet.variant".to_owned(),
+        )]))
+    }
+
+    #[test]
+    fn test_variant_field_schema_match() {
+        let variant = variant_field("v");
+
+        assert!(is_parquet_field_match_source_schema(
+            &variant,
+            &RwType::Jsonb
+        ));
+        assert!(!is_parquet_schema_match_source_schema(
+            variant.data_type(),
+            &RwType::Jsonb
+        ));
+        // The extension takes precedence over the physical struct type.
+        let rw_physical = RwType::Struct(StructType::new(vec![
+            ("metadata".to_owned(), RwType::Bytea),
+            ("value".to_owned(), RwType::Bytea),
+        ]));
+        assert!(!is_parquet_field_match_source_schema(
+            &variant,
+            &rw_physical
+        ));
+
+        // Variant nested in struct / list / map.
+        let arrow_struct = ArrowField::new(
+            "s",
+            ArrowType::Struct(vec![variant_field("v")].into()),
+            true,
+        );
+        let rw_struct = RwType::Struct(StructType::new(vec![("v".to_owned(), RwType::Jsonb)]));
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_struct,
+            &rw_struct
+        ));
+
+        let arrow_list = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(variant_field("element"))),
+            true,
+        );
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_list,
+            &RwType::list(RwType::Jsonb)
+        ));
+
+        let arrow_map = ArrowField::new(
+            "m",
+            ArrowType::Map(
+                Arc::new(ArrowField::new(
+                    "entries",
+                    ArrowType::Struct(
+                        vec![
+                            ArrowField::new("key", ArrowType::Utf8, false),
+                            variant_field("value"),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                )),
+                false,
+            ),
+            true,
+        );
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_map,
+            &RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Jsonb))
+        ));
+    }
 
     #[test]
     fn test_struct_schema_match() {

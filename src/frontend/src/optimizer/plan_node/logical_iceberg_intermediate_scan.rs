@@ -182,10 +182,8 @@ impl LogicalIcebergIntermediateScan {
         !self.table_column_type_mapping.is_empty()
     }
 
-    /// Schema fields carrying the original iceberg-side column types, for predicate pushdown.
-    /// For engine tables the output schema is remapped to Hummock types (e.g. jsonb backed by
-    /// an iceberg string), but pushability must be judged on the underlying iceberg field
-    /// type, which the source catalog keeps.
+    /// Schema fields carrying the iceberg-side column types (undoing the engine-table
+    /// Hummock type remapping), for predicate pushdown.
     fn iceberg_side_fields(&self) -> Vec<Field> {
         self.core
             .column_catalog

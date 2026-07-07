@@ -147,10 +147,8 @@ impl ParquetParser {
                             .type_from_field(parquet_field)
                             .is_ok_and(|inferred| &inferred == rw_data_type)
                         {
-                            // The match involves an extension type (e.g. iceberg variant →
-                            // jsonb), which only the parquet-side field carries the metadata
-                            // to convert. Dispatch on that field instead of one derived from
-                            // the RW type.
+                            // Extension-typed match (e.g. variant → jsonb): only the
+                            // parquet-side field carries the metadata to convert.
                             parquet_field.as_ref().clone()
                         } else {
                             return Err(crate::parser::AccessError::ParquetParser {
