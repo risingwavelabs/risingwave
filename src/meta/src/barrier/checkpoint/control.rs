@@ -346,7 +346,8 @@ impl CheckpointControl {
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
-                    | Command::InjectSourceOffsets { .. } => {
+                    | Command::InjectSourceOffsets { .. }
+                    | Command::IcebergPkIndexRemap { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",

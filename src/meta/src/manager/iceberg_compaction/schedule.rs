@@ -36,6 +36,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::*;
+use crate::barrier::Command;
 use crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink;
 
 /// Compaction track states using type-safe state machine pattern
@@ -1177,6 +1178,10 @@ impl IcebergCompactionManager {
             }
         };
 
+        // Keep a copy of the mapping paths for the post-commit remap mutation below; the commit
+        // call consumes the original.
+        let remap_mapping_paths = mapping_paths.clone();
+
         match self
             .iceberg_pk_index_sink_manager
             .commit_compaction_overwrite(
@@ -1188,7 +1193,37 @@ impl IcebergCompactionManager {
             )
             .await
         {
-            Ok(()) => true,
+            Ok(()) => {
+                // The overwrite committed: input data files are gone from the table and the output
+                // files are live, but the writer's pk-index state table still points surviving rows
+                // at the removed input files. Inject a targeted barrier mutation telling the writer
+                // to remap its own shard to the mapped `(output_file, output_pos)`.
+                //
+                // TODO(B4-window): between this commit and the remap mutation landing, a delete of a
+                // just-compacted PK resolves to a now-removed input file and emits a dangling
+                // position-delete (potential data resurrection). Bounding the window to one barrier
+                // via `run_command_no_wait` mitigates but does not close it; the coordinator-side
+                // masking of window-deletes is handled in a separate B4-window step.
+                //
+                // TODO(B4-recovery): if meta restarts between the commit and mutation delivery, the
+                // pending remap is lost. The writer remap is idempotent (a re-run finds no entries
+                // pointing at the now-removed input files), so durable recovery only needs to
+                // re-inject the mutation; recording a durable "pending remap" is a separate step.
+                if let Err(e) = self
+                    .schedule_pk_index_remap(sink_id, remap_mapping_paths)
+                    .await
+                {
+                    // The remap failing to enqueue does not undo a successful commit; log and keep
+                    // the route successful. Recovery (see TODO above) will re-inject.
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        sink_id = %sink_id,
+                        task_id,
+                        "failed to schedule pk-index remap mutation after compaction overwrite commit"
+                    );
+                }
+                true
+            }
             Err(e) => {
                 tracing::warn!(
                     error = %e.as_report(),
@@ -1199,6 +1234,29 @@ impl IcebergCompactionManager {
                 false
             }
         }
+    }
+
+    /// Enqueue the `IcebergPkIndexRemap` barrier command for `sink_id`'s database. Broadcast within
+    /// the database; the writer self-filters by `sink_id`. Fire-and-forget: the mutation lands on
+    /// the next barrier for that database.
+    async fn schedule_pk_index_remap(
+        &self,
+        sink_id: SinkId,
+        mapping_paths: Vec<String>,
+    ) -> MetaResult<()> {
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(sink_id)
+            .await?;
+        self.barrier_scheduler.run_command_no_wait(
+            database_id,
+            Command::IcebergPkIndexRemap {
+                sink_id,
+                mapping_paths,
+            },
+        )?;
+        Ok(())
     }
 
     pub async fn handle_report_task(&self, report: IcebergReportTask) {

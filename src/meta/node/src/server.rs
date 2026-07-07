@@ -478,6 +478,7 @@ pub async fn start_service_as_election_leader(
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
         iceberg_pk_index_sink_manager.clone(),
+        barrier_scheduler.clone(),
     );
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(

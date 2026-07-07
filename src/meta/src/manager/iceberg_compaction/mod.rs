@@ -33,6 +33,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::barrier::BarrierScheduler;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
@@ -60,6 +61,10 @@ pub struct IcebergCompactionManager {
     /// Used to route pk-index coordinated compaction reports to the sink's commit coordinator
     /// (see `Self::route_pk_index_compaction_report` in `schedule.rs`).
     iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+    /// Used to inject the `IcebergPkIndexRemap` barrier mutation after a coordinated compaction
+    /// overwrite commits, telling the pk-index writer to remap its state table
+    /// (see `Self::route_pk_index_compaction_report` in `schedule.rs`).
+    barrier_scheduler: BarrierScheduler,
 
     compactor_streams_change_tx: CompactorChangeTx,
 
@@ -87,6 +92,7 @@ impl IcebergCompactionManager {
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        barrier_scheduler: BarrierScheduler,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -101,6 +107,7 @@ impl IcebergCompactionManager {
                 metadata_manager,
                 iceberg_compactor_manager,
                 iceberg_pk_index_sink_manager,
+                barrier_scheduler,
                 compactor_streams_change_tx,
                 metrics,
             }),

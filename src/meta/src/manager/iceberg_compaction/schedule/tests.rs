@@ -19,9 +19,10 @@ use prometheus::Registry;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 
 use super::*;
+use crate::barrier::BarrierScheduler;
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::hummock::IcebergCompactorManager;
+use crate::hummock::{CompactorManager, HummockManager, IcebergCompactorManager};
 use crate::manager::MetaOpts;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::rpc::metrics::MetaMetrics;
@@ -41,12 +42,32 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
     let metrics = Arc::new(MetaMetrics::for_test(&Registry::new()));
     let iceberg_pk_index_sink_manager =
         IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+
+    // A `BarrierScheduler` is required by the manager (for the post-compaction pk-index remap
+    // command). These tests never drive a barrier, so a minimal scheduler backed by a test
+    // hummock manager is enough to construct the manager.
+    let compactor_manager = Arc::new(CompactorManager::for_test());
+    let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    let hummock_manager = HummockManager::new(
+        env.clone(),
+        metadata_manager.clone(),
+        metrics.clone(),
+        compactor_manager,
+        compactor_streams_change_tx,
+    )
+    .await
+    .unwrap();
+    let (barrier_scheduler, _scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager, metrics.clone());
+
     let (manager, _) = IcebergCompactionManager::build(
         env,
         metadata_manager,
         iceberg_compactor_manager,
         metrics,
         iceberg_pk_index_sink_manager,
+        barrier_scheduler,
     );
     manager
 }

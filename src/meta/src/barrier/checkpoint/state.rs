@@ -1480,6 +1480,17 @@ impl DatabaseCheckpointControl {
                 ));
                 self.apply_simple_command(mutation, "InjectSourceOffsets")
             }
+
+            Some(Command::IcebergPkIndexRemap {
+                sink_id,
+                mapping_paths,
+            }) => {
+                let mutation = Some(Command::iceberg_pk_index_remap_to_mutation(
+                    sink_id,
+                    &mapping_paths,
+                ));
+                self.apply_simple_command(mutation, "IcebergPkIndexRemap")
+            }
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();

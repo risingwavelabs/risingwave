@@ -583,6 +583,16 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// `IcebergPkIndexRemap` tells the iceberg pk-index writer of `sink_id` to remap its pk-index
+    /// state table after a coordinated compaction overwrite committed. Broadcast within the sink's
+    /// database (the writer self-filters by `sink_id`). `mapping_paths` are the spilled
+    /// row-provenance NDJSON paths the writer reads to rewrite surviving entries to their mapped
+    /// `(output_file, output_pos)`.
+    IcebergPkIndexRemap {
+        sink_id: SinkId,
+        mapping_paths: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -680,6 +690,15 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::IcebergPkIndexRemap {
+                sink_id,
+                mapping_paths,
+            } => write!(
+                f,
+                "IcebergPkIndexRemap: {} ({} mapping paths)",
+                sink_id,
+                mapping_paths.len()
             ),
         }
     }
@@ -1525,6 +1544,17 @@ impl Command {
         Mutation::InjectSourceOffsets(risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
             source_id: source_id.as_raw_id(),
             split_offsets: split_offsets.clone(),
+        })
+    }
+
+    /// Build the `IcebergPkIndexRemap` mutation.
+    pub(super) fn iceberg_pk_index_remap_to_mutation(
+        sink_id: SinkId,
+        mapping_paths: &[String],
+    ) -> Mutation {
+        Mutation::IcebergPkIndexRemap(risingwave_pb::stream_plan::IcebergPkIndexRemapMutation {
+            sink_id: sink_id.as_raw_id(),
+            mapping_paths: mapping_paths.to_vec(),
         })
     }
 
