@@ -258,6 +258,15 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
     use arrow_array::Array as _;
 
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
+    // The upstream decoder for the shredded encoding still panics (or silently nulls)
+    // on data it cannot handle, so reject it wholesale like the iceberg-rust scan does.
+    if variant_array.typed_value_field().is_some() {
+        return Err(ArrayError::from_arrow(
+            "shredded variant (with a `typed_value` field) is not supported yet",
+        ));
+    }
+    let metadata_array = variant_array.metadata_field();
+    let value_array = variant_array.value_field();
     let mut builder = JsonbArrayBuilder::new(variant_array.len());
 
     for idx in 0..variant_array.len() {
@@ -266,17 +275,15 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             continue;
         }
 
-        // `try_value` panics on corrupt bytes in the plain encoding; decode it via the
-        // fully-validating `Variant::try_new` so bad external data surfaces as an error.
-        let variant_result = match (
-            variant_array.typed_value_field(),
-            variant_array.value_field(),
-        ) {
-            (Some(typed_value), _) if typed_value.is_valid(idx) => variant_array.try_value(idx),
-            (_, Some(value)) if value.is_valid(idx) => {
-                Variant::try_new(variant_array.metadata_field().value(idx), value.value(idx))
+        // `try_value` panics on corrupt bytes; decode via the fully-validating
+        // `Variant::try_new` so bad external data surfaces as an error.
+        // TODO: rows of a batch virtually always share one metadata dictionary;
+        // cache the validated metadata instead of re-validating it per row.
+        let variant_result = match value_array {
+            Some(value) if value.is_valid(idx) => {
+                Variant::try_new(metadata_array.value(idx), value.value(idx))
             }
-            // Per spec, neither `value` nor `typed_value` present means variant null.
+            // Per spec, a missing `value` means variant null.
             _ => Ok(Variant::Null),
         };
 
@@ -825,6 +832,79 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(values, vec![Some(r#""HI""#.parse().unwrap()), None]);
+    }
+
+    #[test]
+    fn shredded_variant_is_rejected() {
+        let field = variant_arrow_field("variant_col", true);
+        let array = Arc::new(arrow_array::StructArray::from(vec![
+            (
+                Arc::new(arrow_schema::Field::new(
+                    "metadata",
+                    ArrowDataType::Binary,
+                    false,
+                )),
+                Arc::new(arrow_array::BinaryArray::from_iter_values([
+                    &[1_u8, 0, 0][..]
+                ])) as ArrayRef,
+            ),
+            (
+                Arc::new(arrow_schema::Field::new(
+                    "typed_value",
+                    ArrowDataType::Int64,
+                    true,
+                )),
+                Arc::new(arrow_array::Int64Array::from(vec![7_i64])) as ArrayRef,
+            ),
+        ])) as ArrayRef;
+
+        let err = IcebergArrowConvert
+            .array_from_arrow_array(&field, &array)
+            .unwrap_err();
+        assert!(err.to_string().contains("shredded variant"), "{err}");
+    }
+
+    #[test]
+    fn variant_in_projected_struct_decodes_by_declared_type() {
+        let mut builder = VariantArrayBuilder::new(1);
+        builder.append_variant(Variant::from(7_i64));
+        let variant_array = builder.build();
+        let variant_field = variant_array.field("v");
+        let variant_child = Arc::new(variant_array.into_inner()) as ArrayRef;
+        let extra_child = Arc::new(arrow_array::Int64Array::from(vec![1_i64])) as ArrayRef;
+        let actual = Arc::new(arrow_array::StructArray::from(vec![
+            (
+                Arc::new(arrow_schema::Field::new(
+                    "extra",
+                    ArrowDataType::Int64,
+                    true,
+                )),
+                extra_child,
+            ),
+            (Arc::new(variant_field), variant_child),
+        ])) as ArrayRef;
+
+        // Declared as struct<v jsonb>: the parquet struct is a superset, so conversion
+        // goes through the projected path, which must decode the variant child to jsonb.
+        let declared_field = arrow_schema::Field::new(
+            "s",
+            ArrowDataType::Struct(
+                vec![Arc::new(arrow_schema::Field::new(
+                    "v",
+                    ArrowDataType::Utf8,
+                    true,
+                ))]
+                .into(),
+            ),
+            true,
+        );
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&declared_field, &actual)
+            .unwrap();
+        assert_eq!(
+            converted.data_type(),
+            DataType::Struct(StructType::new(vec![("v", DataType::Jsonb)])),
+        );
     }
 
     fn variant_arrow_field(name: &str, nullable: bool) -> arrow_schema::Field {
