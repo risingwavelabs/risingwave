@@ -17,6 +17,7 @@ pub(crate) use self::report::{
     IcebergPlanCompletion, IcebergTaskReport, IcebergTaskTracker, PkIndexCompactionResult,
     ReportSendResult, build_iceberg_task_report, build_pk_index_compaction_result,
     flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
+    spill_pk_index_row_provenance,
 };
 use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactionPlanRunner;
 

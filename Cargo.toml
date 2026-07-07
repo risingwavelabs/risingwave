@@ -467,3 +467,8 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+
+# TEMP local fork for pk-index compaction row-provenance (fork commit 05b4266e2d); replace with a
+# git rev bump once upstreamed. See .superpowers/sdd/progress.md
+[patch."https://github.com/nimtable/iceberg-compaction.git"]
+iceberg-compaction-core = { path = "/private/tmp/claude-501/-Users-silver-code-risingwave/b61ce943-f0e4-4edd-919d-2fdac3bcf220/scratchpad/icecomp-fork/core" }

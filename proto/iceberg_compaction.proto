@@ -43,6 +43,14 @@ message SubscribeIcebergCompactionEventRequest {
     // The snapshot id the rewrite plan read from, used by the coordinator's
     // commit for optimistic-concurrency validation.
     optional int64 pk_index_read_snapshot_id = 9;
+    // JSON array of absolute paths to the per-row provenance mapping file(s)
+    // (one file per compaction plan admitted into this task) spilled by the
+    // compactor via the iceberg table's `FileIO`. Each file contains
+    // newline-delimited JSON objects `{input_file, input_pos, output_file,
+    // output_pos}` describing how surviving input rows map to their new
+    // location in the rewrite output. Meta's coordinator reads these back
+    // through the same table's `FileIO` to reconcile concurrent deletes.
+    optional string pk_index_mapping_path = 10;
   }
 
   oneof event {

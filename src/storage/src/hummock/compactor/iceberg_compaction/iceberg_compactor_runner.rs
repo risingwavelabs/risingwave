@@ -44,7 +44,10 @@ use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::{IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_result};
+use super::{
+    IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_result,
+    spill_pk_index_row_provenance,
+};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
@@ -276,6 +279,11 @@ impl IcebergCompactionPlanRunner {
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
             .enable_prefetch(config.enable_prefetch)
+            // Only pk-index coordinated (no-commit) tasks need the per-row provenance mapping:
+            // meta's coordinator uses it to reconcile the rewrite output against concurrent
+            // deletes before committing. Non-coordinated tasks commit here directly and never
+            // need it, so leave it off to avoid the extra scan/writer overhead.
+            .need_row_provenance(pk_index_coordinated)
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
@@ -348,28 +356,53 @@ impl IcebergCompactionPlanRunner {
             data_files,
             stats,
             table,
+            row_provenance,
         } = compaction_result;
 
         if pk_index_coordinated {
             // pk-index coordinated compaction: the rewrite above already ran without committing
             // (`compact_with_plan` only commits when we explicitly call `overwrite_files` below,
             // which we skip here). Meta's iceberg pk-index sink coordinator performs the actual
-            // commit later, so we only report the rewrite output, input files, and read snapshot.
+            // commit later, so we only report the rewrite output, input files, read snapshot, and
+            // the spilled per-row provenance mapping.
             //
-            // TODO(B3/B4): dead-row masking + index remap not yet applied. This report instructs
-            // meta to replace `pk_index_input_file_paths` with `data_files` as-is, which is only
-            // correct when no deletes landed on the input files during `(R, N]`.
+            // TODO(B4): index remap not yet applied downstream of the provenance mapping. This
+            // report instructs meta to replace `pk_index_input_file_paths` with `data_files` as
+            // rewritten, using the provenance mapping to mask rows deleted concurrently during
+            // `(R, N]` (B3).
             let committed_table = table.ok_or_else(|| {
                 HummockError::compaction_executor(anyhow::anyhow!(
                     "compact_with_plan returned no table for a pk-index-coordinated compaction task"
                 ))
             })?;
 
+            // We requested `need_row_provenance(true)` above specifically because this task is
+            // pk-index coordinated. A `None` here means the executor silently ignored the
+            // request, which would make meta's future dead-row masking (B3) unsafe (it would
+            // have no way to tell which rows survived vs. were deleted concurrently). Treat this
+            // as a hard failure rather than reporting a coordinated task as done without the
+            // mapping meta depends on.
+            let row_provenance = row_provenance.ok_or_else(|| {
+                HummockError::compaction_executor(anyhow::anyhow!(
+                    "pk-index coordinated compaction requested need_row_provenance but the \
+                     executor returned none; refusing to report as success"
+                ))
+            })?;
+
+            let pk_index_mapping_path = spill_pk_index_row_provenance(
+                &committed_table,
+                task_id,
+                plan_index,
+                &row_provenance,
+            )
+            .await?;
+
             let pk_index_result = build_pk_index_compaction_result(
                 &committed_table,
                 data_files,
                 pk_index_input_file_paths,
                 pk_index_read_snapshot_id,
+                pk_index_mapping_path,
             )?;
 
             return Ok((stats, Some(pk_index_result)));

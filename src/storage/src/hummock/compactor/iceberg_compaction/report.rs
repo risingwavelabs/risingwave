@@ -15,16 +15,89 @@
 use std::collections::VecDeque;
 use std::time::SystemTime;
 
+use bytes::Bytes;
 use iceberg::spec::{DataFile, SerializedDataFile};
 use iceberg::table::Table;
+use iceberg_compaction_core::executor::RowProvenance;
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
+use serde::Serialize;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
 use super::TaskKey;
 use crate::hummock::{HummockError, HummockResult};
+
+/// RW-local mirror of `iceberg_compaction_core::executor::RowProvenance`.
+///
+/// The fork's `RowProvenance` intentionally does not derive `Serialize` (it's an internal type of
+/// a third-party crate), so each row is mapped into this local struct before being JSON-encoded.
+/// Field names and types must stay in sync with the fork's `RowProvenance` and with meta's
+/// decoder (B3).
+#[derive(Debug, Serialize)]
+struct RowProvenanceEntry {
+    input_file: String,
+    input_pos: u64,
+    output_file: String,
+    output_pos: u64,
+}
+
+impl From<&RowProvenance> for RowProvenanceEntry {
+    fn from(row: &RowProvenance) -> Self {
+        Self {
+            input_file: row.input_file.clone(),
+            input_pos: row.input_pos,
+            output_file: row.output_file.clone(),
+            output_pos: row.output_pos,
+        }
+    }
+}
+
+/// Spills a single plan's per-row provenance mapping to the iceberg table's storage via `FileIO`,
+/// so that meta's pk-index sink coordinator can read it back later through the same table's
+/// `FileIO` (B3).
+///
+/// Encoded as newline-delimited JSON (one [`RowProvenanceEntry`] per line) under a
+/// `_rw_pk_index_compaction/` prefix beneath the table's base location. Returns the absolute path
+/// written.
+pub(crate) async fn spill_pk_index_row_provenance(
+    table: &Table,
+    task_id: u64,
+    plan_index: usize,
+    row_provenance: &[RowProvenance],
+) -> HummockResult<String> {
+    let mut buf = Vec::new();
+    for row in row_provenance {
+        serde_json::to_writer(&mut buf, &RowProvenanceEntry::from(row)).map_err(|e| {
+            HummockError::compaction_executor(format!(
+                "failed to serialize pk-index row provenance entry for task {} plan {}: {}",
+                task_id,
+                plan_index,
+                e.as_report()
+            ))
+        })?;
+        buf.push(b'\n');
+    }
+
+    let path = format!(
+        "{}/_rw_pk_index_compaction/{}-{}.jsonl",
+        table.metadata().location().trim_end_matches('/'),
+        task_id,
+        plan_index
+    );
+
+    let output_file = table
+        .file_io()
+        .new_output(&path)
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    output_file
+        .write(Bytes::from(buf))
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    Ok(path)
+}
 
 /// Per-plan result of a pk-index coordinated compaction run (rewrite without commit).
 ///
@@ -41,6 +114,9 @@ pub(crate) struct PkIndexCompactionResult {
     pub(crate) input_file_paths: Vec<String>,
     /// Snapshot the rewrite plan read from.
     pub(crate) read_snapshot_id: i64,
+    /// Absolute path (written via the table's `FileIO`) of this plan's spilled per-row provenance
+    /// mapping file. See [`spill_pk_index_row_provenance`].
+    pub(crate) pk_index_mapping_path: String,
 }
 
 // Manual Debug: `SerializedDataFile` does not implement `Debug`.
@@ -50,6 +126,7 @@ impl std::fmt::Debug for PkIndexCompactionResult {
             .field("output_file_count", &self.output_files.len())
             .field("input_file_count", &self.input_file_paths.len())
             .field("read_snapshot_id", &self.read_snapshot_id)
+            .field("pk_index_mapping_path", &self.pk_index_mapping_path)
             .finish()
     }
 }
@@ -62,11 +139,14 @@ impl std::fmt::Debug for PkIndexCompactionResult {
 /// - `input_file_paths` and `read_snapshot_id` must be captured by the caller *before* the
 ///   compaction plan is consumed by `compact_with_plan` (the plan's `FileGroup` already carries
 ///   each input file's path via `FileScanTask::data_file_path` — no manifest walk needed).
+/// - `pk_index_mapping_path` is the path returned by [`spill_pk_index_row_provenance`], already
+///   spilled by the caller before this is called.
 pub(crate) fn build_pk_index_compaction_result(
     table: &Table,
     data_files: Vec<DataFile>,
     input_file_paths: Vec<String>,
     read_snapshot_id: i64,
+    pk_index_mapping_path: String,
 ) -> HummockResult<PkIndexCompactionResult> {
     let partition_type = table.metadata().default_partition_type();
     let format_version = table.metadata().format_version();
@@ -83,6 +163,7 @@ pub(crate) fn build_pk_index_compaction_result(
         output_files,
         input_file_paths,
         read_snapshot_id,
+        pk_index_mapping_path,
     })
 }
 
@@ -181,9 +262,11 @@ fn populate_pk_index_report_fields(
 
     let mut output_files: Vec<SerializedDataFile> = Vec::new();
     let mut input_file_paths: Vec<String> = Vec::new();
+    let mut mapping_paths: Vec<String> = Vec::new();
     for pk_index_result in pk_index_results {
         output_files.extend(pk_index_result.output_files);
         input_file_paths.extend(pk_index_result.input_file_paths);
+        mapping_paths.push(pk_index_result.pk_index_mapping_path);
     }
 
     match serde_json::to_vec(&output_files) {
@@ -222,6 +305,31 @@ fn populate_pk_index_report_fields(
             report.pk_index_output_files = None;
             // Same rationale as above: a coordinated rewrite that cannot be fully reported must
             // not be reported as success, or meta will silently drop the compaction output.
+            report.status =
+                subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32;
+            report.error_message = Some(format!(
+                "failed to serialize pk-index compaction report payload: {}",
+                e.as_report()
+            ));
+            return;
+        }
+    }
+    // Mapping paths (one per plan) are serialized as a JSON array string, since the proto field
+    // is a single `optional string` but a task can admit multiple plans, each with its own
+    // spilled provenance file.
+    match serde_json::to_string(&mapping_paths) {
+        Ok(s) => report.pk_index_mapping_path = Some(s),
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                task_id = report.task_id,
+                sink_id = report.sink_id,
+                "Failed to serialize pk_index_mapping_path; skipping pk-index payload in report"
+            );
+            report.pk_index_output_files = None;
+            report.pk_index_input_files = None;
+            // Same rationale as above: without the mapping path meta cannot reconcile concurrent
+            // deletes against the rewrite output, so the report must not claim success.
             report.status =
                 subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32;
             report.error_message = Some(format!(
@@ -344,6 +452,8 @@ mod tests {
                 output_files: vec![],
                 input_file_paths: vec![],
                 read_snapshot_id: 42,
+                pk_index_mapping_path: "s3://bucket/table/_rw_pk_index_compaction/7-0.jsonl"
+                    .to_owned(),
             }),
         );
         tracker.record_completion(
@@ -352,6 +462,8 @@ mod tests {
                 output_files: vec![],
                 input_file_paths: vec![],
                 read_snapshot_id: 42,
+                pk_index_mapping_path: "s3://bucket/table/_rw_pk_index_compaction/7-1.jsonl"
+                    .to_owned(),
             }),
         );
 
@@ -367,6 +479,12 @@ mod tests {
             Some(b"[]".as_slice())
         );
         assert_eq!(report.pk_index_read_snapshot_id, Some(42));
+        assert_eq!(
+            report.pk_index_mapping_path.as_deref(),
+            Some(
+                r#"["s3://bucket/table/_rw_pk_index_compaction/7-0.jsonl","s3://bucket/table/_rw_pk_index_compaction/7-1.jsonl"]"#
+            )
+        );
     }
 
     #[test]
@@ -379,6 +497,7 @@ mod tests {
         assert!(report.pk_index_output_files.is_none());
         assert!(report.pk_index_input_files.is_none());
         assert!(report.pk_index_read_snapshot_id.is_none());
+        assert!(report.pk_index_mapping_path.is_none());
     }
 
     #[test]
