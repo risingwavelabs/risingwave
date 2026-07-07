@@ -22,6 +22,7 @@ use arrow_schema::extension::ExtensionType;
 use num_traits::abs;
 use parquet_variant_compute::{VariantArray, VariantType};
 use parquet_variant_json::VariantToJson;
+use thiserror_ext::AsReport;
 
 pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
@@ -269,9 +270,9 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             Ok(json_value) => builder.append_owned(Some(json_value.into())),
             Err(err) => {
                 tracing::warn!(
-                    "failed to decode iceberg variant value at index {}: {}. It will be replaced with null.",
+                    error = %err.as_report(),
+                    "failed to decode iceberg variant value at index {}. It will be replaced with null.",
                     idx,
-                    err
                 );
                 builder.append_null();
             }
