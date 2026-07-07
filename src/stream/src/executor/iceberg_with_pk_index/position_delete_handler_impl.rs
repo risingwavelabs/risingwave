@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap as StdHashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -22,10 +22,9 @@ use hashbrown::hash_map::Entry;
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
-use iceberg::puffin::{CompressionCodec, PuffinReader, PuffinWriter};
 use iceberg::spec::{
-    DataContentType, DataFile, DataFileBuilder, DataFileFormat, FormatVersion, ManifestContentType,
-    ManifestList, PartitionKey, SerializedDataFile,
+    DataContentType, DataFile, DataFileFormat, FormatVersion, ManifestContentType, ManifestList,
+    PartitionKey, SerializedDataFile,
 };
 use iceberg::table::Table;
 use iceberg::writer::base_writer::position_delete_file_writer::POSITION_DELETE_SCHEMA;
@@ -43,7 +42,8 @@ use risingwave_common::array::arrow::arrow_array_iceberg::{
 use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef as ArrowSchemaRef;
 use risingwave_connector::sink::iceberg::{
     IcebergConfig, IcebergPositionDeleteMergerCommitResult, PARQUET_CREATED_BY,
-    resolve_partition_spec, resolve_partition_type, serialize_data_files_default_spec,
+    read_dv_positions_from_data_file, resolve_partition_spec, resolve_partition_type,
+    serialize_data_files_default_spec, write_dv_puffin_file as connector_write_dv_puffin_file,
 };
 use risingwave_connector::source::iceberg::parquet_file_handler::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -52,11 +52,6 @@ use uuid::Uuid;
 
 use super::position_delete_merger::PositionDeleteHandler;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
-
-/// Puffin blob property for deletion vector cardinality.
-const DELETION_VECTOR_PROPERTY_CARDINALITY: &str = "cardinality";
-/// Puffin blob property for referenced data file path.
-const DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE: &str = "referenced-data-file";
 
 /// Per-data-file accumulator returned by [`load_delete_vectors`].
 ///
@@ -118,6 +113,10 @@ impl PositionDeleteHandlerImpl {
     /// Merges `delete_vector` with any existing DV from `loaded`, writes the result
     /// as a single V3 Puffin deletion vector blob referencing `data_file_path`, and
     /// returns its [`DataFile`] metadata with `referenced_data_file` set.
+    ///
+    /// The Puffin authoring itself lives in the connector crate
+    /// ([`connector_write_dv_puffin_file`]) so it can be shared with meta's pk-index
+    /// compaction coordinator; this method only folds in the existing DV / partition key.
     async fn write_dv_puffin_file(
         &mut self,
         table: &Table,
@@ -135,67 +134,16 @@ impl PositionDeleteHandlerImpl {
             delete_vector |= existing;
         }
 
-        let file_name = self.file_name_generator.generate_file_name();
-        let location = self
-            .location_generator
-            .generate_location(partition_key.as_ref(), &file_name);
-        let output_file = table
-            .file_io()
-            .new_output(&location)
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-        let mut writer = PuffinWriter::new(&output_file, StdHashMap::new(), false)
-            .await
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-
-        let cardinality = delete_vector.len();
-        let properties = StdHashMap::from([
-            (
-                DELETION_VECTOR_PROPERTY_CARDINALITY.to_owned(),
-                cardinality.to_string(),
-            ),
-            (
-                DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE.to_owned(),
-                data_file_path.clone(),
-            ),
-        ]);
-        let blob = delete_vector
-            .to_puffin_blob(properties)
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-        writer
-            .add(blob, CompressionCodec::None)
-            .await
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-
-        let result = writer
-            .close_with_metadata()
-            .await
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
-        let blob_metadata = result
-            .blobs_metadata
-            .first()
-            .context("blob metadata should be present")?;
-
-        let mut builder = DataFileBuilder::default();
-        builder
-            .content(DataContentType::PositionDeletes)
-            .file_path(location)
-            .file_format(DataFileFormat::Puffin)
-            .record_count(cardinality)
-            .file_size_in_bytes(result.file_size_in_bytes)
-            .referenced_data_file(Some(data_file_path))
-            .content_offset(Some(blob_metadata.offset() as i64))
-            .content_size_in_bytes(Some(blob_metadata.length() as i64));
-        if let Some(partition_key) = partition_key {
-            builder
-                .partition(partition_key.data().clone())
-                .partition_spec_id(partition_key.spec().spec_id());
-        }
-        builder.build().map_err(|err| {
-            StreamExecutorError::sink_error(
-                anyhow::anyhow!(err).context("Failed to build deletion vector file metadata"),
-                self.sink_id,
-            )
-        })
+        connector_write_dv_puffin_file(
+            table,
+            &self.location_generator,
+            &self.file_name_generator,
+            data_file_path,
+            delete_vector,
+            partition_key.as_ref(),
+        )
+        .await
+        .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))
     }
 
     /// Merges `delete_vector` with any existing positions from `loaded`, writes the result
@@ -550,7 +498,9 @@ async fn scan_existing_delete_files(
 
             let delete_vector = match data_file.file_format() {
                 DataFileFormat::Puffin => {
-                    read_dv_positions_from_data_file(table.file_io(), data_file, sink_id).await?
+                    read_dv_positions_from_data_file(table.file_io(), data_file)
+                        .await
+                        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?
                 }
                 DataFileFormat::Parquet => {
                     read_v2_positions_from_delete_file(table.file_io(), data_file, sink_id).await?
@@ -634,56 +584,6 @@ async fn scan_data_files_for_partition_keys(
         }
     }
     Ok(())
-}
-
-async fn read_dv_positions_from_data_file(
-    file_io: &FileIO,
-    data_file: &DataFile,
-    sink_id: SinkId,
-) -> StreamExecutorResult<DeleteVector> {
-    let blob_offset = data_file.content_offset().with_context(|| {
-        format!(
-            "DV file {} missing content_offset for referenced data file {:?}",
-            data_file.file_path(),
-            data_file.referenced_data_file()
-        )
-    })?;
-    let blob_length = data_file.content_size_in_bytes().with_context(|| {
-        format!(
-            "DV file {} missing content_size_in_bytes for referenced data file {:?}",
-            data_file.file_path(),
-            data_file.referenced_data_file()
-        )
-    })?;
-
-    let input_file = file_io
-        .new_input(data_file.file_path())
-        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
-    let puffin_reader = PuffinReader::new(input_file);
-    let file_metadata = puffin_reader
-        .file_metadata()
-        .await
-        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
-    let blob_metadata = file_metadata
-        .blobs()
-        .iter()
-        .find(|blob| blob.offset() == blob_offset as u64 && blob.length() == blob_length as u64)
-        .with_context(|| {
-            format!(
-                "DV blob metadata not found in {} at offset={} length={}",
-                data_file.file_path(),
-                blob_offset,
-                blob_length
-            )
-        })?;
-    let blob = puffin_reader
-        .blob(blob_metadata)
-        .await
-        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
-
-    let delete_vector = DeleteVector::from_puffin_blob(blob)
-        .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
-    Ok(delete_vector)
 }
 
 /// Reads the positions stored in a V2 Parquet position-delete file into a
