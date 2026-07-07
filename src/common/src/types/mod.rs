@@ -1121,10 +1121,8 @@ impl ScalarImpl {
                 JsonbVal::value_deserialize(bytes)
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
-            DataType::Variant => Self::Variant(
-                VariantVal::value_deserialize(bytes)
-                    .ok_or_else(|| "invalid value of Variant".to_owned())?,
-            ),
+            // pgwire binary parameters are untrusted and must be re-canonicalized.
+            DataType::Variant => Self::Variant(VariantVal::from_serialized_untrusted(bytes)?),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
             DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());

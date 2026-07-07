@@ -26,7 +26,10 @@ fn parse_variant(input: &str) -> Result<VariantVal> {
 
 #[function("to_variant(any) -> variant")]
 fn to_variant(input: Option<ScalarRefImpl<'_>>, ctx: &Context) -> Result<VariantVal> {
-    VariantVal::try_from_scalar_ref(input, &ctx.arg_types[0]).map_err(ExprError::Internal)
+    VariantVal::try_from_scalar_ref(input, &ctx.arg_types[0]).map_err(|e| ExprError::InvalidParam {
+        name: "to_variant",
+        reason: e.to_report_string().into(),
+    })
 }
 
 #[function("variant_get(variant, varchar) -> variant")]
