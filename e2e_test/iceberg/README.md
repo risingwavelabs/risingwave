@@ -58,9 +58,10 @@ Run pure SLT tests (from repo root):
 ### 6. Cleanup
 
 ```bash
-cd e2e_test/iceberg
+# from e2e_test/iceberg
 ./spark-*/sbin/stop-connect-server.sh
-./risedev k
+# from the repo root
+cd ../.. && ./risedev k
 ```
 
 ## Key Config Files
