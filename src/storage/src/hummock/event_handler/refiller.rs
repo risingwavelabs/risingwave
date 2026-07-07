@@ -1020,7 +1020,7 @@ impl CacheRefillTask {
                 .recent_filter()
                 .insert((task.sst.id, usize::MAX));
 
-            let blocks = task.blks.end - task.blks.start + 1;
+            let blocks = task.blks.len();
             let mut contexts = Vec::with_capacity(blocks);
             let mut admits = 0;
 
