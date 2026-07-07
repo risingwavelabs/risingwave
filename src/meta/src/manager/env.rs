@@ -126,6 +126,9 @@ pub struct MetaOpts {
     pub iceberg_compaction_report_timeout_sec: u64,
     /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
     pub iceberg_compaction_config_refresh_interval_sec: u64,
+    /// Whether to route iceberg pk-index sink compaction through the meta-coordinated
+    /// commit path instead of committing directly from the compactor. Off by default.
+    pub iceberg_pk_index_coordinated_compaction_enabled: bool,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -333,6 +336,7 @@ impl MetaOpts {
             iceberg_gc_interval_sec: 3600,
             iceberg_compaction_report_timeout_sec: 30 * 60,
             iceberg_compaction_config_refresh_interval_sec: 60,
+            iceberg_pk_index_coordinated_compaction_enabled: false,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:

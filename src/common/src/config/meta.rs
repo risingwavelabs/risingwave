@@ -180,6 +180,12 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
     pub iceberg_compaction_config_refresh_interval_sec: u64,
 
+    /// Whether to route iceberg pk-index sink compaction through the
+    /// meta-coordinated commit path instead of committing directly from the
+    /// compactor. Off by default.
+    #[serde(default = "default::meta::iceberg_pk_index_coordinated_compaction_enabled")]
+    pub iceberg_pk_index_coordinated_compaction_enabled: bool,
+
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -732,6 +738,10 @@ pub mod default {
 
         pub fn iceberg_compaction_config_refresh_interval_sec() -> u64 {
             60
+        }
+
+        pub fn iceberg_pk_index_coordinated_compaction_enabled() -> bool {
+            false
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
