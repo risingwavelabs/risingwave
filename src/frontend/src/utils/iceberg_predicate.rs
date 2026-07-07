@@ -143,6 +143,38 @@ fn input_ref_to_reference(input_ref: &InputRef, fields: &[Field]) -> Option<Refe
     Some(Reference::new(&field.name))
 }
 
+/// Convert `<col> <op> <literal>` (either operand order) into an iceberg predicate.
+fn comparison_to_iceberg_predicate(
+    func_type: ExprType,
+    args: &[ExprImpl],
+    fields: &[Field],
+) -> Option<IcebergPredicate> {
+    // `flipped` means the literal is on the left: `lit <op> col` ⇔ `col <mirrored op> lit`.
+    let (input_ref, literal, flipped) = match [&args[0], &args[1]] {
+        [ExprImpl::InputRef(input_ref), ExprImpl::Literal(literal)] => (input_ref, literal, false),
+        [ExprImpl::Literal(literal), ExprImpl::InputRef(input_ref)] => (input_ref, literal, true),
+        _ => return None,
+    };
+    let reference = input_ref_to_reference(input_ref, fields)?;
+    let datum = rw_literal_to_iceberg_datum(literal)?;
+    let predicate = match (func_type, flipped) {
+        (ExprType::Equal, _) => reference.equal_to(datum),
+        (ExprType::NotEqual, _) => reference.not_equal_to(datum),
+        (ExprType::GreaterThan, false) | (ExprType::LessThan, true) => {
+            reference.greater_than(datum)
+        }
+        (ExprType::GreaterThanOrEqual, false) | (ExprType::LessThanOrEqual, true) => {
+            reference.greater_than_or_equal_to(datum)
+        }
+        (ExprType::LessThan, false) | (ExprType::GreaterThan, true) => reference.less_than(datum),
+        (ExprType::LessThanOrEqual, false) | (ExprType::GreaterThanOrEqual, true) => {
+            reference.less_than_or_equal_to(datum)
+        }
+        _ => return None,
+    };
+    Some(predicate)
+}
+
 fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<IcebergPredicate> {
     match expr {
         ExprImpl::Literal(l) => match l.get_data() {
@@ -172,87 +204,15 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                     let arg1 = rw_expr_to_iceberg_predicate(&args[1], fields)?;
                     Some(IcebergPredicate::or(arg0, arg1))
                 }
-                ExprType::Equal if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
-                        | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::NotEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
-                        | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.not_equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::GreaterThan if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::GreaterThanOrEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::LessThan if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::LessThanOrEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let reference = input_ref_to_reference(lhs, fields)?;
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
-                        }
-                        _ => None,
-                    }
+                ExprType::Equal
+                | ExprType::NotEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual
+                | ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                    if args[0].return_type() == args[1].return_type() =>
+                {
+                    comparison_to_iceberg_predicate(f.func_type(), args, fields)
                 }
                 ExprType::IsNull => match &args[0] {
                     ExprImpl::InputRef(lhs) => {
@@ -296,7 +256,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::ScalarImpl;
 
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
