@@ -195,6 +195,17 @@ fn populate_pk_index_report_fields(
                 sink_id = report.sink_id,
                 "Failed to serialize pk_index_output_files; skipping pk-index payload in report"
             );
+            // This task is pk-index coordinated (that's why we're populating these fields at
+            // all), so meta's sink coordinator relies on this payload to perform the actual
+            // iceberg commit. Reporting Success without it would make meta silently treat the
+            // rewrite as done while dropping the output files entirely. Fail the report instead
+            // so meta retries the task.
+            report.status =
+                subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32;
+            report.error_message = Some(format!(
+                "failed to serialize pk-index compaction report payload: {}",
+                e.as_report()
+            ));
             return;
         }
     }
@@ -209,6 +220,14 @@ fn populate_pk_index_report_fields(
                 "Failed to serialize pk_index_input_files; skipping pk-index payload in report"
             );
             report.pk_index_output_files = None;
+            // Same rationale as above: a coordinated rewrite that cannot be fully reported must
+            // not be reported as success, or meta will silently drop the compaction output.
+            report.status =
+                subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32;
+            report.error_message = Some(format!(
+                "failed to serialize pk-index compaction report payload: {}",
+                e.as_report()
+            ));
             return;
         }
     }
