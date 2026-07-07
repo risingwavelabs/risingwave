@@ -16,7 +16,7 @@ use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
 use risingwave_common::catalog::Field;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::utils::Condition;
@@ -105,6 +105,30 @@ fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
         ScalarImpl::Bytea(b) => Some(IcebergDatum::binary(b.clone())),
         _ => None,
     }
+}
+
+/// Whether a column of this type can appear in a pushed-down Iceberg predicate.
+/// iceberg-rust only builds field accessors for primitive columns; pushing down
+/// predicates (incl. `IS [NOT] NULL`) referencing struct/list/map or
+/// variant-backed jsonb columns fails at scan time with "Accessor for Field ...
+/// not found".
+pub(crate) fn is_iceberg_predicate_pushable_column_type(ty: &DataType) -> bool {
+    matches!(
+        ty,
+        DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Decimal
+            | DataType::Date
+            | DataType::Time
+            | DataType::Timestamp
+            | DataType::Timestamptz
+            | DataType::Varchar
+            | DataType::Bytea
+    )
 }
 
 fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<IcebergPredicate> {
@@ -229,7 +253,9 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                     }
                 }
                 ExprType::IsNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
+                    ExprImpl::InputRef(lhs)
+                        if is_iceberg_predicate_pushable_column_type(&lhs.return_type()) =>
+                    {
                         let column_name = &fields[lhs.index].name;
                         let reference = Reference::new(column_name);
                         Some(reference.is_null())
@@ -237,7 +263,9 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                     _ => None,
                 },
                 ExprType::IsNotNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
+                    ExprImpl::InputRef(lhs)
+                        if is_iceberg_predicate_pushable_column_type(&lhs.return_type()) =>
+                    {
                         let column_name = &fields[lhs.index].name;
                         let reference = Reference::new(column_name);
                         Some(reference.is_not_null())
