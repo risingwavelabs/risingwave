@@ -18,6 +18,7 @@ use educe::Educe;
 use iceberg::expr::Predicate;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 
@@ -181,6 +182,29 @@ impl LogicalIcebergIntermediateScan {
         !self.table_column_type_mapping.is_empty()
     }
 
+    /// Schema fields carrying the original iceberg-side column types, for predicate pushdown.
+    /// For engine tables the output schema is remapped to Hummock types (e.g. jsonb backed by
+    /// an iceberg string), but pushability must be judged on the underlying iceberg field
+    /// type, which the source catalog keeps.
+    fn iceberg_side_fields(&self) -> Vec<Field> {
+        self.core
+            .column_catalog
+            .iter()
+            .map(|col| {
+                let data_type = if self.table_column_type_mapping.contains_key(col.name())
+                    && let Some(catalog) = self.source_catalog()
+                    && let Some(source_col) =
+                        catalog.columns.iter().find(|c| c.name() == col.name())
+                {
+                    source_col.column_desc.data_type.clone()
+                } else {
+                    col.column_desc.data_type.clone()
+                };
+                Field::new(col.name().to_owned(), data_type)
+            })
+            .collect()
+    }
+
     pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
         assert!(!required_cols.is_empty());
 
@@ -258,7 +282,7 @@ impl PredicatePushdown for LogicalIcebergIntermediateScan {
             iceberg_predicate,
             extracted_condition,
             remaining_condition,
-        } = extract_iceberg_predicate(predicate, self.schema().fields());
+        } = extract_iceberg_predicate(predicate, &self.iceberg_side_fields());
         let plan = self
             .add_predicate(iceberg_predicate, extracted_condition)
             .into();
