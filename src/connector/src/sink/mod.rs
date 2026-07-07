@@ -1204,50 +1204,6 @@ impl From<OpendalError> for SinkError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use super::*;
-
-    fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
-        entries
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value.to_owned()))
-            .collect()
-    }
-
-    #[test]
-    fn test_validate_sink_unknown_fields() {
-        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
-            (CONNECTOR_TYPE_KEY, "redis"),
-            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-            ("primary_key", "id"),
-            ("redis.url", "redis://127.0.0.1:6379"),
-        ]))
-        .unwrap();
-        validate_sink_unknown_fields(&config).unwrap();
-
-        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
-            (CONNECTOR_TYPE_KEY, "redis"),
-            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-            ("redis.url", "redis://127.0.0.1:6379"),
-            ("bogus_with", "1"),
-        ]))
-        .unwrap();
-        let err = validate_sink_unknown_fields(&config).unwrap_err();
-        let report = err.to_report_string();
-        assert!(report.contains("bogus_with"), "{report}");
-
-        let err = crate::sink::kafka::KafkaConfig::from_btreemap(btreemap([
-            (CONNECTOR_TYPE_KEY, "kafka"),
-            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
-        ]))
-        .unwrap_err();
-        assert!(err.to_report_string().contains("missing field `topic`"));
-    }
-}
-
 impl From<parquet::errors::ParquetError> for SinkError {
     fn from(error: parquet::errors::ParquetError) -> Self {
         SinkError::File(error.to_report_string())
@@ -1293,5 +1249,49 @@ impl From<::opensearch::Error> for SinkError {
 impl From<tokio_postgres::Error> for SinkError {
     fn from(err: tokio_postgres::Error) -> Self {
         SinkError::Postgres(anyhow!(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn test_validate_sink_unknown_fields() {
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("primary_key", "id"),
+            ("redis.url", "redis://127.0.0.1:6379"),
+        ]))
+        .unwrap();
+        validate_sink_unknown_fields(&config).unwrap();
+
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("redis.url", "redis://127.0.0.1:6379"),
+            ("bogus_with", "1"),
+        ]))
+        .unwrap();
+        let err = validate_sink_unknown_fields(&config).unwrap_err();
+        let report = err.to_report_string();
+        assert!(report.contains("bogus_with"), "{report}");
+
+        let err = crate::sink::kafka::KafkaConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "kafka"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+        ]))
+        .unwrap_err();
+        assert!(err.to_report_string().contains("missing field `topic`"));
     }
 }
