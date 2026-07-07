@@ -314,9 +314,7 @@ fn skip_metadata_list(buf: &mut &[u8]) -> BackupResult<()> {
 }
 
 fn skip_with_len_prefix(buf: &mut &[u8]) -> BackupResult<()> {
-    let len = read_u64_le(buf)?
-        .try_into()
-        .map_err(|_| BackupError::Other(anyhow!("metadata JSON payload length exceeds usize")))?;
+    let len = read_len_prefix(buf)?;
     if buf.remaining() < len {
         return Err(BackupError::Other(anyhow!(
             "metadata JSON payload length {} exceeds remaining buffer {}",
@@ -328,21 +326,35 @@ fn skip_with_len_prefix(buf: &mut &[u8]) -> BackupResult<()> {
     Ok(())
 }
 
+fn read_len_prefix(buf: &mut &[u8]) -> BackupResult<usize> {
+    match read_u32_le(buf)? {
+        0 => read_u64_le(buf)?
+            .try_into()
+            .map_err(|_| BackupError::Other(anyhow!("metadata JSON payload length exceeds usize"))),
+        len => Ok(len as usize),
+    }
+}
+
 fn put_with_len_prefix<T: Serialize>(buf: &mut Vec<u8>, data: &T) -> Result<(), serde_json::Error> {
     let b = serde_json::to_vec(data)?;
-    buf.put_u64_le(
-        b.len()
-            .try_into()
-            .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
-    );
+    // Any valid JSON value serialized by serde_json is non-empty, such as `null`, `{}`, or `[]`.
+    assert!(!b.is_empty());
+    if let Ok(len) = u32::try_from(b.len()) {
+        buf.put_u32_le(len);
+    } else {
+        buf.put_u32_le(0);
+        buf.put_u64_le(
+            b.len()
+                .try_into()
+                .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
+        );
+    }
     buf.put_slice(&b);
     Ok(())
 }
 
 fn get_with_len_prefix<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> BackupResult<T> {
-    let len = read_u64_le(buf)?
-        .try_into()
-        .map_err(|_| BackupError::Other(anyhow!("metadata JSON payload length exceeds usize")))?;
+    let len = read_len_prefix(buf)?;
     if buf.remaining() < len {
         return Err(BackupError::Other(anyhow!(
             "metadata JSON payload length {} exceeds remaining buffer {}",
@@ -384,7 +396,7 @@ mod tests {
 
         let mut partial_payload = payload[..payload.len() - metadata_buf.len()].to_vec();
         partial_payload.put_u32_le(1);
-        partial_payload.put_u64_le(100);
+        partial_payload.put_u32_le(100);
         partial_payload.put_slice(br#""short""#);
         let checksum = crate::xxhash64_checksum(&partial_payload);
         partial_payload.put_u64_le(checksum);
@@ -400,23 +412,21 @@ mod tests {
     }
 
     #[test]
-    fn test_len_prefix_u64_round_trip() {
+    fn test_len_prefix_legacy_u32_round_trip() {
         let mut buf = vec![];
         put_with_len_prefix(&mut buf, &"hello").unwrap();
 
-        assert_eq!(
-            u64::from_le_bytes(buf[..8].try_into().unwrap()),
-            serde_json::to_vec("hello").unwrap().len() as u64
-        );
+        assert_ne!(u32::from_le_bytes(buf[..4].try_into().unwrap()), 0);
 
         let decoded: String = get_with_len_prefix(&mut buf.as_slice()).unwrap();
         assert_eq!(decoded, "hello");
     }
 
     #[test]
-    fn test_len_prefix_u64_decoding() {
+    fn test_len_prefix_extended_u64_decoding() {
         let payload = serde_json::to_vec("hello").unwrap();
         let mut buf = vec![];
+        buf.put_u32_le(0);
         buf.put_u64_le(payload.len() as u64);
         buf.put_slice(&payload);
 
@@ -425,14 +435,17 @@ mod tests {
     }
 
     #[test]
-    fn test_len_prefix_errors_on_missing_u64() {
-        assert!(get_with_len_prefix::<String>(&mut [].as_slice()).is_err());
+    fn test_len_prefix_errors_on_missing_extended_u64() {
+        let mut buf = vec![];
+        buf.put_u32_le(0);
+
+        assert!(get_with_len_prefix::<String>(&mut buf.as_slice()).is_err());
     }
 
     #[test]
     fn test_len_prefix_errors_on_payload_shorter_than_declared_len() {
         let mut buf = vec![];
-        buf.put_u64_le(100);
+        buf.put_u32_le(100);
         buf.put_slice(br#""hello""#);
 
         assert!(get_with_len_prefix::<String>(&mut buf.as_slice()).is_err());
