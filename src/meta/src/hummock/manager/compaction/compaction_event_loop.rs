@@ -729,7 +729,17 @@ impl IcebergCompactionEventHandler {
     }
 
     fn apply_report_task_event(&self, report: IcebergReportTask) {
-        self.compaction_manager.handle_report_task(report);
+        // `handle_report_task` may now drive an iceberg catalog commit (pk-index coordinated
+        // compaction overwrite), including retries with backoff. This method runs inline in the
+        // single shared iceberg compaction event loop, so awaiting it here would stall that loop —
+        // and therefore every compactor's `PullTask`/`ReportTask` handling for ALL sinks — for the
+        // duration of the commit. Spawn it instead: the event loop returns immediately and keeps
+        // acking pull tasks; reports for a given sink are already serialized by the per-sink track
+        // state machine (`is_processing_task`), so the spawn does not introduce an ordering race.
+        let compaction_manager = self.compaction_manager.clone();
+        tokio::spawn(async move {
+            compaction_manager.handle_report_task(report).await;
+        });
     }
 }
 

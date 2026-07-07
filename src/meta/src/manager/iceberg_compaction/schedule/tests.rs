@@ -23,6 +23,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
 use crate::hummock::IcebergCompactorManager;
 use crate::manager::MetaOpts;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::rpc::metrics::MetaMetrics;
 
 async fn build_test_manager() -> Arc<IcebergCompactionManager> {
@@ -38,8 +39,15 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
     let metadata_manager = MetadataManager::new(cluster_ctl, catalog_ctl);
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
     let metrics = Arc::new(MetaMetrics::for_test(&Registry::new()));
-    let (manager, _) =
-        IcebergCompactionManager::build(env, metadata_manager, iceberg_compactor_manager, metrics);
+    let iceberg_pk_index_sink_manager =
+        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+    let (manager, _) = IcebergCompactionManager::build(
+        env,
+        metadata_manager,
+        iceberg_compactor_manager,
+        metrics,
+        iceberg_pk_index_sink_manager,
+    );
     manager
 }
 
@@ -977,12 +985,15 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         assert_eq!(track.finish_action, CompactionTrackFinishAction::KeepTrack);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
@@ -1119,16 +1130,94 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
     record_commits(&mut track, 3);
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id: 9,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 3);
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+/// A pk-index coordinated report with a valid payload routes into
+/// `route_pk_index_compaction_report`. In this unit test there is no registered pk-index sink
+/// coordinator (no live iceberg catalog), so the commit fails and `route_pk_index_compaction_report`
+/// returns `false`; `handle_report_task` must convert that into `finish_failed` (not silently
+/// `finish_success`, which would drop the completed rewrite) so the scheduler retries the task. The
+/// key property under test is that the state machine runs to completion either way: it must not hang
+/// or panic, and the track must leave `InFlight`.
+#[tokio::test]
+async fn test_handle_report_task_routes_pk_index_payload_and_finishes_track() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(147);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight(&mut track, 9, now);
+    record_commits(&mut track, 3);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    // Empty output-file list, two input file paths, and a read snapshot id.
+    let pk_index_output_files =
+        serde_json::to_vec(&Vec::<iceberg::spec::SerializedDataFile>::new()).unwrap();
+    let pk_index_input_files =
+        serde_json::to_vec(&vec!["a.parquet".to_owned(), "b.parquet".to_owned()]).unwrap();
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            pk_index_output_files: Some(pk_index_output_files),
+            pk_index_input_files: Some(pk_index_input_files),
+            pk_index_read_snapshot_id: Some(777),
+        })
+        .await;
+
+    // No coordinator is registered for this sink in the test environment, so the commit fails and
+    // the track transitions to Idle via `finish_failed` — the scheduler will retry. The key
+    // property is that the state machine ran and the task is no longer InFlight.
+    let guard = manager.inner.read();
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+/// A malformed pk-index payload must be logged and treated as a failure without disrupting the
+/// state machine. `route_pk_index_compaction_report` returns `false` (deserialization fails before
+/// any commit attempt), so the track transitions to Idle via `finish_failed`. This is a regression
+/// guard: the routing helper must never panic or silently report success when a rewrite could not
+/// be routed.
+#[tokio::test]
+async fn test_handle_report_task_malformed_pk_index_payload_still_finishes_track() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(148);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight(&mut track, 9, now);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            pk_index_output_files: Some(b"not valid json".to_vec()),
+            pk_index_input_files: None,
+            pk_index_read_snapshot_id: Some(1),
+        })
+        .await;
+
+    // The routing returned false (deserialize failed), so the track finished via finish_failed
+    // and reset to Idle — the scheduler can retry.
+    let guard = manager.inner.read();
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
 }
 
@@ -1148,12 +1237,15 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         guard.manual_compaction_waiters.insert(sink_id, tx);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
     let guard = manager.inner.read();
@@ -1179,12 +1271,15 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         guard.manual_compaction_waiters.insert(sink_id, tx);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Failed as i32,
-        error_message: Some("boom".to_owned()),
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Failed as i32,
+            error_message: Some("boom".to_owned()),
+            ..Default::default()
+        })
+        .await;
 
     let error = rx.await.unwrap().unwrap_err();
     assert!(error.to_string().contains("boom"));
@@ -1212,12 +1307,15 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         guard.manual_compaction_waiters.insert(sink_id, tx);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
     let guard = manager.inner.read();
@@ -1242,12 +1340,15 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         guard.manual_compaction_waiters.insert(sink_id, tx);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Failed as i32,
-        error_message: Some("boom".to_owned()),
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Failed as i32,
+            error_message: Some("boom".to_owned()),
+            ..Default::default()
+        })
+        .await;
 
     let error = rx.await.unwrap().unwrap_err();
     assert!(error.to_string().contains("boom"));
@@ -1346,12 +1447,15 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         track.start_processing();
         track.mark_dispatched(task_id, 1.into(), now);
     }
-    manager.handle_report_task(IcebergReportTask {
-        task_id,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
     assert!(
         !manager
             .inner
@@ -1524,12 +1628,15 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
     record_commits(&mut track, 3);
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id: 9,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Failed as i32,
-        error_message: Some("boom".to_owned()),
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Failed as i32,
+            error_message: Some("boom".to_owned()),
+            ..Default::default()
+        })
+        .await;
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
@@ -1551,12 +1658,15 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         guard.manual_compaction_waiters.insert(sink_id, tx);
     }
 
-    manager.handle_report_task(IcebergReportTask {
-        task_id: 10,
-        sink_id: sink_id.as_raw_id(),
-        status: IcebergReportTaskStatus::Success as i32,
-        error_message: None,
-    });
+    manager
+        .handle_report_task(IcebergReportTask {
+            task_id: 10,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+            ..Default::default()
+        })
+        .await;
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use iceberg::spec::SerializedDataFile;
 use parking_lot::RwLock;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -99,6 +100,27 @@ impl IcebergPkIndexSinkManager {
     pub async fn commit_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
         coordinator.lock().await.commit().await
+    }
+
+    /// Commit a pk-index **compaction** overwrite for `sink_id`: replace `input_file_paths` with
+    /// `output_files` via a single iceberg `overwrite_files` transaction. Routed through the same
+    /// per-sink coordinator lock as [`Self::pre_commit_epoch`]/[`Self::commit_epoch`], so it can
+    /// never race the sink's own barrier-driven commits. Fails (rather than silently no-oping) if
+    /// the sink has no registered coordinator (e.g. not yet recovered after a meta restart) — the
+    /// caller should treat that as a retryable failure.
+    pub async fn commit_compaction_overwrite(
+        &self,
+        sink_id: SinkId,
+        output_files: Vec<SerializedDataFile>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) -> anyhow::Result<()> {
+        let coordinator = self.coordinator(sink_id)?;
+        coordinator
+            .lock()
+            .await
+            .commit_compaction_overwrite(output_files, input_file_paths, read_snapshot_id)
+            .await
     }
 
     /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown

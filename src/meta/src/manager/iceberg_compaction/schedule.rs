@@ -1112,12 +1112,100 @@ impl IcebergCompactionManager {
         statuses
     }
 
-    pub fn handle_report_task(&self, report: IcebergReportTask) {
+    /// Best-effort routing of a pk-index coordinated-compaction payload to the pk-index sink's
+    /// commit coordinator. Returns `true` iff the iceberg overwrite commit succeeded, `false` if
+    /// the payload is absent/malformed or the commit itself failed.
+    ///
+    /// A `false` result with a payload present tells the caller ([`Self::handle_report_task`]) to
+    /// mark the task failed so the scheduler retries it — silently treating this as success would
+    /// drop a completed rewrite (the output files would never be committed and the input files
+    /// would remain uncompacted forever, since the runner already ran the rewrite without
+    /// committing). This must never panic; every failure path is logged and converted to `false`.
+    async fn route_pk_index_compaction_report(
+        &self,
+        report: &IcebergReportTask,
+        sink_id: SinkId,
+        task_id: u64,
+    ) -> bool {
+        let Some(output_bytes) = &report.pk_index_output_files else {
+            // No pk-index payload: either a non-coordinated task, or a coordinated task whose plan
+            // had no files to compact (see `report.rs::populate_pk_index_report_fields`, which
+            // flips the report to `Failed` if serialization of a non-empty payload fails, so an
+            // absent payload here always means "nothing to commit"). Nothing to route.
+            return false;
+        };
+        let Some(read_snapshot_id) = report.pk_index_read_snapshot_id else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                "pk-index compaction report carries output files but no read_snapshot_id; treating as failure"
+            );
+            return false;
+        };
+        let output_files: Vec<iceberg::spec::SerializedDataFile> = match serde_json::from_slice(
+            output_bytes,
+        ) {
+            Ok(files) => files,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e,
+                    "Failed to deserialize pk_index_output_files from compaction report; treating as failure"
+                );
+                return false;
+            }
+        };
+        let input_bytes = report.pk_index_input_files.as_deref().unwrap_or(b"[]");
+        let input_file_paths: Vec<String> = match serde_json::from_slice(input_bytes) {
+            Ok(paths) => paths,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id,
+                    error = %e,
+                    "Failed to deserialize pk_index_input_files from compaction report; treating as failure"
+                );
+                return false;
+            }
+        };
+
+        match self
+            .iceberg_pk_index_sink_manager
+            .commit_compaction_overwrite(sink_id, output_files, input_file_paths, read_snapshot_id)
+            .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    sink_id = %sink_id,
+                    task_id,
+                    "pk-index compaction overwrite commit failed"
+                );
+                false
+            }
+        }
+    }
+
+    pub async fn handle_report_task(&self, report: IcebergReportTask) {
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let now = Instant::now();
+
+        // For SUCCESS reports carrying a pk-index payload, drive the coordinator overwrite commit
+        // BEFORE touching the state machine: the commit outcome decides whether the track finishes
+        // successfully (commit ok) or as failed (commit error, so the scheduler retries). Reports
+        // without a payload (non-coordinated tasks, or coordinated tasks with nothing to compact)
+        // skip this entirely and behave exactly as today.
+        let commit_ok = if status == IcebergReportTaskStatus::Success {
+            self.route_pk_index_compaction_report(&report, sink_id, task_id)
+                .await
+        } else {
+            false
+        };
 
         let waiter = {
             let mut guard = self.inner.write();
@@ -1126,7 +1214,18 @@ impl IcebergCompactionManager {
             match guard.sink_schedules.get_mut(&sink_id) {
                 Some(track) if track.is_processing_task(task_id) => {
                     let finish_action = match status {
-                        IcebergReportTaskStatus::Success => track.finish_success(now),
+                        IcebergReportTaskStatus::Success => {
+                            if report.pk_index_output_files.is_some() && !commit_ok {
+                                tracing::warn!(
+                                    sink_id = %sink_id,
+                                    task_id,
+                                    "pk-index compaction commit did not succeed; marking task failed for retry"
+                                );
+                                track.finish_failed(now)
+                            } else {
+                                track.finish_success(now)
+                            }
+                        }
                         IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
                                 sink_id = %sink_id,

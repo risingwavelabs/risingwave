@@ -35,6 +35,7 @@ use super::MetaSrvEnv;
 use crate::MetaResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::rpc::metrics::MetaMetrics;
 
 pub type IcebergCompactionManagerRef = Arc<IcebergCompactionManager>;
@@ -56,6 +57,9 @@ pub struct IcebergCompactionManager {
 
     metadata_manager: MetadataManager,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
+    /// Used to route pk-index coordinated compaction reports to the sink's commit coordinator
+    /// (see `Self::route_pk_index_compaction_report` in `schedule.rs`).
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     compactor_streams_change_tx: CompactorChangeTx,
 
@@ -82,6 +86,7 @@ impl IcebergCompactionManager {
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -95,6 +100,7 @@ impl IcebergCompactionManager {
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
+                iceberg_pk_index_sink_manager,
                 compactor_streams_change_tx,
                 metrics,
             }),

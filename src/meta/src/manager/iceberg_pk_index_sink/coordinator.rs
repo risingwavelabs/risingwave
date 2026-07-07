@@ -34,6 +34,7 @@
 //! meta-recovery path drops the coordinator, re-registers it (re-running `init`), and retries from the
 //! persisted `pending_sink_state` rows.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -221,6 +222,70 @@ impl IcebergPkIndexSinkCoordinator {
         })?;
 
         self.prev_committed_epoch = Some(commit.epoch);
+        Ok(())
+    }
+
+    /// Commit a pk-index **compaction** overwrite: replace `input_file_paths` with `output_files`
+    /// via a single iceberg `overwrite_files` transaction. Reached only through
+    /// [`crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager::commit_compaction_overwrite`],
+    /// which takes the same per-sink `Mutex` as [`Self::pre_commit`]/[`Self::commit`] — this commit can
+    /// therefore never race the sink's own barrier-driven commits.
+    ///
+    /// `read_snapshot_id` is the snapshot the compaction plan was computed against; it is not used to
+    /// gate the commit (this coordinator's table keeps advancing via ordinary streaming commits, so an
+    /// exact snapshot match would almost never hold). Instead, on every attempt this reloads the table
+    /// and requires every path in `input_file_paths` to still be present as a live file in the
+    /// CURRENT branch snapshot; if any are missing (already removed by a racing commit) the whole
+    /// commit is aborted rather than silently adding the output files without removing all inputs,
+    /// which would otherwise duplicate rows.
+    ///
+    /// TODO(B3/B4): this assumes no concurrent position/equality deletes landed on the input files
+    /// between `read_snapshot_id` and commit time (no dead-row masking / index remap yet); it only
+    /// guards against the input files themselves having disappeared, not against their rows having
+    /// been independently marked deleted in the meantime.
+    pub async fn commit_compaction_overwrite(
+        &mut self,
+        output_files: Vec<SerializedDataFile>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) -> Result<()> {
+        let schema_id = self.table.metadata().current_schema_id();
+        let partition_spec_id = self.table.metadata().default_partition_spec_id();
+        let table_ident = self.table.identifier().clone();
+        let target_branch = self.target_branch.clone();
+        let catalog = self.catalog.clone();
+
+        let refreshed_table = commit_retry::run_with_retry(
+            catalog.clone(),
+            table_ident,
+            schema_id,
+            partition_spec_id,
+            self.retry_num,
+            |table| {
+                let output_files = output_files.clone();
+                let input_file_paths = input_file_paths.clone();
+                let target_branch = target_branch.clone();
+                let catalog = catalog.clone();
+                async move {
+                    commit_compaction_overwrite_once(
+                        table,
+                        catalog,
+                        target_branch,
+                        output_files,
+                        input_file_paths,
+                    )
+                    .await
+                }
+            },
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "iceberg pk-index compaction overwrite failed for sink {} (read snapshot {})",
+                self.sink_id, read_snapshot_id
+            )
+        })?;
+        self.table = refreshed_table;
         Ok(())
     }
 
@@ -448,6 +513,91 @@ async fn commit_one_epoch(
     )
     .await
     .map_err(CommitError::Commit)
+}
+
+/// Run one attempt of the pk-index compaction overwrite against the freshly-reloaded `table`.
+/// Walks the target branch's CURRENT manifest list to find the live [`DataFile`] entries matching
+/// `input_file_paths` (matched by path, regardless of content type — data compaction can also
+/// replace delete files); fails if any requested path is no longer present (see
+/// [`IcebergPkIndexSinkCoordinator::commit_compaction_overwrite`] for the rationale).
+async fn commit_compaction_overwrite_once(
+    table: Table,
+    catalog: Arc<dyn Catalog>,
+    target_branch: String,
+    output_files: Vec<SerializedDataFile>,
+    input_file_paths: Vec<String>,
+) -> std::result::Result<Table, CommitError> {
+    let mut remaining: HashSet<&str> = input_file_paths.iter().map(String::as_str).collect();
+    let mut removed: Vec<DataFile> = Vec::with_capacity(input_file_paths.len());
+
+    if let Some(snapshot) = table.metadata().snapshot_for_ref(&target_branch) {
+        let manifest_list = snapshot
+            .load_manifest_list(table.file_io(), table.metadata())
+            .await
+            .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest list")))?;
+
+        'outer: for manifest_file in manifest_list.entries() {
+            let manifest = manifest_file
+                .load_manifest(table.file_io())
+                .await
+                .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest")))?;
+            for entry in manifest.entries() {
+                if remaining.remove(entry.file_path()) {
+                    removed.push(entry.data_file().clone());
+                }
+                if remaining.is_empty() {
+                    break 'outer;
+                }
+            }
+        }
+    }
+
+    if !remaining.is_empty() {
+        // Some requested input files are no longer live on the target branch: a racing commit
+        // (e.g. a second compaction of the same sink) must already have replaced them. Committing
+        // the output files without removing all inputs would duplicate rows, so abort instead;
+        // `run_with_retry` will retry with a fresh reload, and if the mismatch persists the caller
+        // surfaces the error so the compaction task is retried from a fresh plan.
+        return Err(CommitError::Commit(anyhow!(
+            "pk-index compaction overwrite: {} of {} input files are no longer present on branch {}",
+            remaining.len(),
+            input_file_paths.len(),
+            target_branch,
+        )));
+    }
+
+    let schema = table.metadata().current_schema();
+    let partition_spec_id = table.metadata().default_partition_spec_id();
+    let partition_type = resolve_partition_type(&table, partition_spec_id, schema)
+        .map_err(|e| CommitError::Commit(anyhow!(e)))?;
+    let add_files: Vec<DataFile> = output_files
+        .into_iter()
+        .map(|f| {
+            f.try_into(partition_spec_id, &partition_type, schema)
+                .map_err(|e| {
+                    CommitError::Commit(
+                        anyhow!(e).context("materialize pk-index compaction output file"),
+                    )
+                })
+        })
+        .collect::<std::result::Result<_, _>>()?;
+
+    let txn = Transaction::new(&table);
+    let action = txn
+        .overwrite_files()
+        .set_target_branch(target_branch)
+        .add_data_files(add_files)
+        .delete_files(removed);
+    let txn = action.apply(txn).map_err(|err| {
+        CommitError::Commit(
+            anyhow!(err).context("apply iceberg pk-index compaction overwrite action"),
+        )
+    })?;
+    txn.commit(catalog.as_ref()).await.map_err(|err| {
+        CommitError::Commit(
+            anyhow!(err).context("commit iceberg pk-index compaction overwrite transaction"),
+        )
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
