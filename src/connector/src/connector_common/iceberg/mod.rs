@@ -1262,14 +1262,7 @@ impl IcebergCommon {
                     .await
                     .context("Unable to load iceberg catalog")?;
                 let current_table = catalog.load_table(&table_ident).await?;
-                let (updates, requirements) =
-                    build_comment_updates(&current_table, table_comment, column_comments)?;
-                if updates.is_empty() && requirements.is_empty() {
-                    return Ok(());
-                }
-                if requirements.iter().any(|requirement| {
-                    matches!(requirement, TableRequirement::CurrentSchemaIdMatch { .. })
-                }) {
+                if has_column_comment_changes(&current_table, column_comments) {
                     tracing::warn!(
                         catalog_type = self.catalog_type(),
                         table = %table_ident,
@@ -1277,24 +1270,32 @@ impl IcebergCommon {
                     );
                 }
 
-                let desired_comment = table_comment.map(str::to_owned);
                 let current_comment = current_table
                     .metadata()
                     .properties()
                     .get(ICEBERG_TABLE_COMMENT_PROPERTY)
-                    .cloned();
-                if desired_comment == current_comment {
+                    .map(String::as_str);
+                let Some(update) = build_table_comment_update(current_comment, table_comment)
+                else {
                     return Ok(());
-                }
+                };
 
                 let mut tx = Transaction::new(&current_table);
-                let action = match desired_comment {
-                    Some(comment) => tx
-                        .update_table_properties()
-                        .set(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(), comment),
-                    None => tx
-                        .update_table_properties()
-                        .remove(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()),
+                let action = match update {
+                    TableUpdate::SetProperties { updates } => {
+                        let comment = updates
+                            .get(ICEBERG_TABLE_COMMENT_PROPERTY)
+                            .expect("table comment property should be set")
+                            .clone();
+                        tx.update_table_properties()
+                            .set(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(), comment)
+                    }
+                    TableUpdate::RemoveProperties { removals } => {
+                        assert_eq!(removals, vec![ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()]);
+                        tx.update_table_properties()
+                            .remove(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned())
+                    }
+                    _ => unreachable!("table comment helper only returns property updates"),
                 };
                 tx = action.apply(tx)?;
                 tx.commit(catalog.as_ref()).await?;
@@ -1351,23 +1352,53 @@ fn build_comment_updates(
         });
     }
 
-    let desired_table_comment = table_comment.map(str::to_owned);
     let current_table_comment = metadata
         .properties()
         .get(ICEBERG_TABLE_COMMENT_PROPERTY)
-        .cloned();
-    if desired_table_comment != current_table_comment {
-        match desired_table_comment {
-            Some(comment) => updates.push(TableUpdate::SetProperties {
-                updates: HashMap::from([(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(), comment)]),
-            }),
-            None => updates.push(TableUpdate::RemoveProperties {
-                removals: vec![ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()],
-            }),
-        }
+        .map(String::as_str);
+    if let Some(update) = build_table_comment_update(current_table_comment, table_comment) {
+        updates.push(update);
     }
 
     Ok((updates, requirements))
+}
+
+fn has_column_comment_changes(
+    table: &Table,
+    column_comments: &HashMap<String, Option<String>>,
+) -> bool {
+    table
+        .metadata()
+        .current_schema()
+        .as_struct()
+        .fields()
+        .iter()
+        .any(|field| {
+            column_comments
+                .get(field.name.as_str())
+                .is_some_and(|desired_doc| field.doc != *desired_doc)
+        })
+}
+
+fn build_table_comment_update(
+    current_table_comment: Option<&str>,
+    desired_table_comment: Option<&str>,
+) -> Option<TableUpdate> {
+    if desired_table_comment == current_table_comment {
+        return None;
+    }
+
+    Some(match desired_table_comment {
+        Some(comment) => TableUpdate::SetProperties {
+            updates: HashMap::from([(
+                ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(),
+                comment.to_owned(),
+            )]),
+        },
+        None => TableUpdate::RemoveProperties {
+            removals: vec![ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()],
+        },
+    })
 }
 
 /// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
@@ -1477,6 +1508,28 @@ mod tests {
             common.resolve_catalog_kind().unwrap(),
             IcebergCatalogKind::Mock
         );
+    }
+
+    #[test]
+    fn test_build_table_comment_update_for_native_rust_catalog_path() {
+        let Some(TableUpdate::SetProperties { updates }) =
+            build_table_comment_update(None, Some("new table comment"))
+        else {
+            panic!("expected table comment set-properties update");
+        };
+        assert_eq!(
+            updates.get(ICEBERG_TABLE_COMMENT_PROPERTY).unwrap(),
+            "new table comment"
+        );
+
+        let Some(TableUpdate::RemoveProperties { removals }) =
+            build_table_comment_update(Some("old table comment"), None)
+        else {
+            panic!("expected table comment remove-properties update");
+        };
+        assert_eq!(removals, vec![ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()]);
+
+        assert!(build_table_comment_update(Some("same"), Some("same")).is_none());
     }
 
     #[test]

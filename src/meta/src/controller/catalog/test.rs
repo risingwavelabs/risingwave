@@ -14,6 +14,8 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -75,6 +77,56 @@ mod tests {
         Ok(())
     }
 
+    async fn insert_test_sink(
+        txn: &DatabaseTransaction,
+        sink_id: SinkId,
+        name: &str,
+        connector: &str,
+        sink_from_name: &str,
+    ) -> MetaResult<()> {
+        sink::ActiveModel {
+            sink_id: Set(sink_id),
+            name: Set(name.to_owned()),
+            columns: Set(vec![].into()),
+            plan_pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            downstream_pk: Set(Vec::<i32>::new().into()),
+            sink_type: Set(sink::SinkType::AppendOnly),
+            ignore_delete: Set(false),
+            properties: Set(Property(BTreeMap::from([(
+                CONNECTOR_TYPE_KEY.to_owned(),
+                connector.to_owned(),
+            )]))),
+            definition: Set(format!("CREATE SINK {name}")),
+            connection_id: Set(None),
+            db_name: Set("dev".to_owned()),
+            sink_from_name: Set(sink_from_name.to_owned()),
+            sink_format_desc: Set(None),
+            target_table: Set(None),
+            secret_ref: Set(None),
+            original_target_columns: Set(None),
+            auto_refresh_schema_from_table: Set(None),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_test_dependency(
+        txn: &DatabaseTransaction,
+        oid: ObjectId,
+        used_by: ObjectId,
+    ) -> MetaResult<()> {
+        object_dependency::ActiveModel {
+            id: Default::default(),
+            oid: Set(oid),
+            used_by: Set(used_by),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
@@ -104,6 +156,139 @@ mod tests {
 
         mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
             .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_iceberg_comment_sinks_only_returns_direct_iceberg_sinks() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let table_id = table_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            table_id,
+            "comment_src",
+            TableType::Table,
+            None,
+            "CREATE TABLE comment_src (a int)",
+        )
+        .await?;
+        let table = Table::find_by_id(table_id).one(&txn).await?.unwrap();
+
+        let direct_table_sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_sink(
+            &txn,
+            direct_table_sink_obj.oid.as_sink_id(),
+            "direct_table_iceberg_sink",
+            ICEBERG_SINK,
+            "comment_src",
+        )
+        .await?;
+        insert_test_dependency(&txn, table_id.as_object_id(), direct_table_sink_obj.oid).await?;
+
+        let mv_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let mv_id = mv_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            mv_id,
+            "comment_mv",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW comment_mv AS SELECT * FROM comment_src",
+        )
+        .await?;
+        let mv = Table::find_by_id(mv_id).one(&txn).await?.unwrap();
+
+        let direct_mv_sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_sink(
+            &txn,
+            direct_mv_sink_obj.oid.as_sink_id(),
+            "direct_mv_iceberg_sink",
+            ICEBERG_SINK,
+            "comment_mv",
+        )
+        .await?;
+        insert_test_dependency(&txn, mv_id.as_object_id(), direct_mv_sink_obj.oid).await?;
+
+        let derived_sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_sink(
+            &txn,
+            derived_sink_obj.oid.as_sink_id(),
+            "derived_iceberg_sink",
+            ICEBERG_SINK,
+            "derived_iceberg_sink",
+        )
+        .await?;
+        insert_test_dependency(&txn, table_id.as_object_id(), derived_sink_obj.oid).await?;
+
+        let non_iceberg_sink_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_sink(
+            &txn,
+            non_iceberg_sink_obj.oid.as_sink_id(),
+            "direct_kafka_sink",
+            "kafka",
+            "comment_src",
+        )
+        .await?;
+        insert_test_dependency(&txn, table_id.as_object_id(), non_iceberg_sink_obj.oid).await?;
+
+        let table_sinks = mgr
+            .find_iceberg_comment_sinks(&txn, &table, &table_obj)
+            .await?;
+        let mv_sinks = mgr.find_iceberg_comment_sinks(&txn, &mv, &mv_obj).await?;
+        txn.commit().await?;
+        drop(inner);
+
+        assert_eq!(table_sinks.len(), 1);
+        assert_eq!(table_sinks[0].name, "direct_table_iceberg_sink");
+        assert_eq!(mv_sinks.len(), 1);
+        assert_eq!(mv_sinks[0].name, "direct_mv_iceberg_sink");
 
         Ok(())
     }

@@ -714,15 +714,11 @@ impl CatalogController {
             .await?
         };
 
-        self.sync_iceberg_comments_for_table(
-            &txn,
-            &table_row,
-            &table_obj,
-            table_description.as_deref(),
-            &pb_columns,
-        )
-        .await?;
+        let sinks = self
+            .find_iceberg_comment_sinks(&txn, &table_row, &table_obj)
+            .await?;
         txn.commit().await?;
+        drop(inner);
 
         let version = self
             .notify_frontend_relation_info(
@@ -731,14 +727,21 @@ impl CatalogController {
             )
             .await;
 
+        self.sync_iceberg_comments_for_sinks(
+            sinks,
+            comment.table_id,
+            table_description.as_deref(),
+            &pb_columns,
+        )
+        .await?;
+
         Ok(version)
     }
 
-    async fn sync_iceberg_comments_for_table(
+    async fn sync_iceberg_comments_for_sinks(
         &self,
-        txn: &DatabaseTransaction,
-        table: &table::Model,
-        table_obj: &object::Model,
+        sinks: Vec<PbSink>,
+        table_id: TableId,
         table_comment: Option<&str>,
         pb_columns: &[risingwave_pb::plan_common::PbColumnCatalog],
     ) -> MetaResult<()> {
@@ -748,9 +751,6 @@ impl CatalogController {
             .map(ColumnCatalog::from)
             .map(|column| column.column_desc)
             .collect_vec();
-        let sinks = self
-            .find_iceberg_comment_sinks(txn, table, table_obj)
-            .await?;
         for sink in sinks {
             let sink = SinkCatalog::from(sink);
             let sync_result = async {
@@ -762,7 +762,7 @@ impl CatalogController {
             if let Err(err) = sync_result {
                 tracing::warn!(
                     error = %err.as_report(),
-                    table_id = %table.table_id,
+                    table_id = %table_id,
                     sink_id = %sink.id,
                     sink_name = %sink.name,
                     "failed to sync Iceberg comments after COMMENT ON; keeping RisingWave catalog changes"
@@ -783,7 +783,7 @@ impl CatalogController {
             .column(object_dependency::Column::UsedBy)
             .join(
                 JoinType::InnerJoin,
-                object_dependency::Relation::Object2.def(),
+                object_dependency::Relation::Object1.def(),
             )
             .filter(
                 object_dependency::Column::Oid
@@ -833,6 +833,9 @@ impl CatalogController {
             {
                 continue;
             }
+            if !Self::is_direct_iceberg_comment_sink(&sink, table) {
+                continue;
+            }
             sinks.push(PbSink::from(ObjectModel(
                 sink,
                 sink_obj.ok_or_else(|| MetaError::catalog_id_not_found("object", sink_id))?,
@@ -840,6 +843,11 @@ impl CatalogController {
             )));
         }
         Ok(sinks)
+    }
+
+    fn is_direct_iceberg_comment_sink(sink: &sink::Model, table: &table::Model) -> bool {
+        sink.name == format!("{}{}", ICEBERG_SINK_PREFIX, table.name)
+            || sink.sink_from_name == table.name
     }
 
     async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
