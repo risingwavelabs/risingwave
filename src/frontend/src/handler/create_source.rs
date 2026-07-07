@@ -851,14 +851,15 @@ pub(crate) fn reject_variant_columns(columns: &[ColumnCatalog], context: &str) -
 /// Reject user-declared `VARIANT` columns when the `FORMAT ... ENCODE ...` is handled by a
 /// row-encode parser or native generator, none of which can produce variant values.
 ///
-/// Not gated: connector-native schemas (`ENCODE NONE`, e.g. iceberg) infer their own schema.
+/// Not gated: connector-native schemas (`ENCODE NONE`, e.g. iceberg) infer their own schema, and
+/// `ENCODE PARQUET` reads variant columns via the Parquet Variant extension type.
 fn reject_variant_columns_for_unsupported_encoding(
     format_encode: &FormatEncodeOptions,
     columns_from_sql: &[ColumnCatalog],
 ) -> Result<()> {
     if matches!(
         (&format_encode.format, &format_encode.row_encode),
-        (Format::None, Encode::None)
+        (Format::None, Encode::None) | (_, Encode::Parquet)
     ) {
         return Ok(());
     }
