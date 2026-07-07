@@ -219,3 +219,25 @@ drop table variant_full_type_t;
 
 statement ok
 drop table variant_table_definition;
+
+# VARIANT only has byte-wise equality and ordering, so it must be rejected from
+# every storage key: table pk, index keys, and MV ORDER BY.
+
+statement error is part of the storage primary key
+create table variant_pk_t (v variant primary key);
+
+statement error is part of the storage primary key
+create table variant_nested_pk_t (s struct<v variant> primary key);
+
+statement ok
+create table variant_key_source_t (id int primary key, payload variant);
+
+statement error is part of the storage primary key
+create index variant_idx on variant_key_source_t (payload);
+
+statement error is part of the storage primary key
+create materialized view variant_order_mv as
+select payload from variant_key_source_t order by payload;
+
+statement ok
+drop table variant_key_source_t;

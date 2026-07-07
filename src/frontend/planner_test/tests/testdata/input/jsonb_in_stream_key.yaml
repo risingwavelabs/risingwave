@@ -34,3 +34,9 @@
     select v2 from t1 group by v2, v1;
   expected_outputs:
   - stream_error
+- name: variant in materialized view order by
+  sql: |
+    create table t1 (v1 variant, v2 int);
+    select v1, v2 from t1 order by v1;
+  expected_outputs:
+  - stream_error

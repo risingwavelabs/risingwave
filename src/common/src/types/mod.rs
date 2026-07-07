@@ -680,6 +680,19 @@ impl DataType {
             }
         }
     }
+
+    /// Whether this type is `VARIANT` or contains a nested `VARIANT`.
+    pub fn contains_variant(&self) -> bool {
+        match self {
+            DataType::Variant => true,
+            DataType::List(list_type) => list_type.elem().contains_variant(),
+            DataType::Struct(struct_type) => struct_type.types().any(DataType::contains_variant),
+            DataType::Map(map_type) => {
+                map_type.key().contains_variant() || map_type.value().contains_variant()
+            }
+            _ => false,
+        }
+    }
 }
 
 impl From<StructType> for DataType {
