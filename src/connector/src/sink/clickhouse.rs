@@ -507,8 +507,10 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "BYTEA is not supported for ClickHouse sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
-            risingwave_common::types::DataType::Jsonb
-            | risingwave_common::types::DataType::Variant => Ok(ck_column.r#type.contains("JSON")),
+            risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
+            risingwave_common::types::DataType::Variant => Err(SinkError::ClickHouse(
+                "VARIANT is not supported for ClickHouse sink.".to_owned(),
+            )),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -1037,9 +1039,10 @@ impl ClickHouseFieldWithNull {
                 let json_str = v.to_string();
                 ClickHouseField::String(json_str)
             }
-            ScalarRefImpl::Variant(v) => {
-                let json_str = v.to_string();
-                ClickHouseField::String(json_str)
+            ScalarRefImpl::Variant(_) => {
+                return Err(SinkError::ClickHouse(
+                    "VARIANT is not supported for ClickHouse sink.".to_owned(),
+                ));
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];

@@ -42,29 +42,6 @@ pub struct IcebergArrowConvert;
 pub const ICEBERG_DECIMAL_PRECISION: u8 = 38;
 pub const ICEBERG_DECIMAL_SCALE: i8 = 10;
 
-fn variant_arrow_field(name: &str) -> arrow_schema::Field {
-    let fields = [
-        Arc::new(arrow_schema::Field::new(
-            "metadata",
-            arrow_schema::DataType::Binary,
-            false,
-        )),
-        Arc::new(arrow_schema::Field::new(
-            "value",
-            arrow_schema::DataType::Binary,
-            false,
-        )),
-    ]
-    .into();
-    arrow_schema::Field::new(name, arrow_schema::DataType::Struct(fields), true).with_metadata(
-        [(
-            "ARROW:extension:name".into(),
-            "arrow.parquet.variant".into(),
-        )]
-        .into(),
-    )
-}
-
 impl IcebergArrowConvert {
     pub fn to_record_batch(
         &self,
@@ -154,7 +131,12 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
-            DataType::Variant => return Ok(variant_arrow_field(name)),
+            // TODO(#25165): support Iceberg variant.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
@@ -330,10 +312,11 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
+            // TODO(#25165): support Iceberg variant.
             DataType::Variant => {
-                let mut arrow_field = variant_arrow_field(name);
-                self.add_field_id(&mut arrow_field);
-                return Ok(arrow_field);
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
             }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
