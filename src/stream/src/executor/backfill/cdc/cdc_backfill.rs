@@ -57,6 +57,51 @@ use crate::task::CreateMviewProgressReporter;
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
 
+// The TimestampHandling/TimestamptzHandling/TimeHandling parser's behavior depends on the debezium.time.precision.mode setting:
+// - If left unset, Debezium defaults to time.precision.mode=microseconds (per debezium.properties), and the parser uses Micro.
+// - If set to "connect", Debezium uses time.precision.mode=connect, and the parser uses Milli by design.
+// - If set to any other value, Debezium applies that specific value, and the default parser is used to maintain backward compatibility.
+pub(crate) fn get_cdc_json_parse_handling_from_properties(
+    properties: &BTreeMap<String, String>,
+) -> (
+    Option<TimestampHandling>,
+    Option<TimestamptzHandling>,
+    Option<TimeHandling>,
+    Option<BigintUnsignedHandlingMode>,
+) {
+    let (timestamp_handling, timestamptz_handling, time_handling) = match properties
+        .get("debezium.time.precision.mode")
+    {
+        None => (
+            Some(TimestampHandling::Micro),
+            Some(TimestamptzHandling::Micro),
+            Some(TimeHandling::Micro),
+        ),
+        Some(m) if m == "connect" => (
+            Some(TimestampHandling::Milli),
+            Some(TimestamptzHandling::Milli),
+            Some(TimeHandling::Milli),
+        ),
+        Some(other) => {
+            // backward compatibility.
+            tracing::warn!(
+                "Unsupported debezium.time.precision.mode = {other}, fall back to default parser."
+            );
+            (None, None, None)
+        }
+    };
+    let bigint_unsigned_handling = properties
+        .get("debezium.bigint.unsigned.handling.mode")
+        .is_some_and(|v| v == "precise")
+        .then_some(BigintUnsignedHandlingMode::Precise);
+    (
+        timestamp_handling,
+        timestamptz_handling,
+        time_handling,
+        bigint_unsigned_handling,
+    )
+}
+
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -301,30 +346,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
-        let timestamp_handling: Option<TimestampHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestampHandling::Milli);
-        let timestamptz_handling: Option<TimestamptzHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestamptzHandling::Milli);
-        let time_handling: Option<TimeHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimeHandling::Milli);
-        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
-            .properties
-            .get("debezium.bigint.unsigned.handling.mode")
-            .map(|v| v == "precise")
-            .unwrap_or(false)
-            .then_some(BigintUnsignedHandlingMode::Precise);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
