@@ -29,6 +29,7 @@ use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as PgType;
+use with_options::WithOptions;
 
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
@@ -54,12 +55,13 @@ const CHECK_FOREIGN_KEY_SQL: &str = r#"
 "#;
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PostgresConfig {
     pub host: String,
     #[serde_as(as = "DisplayFromStr")]
     pub port: u16,
     pub user: String,
+    #[with_option(allow_alter_on_fly)]
     pub password: String,
     pub database: String,
     pub table: String,
@@ -68,6 +70,7 @@ pub struct PostgresConfig {
     #[serde(default = "Default::default")]
     pub ssl_mode: SslMode,
     #[serde(rename = "ssl.root.cert")]
+    #[with_option(allow_alter_on_fly)]
     pub ssl_root_cert: Option<String>,
     #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
@@ -82,7 +85,7 @@ pub struct PostgresConfig {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct TcpKeepaliveConfig {
     #[serde(rename = "tcp.keepalive.idle")]
     #[serde_as(as = "DisplayFromStr")]
