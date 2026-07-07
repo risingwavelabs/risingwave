@@ -359,8 +359,10 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         | DataType::Time
         | DataType::Timestamp
         | DataType::Timestamptz
-        | DataType::Jsonb
-        | DataType::Variant => AttributeValue::S(scalar_ref.to_text_with_type(data_type)),
+        | DataType::Jsonb => AttributeValue::S(scalar_ref.to_text_with_type(data_type)),
+        DataType::Variant => {
+            return Err(SinkError::DynamoDb(anyhow!("variant is not supported yet")));
+        }
         DataType::Boolean => AttributeValue::Bool(scalar_ref.into_bool()),
         DataType::Bytea => AttributeValue::B(Blob::new(scalar_ref.into_bytea())),
         DataType::List(lt) => {

@@ -134,31 +134,6 @@ impl VariantArray {
         .into())
     }
 
-    pub fn metadata_at(&self, idx: usize) -> Option<&[u8]> {
-        self.value_at(idx).map(|value| value.metadata())
-    }
-
-    pub fn value_at_raw(&self, idx: usize) -> Option<&[u8]> {
-        self.value_at(idx).map(|value| value.value())
-    }
-
-    pub fn from_metadata_values<'a>(
-        iter: impl IntoIterator<Item = Option<(&'a [u8], &'a [u8])>>,
-    ) -> anyhow::Result<Self> {
-        let iter = iter.into_iter();
-        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
-        for value in iter {
-            match value {
-                Some((metadata, value)) => {
-                    let value = VariantVal::from_metadata_value(metadata.to_vec(), value.to_vec())?;
-                    builder.append(Some(value.as_scalar_ref()));
-                }
-                None => builder.append(None),
-            }
-        }
-        Ok(builder.finish())
-    }
-
     fn serialized_at_unchecked(&self, idx: usize) -> &[u8] {
         unsafe {
             let begin = *self.offsets.get_unchecked(idx) as usize;
