@@ -161,13 +161,14 @@ where id = 2
 ----
 1
 
-# NaN is a valid variant double but the canonical RW encoding rejects non-finite
-# floats; the value decodes to NULL.
-query TTTTTTTT
+# NaN is a valid variant double: it normalizes to the canonical bit pattern and
+# renders as the string "NaN", following to_jsonb(float8).
+query TTTTTTTTT
 select
     v_object::jsonb = '{}'::jsonb,
     v_array::jsonb = '[]'::jsonb,
-    v_double is null,
+    variant_typeof(v_double) = 'double',
+    v_double::jsonb = '"NaN"'::jsonb,
     v_int8 is null,
     (nested).top_variant::jsonb = '{"a":{"b":[1,{"c":2}],"d":{},"e":[]}}'::jsonb,
     (nested).variant_list[1]::jsonb = '{}'::jsonb,
@@ -176,7 +177,7 @@ select
 from iceberg_variant_source
 where id = 3;
 ----
-t t t t t t t t
+t t t t t t t t t
 
 query TT
 select
@@ -378,11 +379,12 @@ where id = 2
 ----
 1
 
-query TTTTTTTT retry 11 backoff 1s
+query TTTTTTTTT retry 11 backoff 1s
 select
     v_object::jsonb = '{}'::jsonb,
     v_array::jsonb = '[]'::jsonb,
-    v_double is null,
+    variant_typeof(v_double) = 'double',
+    v_double::jsonb = '"NaN"'::jsonb,
     v_int8 is null,
     (nested).top_variant::jsonb = '{"a":{"b":[1,{"c":2}],"d":{},"e":[]}}'::jsonb,
     (nested).variant_list[1]::jsonb = '{}'::jsonb,
@@ -391,7 +393,7 @@ select
 from iceberg_variant_batch_table
 where id = 3;
 ----
-t t t t t t t t
+t t t t t t t t t
 
 statement ok
 DROP TABLE iceberg_variant_batch_table;

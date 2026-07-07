@@ -662,6 +662,8 @@ mod test {
         builder.append_variant(Variant::Int64(5_000_000_000));
         builder.append_variant(Variant::Float(3.5));
         builder.append_variant(Variant::Double(14.25));
+        // NaN normalizes to the canonical bit pattern and renders as the string "NaN".
+        builder.append_variant(Variant::Double(f64::NAN));
         builder.append_variant(Variant::Decimal4(
             VariantDecimal4::try_new(12_345, 0).unwrap(),
         ));
@@ -732,6 +734,7 @@ mod test {
                 Some("5000000000".to_owned()),
                 Some("3.5".to_owned()),
                 Some("14.25".to_owned()),
+                Some(r#""NaN""#.to_owned()),
                 Some("12345".to_owned()),
                 Some("1234567890123".to_owned()),
                 Some("1234567890123456789".to_owned()),
