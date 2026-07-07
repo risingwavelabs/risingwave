@@ -20,13 +20,14 @@ use std::sync::{Arc, LazyLock};
 use arrow_array::ArrayRef;
 use arrow_schema::extension::ExtensionType;
 use num_traits::abs;
+use parquet_variant::Variant;
 use parquet_variant_compute::{VariantArray, VariantType};
 use parquet_variant_json::VariantToJson;
 use thiserror_ext::AsReport;
 
 pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
-    is_parquet_schema_match_source_schema,
+    is_parquet_field_match_source_schema, is_parquet_schema_match_source_schema,
 };
 use crate::array::{
     Array, ArrayBuilder, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
@@ -254,6 +255,8 @@ impl FromArrow for IcebergArrowConvert {
 }
 
 fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
+    use arrow_array::Array as _;
+
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
     let mut builder = JsonbArrayBuilder::new(variant_array.len());
 
@@ -263,10 +266,24 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             continue;
         }
 
-        match variant_array
-            .try_value(idx)
-            .and_then(|variant| variant.to_json_value())
-        {
+        // `VariantArray::try_value` is only fallible for the shredded (`typed_value`)
+        // encoding; for the plain encoding it panics on corrupt metadata/value bytes.
+        // Decode the plain encoding via the fully-validating `Variant::try_new` instead,
+        // so that malformed data from external writers surfaces as an error here.
+        let variant_result = match (
+            variant_array.typed_value_field(),
+            variant_array.value_field(),
+        ) {
+            (Some(typed_value), _) if typed_value.is_valid(idx) => variant_array.try_value(idx),
+            (_, Some(value)) if value.is_valid(idx) => {
+                Variant::try_new(variant_array.metadata_field().value(idx), value.value(idx))
+            }
+            // Neither `value` nor `typed_value` is available; the spec requires readers
+            // to interpret this as a variant null.
+            _ => Ok(Variant::Null),
+        };
+
+        match variant_result.and_then(|variant| variant.to_json_value()) {
             Ok(json_value) => builder.append_owned(Some(json_value.into())),
             Err(err) => {
                 tracing::warn!(
@@ -774,9 +791,9 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Invalid variant data")]
-    fn invalid_variant_value_panics_in_upstream_decoder() {
+    fn invalid_variant_value_decodes_to_null() {
         let field = variant_arrow_field("variant_col", true);
+        // Row 0 is a valid variant string "HI"; row 1 has a corrupt value byte.
         let array = Arc::new(arrow_array::StructArray::from(vec![
             (
                 Arc::new(arrow_schema::Field::new(
@@ -785,7 +802,8 @@ mod test {
                     false,
                 )),
                 Arc::new(arrow_array::BinaryArray::from_iter_values([
-                    &[1_u8, 0, 0][..]
+                    &[1_u8, 0, 0][..],
+                    &[1_u8, 0, 0][..],
                 ])) as ArrayRef,
             ),
             (
@@ -794,11 +812,23 @@ mod test {
                     ArrowDataType::Binary,
                     true,
                 )),
-                Arc::new(arrow_array::BinaryArray::from_iter_values([&[255_u8][..]])) as ArrayRef,
+                Arc::new(arrow_array::BinaryArray::from_iter_values([
+                    &[0x09_u8, b'H', b'I'][..],
+                    &[255_u8][..],
+                ])) as ArrayRef,
             ),
         ])) as ArrayRef;
 
-        let _ = IcebergArrowConvert.array_from_arrow_array(&field, &array);
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&field, &array)
+            .unwrap();
+        let values = converted
+            .into_jsonb()
+            .iter()
+            .map(|value| value.map(|value| value.to_owned_scalar()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, vec![Some(r#""HI""#.parse().unwrap()), None]);
     }
 
     fn variant_arrow_field(name: &str, nullable: bool) -> arrow_schema::Field {
