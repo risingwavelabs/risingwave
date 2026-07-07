@@ -534,10 +534,14 @@ async fn commit_one_epoch(
 /// attempt.
 ///
 /// Steps:
-/// 1. Walk `N`'s manifest list for the live [`DataFile`] entries matching `input_file_paths`
-///    (matched by path, regardless of content type). Only `is_alive()` entries match, so a path a
-///    racing commit already marked `Deleted` does not count as found; abort if any requested path
-///    is no longer present (see [`IcebergPkIndexSinkCoordinator::commit_compaction_overwrite`]).
+/// 1. Walk `N`'s manifest list for the live [`DataFile`] entries matching `input_file_paths` and
+///    add them to the overwrite's remove set. `input_file_paths` mixes input DATA files with the
+///    R-era input delete/DV file paths. Only the input **DATA** files are required to still be
+///    live at `N`: if any input data file was already removed by a racing commit we abort (adding
+///    the outputs on top of rewritten rows would duplicate them). Input **delete/DV** paths do NOT
+///    gate the overwrite — a concurrent `(R, N]` delete can supersede an R-era DV, leaving its
+///    path `Deleted` at `N`; requiring it live would thrash forever on repeatedly-deleted rows.
+///    Their removal is handled by step 1 (if still live) and the `DV_N` walk in step 3.
 /// 2. **B3 dead-row masking:** collect the Puffin position-delete (DV) files at `N` that reference
 ///    the input data files, read their deleted positions, and remap each to its output position via
 ///    the spilled row-provenance `mapping_paths`. A deleted input position with NO mapping entry was
@@ -555,7 +559,12 @@ async fn commit_compaction_overwrite_once(
     input_file_paths: Vec<String>,
     mapping_paths: Vec<String>,
 ) -> std::result::Result<Table, CommitError> {
-    let mut remaining: HashSet<&str> = input_file_paths.iter().map(String::as_str).collect();
+    // Input DATA files that must still be live at N. Starts as every input path; entries that turn
+    // out to be delete/DV files (position/equality deletes) are dropped from this set regardless of
+    // their liveness, so only the input data files remain required-live after the walk. Anything
+    // still here at the end is an input data file a racing commit removed -> abort.
+    let mut required_live_data: HashSet<&str> =
+        input_file_paths.iter().map(String::as_str).collect();
     let mut removed: Vec<DataFile> = Vec::with_capacity(input_file_paths.len());
     // Puffin DV files at N that reference one of the input data files. Both read for masking and
     // removed from the overwrite so they don't dangle after their referenced data files go away.
@@ -575,41 +584,77 @@ async fn commit_compaction_overwrite_once(
                 .await
                 .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest")))?;
             for entry in manifest.entries() {
+                let data_file = entry.data_file();
+                let path = data_file.file_path();
+
+                // Liveness relaxation: an input path whose manifest entry is a delete/DV file
+                // (position or equality delete) must NOT gate the overwrite, whether it is still
+                // live or already `Deleted` at N. A concurrent (R, N] delete supersedes a prior
+                // R-era DV, leaving that R-era path `Deleted` at N; requiring it live would abort
+                // and thrash forever on repeatedly-deleted rows. Drop such input paths from the
+                // required-live set here (classified from any entry, alive or not); their removal
+                // is handled by step 1 below (if still live) or the DV_N walk in step 2/3.
+                let is_delete_content = matches!(
+                    data_file.content_type(),
+                    DataContentType::PositionDeletes | DataContentType::EqualityDeletes,
+                );
+                if is_delete_content && input_paths.contains(path) {
+                    required_live_data.remove(path);
+                }
+
                 if !entry.is_alive() {
+                    // A `Deleted` entry keeps the same `file_path()` as when it was live; the
+                    // `is_alive()` guard prevents a racing commit's stale entry from being treated
+                    // as a still-live input (which would otherwise let us add the compaction
+                    // outputs on top of rewritten rows). Only used above for delete classification.
                     continue;
                 }
-                let data_file = entry.data_file();
-                // Step 1: match input files by path. A `Deleted` entry keeps the same
-                // `file_path()` as when it was live, so the `is_alive()` guard above prevents a
-                // racing commit's stale entry from masking an already-removed input (which would
-                // otherwise let us add the compaction outputs on top of rewritten rows).
-                if remaining.remove(data_file.file_path()) {
+
+                // Step 1: remove every live input file (data files, and still-live input delete
+                // files) in the overwrite. Data files also clear the required-live set.
+                if input_paths.contains(path) {
+                    required_live_data.remove(path);
                     removed.push(data_file.clone());
                 }
-                // Step 2/3: collect Puffin DV files (at N) referencing an input data file. These
-                // include DVs created during (R, N] that are NOT in `input_file_paths` (the plan
-                // only saw R-era files), so this is a separate collection from step 1.
+
+                // Step 2/3: collect the live Puffin DV files (at N) referencing an input data file.
+                // These include DVs created during (R, N] that are NOT in `input_file_paths` (the
+                // plan only saw R-era files), so this is a separate collection from step 1.
                 if manifest_file.content == ManifestContentType::Deletes
                     && data_file.content_type() == DataContentType::PositionDeletes
-                    && data_file.file_format() == DataFileFormat::Puffin
                     && let Some(referenced) = data_file.referenced_data_file()
                     && input_paths.contains(referenced.as_str())
                 {
+                    // Coordinated pk-index compaction assumes V3/Puffin deletion vectors. A live
+                    // non-Puffin position delete (e.g. a Parquet V2 positional delete) referencing
+                    // an input data file would be silently ignored here and dangle/miss a delete;
+                    // fail explicitly instead.
+                    if data_file.file_format() != DataFileFormat::Puffin {
+                        return Err(CommitError::Commit(anyhow!(
+                            "pk-index compaction masking: position-delete file {} referencing \
+                             input data file {} is {:?}, not Puffin; coordinated pk-index \
+                             compaction requires Puffin deletion vectors",
+                            path,
+                            referenced,
+                            data_file.file_format(),
+                        )));
+                    }
                     input_dv_files.push(data_file.clone());
                 }
             }
         }
     }
 
-    if !remaining.is_empty() {
-        // Some requested input files are no longer live on the target branch: a racing commit
-        // (e.g. a second compaction of the same sink) must already have replaced them. Committing
-        // the output files without removing all inputs would duplicate rows, so abort instead;
-        // `run_with_retry` will retry with a fresh reload, and if the mismatch persists the caller
-        // surfaces the error so the compaction task is retried from a fresh plan.
+    if !required_live_data.is_empty() {
+        // Some input DATA files are no longer live on the target branch: a racing commit (e.g. a
+        // second compaction of the same sink) must already have replaced them. Committing the
+        // output files without removing all input data files would duplicate rows, so abort
+        // instead; `run_with_retry` retries with a fresh reload, and if the mismatch persists the
+        // caller surfaces the error so the compaction task is retried from a fresh plan.
         return Err(CommitError::Commit(anyhow!(
-            "pk-index compaction overwrite: {} of {} input files are no longer present on branch {}",
-            remaining.len(),
+            "pk-index compaction overwrite: {} of {} input files (data files) are no longer \
+             present on branch {}",
+            required_live_data.len(),
             input_file_paths.len(),
             target_branch,
         )));
@@ -633,6 +678,19 @@ async fn commit_compaction_overwrite_once(
 
     // --- B3: author output DV files masking rows deleted on the inputs during (R, N]. ---
     let mapping = read_row_provenance_mapping(&table, &mapping_paths).await?;
+    // Masking depends on a non-empty row-provenance mapping. An empty mapping (no `mapping_paths`,
+    // or every spilled file decoded to zero entries) while we are committing output data files
+    // means masking is silently disabled: any row deleted on an input during (R, N] would resurface
+    // in the compaction output. Fail the commit rather than commit unmasked.
+    if !add_files.is_empty() && mapping.is_empty() {
+        return Err(CommitError::Commit(anyhow!(
+            "pk-index compaction masking: row-provenance mapping is empty (from {} mapping file(s)) \
+             but the overwrite has {} output data file(s) to commit; refusing to commit without \
+             masking",
+            mapping_paths.len(),
+            add_files.len(),
+        )));
+    }
     let deleted_inputs = read_input_dv_positions(&table, &input_dv_files).await?;
     let dead_by_output = compute_dead_out_positions(&mapping, deleted_inputs);
     if !dead_by_output.is_empty() {
@@ -992,6 +1050,26 @@ mod tests {
 
         assert_eq!(dead.len(), 1);
         assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![5]);
+    }
+
+    /// Two distinct input files can each contribute a dead row to the SAME output file (compaction
+    /// merges many inputs into one output). Both remapped positions must land in that output file's
+    /// delete vector.
+    #[test]
+    fn dead_out_merges_two_inputs_into_same_output_file() {
+        let mapping = mapping(&[
+            ("in-a.parquet", 3, "out-0.parquet", 10),
+            ("in-b.parquet", 7, "out-0.parquet", 20),
+        ]);
+        let deleted_inputs = vec![
+            ("in-a.parquet".to_owned(), 3),
+            ("in-b.parquet".to_owned(), 7),
+        ];
+
+        let dead = compute_dead_out_positions(&mapping, deleted_inputs);
+
+        assert_eq!(dead.len(), 1);
+        assert_eq!(positions(dead.get("out-0.parquet").unwrap()), vec![10, 20]);
     }
 
     /// No concurrent deletes -> nothing to mask.
