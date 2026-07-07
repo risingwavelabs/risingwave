@@ -150,6 +150,42 @@ fn new_test_iceberg_config(
     IcebergConfig::from_btreemap(values).unwrap()
 }
 
+fn pk_index_sink_properties() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("connector".to_owned(), "iceberg".to_owned()),
+        ("enable_pk_index".to_owned(), "true".to_owned()),
+    ])
+}
+
+fn plain_iceberg_sink_properties() -> BTreeMap<String, String> {
+    BTreeMap::from([("connector".to_owned(), "iceberg".to_owned())])
+}
+
+#[test]
+fn test_schedule_sets_pk_index_coordinated_for_pk_index_sink_when_config_enabled() {
+    assert!(should_coordinate_pk_index_compaction(
+        true,
+        &pk_index_sink_properties()
+    ));
+}
+
+#[test]
+fn test_schedule_leaves_pk_index_coordinated_false_for_non_pk_index_sink() {
+    assert!(!should_coordinate_pk_index_compaction(
+        true,
+        &plain_iceberg_sink_properties()
+    ));
+}
+
+#[test]
+fn test_schedule_leaves_pk_index_coordinated_false_when_config_disabled() {
+    // Even for a pk-index sink, the config gate must keep the flag false.
+    assert!(!should_coordinate_pk_index_compaction(
+        false,
+        &pk_index_sink_properties()
+    ));
+}
+
 #[test]
 fn test_should_trigger_by_pending_commit_threshold() {
     let now = Instant::now();
@@ -1063,6 +1099,7 @@ async fn test_pre_dispatch_failure_notifies_manual_waiter_and_removes_temporary_
         TaskType::Full,
         manager.inner.clone(),
         manager.metadata_manager.clone(),
+        false,
     ));
 
     let error = rx.await.unwrap().unwrap_err();
