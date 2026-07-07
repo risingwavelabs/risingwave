@@ -518,7 +518,9 @@ async fn commit_one_epoch(
 /// Run one attempt of the pk-index compaction overwrite against the freshly-reloaded `table`.
 /// Walks the target branch's CURRENT manifest list to find the live [`DataFile`] entries matching
 /// `input_file_paths` (matched by path, regardless of content type — data compaction can also
-/// replace delete files); fails if any requested path is no longer present (see
+/// replace delete files). Only entries with `is_alive() == true` are matched, so a path whose
+/// entry has been marked `Deleted` by a racing commit does not count as found; fails if any
+/// requested path is no longer present among the live entries (see
 /// [`IcebergPkIndexSinkCoordinator::commit_compaction_overwrite`] for the rationale).
 async fn commit_compaction_overwrite_once(
     table: Table,
@@ -542,7 +544,13 @@ async fn commit_compaction_overwrite_once(
                 .await
                 .map_err(|e| CommitError::Commit(anyhow!(e).context("load manifest")))?;
             for entry in manifest.entries() {
-                if remaining.remove(entry.file_path()) {
+                // Only match entries that are still alive on this branch: a `Deleted` entry
+                // keeps the same `file_path()` as when it was live, so without this guard a
+                // racing commit that already removed one of our input files would be masked —
+                // the stale `Deleted` entry would satisfy `remaining`, the "abort if missing"
+                // check below would never fire, and we'd add the compaction outputs on top of
+                // rows the racing commit already rewrote, duplicating them.
+                if entry.is_alive() && remaining.remove(entry.file_path()) {
                     removed.push(entry.data_file().clone());
                 }
                 if remaining.is_empty() {
