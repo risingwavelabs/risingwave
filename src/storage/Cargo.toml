@@ -33,8 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-# TODO: switch back to a main-branch rev once nimtable/iceberg-compaction#155 merges.
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "8135cd8c74ec3587ee13a297cbe31e34e8659dd3" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "1962561e3a417263dfe8ae4507d4682c5839e6f9" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
