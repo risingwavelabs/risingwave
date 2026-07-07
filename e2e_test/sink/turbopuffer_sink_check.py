@@ -79,6 +79,7 @@ def main():
     )
     assert_equal(backfill["distance_metric"], "cosine_distance", "distance metric")
     assert_equal(backfill["disable_backpressure"], True, "disable_backpressure")
+    assert_equal(backfill["sharding"]["num_shards"], 8, "num_shards")
 
     schema = backfill["schema"]
     assert_equal(schema["body"]["type"], "string", "body type")
