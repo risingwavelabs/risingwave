@@ -32,10 +32,8 @@ pub struct ExtractIcebergPredicateResult {
 /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
 ///
-/// `fields` must carry the column types as seen by the iceberg scan. For iceberg engine
-/// tables, whose output schema is remapped to Hummock types, pass the original iceberg-side
-/// source types instead of the remapped ones — pushability depends on the underlying iceberg
-/// field type, not the RisingWave output type.
+/// `fields` must carry the iceberg-side column types: for engine tables, pass the original
+/// source types rather than the remapped Hummock output types.
 pub fn extract_iceberg_predicate(
     predicate: Condition,
     fields: &[Field],
@@ -112,13 +110,9 @@ fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
     }
 }
 
-/// Whether a column of this type can appear in a pushed-down Iceberg predicate.
-/// iceberg-rust only builds field accessors for primitive columns; pushing down
-/// predicates (incl. `IS [NOT] NULL`) referencing struct/list/map or
-/// variant-backed jsonb columns fails at scan time with "Accessor for Field ...
-/// not found".
-///
-/// `ty` must be the iceberg-side column type; see [`extract_iceberg_predicate`].
+/// Whether a column of this iceberg-side type can appear in a pushed-down predicate:
+/// iceberg-rust only builds field accessors for primitive columns, so a pushed-down
+/// predicate referencing others fails at scan time with "Accessor for Field ... not found".
 fn is_iceberg_predicate_pushable_column_type(ty: &DataType) -> bool {
     matches!(
         ty,
@@ -138,13 +132,9 @@ fn is_iceberg_predicate_pushable_column_type(ty: &DataType) -> bool {
     )
 }
 
-/// Build the iceberg `Reference` for a column referenced by a pushed-down predicate, or
-/// `None` if the column cannot appear in one.
-///
-/// This is the single enforcement point of the "referenced column must be an
-/// accessor-able primitive" invariant: every match arm in
-/// [`rw_expr_to_iceberg_predicate`] must obtain its `Reference` through this function,
-/// so that a newly added arm cannot bypass the column-type check.
+/// Build the `Reference` for a pushed-down predicate, or `None` for an unpushable column.
+/// Every match arm must obtain its `Reference` here so the column-type check cannot be
+/// bypassed.
 fn input_ref_to_reference(input_ref: &InputRef, fields: &[Field]) -> Option<Reference> {
     let field = &fields[input_ref.index];
     if !is_iceberg_predicate_pushable_column_type(&field.data_type) {

@@ -266,10 +266,8 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             continue;
         }
 
-        // `VariantArray::try_value` is only fallible for the shredded (`typed_value`)
-        // encoding; for the plain encoding it panics on corrupt metadata/value bytes.
-        // Decode the plain encoding via the fully-validating `Variant::try_new` instead,
-        // so that malformed data from external writers surfaces as an error here.
+        // `try_value` panics on corrupt bytes in the plain encoding; decode it via the
+        // fully-validating `Variant::try_new` so bad external data surfaces as an error.
         let variant_result = match (
             variant_array.typed_value_field(),
             variant_array.value_field(),
@@ -278,8 +276,7 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             (_, Some(value)) if value.is_valid(idx) => {
                 Variant::try_new(variant_array.metadata_field().value(idx), value.value(idx))
             }
-            // Neither `value` nor `typed_value` is available; the spec requires readers
-            // to interpret this as a variant null.
+            // Per spec, neither `value` nor `typed_value` present means variant null.
             _ => Ok(Variant::Null),
         };
 
@@ -649,7 +646,6 @@ mod test {
         let variant_array = builder.build();
         let field = variant_array.field("variant_col");
 
-        // Variant extension type should map to Jsonb (merged from variant_extension_type_maps_to_jsonb)
         assert_eq!(
             IcebergArrowConvert.type_from_field(&field).unwrap(),
             DataType::Jsonb

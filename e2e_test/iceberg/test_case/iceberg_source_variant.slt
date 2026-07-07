@@ -134,6 +134,37 @@ where id = 3;
 ----
 t t t t t t t t
 
+# file_scan the Spark-written data files directly: the generic parquet path must
+# infer variant columns as jsonb via the extension metadata and decode them.
+query I
+select count(*) from file_scan(
+    'parquet',
+    's3',
+    'http://127.0.0.1:9301',
+    'hummockadmin',
+    'hummockadmin',
+    's3://icebergdata/demo/demo_db/test_variant_source/data/'
+);
+----
+3
+
+query TTTT
+select
+    pg_typeof(v_object),
+    v_object = '{"a":1,"b":true}'::jsonb,
+    (nested).top_variant = to_jsonb(cast('2024-11-08' as varchar)),
+    (nested).variant_map['k1'] = to_jsonb(cast(42 as integer))
+from file_scan(
+    'parquet',
+    's3',
+    'http://127.0.0.1:9301',
+    'hummockadmin',
+    'hummockadmin',
+    's3://icebergdata/demo/demo_db/test_variant_source/data/'
+) where id = 1;
+----
+jsonb t t t
+
 statement ok
 DROP SOURCE iceberg_variant_source;
 
@@ -263,7 +294,6 @@ where id = 2
 ----
 1
 
-# NaN is a valid variant double but has no JSON representation; it decodes to NULL.
 query TTTTTTTT retry 11 backoff 1s
 select
     v_object = '{}'::jsonb,
