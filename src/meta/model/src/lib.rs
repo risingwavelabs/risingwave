@@ -50,6 +50,7 @@ pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod iceberg_namespace_properties;
+pub mod iceberg_pk_index_pending_remap;
 pub mod iceberg_tables;
 pub mod index;
 pub mod object;
@@ -102,6 +103,7 @@ macro_rules! for_all_meta_model_entities {
             hummock_version_delta,
             hummock_version_stats,
             iceberg_namespace_properties,
+            iceberg_pk_index_pending_remap,
             iceberg_tables,
             index,
             object,

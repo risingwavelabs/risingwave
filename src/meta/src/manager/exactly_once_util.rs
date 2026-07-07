@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_meta_model::pending_sink_state::{self};
-use risingwave_meta_model::{Epoch, SinkId, SinkSchemachange};
+use risingwave_meta_model::{Epoch, SinkId, SinkSchemachange, iceberg_pk_index_pending_remap};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -171,4 +171,113 @@ pub async fn list_sink_states_ordered_by_epoch(
             )
         })
         .collect())
+}
+
+// Helpers for accessing the `iceberg_pk_index_pending_remap` system table used by the Iceberg
+// pk-index sink coordinator to durably record pending compaction remaps (so they can be re-triggered
+// on meta restart) and self-heal them once the remap is provably applied.
+
+/// A recovered pending remap: the `remap_id` plus the decoded `mapping_paths` (row-provenance NDJSON
+/// paths for the writer to remap against) and `input_files` (removed input DATA/DV paths used by the
+/// satisfied check).
+pub struct PendingRemapRecord {
+    pub remap_id: i64,
+    pub mapping_paths: Vec<String>,
+    pub input_files: Vec<String>,
+}
+
+/// Durably record a pending pk-index compaction remap. Called right after the compaction overwrite
+/// commits and BEFORE the `IcebergPkIndexRemap` barrier mutation is enqueued, so a crash in between
+/// is recoverable. Idempotent on `(sink_id, remap_id)`: a re-issued insert for an already-recorded
+/// remap is a no-op.
+pub async fn persist_pending_remap(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+    remap_id: i64,
+    mapping_paths: &[String],
+    input_files: &[String],
+) -> anyhow::Result<()> {
+    let m = iceberg_pk_index_pending_remap::ActiveModel {
+        sink_id: Set(sink_id),
+        remap_id: Set(remap_id),
+        mapping_paths: Set(serde_json::to_vec(mapping_paths)?),
+        input_files: Set(serde_json::to_vec(input_files)?),
+    };
+    let mut on_conflict = sea_orm::sea_query::OnConflict::columns([
+        iceberg_pk_index_pending_remap::Column::SinkId,
+        iceberg_pk_index_pending_remap::Column::RemapId,
+    ]);
+    // Workaround to support MySQL for `DO NOTHING`: a no-op update of a PK column.
+    on_conflict.update_column(iceberg_pk_index_pending_remap::Column::SinkId);
+    match iceberg_pk_index_pending_remap::Entity::insert(m)
+        .on_conflict(on_conflict)
+        .do_nothing()
+        .exec(db)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::error!(
+                "Error inserting into iceberg_pk_index_pending_remap: {:?}",
+                e.as_report()
+            );
+            Err(e.into())
+        }
+    }
+}
+
+/// List all durable pending remaps for `sink_id`, decoding the JSON-encoded path blobs.
+pub async fn list_pending_remaps(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+) -> anyhow::Result<Vec<PendingRemapRecord>> {
+    let rows = match iceberg_pk_index_pending_remap::Entity::find()
+        .filter(iceberg_pk_index_pending_remap::Column::SinkId.eq(sink_id))
+        .order_by(iceberg_pk_index_pending_remap::Column::RemapId, Order::Asc)
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("Error querying pending remaps: {:?}", e.as_report());
+            return Err(e.into());
+        }
+    };
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(PendingRemapRecord {
+                remap_id: row.remap_id,
+                mapping_paths: serde_json::from_slice(&row.mapping_paths)?,
+                input_files: serde_json::from_slice(&row.input_files)?,
+            })
+        })
+        .collect()
+}
+
+/// Delete a durable pending remap once it is provably applied (self-heal) or superseded. Deleting a
+/// missing `(sink_id, remap_id)` is a harmless no-op.
+pub async fn clear_pending_remap(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+    remap_id: i64,
+) -> anyhow::Result<()> {
+    match iceberg_pk_index_pending_remap::Entity::delete_many()
+        .filter(
+            iceberg_pk_index_pending_remap::Column::SinkId
+                .eq(sink_id)
+                .and(iceberg_pk_index_pending_remap::Column::RemapId.eq(remap_id)),
+        )
+        .exec(db)
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::error!(
+                "Error deleting from iceberg_pk_index_pending_remap: {:?}",
+                e.as_report()
+            );
+            Err(e.into())
+        }
+    }
 }

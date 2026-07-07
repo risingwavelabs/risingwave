@@ -73,6 +73,7 @@ mod m20260312_000000_streaming_job_backfill_parallelism_strategy;
 mod m20260518_000000_disable_unused_read_prefix_hints;
 mod m20260519_000000_streaming_job_batch_refresh_seconds;
 mod m20260624_000000_pending_sink_state_object_fk;
+mod m20260707_000000_iceberg_pk_index_pending_remap;
 mod utils;
 
 pub struct Migrator;
@@ -184,6 +185,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260518_000000_disable_unused_read_prefix_hints::Migration),
             Box::new(m20260519_000000_streaming_job_batch_refresh_seconds::Migration),
             Box::new(m20260624_000000_pending_sink_state_object_fk::Migration),
+            Box::new(m20260707_000000_iceberg_pk_index_pending_remap::Migration),
         ]
     }
 }
