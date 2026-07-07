@@ -153,10 +153,16 @@ impl Ord for VariantRef<'_> {
 
 impl ToText for VariantRef<'_> {
     fn write<W: fmt::Write>(&self, f: &mut W) -> fmt::Result {
-        let json = self
-            .parquet_variant()
-            .to_json_string()
-            .map_err(|_| fmt::Error)?;
+        let variant = self.parquet_variant();
+        // `to_json_string` writes non-finite floats bare (e.g. `NaN`), which is not valid
+        // JSON; take the lossy path rendering them as strings instead.
+        let json = if contains_non_finite_float(&variant) {
+            variant_to_json_value_lossy(variant)
+                .map_err(|_| fmt::Error)?
+                .to_string()
+        } else {
+            variant.to_json_string().map_err(|_| fmt::Error)?
+        };
         f.write_str(&json)
     }
 
@@ -214,9 +220,7 @@ impl VariantVal {
     pub fn from_parquet_variant(variant: ParquetVariant<'_, '_>) -> anyhow::Result<Self> {
         let field_names = collect_variant_field_names(variant.clone())?;
         let mut builder = canonical_builder(&field_names);
-        builder
-            .try_append_value(variant)
-            .context("failed to encode variant")?;
+        append_variant_value(variant, &mut builder).context("failed to encode variant")?;
         let (metadata, value) = builder.finish();
         Ok(Self::from_canonical_parts(&metadata, &value))
     }
@@ -252,7 +256,8 @@ impl VariantVal {
     }
 
     /// Decodes a tagged buffer from an untrusted origin (e.g. pgwire binary parameters),
-    /// re-canonicalizing it so non-canonical or non-finite inputs cannot break `Eq`/`Hash`/`Ord`.
+    /// re-canonicalizing it so non-canonical inputs (unsorted dictionaries, non-canonical
+    /// float bit patterns) cannot break `Eq`/`Hash`/`Ord`.
     pub fn from_serialized_untrusted(buf: &[u8]) -> anyhow::Result<Self> {
         let (metadata, value) = split_serialized_value(buf).context("invalid variant encoding")?;
         Self::from_parts(metadata, value)
@@ -392,9 +397,7 @@ impl<'a> VariantRef<'a> {
     }
 
     pub fn to_jsonb(self) -> anyhow::Result<JsonbVal> {
-        let json = self
-            .parquet_variant()
-            .to_json_value()
+        let json = variant_to_json_value_lossy(self.parquet_variant())
             .context("failed to convert variant to jsonb")?;
         Ok(json.into())
     }
@@ -514,8 +517,7 @@ fn collect_variant_field_names(
     Ok(field_names)
 }
 
-/// Collects object field names and, as the single walk over untrusted input, also rejects
-/// non-finite floats.
+/// Collects object field names for the canonical dictionary.
 fn collect_variant_field_names_inner(
     variant: ParquetVariant<'_, '_>,
     field_names: &mut BTreeSet<String>,
@@ -535,12 +537,6 @@ fn collect_variant_field_names_inner(
                     field_names,
                 )?;
             }
-        }
-        ParquetVariant::Float(v) if !v.is_finite() => {
-            bail!("non-finite float cannot be converted to variant")
-        }
-        ParquetVariant::Double(v) if !v.is_finite() => {
-            bail!("non-finite float cannot be converted to variant")
         }
         _ => {}
     }
@@ -601,7 +597,7 @@ fn append_json_value(
             } else if let Some(v) = v.as_u64() {
                 builder.append_value(v);
             } else if let Some(v) = v.as_f64() {
-                append_float64(v, builder)?;
+                append_float64(v, builder);
             } else {
                 bail!("unsupported JSON number: {v}");
             }
@@ -653,8 +649,8 @@ fn append_datum_value(
         (ScalarRefImpl::Int32(v), _) => builder.append_value(v),
         (ScalarRefImpl::Int64(v), _) => builder.append_value(v),
         (ScalarRefImpl::Serial(v), _) => builder.append_value(v.into_inner()),
-        (ScalarRefImpl::Float32(v), _) => append_float64(f64::from(v.into_inner()), builder)?,
-        (ScalarRefImpl::Float64(v), _) => append_float64(v.into_inner(), builder)?,
+        (ScalarRefImpl::Float32(v), _) => append_float64(f64::from(v.into_inner()), builder),
+        (ScalarRefImpl::Float64(v), _) => append_float64(v.into_inner(), builder),
         (ScalarRefImpl::Decimal(v), _) => append_decimal(v, builder)?,
         (ScalarRefImpl::Utf8(v), _) => builder.append_value(v),
         (ScalarRefImpl::Bytea(v), _) => builder.append_value(v),
@@ -726,13 +722,132 @@ fn append_struct(
     Ok(())
 }
 
-fn append_float64(value: f64, builder: &mut impl VariantBuilderExt) -> anyhow::Result<()> {
-    if !value.is_finite() {
-        bail!("non-finite float cannot be converted to variant");
+// Positive quiet NaN with zero payload. All NaN bit patterns collapse to this one so
+// that byte-wise `Eq`/`Hash`/`Ord` treat NaN as a single value, like `memcmp_encoding`
+// does for float columns.
+const CANONICAL_NAN_F32: u32 = 0x7fc0_0000;
+const CANONICAL_NAN_F64: u64 = 0x7ff8_0000_0000_0000;
+
+/// Normalizes a float to its canonical bit pattern: a single `NaN` representation and
+/// `-0.0` collapsed to `+0.0`.
+fn normalize_float(value: f32) -> f32 {
+    if value.is_nan() {
+        f32::from_bits(CANONICAL_NAN_F32)
+    } else if value == 0.0 {
+        0.0
+    } else {
+        value
     }
-    let value = if value == 0.0 { 0.0 } else { value };
-    builder.append_value(value);
+}
+
+/// See [`normalize_float`].
+fn normalize_double(value: f64) -> f64 {
+    if value.is_nan() {
+        f64::from_bits(CANONICAL_NAN_F64)
+    } else if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
+fn append_float64(value: f64, builder: &mut impl VariantBuilderExt) {
+    builder.append_value(normalize_double(value));
+}
+
+/// Re-encodes a variant value with the canonical builder, normalizing floats to their
+/// canonical bit patterns.
+fn append_variant_value(
+    variant: ParquetVariant<'_, '_>,
+    builder: &mut impl VariantBuilderExt,
+) -> anyhow::Result<()> {
+    match variant {
+        ParquetVariant::Object(object) => {
+            let mut object_builder = builder
+                .try_new_object()
+                .context("failed to create variant object")?;
+            for field in object.iter_try() {
+                let (field_name, value) = field.context("failed to read variant object")?;
+                let mut field_builder = ObjectFieldBuilder::new(field_name, &mut object_builder);
+                append_variant_value(value, &mut field_builder)?;
+            }
+            object_builder.finish();
+        }
+        ParquetVariant::List(list) => {
+            let mut list_builder = builder
+                .try_new_list()
+                .context("failed to create variant list")?;
+            for value in list.iter_try() {
+                append_variant_value(
+                    value.context("failed to read variant list")?,
+                    &mut list_builder,
+                )?;
+            }
+            list_builder.finish();
+        }
+        ParquetVariant::Float(v) => builder.append_value(normalize_float(v)),
+        ParquetVariant::Double(v) => append_float64(v, builder),
+        other => builder.append_value(other),
+    }
     Ok(())
+}
+
+/// Returns whether the variant contains a non-finite float. Read errors also count so
+/// that the lossy path, which reports them, is taken.
+fn contains_non_finite_float(variant: &ParquetVariant<'_, '_>) -> bool {
+    match variant {
+        ParquetVariant::Object(object) => object.iter_try().any(|field| match field {
+            Ok((_, value)) => contains_non_finite_float(&value),
+            Err(_) => true,
+        }),
+        ParquetVariant::List(list) => list.iter_try().any(|value| match value {
+            Ok(value) => contains_non_finite_float(&value),
+            Err(_) => true,
+        }),
+        ParquetVariant::Float(v) => !v.is_finite(),
+        ParquetVariant::Double(v) => !v.is_finite(),
+        _ => false,
+    }
+}
+
+/// Converts a variant to a `serde_json::Value`, rendering non-finite floats as the
+/// strings `"NaN"` / `"Infinity"` / `"-Infinity"`, following `to_jsonb` on float types.
+fn variant_to_json_value_lossy(
+    variant: ParquetVariant<'_, '_>,
+) -> anyhow::Result<serde_json::Value> {
+    Ok(match variant {
+        ParquetVariant::Object(object) => {
+            let mut fields = serde_json::Map::new();
+            for field in object.iter_try() {
+                let (field_name, value) = field.context("failed to read variant object")?;
+                fields.insert(field_name.to_owned(), variant_to_json_value_lossy(value)?);
+            }
+            serde_json::Value::Object(fields)
+        }
+        ParquetVariant::List(list) => serde_json::Value::Array(
+            list.iter_try()
+                .map(|value| {
+                    variant_to_json_value_lossy(value.context("failed to read variant list")?)
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        ),
+        ParquetVariant::Float(v) if !v.is_finite() => non_finite_to_json(f64::from(v)),
+        ParquetVariant::Double(v) if !v.is_finite() => non_finite_to_json(v),
+        other => other
+            .to_json_value()
+            .context("failed to convert variant to json")?,
+    })
+}
+
+fn non_finite_to_json(value: f64) -> serde_json::Value {
+    let s = if value.is_nan() {
+        "NaN"
+    } else if value == f64::INFINITY {
+        "Infinity"
+    } else {
+        "-Infinity"
+    };
+    serde_json::Value::String(s.to_owned())
 }
 
 fn append_decimal(value: Decimal, builder: &mut impl VariantBuilderExt) -> anyhow::Result<()> {
@@ -907,7 +1022,7 @@ mod tests {
         }
 
         // Include values with different metadata lengths.
-        let values: Vec<VariantVal> = [
+        let mut values: Vec<VariantVal> = [
             "1",
             r#""short""#,
             r#"{"b":1,"c":1}"#,
@@ -918,6 +1033,15 @@ mod tests {
         .iter()
         .map(|s| s.parse().unwrap())
         .collect();
+        for f in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            values.push(
+                VariantVal::try_from_scalar_ref(
+                    Some(ScalarRefImpl::Float64(F64::from(f))),
+                    &DataType::Float64,
+                )
+                .unwrap(),
+            );
+        }
         for a in &values {
             for b in &values {
                 assert_eq!(
@@ -944,28 +1068,77 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_finite_double_from_parquet_variant() {
+    fn normalizes_non_finite_floats_to_canonical_bit_patterns() {
+        let from_double_bits = |bits: u64| {
+            let mut builder = VariantBuilder::new();
+            builder.append_value(f64::from_bits(bits));
+            let (metadata, value) = builder.finish();
+            VariantVal::from_parts(&metadata, &value).unwrap()
+        };
+
+        // Every NaN bit pattern (sign, signaling, payload) collapses to the canonical one.
+        let canonical_nan = from_double_bits(CANONICAL_NAN_F64);
+        assert_same_variant(&canonical_nan, &from_double_bits(0xfff8_0000_0000_0001));
+        assert_same_variant(&canonical_nan, &from_double_bits(0x7ff0_0000_0000_0001));
+
+        let nan = canonical_nan.as_scalar_ref();
+        assert_eq!(nan.type_name(), "double");
+        assert_eq!(nan.to_text(), r#""NaN""#);
+        assert_eq!(nan.to_jsonb().unwrap().to_string(), r#""NaN""#);
+
+        // Infinities have unique bit patterns and render as strings, like `to_jsonb(float8)`.
+        let inf = from_double_bits(f64::INFINITY.to_bits());
+        assert_eq!(inf.as_scalar_ref().type_name(), "double");
+        assert_eq!(inf.as_scalar_ref().to_text(), r#""Infinity""#);
+        assert_eq!(
+            from_double_bits(f64::NEG_INFINITY.to_bits())
+                .as_scalar_ref()
+                .to_text(),
+            r#""-Infinity""#
+        );
+
+        // `-0.0` collapses to `+0.0` on this path too, matching `to_variant`.
+        assert_same_variant(
+            &from_double_bits((-0.0_f64).to_bits()),
+            &from_double_bits(0.0_f64.to_bits()),
+        );
+
+        // The same normalization applies to the f32 variant type.
+        let from_float_bits = |bits: u32| {
+            let mut builder = VariantBuilder::new();
+            builder.append_value(f32::from_bits(bits));
+            let (metadata, value) = builder.finish();
+            VariantVal::from_parts(&metadata, &value).unwrap()
+        };
+        let float_nan = from_float_bits(0xffc0_0001);
+        assert_same_variant(&float_nan, &from_float_bits(CANONICAL_NAN_F32));
+        assert_eq!(float_nan.as_scalar_ref().type_name(), "float");
+        assert_eq!(float_nan.as_scalar_ref().to_text(), r#""NaN""#);
+
+        // Non-finite floats nested in objects/lists render as strings as well.
         let mut builder = VariantBuilder::new();
-        builder.append_value(f64::NAN);
+        builder.add_field_name("x");
+        let mut object = builder.new_object();
+        object.insert("x", f64::NAN);
+        object.finish();
         let (metadata, value) = builder.finish();
-
-        assert!(VariantVal::from_parts(&metadata, &value).is_err());
-
-        // Even if such a value slipped through, converting it to jsonb must error, not panic.
-        let v = VariantVal::from_canonical_parts(&metadata, &value);
-        assert!(v.as_scalar_ref().to_jsonb().is_err());
+        let nested = VariantVal::from_parts(&metadata, &value).unwrap();
+        assert_eq!(nested.as_scalar_ref().to_text(), r#"{"x":"NaN"}"#);
     }
 
     #[test]
-    fn untrusted_serialized_rejects_non_finite_double() {
+    fn untrusted_serialized_canonicalizes_non_finite_double() {
         let mut builder = VariantBuilder::new();
-        builder.append_value(f64::NAN);
+        builder.append_value(f64::from_bits(0xfff8_0000_0000_0001));
         let (metadata, value) = builder.finish();
         let bytes = VariantVal::from_canonical_parts(&metadata, &value)
             .as_scalar_ref()
             .value_serialize();
 
-        assert!(VariantVal::from_serialized_untrusted(&bytes).is_err());
+        let canonicalized = VariantVal::from_serialized_untrusted(&bytes).unwrap();
+        assert_eq!(canonicalized.as_scalar_ref().to_text(), r#""NaN""#);
+        // The non-canonical NaN bit pattern was rewritten.
+        assert_ne!(bytes, canonicalized.as_scalar_ref().value_serialize());
         // The trusted decode path only checks structure.
         assert!(VariantVal::value_deserialize(&bytes).is_some());
     }
@@ -1043,17 +1216,19 @@ mod tests {
         )
         .unwrap();
         assert_same_variant(&positive_zero, &negative_zero);
+
+        // Non-finite floats keep their type identity and render as strings.
+        let sql_nan = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Float64(F64::from(f64::NAN))),
+            &DataType::Float64,
+        )
+        .unwrap();
+        assert_eq!(sql_nan.as_scalar_ref().type_name(), "double");
+        assert_eq!(sql_nan.as_scalar_ref().to_text(), r#""NaN""#);
     }
 
     #[test]
     fn rejects_non_canonical_sql_only_scalars() {
-        assert!(
-            VariantVal::try_from_scalar_ref(
-                Some(ScalarRefImpl::Float64(F64::from(f64::NAN))),
-                &DataType::Float64,
-            )
-            .is_err()
-        );
         assert!(
             VariantVal::try_from_scalar_ref(
                 Some(ScalarRefImpl::Interval(Interval::from_month_day_usec(

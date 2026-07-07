@@ -205,6 +205,19 @@ from v;
 ----
 array array int32 array int16 int32 int64
 
+# Non-finite floats normalize to canonical variant doubles and render as strings,
+# following to_jsonb on float8.
+query TTTTTT
+select
+    variant_typeof(to_variant('NaN'::float8)),
+    to_variant('NaN'::float8)::varchar,
+    to_variant('NaN'::float8)::jsonb = '"NaN"'::jsonb,
+    to_variant('Infinity'::float8)::varchar,
+    to_variant('-Infinity'::float8)::varchar,
+    variant_typeof(parse_variant('"NaN"'));
+----
+double "NaN" t "Infinity" "-Infinity" string
+
 statement error cannot be converted to variant
 select to_variant(interval '1 day');
 
