@@ -1,0 +1,48 @@
+[meta]
+disable_recovery = true
+max_heartbeat_interval_secs = 60
+# Enabled only for the `ci-iceberg-test` risedev profile (docker-backed iceberg
+# e2e cluster) so the pk-index coordinated compaction path gets e2e coverage.
+# This flag defaults to `false` everywhere else (see src/config/example.toml);
+# it must stay `false` in shared CI configs (e.g. src/config/ci.toml) until
+# B4 lands and it is safe to flip the default. See
+# e2e_test/iceberg/test_case/pure_slt/iceberg_pk_index/compaction_no_concurrent_delete.slt.
+iceberg_pk_index_coordinated_compaction_enabled = true
+
+[meta.compaction_config]
+level0_tier_compact_file_number = 6
+level0_overlapping_sub_level_compact_level_count = 3
+level0_max_compact_file_number = 96
+max_vnode_key_range_bytes = 214748364800
+
+[streaming]
+in_flight_barrier_nums = 10
+
+[streaming.developer]
+stream_exchange_concurrent_barriers = 10
+stream_refresh_scheduler_interval_sec = 1
+
+[storage]
+share_buffers_sync_parallelism = 4
+imm_merge_threshold = 2
+max_cached_recent_versions_number = 200
+shorten_block_meta_key_threshold = 4096
+
+[storage.object_store.retry]
+streaming_upload_attempt_timeout_ms = 10000
+upload_retry_attempts = 5
+read_attempt_timeout_ms = 16000
+read_retry_attempts = 6
+
+[frontend]
+unsafe_enable_local_fs_connector = true
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 5
+max_concurrent_creating_streaming_jobs = 0
+
+[udf]
+enable_embedded_python_udf = true
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

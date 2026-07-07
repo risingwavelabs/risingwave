@@ -1,0 +1,184 @@
+# End-to-end coverage for B1 of "pk-index coordinated iceberg compaction":
+# the compactor runs the rewrite without committing, reports the result to
+# meta, and the IcebergPkIndexSinkCoordinator performs the overwrite_files
+# commit. This is gated by the off-by-default meta config
+# `iceberg_pk_index_coordinated_compaction_enabled`, which the `ci-iceberg-test`
+# risedev profile turns on (see src/config/ci-iceberg-test.toml) so this test
+# exercises the coordinated commit path, not just the compactor's own commit.
+#
+# Scope: NO delete lands during the compaction window (between the
+# compaction's read snapshot and the coordinator's commit). B1 does not mask
+# dead rows created by concurrent deletes -- that is B3/B4. The delete below
+# fully commits (and its position-delete file is visible) *before* VACUUM
+# FULL is issued, so it is not concurrent with the compaction task.
+
+statement ok
+create secret pk_index_compaction_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection pk_index_compaction_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_pk_index_compaction',
+    s3.access.key = secret pk_index_compaction_secret,
+    s3.secret.key = secret pk_index_compaction_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.pk_index_compaction_conn';
+
+# Non-partitioned pk-index table: each insert below is flushed on its own
+# checkpoint, so the table accumulates several small data files before we
+# trigger compaction.
+statement ok
+create table t_pk_index_compact(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 1,
+    format_version = 2,
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+statement ok
+insert into t_pk_index_compact values(1, 'alice', 100), (2, 'bob', 200);
+
+statement ok
+flush;
+
+sleep 1s
+
+statement ok
+insert into t_pk_index_compact values(3, 'charlie', 300), (4, 'diana', 400);
+
+statement ok
+flush;
+
+sleep 1s
+
+statement ok
+insert into t_pk_index_compact values(5, 'eve', 500), (6, 'frank', 600);
+
+statement ok
+flush;
+
+# Delete two rows. This commits (and its position-delete file becomes
+# visible) well before VACUUM FULL is issued below, so it is NOT concurrent
+# with the compaction task's read-then-commit window.
+statement ok
+delete from t_pk_index_compact where id in (2, 4);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_compact;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+6 frank 600
+
+# Several small data files should have accumulated from the inserts above.
+query T retry 6 backoff 1s
+select count(*) > 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_compact'
+  and content = 'Data';
+----
+t
+
+# The pk-index path writes file-scoped position deletes, never equality
+# deletes.
+query T retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_compact'
+  and content = 'PositionDeletes';
+----
+t
+
+query T retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_compact'
+  and content = 'EqualityDeletes';
+----
+t
+
+# Trigger compaction: with the coordinated path enabled, the compactor
+# rewrites the surviving rows without committing, reports the result to
+# meta, and the sink coordinator performs the overwrite_files commit.
+statement ok
+VACUUM FULL t_pk_index_compact;
+
+# The table must read back exactly the same live rows after compaction --
+# the whole point of B1 is that a coordinated-commit rewrite with no
+# concurrent delete is loss-less.
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_compact;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+6 frank 600
+
+# A second VACUUM FULL (idempotent: no new writes in between) fully
+# converges the table to a single compacted data file with no leftover
+# delete files, mirroring the existing (non-pk-index) compaction test's
+# two-pass convergence pattern.
+statement ok
+VACUUM FULL t_pk_index_compact;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_compact;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+6 frank 600
+
+query T retry 6 backoff 1s
+select count(*) = 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_compact'
+  and content = 'Data';
+----
+t
+
+query T retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_compact'
+  and content in ('PositionDeletes', 'EqualityDeletes');
+----
+t
+
+# The table must remain fully usable after the coordinated commit: further
+# writes still round-trip correctly.
+statement ok
+insert into t_pk_index_compact values(7, 'grace', 700);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_compact;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+6 frank 600
+7 grace 700
+
+statement ok
+DROP TABLE t_pk_index_compact;
+
+statement ok
+DROP CONNECTION pk_index_compaction_conn;
+
+statement ok
+DROP SECRET pk_index_compaction_secret;
