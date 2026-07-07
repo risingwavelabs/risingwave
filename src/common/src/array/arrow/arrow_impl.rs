@@ -1641,6 +1641,29 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
+/// Field-aware version of [`is_parquet_schema_match_source_schema`]: additionally matches a
+/// Parquet variant column (an `arrow.parquet.variant` extension over a struct) against
+/// RisingWave's `Jsonb`. The bare `DataType` check cannot see this case because extension
+/// names live in the field metadata. Prefer this function whenever an `arrow_schema::Field`
+/// is available.
+pub fn is_parquet_field_match_source_schema(
+    arrow_field: &arrow_schema::Field,
+    rw_data_type: &crate::types::DataType,
+) -> bool {
+    use arrow_schema::extension::ExtensionType as _;
+
+    if arrow_field
+        .metadata()
+        .get("ARROW:extension:name")
+        .map(String::as_str)
+        == Some(parquet_variant_compute::VariantType::NAME)
+        && matches!(arrow_field.data_type(), arrow_schema::DataType::Struct(_))
+    {
+        return matches!(rw_data_type, crate::types::DataType::Jsonb);
+    }
+    is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_data_type)
+}
+
 /// This function checks whether the schema of a Parquet file matches the user-defined schema in RisingWave.
 /// It handles the following special cases:
 /// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `Timestamp` type.
@@ -1702,7 +1725,7 @@ pub fn is_parquet_schema_match_source_schema(
                 if candidates.next().is_some() {
                     return false;
                 }
-                if !is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_ty) {
+                if !is_parquet_field_match_source_schema(arrow_field, rw_ty) {
                     return false;
                 }
             }
@@ -1711,7 +1734,7 @@ pub fn is_parquet_schema_match_source_schema(
         // List type recursive matching
         // Arrow's List matches RisingWave's List if the element type matches recursively
         (ArrowType::List(arrow_field), RwType::List(rw_list_ty)) => {
-            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_list_ty.elem())
+            is_parquet_field_match_source_schema(arrow_field, rw_list_ty.elem())
         }
         // Map type recursive matching
         // Arrow's Map matches RisingWave's Map if the key and value types match recursively,
@@ -1727,8 +1750,8 @@ pub fn is_parquet_schema_match_source_schema(
                     return false;
                 }
                 let (rw_key_ty, rw_value_ty) = (rw_map_ty.key(), rw_map_ty.value());
-                is_parquet_schema_match_source_schema(key_field.data_type(), rw_key_ty)
-                    && is_parquet_schema_match_source_schema(value_field.data_type(), rw_value_ty)
+                is_parquet_field_match_source_schema(key_field, rw_key_ty)
+                    && is_parquet_field_match_source_schema(value_field, rw_value_ty)
             } else {
                 false
             }
