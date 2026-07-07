@@ -23,7 +23,9 @@ use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde::{Deserialize, Serialize};
 
-use crate::meta_snapshot::{MetaSnapshot, Metadata};
+use crate::meta_snapshot::{
+    MetaSnapshot, Metadata, read_u32_le, read_u64_le, verify_checksum_and_strip,
+};
 use crate::{BackupError, BackupResult};
 pub type MetaSnapshotV2 = MetaSnapshot<MetadataV2>;
 
@@ -134,6 +136,32 @@ macro_rules! define_decode_metadata {
 }
 
 for_all_metadata_models_v2!(define_decode_metadata);
+
+// Metadata V2 is encoded as a positional list of sections. The actual encoded order inserts
+// `hummock_version` before `version_stats`, so `hummock_sequences` is section 26:
+// 0 seaql_migrations, 1 hummock_version, 2 version_stats, ..., 26 hummock_sequences.
+//
+// Keep this as a fixed index so partial decoding can remain compatible with future formats that
+// only append sections after `hummock_sequences`.
+const HUMMOCK_SEQUENCES_METADATA_SECTION_INDEX: usize = 26;
+
+pub fn decode_hummock_sequences_from_snapshot(
+    snapshot: &[u8],
+) -> BackupResult<Vec<risingwave_meta_model::hummock_sequence::Model>> {
+    let mut buf = verify_checksum_and_strip(snapshot)?;
+    let format_version = read_u32_le(&mut buf)?;
+    if format_version < 2 {
+        return Err(BackupError::Other(anyhow!(
+            "unsupported metadata snapshot format version for hummock sequence partial decoding: {}",
+            format_version
+        )));
+    }
+    let _snapshot_id = read_u64_le(&mut buf)?;
+    for _ in 0..HUMMOCK_SEQUENCES_METADATA_SECTION_INDEX {
+        skip_metadata_list(&mut buf)?;
+    }
+    get_n(&mut buf)
+}
 
 impl Display for MetadataV2 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -262,8 +290,8 @@ fn put_1<T: Serialize>(buf: &mut Vec<u8>, data: &T) -> Result<(), serde_json::Er
     put_n(buf, &[data])
 }
 
-fn get_n<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<Vec<T>, serde_json::Error> {
-    let n = buf.get_u32_le() as usize;
+fn get_n<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> BackupResult<Vec<T>> {
+    let n = read_u32_le(buf)? as usize;
     let mut elements = Vec::with_capacity(n);
     for _ in 0..n {
         elements.push(get_with_len_prefix(buf)?);
@@ -271,45 +299,57 @@ fn get_n<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<Vec<T>, serde_jso
     Ok(elements)
 }
 
-fn get_1<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<T, serde_json::Error> {
+fn get_1<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> BackupResult<T> {
     let elements = get_n(buf)?;
     assert_eq!(elements.len(), 1);
     Ok(elements.into_iter().next().unwrap())
 }
 
+fn skip_metadata_list(buf: &mut &[u8]) -> BackupResult<()> {
+    let n = read_u32_le(buf)? as usize;
+    for _ in 0..n {
+        skip_with_len_prefix(buf)?;
+    }
+    Ok(())
+}
+
+fn skip_with_len_prefix(buf: &mut &[u8]) -> BackupResult<()> {
+    let len = read_u64_le(buf)?
+        .try_into()
+        .map_err(|_| BackupError::Other(anyhow!("metadata JSON payload length exceeds usize")))?;
+    if buf.remaining() < len {
+        return Err(BackupError::Other(anyhow!(
+            "metadata JSON payload length {} exceeds remaining buffer {}",
+            len,
+            buf.remaining()
+        )));
+    }
+    buf.advance(len);
+    Ok(())
+}
+
 fn put_with_len_prefix<T: Serialize>(buf: &mut Vec<u8>, data: &T) -> Result<(), serde_json::Error> {
     let b = serde_json::to_vec(data)?;
-    // Any valid JSON value serialized by serde_json is non-empty, such as `null`, `{}`, or `[]`.
-    assert!(!b.is_empty());
-    if let Ok(len) = u32::try_from(b.len()) {
-        buf.put_u32_le(len);
-    } else {
-        buf.put_u32_le(0);
-        buf.put_u64_le(
-            b.len()
-                .try_into()
-                .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
-        );
-    }
+    buf.put_u64_le(
+        b.len()
+            .try_into()
+            .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
+    );
     buf.put_slice(&b);
     Ok(())
 }
 
-fn get_with_len_prefix<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<T, serde_json::Error> {
-    let len = match buf.get_u32_le() {
-        0 => {
-            let len = buf.get_u64_le();
-            len.try_into()
-                .unwrap_or_else(|_| panic!("cannot convert {} into usize", len))
-        }
-        len => len as usize,
-    };
-    assert!(
-        buf.remaining() >= len,
-        "JSON payload length {} exceeds remaining buffer {}",
-        len,
-        buf.remaining()
-    );
+fn get_with_len_prefix<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> BackupResult<T> {
+    let len = read_u64_le(buf)?
+        .try_into()
+        .map_err(|_| BackupError::Other(anyhow!("metadata JSON payload length exceeds usize")))?;
+    if buf.remaining() < len {
+        return Err(BackupError::Other(anyhow!(
+            "metadata JSON payload length {} exceeds remaining buffer {}",
+            len,
+            buf.remaining()
+        )));
+    }
     let d = serde_json::from_slice(&buf[..len])?;
     buf.advance(len);
     Ok(d)
@@ -318,25 +358,65 @@ fn get_with_len_prefix<'a, T: Deserialize<'a>>(buf: &mut &'a [u8]) -> Result<T, 
 #[cfg(test)]
 mod tests {
     use bytes::BufMut;
+    use risingwave_common::util::panic::rw_catch_unwind;
+    use risingwave_meta_model::hummock_sequence;
 
     use super::*;
 
+    fn encoded_snapshot_with_invalid_trailing_metadata_after_hummock_sequences(
+        metadata: &MetadataV2,
+    ) -> Vec<u8> {
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: metadata.hummock_sequences.clone(),
+                ..Default::default()
+            },
+        };
+        let encoded = raw.encode().unwrap();
+        let payload = &encoded[..encoded.len() - 8];
+        let mut metadata_buf = &payload[12..];
+
+        for _ in 0..=HUMMOCK_SEQUENCES_METADATA_SECTION_INDEX {
+            skip_metadata_list(&mut metadata_buf).unwrap();
+        }
+
+        let mut partial_payload = payload[..payload.len() - metadata_buf.len()].to_vec();
+        partial_payload.put_u32_le(1);
+        partial_payload.put_u64_le(100);
+        partial_payload.put_slice(br#""short""#);
+        let checksum = crate::xxhash64_checksum(&partial_payload);
+        partial_payload.put_u64_le(checksum);
+        partial_payload
+    }
+
+    fn append_future_metadata_section(mut encoded: Vec<u8>) -> Vec<u8> {
+        encoded.truncate(encoded.len() - 8);
+        put_n(&mut encoded, &["future section"]).unwrap();
+        let checksum = crate::xxhash64_checksum(&encoded);
+        encoded.put_u64_le(checksum);
+        encoded
+    }
+
     #[test]
-    fn test_len_prefix_legacy_u32_round_trip() {
+    fn test_len_prefix_u64_round_trip() {
         let mut buf = vec![];
         put_with_len_prefix(&mut buf, &"hello").unwrap();
 
-        assert_ne!(u32::from_le_bytes(buf[..4].try_into().unwrap()), 0);
+        assert_eq!(
+            u64::from_le_bytes(buf[..8].try_into().unwrap()),
+            serde_json::to_vec("hello").unwrap().len() as u64
+        );
 
         let decoded: String = get_with_len_prefix(&mut buf.as_slice()).unwrap();
         assert_eq!(decoded, "hello");
     }
 
     #[test]
-    fn test_len_prefix_extended_u64_decoding() {
+    fn test_len_prefix_u64_decoding() {
         let payload = serde_json::to_vec("hello").unwrap();
         let mut buf = vec![];
-        buf.put_u32_le(0);
         buf.put_u64_le(payload.len() as u64);
         buf.put_slice(&payload);
 
@@ -345,26 +425,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_len_prefix_panics_on_missing_extended_u64() {
-        let mut buf = vec![];
-        buf.put_u32_le(0);
-
-        let _ = get_with_len_prefix::<String>(&mut buf.as_slice());
+    fn test_len_prefix_errors_on_missing_u64() {
+        assert!(get_with_len_prefix::<String>(&mut [].as_slice()).is_err());
     }
 
     #[test]
-    #[should_panic]
-    fn test_len_prefix_panics_on_payload_shorter_than_declared_len() {
+    fn test_len_prefix_errors_on_payload_shorter_than_declared_len() {
         let mut buf = vec![];
-        buf.put_u32_le(100);
+        buf.put_u64_le(100);
         buf.put_slice(br#""hello""#);
 
-        let _ = get_with_len_prefix::<String>(&mut buf.as_slice());
+        assert!(get_with_len_prefix::<String>(&mut buf.as_slice()).is_err());
     }
 
     #[test]
-    fn test_snapshot_v2_legacy_encoding_decoding() {
+    fn test_snapshot_v2_encoding_decoding() {
         let raw = MetaSnapshotV2 {
             format_version: 2,
             id: 123,
@@ -380,5 +455,69 @@ mod tests {
             decoded.metadata.hummock_version.id,
             raw.metadata.hummock_version.id
         );
+    }
+
+    #[test]
+    fn test_partial_decode_hummock_sequences() {
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: vec![
+                    hummock_sequence::Model {
+                        name: "meta_backup".to_owned(),
+                        seq: 42,
+                    },
+                    hummock_sequence::Model {
+                        name: "sstable_object".to_owned(),
+                        seq: 100,
+                    },
+                ],
+                ..Default::default()
+            },
+        };
+
+        let decoded = decode_hummock_sequences_from_snapshot(&raw.encode().unwrap()).unwrap();
+        assert_eq!(decoded, raw.metadata.hummock_sequences);
+    }
+
+    #[test]
+    fn test_partial_decode_hummock_sequences_ignores_trailing_metadata() {
+        let metadata = MetadataV2 {
+            hummock_sequences: vec![hummock_sequence::Model {
+                name: "meta_backup".to_owned(),
+                seq: 42,
+            }],
+            ..Default::default()
+        };
+        let encoded =
+            encoded_snapshot_with_invalid_trailing_metadata_after_hummock_sequences(&metadata);
+
+        let decoded = decode_hummock_sequences_from_snapshot(&encoded).unwrap();
+        assert_eq!(decoded, metadata.hummock_sequences);
+        let full_decode_result = rw_catch_unwind(|| MetaSnapshotV2::decode(&encoded));
+        assert!(
+            full_decode_result.is_err() || full_decode_result.unwrap().is_err(),
+            "full metadata decoding should not accept the intentionally invalid trailing section"
+        );
+    }
+
+    #[test]
+    fn test_partial_decode_hummock_sequences_ignores_appended_future_sections() {
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: vec![hummock_sequence::Model {
+                    name: "meta_backup".to_owned(),
+                    seq: 42,
+                }],
+                ..Default::default()
+            },
+        };
+
+        let encoded = append_future_metadata_section(raw.encode().unwrap());
+        let decoded = decode_hummock_sequences_from_snapshot(&encoded).unwrap();
+        assert_eq!(decoded, raw.metadata.hummock_sequences);
     }
 }
