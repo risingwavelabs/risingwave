@@ -140,6 +140,7 @@ impl TimestamptzHandling {
 #[derive(Clone, Debug)]
 pub enum TimestampHandling {
     Milli,
+    Micro,
     GuessNumberUnit,
 }
 
@@ -574,18 +575,23 @@ impl JsonParseOptions {
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => {
-                match self.timestamp_handling {
+            ) => value
+                .as_i64()
+                .map(|num| match self.timestamp_handling {
                     // Only when user configures debezium.time.precision.mode = 'connect',
                     // the Milli branch will be executed
-                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                }
-            }
+                    TimestampHandling::Milli => {
+                        Timestamp::with_millis(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::Micro => {
+                        Timestamp::with_micros(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::GuessNumberUnit => {
+                        i64_to_timestamp(num).map_err(|_| create_error())
+                    }
+                })
+                .ok_or_else(create_error)??
+                .into(),
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
