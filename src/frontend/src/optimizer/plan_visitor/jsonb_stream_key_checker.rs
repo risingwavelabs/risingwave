@@ -53,8 +53,8 @@ impl StreamKeyChecker {
         format!(
             "{} column \"{}\" should not be in the {}.",
             self.type_name(),
-            target,
-            FieldDisplay(field)
+            FieldDisplay(field),
+            target
         )
     }
 

@@ -5,7 +5,7 @@
     create table t2 (v3 jsonb, v4 int);
     select v2 from t1 group by v2, v1;
   stream_error: |-
-    Not supported: JSONB column "aggregation group key" should not be in the t1.v1.
+    Not supported: JSONB column "t1.v1" should not be in the aggregation group key.
     HINT: Using JSONB columns as part of the join or aggregation keys can severely impair performance. If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`
 - name: jsonb in union
   sql: |
@@ -13,14 +13,14 @@
     create table t2 (v3 jsonb, v4 int);
     select v1, v2 from t1 union select v3, v4 from t2;
   stream_error: |-
-    Not supported: JSONB column "field" should not be in the t1.v1.
+    Not supported: JSONB column "t1.v1" should not be in the field.
     HINT: Using JSONB columns as part of the join or aggregation keys can severely impair performance. If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`
 - name: jsonb in distinct
   sql: |
     create table t1 (v1 jsonb, v2 int);
     select distinct v1 from t1;
   stream_error: |-
-    Not supported: JSONB column "aggregation group key" should not be in the t1.v1.
+    Not supported: JSONB column "t1.v1" should not be in the aggregation group key.
     HINT: Using JSONB columns as part of the join or aggregation keys can severely impair performance. If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`
 - name: jsonb in TopN by group
   sql: |
@@ -30,7 +30,7 @@
       FROM t1)
     WHERE rank <= 2;
   stream_error: |-
-    Not supported: JSONB column "over window partition key" should not be in the t1.v1.
+    Not supported: JSONB column "t1.v1" should not be in the over window partition key.
     HINT: Using JSONB columns as part of the join or aggregation keys can severely impair performance. If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`
 - name: variant in group by with jsonb opt-in
   sql: |
@@ -38,5 +38,12 @@
     create table t1 (v1 variant, v2 int);
     select v2 from t1 group by v2, v1;
   stream_error: |-
-    Not supported: VARIANT column "aggregation group key" should not be in the t1.v1.
+    Not supported: VARIANT column "t1.v1" should not be in the aggregation group key.
     HINT: Using VARIANT columns as stream keys is not supported.
+- name: variant in materialized view order by
+  sql: |
+    create table t1 (v1 variant, v2 int);
+    select v1, v2 from t1 order by v1;
+  stream_error: |-
+    Not supported: VARIANT column "v1" is part of the storage primary key
+    HINT: VARIANT values only have byte-wise equality and ordering, so they cannot be used in primary keys, index keys, or ORDER BY of materialized views.
