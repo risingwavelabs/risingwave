@@ -59,11 +59,11 @@ impl StreamKeyChecker {
     }
 
     fn is_restricted_key_type(&self, data_type: &DataType) -> bool {
-        matches!(
-            (self.mode, data_type),
-            (StreamKeyCheckMode::Jsonb, DataType::Jsonb)
-                | (StreamKeyCheckMode::Variant, DataType::Variant)
-        )
+        match self.mode {
+            StreamKeyCheckMode::Jsonb => matches!(data_type, DataType::Jsonb),
+            // Unlike the pre-existing JSONB behavior, VARIANT is rejected even when nested.
+            StreamKeyCheckMode::Variant => data_type.contains_variant(),
+        }
     }
 
     fn type_name(&self) -> &'static str {

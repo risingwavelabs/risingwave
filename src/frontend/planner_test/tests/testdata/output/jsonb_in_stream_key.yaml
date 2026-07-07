@@ -47,3 +47,20 @@
   stream_error: |-
     Not supported: VARIANT column "v1" is part of the storage primary key
     HINT: VARIANT values only have byte-wise equality and ordering, so they cannot be used in primary keys, index keys, or ORDER BY of materialized views.
+- name: nested variant in TopN order key
+  sql: |
+    create table t1 (id int primary key, s struct<v variant>);
+    select count(*) from (select * from t1 order by s limit 10);
+  stream_error: |-
+    Not supported: VARIANT column "t1.s" should not be in the TopN order key.
+    HINT: Using VARIANT columns as stream keys is not supported.
+- name: nested variant in over window partition key
+  sql: |
+    create table t1 (id int primary key, s struct<v variant>);
+    select id from (
+      select id, rank() OVER (PARTITION BY s ORDER BY id) AS rank
+      from t1)
+    where rank <= 2;
+  stream_error: |-
+    Not supported: VARIANT column "t1.s" should not be in the over window partition key.
+    HINT: Using VARIANT columns as stream keys is not supported.

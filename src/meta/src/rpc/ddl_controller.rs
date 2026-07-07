@@ -95,7 +95,8 @@ use crate::stream::{
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
     StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    create_source_worker, first_variant_column, rewrite_refresh_schema_sink_fragment, state_match,
+    validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -1638,6 +1639,19 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
+                // Fail before any fragment rewrite or catalog persistence so a rejected ALTER
+                // leaves no partial state.
+                if let Some(variant_column) = first_variant_column(&newly_added_columns) {
+                    let sink_names = auto_refresh_schema_sinks
+                        .iter()
+                        .map(|sink| format!("`{}`", sink.name))
+                        .join(", ");
+                    return Err(MetaError::invalid_parameter(format!(
+                        "cannot add VARIANT column `{}` because sink(s) {} with auto schema refresh do not support VARIANT",
+                        variant_column.name_with_hidden(),
+                        sink_names,
+                    )));
+                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self

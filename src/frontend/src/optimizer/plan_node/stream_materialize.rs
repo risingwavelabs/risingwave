@@ -346,10 +346,8 @@ impl StreamMaterialize {
             derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
 
-        // This is the single point where the storage pk of tables, indexes, and materialized
-        // views is finalized, so it backstops every path that could put a VARIANT column into a
-        // storage key (table pk, index keys, MV ORDER BY, or a derived stream key), in addition
-        // to the `StreamKeyChecker` pass that reports friendlier errors for common plans.
+        // Guards only this table's own pk (table pk, index keys, MV ORDER BY); internal state
+        // tables are covered by `reject_variant_in_internal_storage_key` in the stream fragmenter.
         for order in &table_pk {
             let column = &columns[order.column_index];
             if column.data_type().contains_variant() {
