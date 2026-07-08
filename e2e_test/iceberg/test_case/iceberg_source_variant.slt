@@ -188,6 +188,28 @@ where id = 3;
 ----
 t object
 
+# Variant is gated out of the DataFusion batch engine, so these queries fall back to
+# the RisingWave engine: bare variant output and canonical (not raw-byte) grouping.
+# Bare top-level variant expression, no cast: renders as the canonical JSON text.
+query T
+select variant_get(v_object, '$.a') from iceberg_variant_source where id = 1;
+----
+1
+
+# GROUP BY on a variant column: three distinct values (object, null, empty object).
+query I
+select count(*) from iceberg_variant_source group by v_object order by 1;
+----
+1
+1
+1
+
+# DISTINCT over a variant column: null is excluded, two distinct objects remain.
+query I
+select count(distinct v_object) from iceberg_variant_source;
+----
+2
+
 # file_scan the Spark-written data files directly: the generic parquet path must
 # infer variant columns via the extension metadata and decode them.
 query I
