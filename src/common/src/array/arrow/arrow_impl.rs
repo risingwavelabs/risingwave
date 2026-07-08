@@ -1642,8 +1642,12 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
 }
 
 /// Field-aware version of [`is_parquet_schema_match_source_schema`]: it inspects the field
-/// metadata so an `arrow.parquet.variant` struct matches a declared `Variant` at any nesting
-/// depth. Prefer this whenever a `Field` is available.
+/// metadata to match an `arrow.parquet.variant` struct against `Variant`. A variant extension
+/// binds exclusively to `Variant` at every nesting depth — declaring such a column as anything
+/// else (e.g. the raw physical struct) is an illegal type mismatch, so the parser NULL-fills it
+/// instead of decoding a diverging type. Other extensions do not affect matching: decode
+/// follows the declared side, which simply ignores them. Prefer this whenever a `Field` is
+/// available.
 pub fn is_parquet_field_match_source_schema(
     arrow_field: &arrow_schema::Field,
     rw_data_type: &crate::types::DataType,
@@ -1803,7 +1807,8 @@ mod tests {
             variant.data_type(),
             &RwType::Variant
         ));
-        // The extension takes precedence over the physical struct type.
+        // A variant field does NOT match its raw physical struct layout: the variant extension
+        // binds exclusively to `Variant`, so declaring it as a struct is an illegal type mismatch.
         let rw_physical = RwType::Struct(StructType::new(vec![
             ("metadata".to_owned(), RwType::Bytea),
             ("value".to_owned(), RwType::Bytea),

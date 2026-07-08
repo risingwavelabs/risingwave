@@ -272,6 +272,35 @@ t t
 statement ok
 drop table parquet_variant_projected;
 
+# A variant column declared as a non-variant type (here its raw physical struct) is an illegal
+# type mismatch: the `arrow.parquet.variant` extension binds exclusively to `variant`, so the
+# column NULL-fills instead of decoding to a diverging struct. Other columns decode normally.
+statement ok
+create table parquet_variant_as_struct (
+    id int,
+    v_object struct<metadata bytea, value bytea>
+) with (
+    connector = 's3',
+    match_pattern = 'demo/demo_db/test_variant_source/data/*.parquet',
+    s3.region_name = 'us-east-1',
+    s3.bucket_name = 'icebergdata',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://127.0.0.1:9301',
+    refresh.interval.sec = 1
+) format plain encode parquet;
+
+query II retry 11 backoff 1s
+select
+    count(*) filter (where id is not null),
+    count(*) filter (where v_object is not null)
+from parquet_variant_as_struct;
+----
+3 0
+
+statement ok
+drop table parquet_variant_as_struct;
+
 statement ok
 DROP SOURCE iceberg_variant_source;
 
