@@ -33,6 +33,16 @@ e2e_test/commands/deltalake_prepare
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/deltalake_rust_sink.slt'
+if [[ -n "${RISEDEV_DELTALAKE_ADLS_LOCATION:-}" ]]; then
+    : "${RISEDEV_DELTALAKE_ADLS_ACCOUNT_NAME:?missing}"
+    : "${RISEDEV_DELTALAKE_ADLS_ACCOUNT_KEY:?missing}"
+    : "${RISEDEV_DELTALAKE_ADLS_ENDPOINT:?missing}"
+
+    echo "--- testing ADLS deltalake sink"
+    sqllogictest -p 4566 -d dev './e2e_test/sink/deltalake_adls_sink.slt'
+else
+    echo "--- skipping ADLS deltalake sink test because RISEDEV_DELTALAKE_ADLS_LOCATION is not set"
+fi
 sleep 1
 
 SPARK_VERSION=4.0.2

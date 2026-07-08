@@ -1,0 +1,45 @@
+control substitution on
+
+statement ok
+set sink_decouple = false;
+
+statement ok
+CREATE TABLE t_adls (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamptz, v9 boolean, v10 decimal, v11 decimal[]);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_adls AS SELECT * FROM t_adls;
+
+statement ok
+CREATE SECRET deltalake_adls_account_key WITH (
+  backend = 'meta'
+) as '${RISEDEV_DELTALAKE_ADLS_ACCOUNT_KEY}';
+
+statement ok
+create sink s_adls as select * from mv_adls
+with (
+    connector = 'deltalake',
+    type = 'append-only',
+    force_append_only = 'true',
+    location = '${RISEDEV_DELTALAKE_ADLS_LOCATION}',
+    adlsgen2.account_name = '${RISEDEV_DELTALAKE_ADLS_ACCOUNT_NAME}',
+    adlsgen2.account_key = secret deltalake_adls_account_key,
+    adlsgen2.endpoint = '${RISEDEV_DELTALAKE_ADLS_ENDPOINT}'
+);
+
+statement ok
+INSERT INTO t_adls VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00', false, 1, array[1]::decimal[]);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_adls;
+
+statement ok
+DROP SECRET deltalake_adls_account_key;
+
+statement ok
+DROP MATERIALIZED VIEW mv_adls;
+
+statement ok
+DROP TABLE t_adls;
