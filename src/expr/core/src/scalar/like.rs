@@ -56,7 +56,7 @@ fn like_impl_inner<const CASE_INSENSITIVE: bool>(
     escape: Option<u8>,
 ) -> Result<bool> {
     let pattern = normalize_pattern(p, escape);
-    match_text::<CASE_INSENSITIVE>(s.as_bytes(), &pattern)
+    Ok(match_text::<CASE_INSENSITIVE>(s.as_bytes(), &pattern)?.into_bool())
 }
 
 #[const_currying]
@@ -66,6 +66,20 @@ fn like_impl<const CASE_INSENSITIVE: bool>(
     #[maybe_const(consts = [b'\\'])] escape: u8,
 ) -> Result<bool> {
     like_impl_inner::<CASE_INSENSITIVE>(s, p, Some(escape))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchResult {
+    True,
+    False,
+    Abort,
+}
+
+impl MatchResult {
+    #[inline]
+    fn into_bool(self) -> bool {
+        matches!(self, MatchResult::True)
+    }
 }
 
 #[inline]
@@ -85,37 +99,77 @@ fn byte_eq<const CASE_INSENSITIVE: bool>(a: u8, b: u8) -> bool {
 pub fn match_text<const CASE_INSENSITIVE: bool>(
     mut text: &[u8],
     mut pattern: &[u8],
-) -> Result<bool, ExprError> {
-    while !text.is_empty() && !pattern.is_empty() {
-        let (&p, rest_pattern) = pattern.split_first().unwrap();
+) -> Result<MatchResult, ExprError> {
+    // Fast path for match-everything pattern
+    if pattern == b"%" {
+        return Ok(MatchResult::True);
+    }
 
+    while let (Some((&p, rest_pattern)), Some((&t, rest_text))) =
+        (pattern.split_first(), text.split_first())
+    {
         match p {
             b'%' => {
                 pattern = rest_pattern;
 
-                while pattern.first() == Some(&b'%') {
-                    pattern = &pattern[1..];
-                }
+                while let Some((&p, rest_pattern)) = pattern.split_first() {
+                    match p {
+                        b'%' => {
+                            // N's % == one's %
+                            pattern = rest_pattern;
+                        }
+                        b'_' => {
+                            let Some((_, rest_text)) = text.split_first() else {
+                                // If not enough text left to match the pattern, ABORT
+                                return Ok(MatchResult::Abort);
+                            };
 
-                if pattern.is_empty() {
-                    return Ok(true);
-                }
-
-                for start in 0..=text.len() {
-                    if match_text::<CASE_INSENSITIVE>(&text[start..], pattern)? {
-                        return Ok(true);
+                            text = rest_text;
+                            pattern = rest_pattern;
+                        }
+                        _ => break, // Reached a non-wildcard pattern char
                     }
                 }
 
-                return Ok(false);
+                // If we're at end of pattern, match: we have a trailing % which
+                // matches any remaining text string.
+                let Some((&first, _)) = pattern.split_first() else {
+                    return Ok(MatchResult::True);
+                };
+
+                // Get the first literal character in the remaining pattern for fast text scanning.
+                let first = if first == b'\\' {
+                    let Some(&escaped) = pattern.get(1) else {
+                        return Err(ExprError::InvalidParam {
+                            name: "pattern",
+                            reason: "LIKE pattern must not end with escape character".into(),
+                        });
+                    };
+                    escaped
+                } else {
+                    first
+                };
+
+                while let Some((&t, rest_text)) = text.split_first() {
+                    if byte_eq::<CASE_INSENSITIVE>(t, first) {
+                        let matched = match_text::<CASE_INSENSITIVE>(text, pattern)?;
+
+                        if matched != MatchResult::False {
+                            return Ok(matched); /* TRUE or ABORT */
+                        }
+                    }
+
+                    text = rest_text;
+                }
+
+                // End of text with no match, so no point in trying later places
+                // to start matching this pattern.
+                return Ok(MatchResult::Abort);
             }
-
             b'_' => {
-                text = &text[1..];
-
+                text = rest_text;
                 pattern = rest_pattern;
             }
-
             b'\\' => {
                 let Some((&escaped, rest_pattern)) = rest_pattern.split_first() else {
                     return Err(ExprError::InvalidParam {
@@ -123,37 +177,43 @@ pub fn match_text<const CASE_INSENSITIVE: bool>(
                         reason: "LIKE pattern must not end with escape character".into(),
                     });
                 };
-
-                if !byte_eq::<CASE_INSENSITIVE>(text[0], escaped) {
-                    return Ok(false);
+                if !byte_eq::<CASE_INSENSITIVE>(t, escaped) {
+                    return Ok(MatchResult::False);
                 }
-
-                text = &text[1..];
-
+                text = rest_text;
                 pattern = rest_pattern;
             }
-
             literal => {
-                if !byte_eq::<CASE_INSENSITIVE>(text[0], literal) {
-                    return Ok(false);
+                if !byte_eq::<CASE_INSENSITIVE>(t, literal) {
+                    // non-wildcard pattern char fails to match text char
+                    return Ok(MatchResult::False);
                 }
 
-                text = &text[1..];
-
+                text = rest_text;
                 pattern = rest_pattern;
             }
         }
     }
 
     if !text.is_empty() {
-        return Ok(false);
+        // end of pattern, but not of text
+        return Ok(MatchResult::False);
     }
 
+    // End of text, but perhaps not of pattern.
+    // Match iff the remaining pattern can match a zero-length string,
+    // ie, it's zero or more %'s.
     while pattern.first() == Some(&b'%') {
         pattern = &pattern[1..];
     }
 
-    Ok(pattern.is_empty())
+    // End of text with no match, so no point in trying later places to start
+    // matching this pattern.
+    if pattern.is_empty() {
+        Ok(MatchResult::True)
+    } else {
+        Ok(MatchResult::Abort)
+    }
 }
 
 #[function("like(varchar, varchar) -> boolean")]
