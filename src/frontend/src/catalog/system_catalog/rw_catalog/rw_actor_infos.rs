@@ -41,8 +41,8 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo
         .collect_vec();
     let table_fragments = reader.meta_client.list_table_fragments(&job_ids).await?;
     Ok(table_fragments
-        .into_iter()
-        .flat_map(|(_, fragment_info)| {
+        .into_values()
+        .flat_map(|fragment_info| {
             fragment_info.fragments.into_iter().flat_map(|fragment| {
                 let fragment_id = fragment.id;
                 fragment.actors.into_iter().map(move |actor| RwActorInfo {

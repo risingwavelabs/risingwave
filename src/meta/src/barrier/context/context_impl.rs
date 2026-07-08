@@ -16,34 +16,138 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
+use thiserror_ext::AsReport;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::command::{PostCollectCommand, ResumeBackfillTarget};
+use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
+use crate::barrier::command::{
+    PostCollectCommand, ResumeBackfillTarget, SinceTimestampResolvedEpoch,
+};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
-    Scheduled,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo, Command,
+    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
+    RecoveryReason, ReplaceStreamJobPlan, Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
-use crate::stream::SourceChange;
+use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
+
+fn resolve_since_timestamp_log_store_epoch(
+    table_id: TableId,
+    since_epoch: u64,
+    upstream_committed_epoch: u64,
+    table_change_log: &TableChangeLogs,
+) -> MetaResult<SinceTimestampResolvedEpoch> {
+    let change_log = table_change_log.get(&table_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no table changelog found for upstream table {} when resolving since_timestamp",
+            table_id
+        )
+    })?;
+    let Some(first_log) = change_log.first() else {
+        return Err(anyhow::anyhow!(
+            "empty table changelog found for upstream table {} when resolving since_timestamp",
+            table_id
+        )
+        .into());
+    };
+    let first_checkpoint_epoch = first_log.checkpoint_epoch;
+    if since_epoch < first_checkpoint_epoch {
+        return Err(anyhow::anyhow!(
+            "since_timestamp is earlier than the retained changelog of upstream table {}: requested epoch {}, first retained checkpoint epoch {}",
+            table_id,
+            since_epoch,
+            first_checkpoint_epoch,
+        )
+        .into());
+    }
+    if since_epoch >= upstream_committed_epoch {
+        return Err(anyhow::anyhow!(
+            "since_timestamp is not before the committed epoch of upstream table {}: requested epoch {}, committed epoch {}",
+            table_id,
+            since_epoch,
+            upstream_committed_epoch,
+        )
+        .into());
+    }
+    let latest_log = change_log.last().expect("checked non-empty");
+    if upstream_committed_epoch != latest_log.checkpoint_epoch {
+        return Err(anyhow::anyhow!(
+            "upstream committed epoch {} does not match latest changelog epoch {} for upstream table {}",
+            upstream_committed_epoch,
+            latest_log.checkpoint_epoch,
+            table_id,
+        )
+        .into());
+    }
+
+    // `binary_search_by_checkpoint_epoch` searches only by the checkpoint epoch
+    // of each changelog entry. An entry may still cover earlier non-checkpoint
+    // epochs, e.g. `{ non_checkpoint_epochs: [30, 35], checkpoint_epoch: 40 }`
+    // covers `(20, 40]` if the previous checkpoint is 20. For `since_epoch =
+    // 35`, the search returns `Err(index_of_40)`, and 40 is the snapshot epoch.
+    // For `since_epoch = 40`, it returns `Ok(index_of_40)`. In both cases, the
+    // resolved snapshot epoch is the least checkpoint epoch >= `since_epoch`.
+    let snapshot_epoch_index = match change_log.binary_search_by_checkpoint_epoch(since_epoch) {
+        Ok(index) => index,
+        Err(index) => index,
+    };
+    let snapshot_epoch = change_log
+        .get(snapshot_epoch_index)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "since_timestamp is later than the latest changelog of upstream table {}: requested epoch {}, latest changelog epoch {}",
+                table_id,
+                since_epoch,
+                upstream_committed_epoch,
+            )
+        })?
+        .checkpoint_epoch;
+    // A request inside the latest changelog entry may be smaller than
+    // `upstream_committed_epoch`, but still resolve to the latest checkpoint.
+    // That end-of-log case is not a usable historical snapshot epoch.
+    if snapshot_epoch >= upstream_committed_epoch {
+        return Err(anyhow::anyhow!(
+            "since_timestamp is too new for upstream table {}: requested epoch {}, resolved snapshot epoch {}, latest changelog epoch {}",
+            table_id,
+            since_epoch,
+            snapshot_epoch,
+            upstream_committed_epoch,
+        )
+        .into());
+    }
+    let epochs = change_log
+        .range((snapshot_epoch_index + 1)..)
+        .map(|epoch_log| {
+            (
+                epoch_log.non_checkpoint_epochs.clone(),
+                epoch_log.checkpoint_epoch,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    Ok((snapshot_epoch, epochs))
+}
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument]
@@ -79,9 +183,63 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         }
     }
 
+    async fn resolve_log_store_epoch<'a>(
+        &'a self,
+        upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
+        since_epoch: u64,
+    ) -> MetaResult<SinceTimestampResolvedEpoch> {
+        let upstream_table_ids = upstream_table_ids.collect::<Vec<_>>();
+        if upstream_table_ids.is_empty() {
+            return Err(
+                anyhow::anyhow!("since_timestamp requires at least one upstream table").into(),
+            );
+        }
+
+        self.hummock_manager
+            .on_current_version_and_table_change_log(|version, table_change_log| {
+                let mut unified_log_epochs = None;
+                for &upstream_table_id in &upstream_table_ids {
+                    let upstream_committed_epoch = version
+                        .state_table_info
+                        .info()
+                        .get(&upstream_table_id)
+                        .map(|info| info.committed_epoch)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot get committed epoch for upstream table {}",
+                                upstream_table_id
+                            )
+                        })?;
+                    let table_log_epochs = resolve_since_timestamp_log_store_epoch(
+                        upstream_table_id,
+                        since_epoch,
+                        upstream_committed_epoch,
+                        table_change_log,
+                    )?;
+                    if let Some(unified_log_epochs) = &unified_log_epochs {
+                        if unified_log_epochs != &table_log_epochs {
+                            return Err(anyhow::anyhow!(
+                                "resolved since_timestamp log epochs for upstream table {} do not match previous upstream table log epochs: {:?} vs {:?}",
+                                upstream_table_id,
+                                table_log_epochs,
+                                unified_log_epochs,
+                            )
+                            .into());
+                        }
+                    } else {
+                        unified_log_epochs = Some(table_log_epochs);
+                    }
+                }
+                unified_log_epochs.ok_or_else(|| {
+                    anyhow::anyhow!("since_timestamp requires at least one upstream table").into()
+                })
+            })
+            .await
+    }
+
     #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        command.post_collect(self).await
+        Box::pin(command.post_collect(self)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -241,6 +399,116 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         Ok(())
     }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        self.load_batch_refresh_trigger_context_impl(job_id, database_id, last_committed_epoch)
+            .await
+    }
+
+    #[await_tree::instrument]
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
+        &self,
+        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+    ) -> MetaResult<Vec<SinkId>> {
+        let grouped = group_reports_by_sink(reports)?;
+        let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
+        let futs = FuturesUnordered::new();
+        for (sink_id, (prev_epoch, reports)) in grouped {
+            if reports.is_empty() {
+                continue;
+            }
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move {
+                (
+                    sink_id,
+                    manager.pre_commit_epoch(sink_id, prev_epoch, reports).await,
+                )
+            });
+        }
+
+        // Drain all futures regardless of individual failures, so that no coordinator is left with
+        // state inconsistent vs. the caller's view.
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(success_ids)
+        } else {
+            Err(aggregate_sink_errors("pre-commit", errs).into())
+        }
+    }
+
+    #[await_tree::instrument]
+    async fn commit_iceberg_pk_index_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+        let futs = FuturesUnordered::new();
+        for sink_id in sink_ids {
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move { (sink_id, manager.commit_epoch(sink_id).await) });
+        }
+
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<(SinkId, anyhow::Error)> = results
+            .into_iter()
+            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
+            .collect();
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            Err(aggregate_sink_errors("commit", errs).into())
+        }
+    }
+}
+
+/// Combine per-sink errors from a fan-out into a single `anyhow::Error`. The first failing
+/// sink's error is used as the source so the original chain is preserved; the message lists
+/// every failing `sink_id` and its error stringified.
+fn aggregate_sink_errors(
+    phase: &'static str,
+    mut errs: Vec<(SinkId, anyhow::Error)>,
+) -> anyhow::Error {
+    debug_assert!(!errs.is_empty());
+    let sink_ids: Vec<String> = errs.iter().map(|(id, _)| id.to_string()).collect();
+    let details: Vec<String> = errs
+        .iter()
+        .map(|(id, e)| format!("sink {}: {}", id, e.as_report()))
+        .collect();
+    // Preserve the first error's chain as the cause.
+    let (_, first_err) = errs.remove(0);
+    first_err.context(format!(
+        "iceberg v3 sink {} failed for sink_id(s) [{}]: {}",
+        phase,
+        sink_ids.join(", "),
+        details.join("; ")
+    ))
+}
+
+fn group_reports_by_sink(
+    reports: Vec<PbIcebergPkIndexSinkMetadata>,
+) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)>> {
+    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)> = HashMap::new();
+    for r in reports {
+        let sink_id = r.sink_id;
+        let prev_epoch = r.prev_epoch;
+        let entry = grouped.entry(sink_id).or_insert((prev_epoch, Vec::new()));
+        if entry.0 != prev_epoch {
+            return Err(anyhow::anyhow!(
+                "iceberg v3 sink {} reports disagree on prev_epoch: {} vs {}",
+                sink_id,
+                entry.0,
+                prev_epoch
+            )
+            .into());
+        }
+        entry.1.push(r);
+    }
+    Ok(grouped)
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -280,6 +548,153 @@ impl GlobalBarrierWorkerContextImpl {
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
+
+    /// Load the context metadata and resolve upstream log epochs for a batch refresh trigger.
+    async fn load_batch_refresh_trigger_context_impl(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        use itertools::Itertools;
+        use sea_orm::TransactionTrait;
+
+        use crate::controller::scale::load_fragment_context_for_jobs;
+
+        // Load metadata from the catalog under a single transaction.
+        let inner = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let txn = inner.db.begin().await?;
+
+        // 1. Load fragment context (job model, database model).
+        let fragment_context =
+            load_fragment_context_for_jobs(&txn, HashSet::from([job_id])).await?;
+
+        let streaming_job_model = fragment_context
+            .job_map
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("streaming job model not found for job {}", job_id))?
+            .clone();
+
+        let database_model = fragment_context
+            .database_map
+            .get(&database_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("database model not found for database {}", database_id)
+            })?;
+        let database_resource_group = database_model.resource_group.clone();
+
+        // 2. Load job definition.
+        let mut job_extra_info = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_extra_info_in_txn(&txn, vec![job_id])
+            .await?;
+        let definition = job_extra_info
+            .remove(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("extra info not found for job {}", job_id))?
+            .job_definition;
+
+        // 3. Get fragments from fragment_context and load downstream relations.
+        let fragments = fragment_context
+            .job_fragments
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("fragments not found for job {}", job_id))?
+            .clone();
+
+        // Derive upstream table IDs from the snapshot backfill scan nodes in the fragments.
+        let upstream_table_ids: HashSet<TableId> = {
+            use crate::stream::StreamFragmentGraph;
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                fragments.values().map(|f| (&f.nodes, f.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| {
+                anyhow::anyhow!("batch refresh job {} has no snapshot backfill info", job_id)
+            })?;
+            snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .into_keys()
+                .collect()
+        };
+
+        let fragment_ids: Vec<_> = fragments.keys().copied().collect();
+        let downstreams = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_downstream_relations_in_txn(&txn, fragment_ids)
+            .await?;
+
+        txn.commit().await?;
+        drop(inner);
+
+        // Resolve upstream log epochs from the hummock changelog.
+        let (upstream_table_log_epochs, target_upstream_epoch) = self
+            .hummock_manager
+            .on_current_version_and_table_change_log(|version, table_change_log| {
+                let mut target_upstream_epoch = last_committed_epoch;
+                let mut log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>> = HashMap::new();
+
+                for &upstream_table_id in &upstream_table_ids {
+                    let upstream_committed_epoch = version
+                        .state_table_info
+                        .info()
+                        .get(&upstream_table_id)
+                        .map(|info| info.committed_epoch)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot get committed epoch for upstream table {}",
+                                upstream_table_id
+                            )
+                        })?;
+
+                    target_upstream_epoch =
+                        std::cmp::max(target_upstream_epoch, upstream_committed_epoch);
+
+                    if upstream_committed_epoch <= last_committed_epoch {
+                        continue;
+                    }
+
+                    if let Some(change_log) = table_change_log.get(&upstream_table_id) {
+                        let epochs = change_log
+                            .filter_epoch((last_committed_epoch, upstream_committed_epoch))
+                            .map(|epoch_log| {
+                                (
+                                    epoch_log.non_checkpoint_epochs.clone(),
+                                    epoch_log.checkpoint_epoch,
+                                )
+                            })
+                            .collect_vec();
+                        if !epochs.is_empty() {
+                            log_epochs.insert(upstream_table_id, epochs);
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "upstream table {} has lagged downstream on epoch {} but no table change log (upstream committed: {})",
+                            upstream_table_id,
+                            last_committed_epoch,
+                            upstream_committed_epoch,
+                        );
+                    }
+                }
+
+                Ok((log_epochs, target_upstream_epoch))
+            })
+            .await?;
+
+        Ok(BatchRefreshJobTriggerContext {
+            fragments,
+            downstreams,
+            streaming_job_model,
+            definition,
+            database_resource_group,
+            upstream_table_log_epochs,
+            target_upstream_epoch,
+        })
+    }
 }
 
 impl PostCollectCommand {
@@ -300,26 +715,7 @@ impl PostCollectCommand {
                     .await?;
             }
 
-            PostCollectCommand::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-            } => {
-                for job_id in streaming_job_ids {
-                    barrier_manager_context
-                        .refresh_manager
-                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
-                }
-
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
-                    .await?;
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .complete_dropped_tables(unregistered_state_table_ids.iter().copied())
-                    .await;
-            }
+            PostCollectCommand::DropStreamingJobs => {}
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
@@ -406,7 +802,14 @@ impl PostCollectCommand {
                             )
                             .await?
                     }
-                    CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                    CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    }
+                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                        snapshot_backfill_info,
+                        ..
+                    }) => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -435,8 +838,10 @@ impl PostCollectCommand {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
+                    replace_sink,
                     ..
                 } = info;
+                let new_job_id = stream_job_fragments.stream_job_id();
                 let new_sink_downstream =
                     if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
                         let new_downstreams = ctx.new_sink_downstream.clone();
@@ -449,14 +854,15 @@ impl PostCollectCommand {
                         None
                     };
 
-                barrier_manager_context
+                let old_state_table_ids = barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id(),
+                        new_job_id,
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
+                        replace_sink.as_ref(),
                     )
                     .await?;
 
@@ -469,6 +875,22 @@ impl PostCollectCommand {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                if let Some(old_sink_id) = replace_sink {
+                    barrier_manager_context
+                        .sink_manager
+                        .stop_sink_coordinator(vec![old_sink_id])
+                        .await;
+                    cleanup_dropped_streaming_jobs(
+                        &barrier_manager_context.refresh_manager,
+                        &barrier_manager_context.hummock_manager,
+                        &barrier_manager_context.metadata_manager,
+                        [old_sink_id.as_job_id()],
+                        old_state_table_ids.expect("replace sink should return old state tables"),
+                        "replace_sink",
+                    )
+                    .await?;
+                }
             }
             PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
@@ -505,6 +927,7 @@ impl PostCollectCommand {
                         upstream_fragment_downstreams,
                         None,
                         Some(&resolved_split_assignment),
+                        None,
                     )
                     .await?;
 
@@ -518,6 +941,7 @@ impl PostCollectCommand {
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment
+                                None,
                             )
                             .await?;
                     }
@@ -532,10 +956,15 @@ impl PostCollectCommand {
                         &replace_plan,
                     )
                     .await;
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
-                    .await?;
+                cleanup_dropped_streaming_jobs(
+                    &barrier_manager_context.refresh_manager,
+                    &barrier_manager_context.hummock_manager,
+                    &barrier_manager_context.metadata_manager,
+                    [],
+                    to_drop_state_table_ids.clone(),
+                    "replace_streaming_job",
+                )
+                .await?;
             }
 
             PostCollectCommand::CreateSubscription { subscription_id } => {
@@ -553,7 +982,120 @@ impl PostCollectCommand {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
+
     use super::*;
+
+    fn test_change_logs(table_id: TableId) -> TableChangeLogs {
+        TableChangeLogs::from_iter([(
+            table_id,
+            TableChangeLog::new([
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![10],
+                    checkpoint_epoch: 20,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![30],
+                    checkpoint_epoch: 40,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![50],
+                    checkpoint_epoch: 60,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 80,
+                },
+            ]),
+        )])
+    }
+
+    #[test]
+    fn test_resolve_since_timestamp_log_store_epoch() {
+        let table_id = TableId::new(233);
+        let change_logs = test_change_logs(table_id);
+
+        let resolved =
+            resolve_since_timestamp_log_store_epoch(table_id, 45, 80, &change_logs).unwrap();
+
+        assert_eq!(resolved, (60, vec![(vec![], 80)]));
+    }
+
+    #[test]
+    fn test_resolve_since_timestamp_log_store_epoch_rejects_invalid_range() {
+        let table_id = TableId::new(233);
+        let change_logs = test_change_logs(table_id);
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 9, 80, &change_logs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("earlier than the retained changelog"));
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 80, 80, &change_logs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("is not before the committed epoch"));
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 45, 60, &change_logs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not match latest changelog epoch"));
+    }
+
+    #[test]
+    fn test_resolve_since_timestamp_log_store_epoch_rejects_empty_or_missing_log() {
+        let table_id = TableId::new(233);
+        let empty_change_logs = TableChangeLogs::from_iter([(table_id, TableChangeLog::new([]))]);
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 30, 60, &empty_change_logs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("empty table changelog"));
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 30, 60, &Default::default())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no table changelog"));
+    }
+
+    #[test]
+    fn test_resolve_since_timestamp_log_store_epoch_keeps_latest_non_checkpoint_epochs() {
+        let table_id = TableId::new(233);
+        let change_logs = TableChangeLogs::from_iter([(
+            table_id,
+            TableChangeLog::new([
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 20,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![30],
+                    checkpoint_epoch: 40,
+                },
+            ]),
+        )]);
+
+        let resolved =
+            resolve_since_timestamp_log_store_epoch(table_id, 20, 40, &change_logs).unwrap();
+        assert_eq!(resolved, (20, vec![(vec![30], 40)]));
+
+        let err = resolve_since_timestamp_log_store_epoch(table_id, 30, 40, &change_logs)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("since_timestamp is too new"));
+    }
 
     #[test]
     fn test_skip_refresh_finish_when_associated_source_missing() {

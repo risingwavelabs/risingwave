@@ -61,30 +61,28 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     s.push_str("Input: \n");
-    let existing_table_ids: HashSet<TableId> =
-        compact_task.existing_table_ids.iter().copied().collect();
     let mut input_sst_table_ids: HashSet<TableId> = HashSet::new();
-    let mut dropped_table_ids = HashSet::new();
+    let mut dropped_only_sst_count = 0;
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
             .map(|table| {
-                for tid in &table.table_ids {
-                    if !existing_table_ids.contains(tid) {
-                        dropped_table_ids.insert(tid);
-                    } else {
-                        input_sst_table_ids.insert(*tid);
-                    }
+                if table.table_ids.is_empty() {
+                    dropped_only_sst_count += 1;
+                } else {
+                    input_sst_table_ids.extend(table.table_ids.iter().copied());
                 }
-                if table.total_key_count != 0 {
+                if let Some(stale_ratio) =
+                    (table.stale_key_count * 100).checked_div(table.total_key_count)
+                {
                     format!(
                         "[id: {}, obj_id: {} object_size {}KB sst_size {}KB stale_ratio {}]",
                         table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         table.sst_size / 1024,
-                        (table.stale_key_count * 100 / table.total_key_count),
+                        stale_ratio,
                     )
                 } else {
                     format!(
@@ -110,8 +108,13 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
             });
     }
 
-    if !dropped_table_ids.is_empty() {
-        writeln!(s, "Dropped table_ids: {:?} ", dropped_table_ids).unwrap();
+    if dropped_only_sst_count > 0 {
+        writeln!(
+            s,
+            "Dropped-only input SST count: {:?} ",
+            dropped_only_sst_count
+        )
+        .unwrap();
     }
     s
 }
@@ -136,7 +139,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         .unwrap_or(0);
     writeln!(
         s,
-        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, bloom_filter_kind {:?}",
+        "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, object_size={}KB, sst_size={}KB stale_ratio={}%, filter_type {:?}, filter_layout {:?}",
         sstable_info.object_id,
         sstable_info.sst_id,
         left_str,
@@ -145,7 +148,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         sstable_info.file_size / 1024,
         sstable_info.sst_size / 1024,
         stale_ratio,
-        sstable_info.bloom_filter_kind,
+        sstable_info.filter_type,
+        sstable_info.filter_layout,
     )
     .unwrap();
 }
@@ -156,14 +160,11 @@ pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
     let mut total_file_size = 0;
     let mut total_uncompressed_file_size = 0;
 
-    for level in &task.input_ssts {
-        total_file_count += level.table_infos.len() as u64;
-
-        level.table_infos.iter().for_each(|sst| {
-            total_file_size += sst.file_size;
-            total_uncompressed_file_size += sst.uncompressed_file_size;
-            total_key_count += sst.total_key_count;
-        });
+    for sst in task.read_input_ssts() {
+        total_file_count += 1;
+        total_file_size += sst.file_size;
+        total_uncompressed_file_size += sst.uncompressed_file_size;
+        total_key_count += sst.total_key_count;
     }
 
     CompactTaskStatistics {
@@ -204,15 +205,17 @@ pub fn estimate_memory_for_compact_task(
     for level in &task.input_ssts {
         if level.level_type == LevelType::Nonoverlapping {
             let mut cur_level_max_sst_meta_size = 0;
-            for sst in &level.table_infos {
+            for sst in level.read_sstable_infos() {
                 let meta_size = sst.file_size - sst.meta_offset;
                 task_max_sst_meta_ratio =
                     std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
                 cur_level_max_sst_meta_size = std::cmp::max(meta_size, cur_level_max_sst_meta_size);
             }
-            result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
+            if cur_level_max_sst_meta_size > 0 {
+                result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
+            }
         } else {
-            for sst in &level.table_infos {
+            for sst in level.read_sstable_infos() {
                 let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
                 task_max_sst_meta_ratio =

@@ -21,10 +21,10 @@ statement ok
 set iceberg_engine_connection = 'public.my_conn';
 
 statement ok
-create table t(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+create table t(id int primary key, name varchar, extra varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
-insert into t values(1, 'xxx');
+insert into t values(1, 'xxx', 'drop-me');
 
 statement ok
 FLUSH;
@@ -32,12 +32,27 @@ FLUSH;
 query ?? retry 6 backoff 1s
 select * from t;
 ----
-1 xxx
+1 xxx drop-me
 
 query ??
 select * from t for system_time as of '2222-12-10 11:48:06';
 ----
+1 xxx drop-me
+
+statement ok
+alter table t drop column extra;
+
+statement ok
+insert into t(id, name) values(2, 'yyy');
+
+statement ok
+FLUSH;
+
+query ?? rowsort retry 6 backoff 1s
+select * from t;
+----
 1 xxx
+2 yyy
 
 statement ok
 DROP TABLE t;

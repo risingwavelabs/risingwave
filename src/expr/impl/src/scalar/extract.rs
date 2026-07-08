@@ -274,7 +274,7 @@ macro_rules! define_unit {
 
 define_unit! {
     /// Datetime units.
-    #[allow(non_camel_case_types)]
+    #[expect(non_camel_case_types)]
     enum Unit {
         Millennium,
         Century,

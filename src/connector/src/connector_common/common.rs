@@ -28,7 +28,7 @@ use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
-use pulsar::{Authentication, Pulsar, TokioExecutor};
+use pulsar::{Authentication, OperationRetryOptions, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
 use rustls_pki_types::pem::PemObject;
@@ -141,11 +141,13 @@ impl AwsAuthProps {
     }
 
     async fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
-        if self.access_key.is_some() && self.secret_key.is_some() {
+        if let (Some(access_key), Some(secret_key)) =
+            (self.access_key.as_ref(), self.secret_key.as_ref())
+        {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
-                    self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
+                    access_key,
+                    secret_key,
                     self.session_token.clone(),
                 ),
             ))
@@ -213,30 +215,37 @@ pub struct KafkaConnectionProps {
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_location: Option<String>,
 
     /// CA certificate string (PEM format) for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_pem: Option<String>,
 
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_location: Option<String>,
 
     /// Client's public key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.certificate.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_pem: Option<String>,
 
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_location: Option<String>,
 
     /// Client's private key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.key.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_password: Option<String>,
 
     /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
@@ -357,12 +366,45 @@ pub struct RdKafkaPropertiesCommon {
     #[with_option(allow_alter_on_fly)]
     pub enable_ssl_certificate_verification: Option<bool>,
 
+    /// Initial backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_max_ms: Option<usize>,
+
+    /// Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+    /// SSL/SASL handshakes.
+    #[serde(rename = "properties.socket.connection.setup.timeout.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub socket_connection_setup_timeout_ms: Option<usize>,
+
     #[serde(
         rename = "properties.socket.keepalive.enable",
         default = "default_socket_keepalive_enable"
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub socket_keepalive_enable: bool,
+
+    /// Initial backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_max_ms: Option<usize>,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -382,10 +424,25 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        if let Some(v) = self.reconnect_backoff_ms {
+            c.set("reconnect.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.reconnect_backoff_max_ms {
+            c.set("reconnect.backoff.max.ms", v.to_string());
+        }
+        if let Some(v) = self.socket_connection_setup_timeout_ms {
+            c.set("socket.connection.setup.timeout.ms", v.to_string());
+        }
         c.set(
             "socket.keepalive.enable",
             self.socket_keepalive_enable.to_string(),
         );
+        if let Some(v) = self.retry_backoff_ms {
+            c.set("retry.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.retry_backoff_max_ms {
+            c.set("retry.backoff.max.ms", v.to_string());
+        }
     }
 }
 
@@ -559,6 +616,7 @@ impl PulsarCommon {
         &self,
         oauth: &Option<PulsarOauthCommon>,
         aws_auth_props: &AwsAuthProps,
+        operation_retry_options: Option<OperationRetryOptions>,
     ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut _temp_file = None; // Keep temp file alive
@@ -583,6 +641,15 @@ impl PulsarCommon {
                 name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
+        }
+
+        if let Some(operation_retry_options) = operation_retry_options {
+            tracing::info!(
+                max_retries = ?operation_retry_options.max_retries,
+                retry_delay_ms = operation_retry_options.retry_delay.as_millis(),
+                "applying Pulsar source operation retry override"
+            );
+            pulsar_builder = pulsar_builder.with_operation_retry_options(operation_retry_options);
         }
 
         let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;

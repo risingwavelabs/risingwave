@@ -20,7 +20,7 @@ use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
 use risingwave_expr::Result as ExprResult;
 use risingwave_expr::expr::{
-    ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    InputRefExpression, LiteralExpression, NonStrictExpression, SyncExpressionBoxExt,
     build_func_non_strict,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -52,7 +52,6 @@ pub type WatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, false>;
 pub type UpsertWatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, true>;
 
 impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
@@ -383,7 +382,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
         // Return the minimal value if the remote max watermark is Null.
         let watermark = global_watermarks
             .into_iter()
-            .chain(local_watermarks.into_iter())
+            .chain(local_watermarks)
             .flatten()
             .max_by(DefaultOrd::default_cmp);
 

@@ -14,7 +14,7 @@
 
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
@@ -65,14 +65,11 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
         let mut lister = self.op.lister(&list_prefix).await?;
         // fetch one item as validation, no need to get all
-        match lister.try_next().await {
-            Ok(_) => return Ok(vec![empty_split]),
-            Err(e) => {
-                return Err(anyhow!(e)
-                    .context("fail to create source, please check your config.")
-                    .into());
-            }
-        }
+        lister
+            .try_next()
+            .await
+            .context("fail to create source, please check your config")?;
+        Ok(vec![empty_split])
     }
 }
 
@@ -112,7 +109,14 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                         let mut t = meta.last_modified();
                         let mut size = meta.content_length() as i64;
                         if t.is_none() || size == 0 {
-                            let stat_meta = op.stat(&name).await.ok()?;
+                            let stat_meta = match op
+                                .stat(&name)
+                                .await
+                                .with_context(|| format!("failed to stat listed object {name}"))
+                            {
+                                Ok(stat_meta) => stat_meta,
+                                Err(err) => return Some((Err(err.into()), object_lister)),
+                            };
                             t = stat_meta.last_modified();
                             size = stat_meta.content_length() as i64;
                         }

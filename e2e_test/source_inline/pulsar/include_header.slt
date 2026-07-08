@@ -1,0 +1,62 @@
+control substitution on
+
+system ok
+curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
+----
+ok
+
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/include_header' --force
+
+system ok
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/include_header' --partitions 0
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' -P tenant=acme -P region=us <<EOF
+{"a":1}
+EOF
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' <<EOF
+{"a":2}
+EOF
+
+statement ok
+create table pulsar_additional_columns (a int)
+include header as all_headers
+include header 'tenant' as tenant_header
+include header 'region' as region_header
+include header 'tenant' varchar as tenant_header_varchar
+include header 'missing' as missing_header
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/include_header',
+  scan.startup.mode = 'earliest'
+) format plain encode json;
+
+query ?? rowsort retry 3 backoff 2s
+with arr as (select all_headers from pulsar_additional_columns where a = 1),
+unnested as (select unnest(all_headers) from arr)
+select *, count(*) from unnested group by 1 order by 1;
+----
+(region,"\\x7573") 1
+(tenant,"\\x61636d65") 1
+
+query ???? retry 3 backoff 2s
+select tenant_header, region_header, tenant_header_varchar, missing_header
+from pulsar_additional_columns where a = 1;
+----
+\x61636d65	\x7573	acme	NULL
+
+query I retry 3 backoff 2s
+select count(*) from pulsar_additional_columns where a = 2 and all_headers is null;
+----
+1
+
+statement ok
+drop table pulsar_additional_columns;
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/include_header' --force

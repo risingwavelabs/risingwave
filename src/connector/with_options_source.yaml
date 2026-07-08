@@ -215,6 +215,9 @@ IcebergProperties:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.endpoint
+    field_type: String
+    required: false
   - name: glue.id
     field_type: String
     comments: |-
@@ -240,6 +243,18 @@ IcebergProperties:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path
@@ -308,16 +323,21 @@ IcebergProperties:
   - name: catalog.header
     field_type: String
     comments: |-
-      The http header to be used in the catalog requests.
+      The HTTP header to be used in catalog requests.
       Example:
       `catalog.header = "key1=value1;key2=value2;key3=value3"`
-      explain the format of the header:
+      For Google Cloud Lakehouse Iceberg REST catalogs, set
+      `catalog.header = "x-goog-user-project=PROJECT_ID"` to specify the billing project.
+      Explain the format of the header:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
   - name: vended_credentials
     field_type: bool
-    comments: Enable vended credentials for iceberg REST catalog.
+    comments: |-
+      Enable vended credentials for Iceberg REST catalog.
+      For Google Cloud Lakehouse Iceberg REST catalogs, this sends
+      `X-Iceberg-Access-Delegation: vended-credentials`.
     required: false
     default: Default::default
   - name: catalog.security
@@ -345,13 +365,17 @@ IcebergProperties:
       - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
       - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
       - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+      Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
+      `org.apache.iceberg.gcp.gcs.GCSFileIO`.
     required: false
   - name: database.name
     field_type: String
     required: false
   - name: table.name
     field_type: String
-    comments: Full name of table, must include schema name when database is provided.
+    comments: |-
+      Table name or namespace-qualified table name. Dots are treated as
+      Iceberg namespace separators.
     required: true
   - name: catalog.jdbc.user
     field_type: String
@@ -445,30 +469,37 @@ KafkaProperties:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.pem
     field_type: String
     comments: CA certificate string (PEM format) for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.pem
     field_type: String
     comments: Client's public key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.pem
     field_type: String
     comments: Client's private key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.password
     field_type: String
     comments: Passphrase of client's private key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.mechanism
     field_type: String
     comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
@@ -539,10 +570,41 @@ KafkaProperties:
     field_type: bool
     required: false
     allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.ms
+    field_type: usize
+    comments: |-
+      Initial backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.max.ms
+    field_type: usize
+    comments: |-
+      Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.socket.connection.setup.timeout.ms
+    field_type: usize
+    comments: |-
+      Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+      SSL/SASL handshakes.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
     default: 'true'
+  - name: properties.retry.backoff.ms
+    field_type: usize
+    comments: Initial backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.retry.backoff.max.ms
+    field_type: usize
+    comments: Maximum backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.queued.min.messages
     field_type: usize
     comments: |-
@@ -600,6 +662,11 @@ KafkaProperties:
       progress for monitoring. Setting this to false can avoid creating consumer groups.
 
       default: true
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.auto.commit.interval.ms
+    field_type: usize
+    comments: The frequency in milliseconds that the consumer offsets are committed.
     required: false
     allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
@@ -1370,6 +1437,20 @@ PulsarProperties:
     field_type: Duration
     required: false
     default: Default::default
+  - name: pulsar.operation.retry.max.retries
+    field_type: u32
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: pulsar.operation.retry.delay
+    field_type: Duration
+    comments: |-
+      This controls Pulsar client operation retry delay for the source.
+      It is distinct from `subscription.unacked.resend.delay`, which only affects
+      unacked message redelivery, and from sink-side `properties.retry.*` settings.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
   - name: pulsar.read_compacted
     field_type: bool
     required: false

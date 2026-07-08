@@ -125,8 +125,8 @@ pub struct StorageConfig {
     pub meta_file_cache: FileCacheConfig,
 
     /// sst serde happens when a sst meta is written to meta disk cache.
-    /// excluding bloom filter from serde can reduce the meta disk cache entry size
-    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    /// Excluding the SST filter from serde can reduce the meta disk cache entry size
+    /// and reduce disk IO throughput at the cost of making the SST filter useless.
     #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
     pub sst_skip_bloom_filter_in_serde: bool,
 
@@ -255,6 +255,25 @@ pub struct StorageConfig {
         default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
     )]
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+    /// Pull interval for iceberg compaction task requests in milliseconds.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pull_interval_ms",
+        deserialize_with = "deserialize_iceberg_compaction_pull_interval_ms"
+    )]
+    pub iceberg_compaction_pull_interval_ms: u64,
+    /// Enable prefetching entire data files before compacting them.
+    ///
+    /// When enabled, each input file is downloaded with a single HTTP GET before compaction
+    /// begins, replacing the default pattern of N+1 range reads (1 footer + N column chunks)
+    /// with a single sequential read per file. This reduces object storage READ API calls
+    /// from D×(1+N) to D per compaction cycle.
+    ///
+    /// Trade-off: higher peak memory — one full file is held in memory per concurrent
+    /// compaction task. Enable only when object storage API cost is a priority and memory headroom is
+    /// sufficient. See also the memory-protection config knobs such as
+    /// `iceberg_compaction_task_parallelism_ratio`.
+    #[serde(default = "default::storage::iceberg_compaction_enable_prefetch")]
+    pub iceberg_compaction_enable_prefetch: bool,
 
     #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
     pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
@@ -528,6 +547,19 @@ where
     if value == 0 {
         return Err(D::Error::custom(
             "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
+fn deserialize_iceberg_compaction_pull_interval_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.iceberg_compaction_pull_interval_ms must be greater than 0",
         ));
     }
     Ok(value)
@@ -1145,6 +1177,14 @@ pub mod default {
 
         pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
             4.0
+        }
+
+        pub fn iceberg_compaction_pull_interval_ms() -> u64 {
+            5000
+        }
+
+        pub fn iceberg_compaction_enable_prefetch() -> bool {
+            false
         }
 
         pub fn iceberg_compaction_target_binpack_group_size_mb() -> Option<u64> {

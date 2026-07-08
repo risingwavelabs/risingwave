@@ -42,6 +42,9 @@ pub trait MetaSnapshotStorage: 'static + Sync + Send {
     /// Gets a snapshot by id.
     async fn get<S: Metadata>(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>>;
 
+    /// Gets raw encoded snapshot bytes by id.
+    async fn get_raw(&self, id: MetaSnapshotId) -> BackupResult<Vec<u8>>;
+
     /// Gets local snapshot manifest.
     async fn manifest(&self) -> Arc<MetaSnapshotManifest>;
 
@@ -110,7 +113,7 @@ impl ObjectStoreMetaSnapshotStorage {
         format!("{}/{}.snapshot", self.path, id)
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn get_snapshot_id_from_path(path: &str) -> MetaSnapshotId {
         let split = path.split(&['/', '.']).collect_vec();
         debug_assert!(split.len() > 2);
@@ -146,9 +149,13 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
     }
 
     async fn get<S: Metadata>(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>> {
-        let path = self.get_snapshot_path(id);
-        let data = self.store.read(&path, ..).await?;
+        let data = self.get_raw(id).await?;
         MetaSnapshot::decode(&data)
+    }
+
+    async fn get_raw(&self, id: MetaSnapshotId) -> BackupResult<Vec<u8>> {
+        let path = self.get_snapshot_path(id);
+        Ok(self.store.read(&path, ..).await?.to_vec())
     }
 
     async fn manifest(&self) -> Arc<MetaSnapshotManifest> {

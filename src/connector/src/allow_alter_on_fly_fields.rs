@@ -112,6 +112,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -121,6 +123,9 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "debezium.heartbeat.interval.ms".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -130,6 +135,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "hostname".to_owned(),
+            "port".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -150,6 +157,13 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.sync.call.timeout".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.ssl.ca.location".to_owned(),
+            "properties.ssl.ca.pem".to_owned(),
+            "properties.ssl.certificate.location".to_owned(),
+            "properties.ssl.certificate.pem".to_owned(),
+            "properties.ssl.key.location".to_owned(),
+            "properties.ssl.key.pem".to_owned(),
+            "properties.ssl.key.password".to_owned(),
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
@@ -158,12 +172,18 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.statistics.interval.ms".to_owned(),
             "properties.client.id".to_owned(),
             "properties.enable.ssl.certificate.verification".to_owned(),
+            "properties.reconnect.backoff.ms".to_owned(),
+            "properties.reconnect.backoff.max.ms".to_owned(),
+            "properties.socket.connection.setup.timeout.ms".to_owned(),
+            "properties.retry.backoff.ms".to_owned(),
+            "properties.retry.backoff.max.ms".to_owned(),
             "properties.queued.min.messages".to_owned(),
             "properties.queued.max.messages.kbytes".to_owned(),
             "properties.fetch.wait.max.ms".to_owned(),
             "properties.fetch.queue.backoff.ms".to_owned(),
             "properties.fetch.max.bytes".to_owned(),
             "properties.enable.auto.commit".to_owned(),
+            "properties.auto.commit.interval.ms".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // PubsubProperties
@@ -171,6 +191,14 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
         std::any::type_name::<PubsubProperties>().to_owned(),
         [
             "pubsub.ack_deadline_seconds".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PulsarProperties
+    map.try_insert(
+        std::any::type_name::<PulsarProperties>().to_owned(),
+        [
+            "pulsar.operation.retry.max.retries".to_owned(),
+            "pulsar.operation.retry.delay".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
@@ -206,7 +234,6 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<IcebergConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
-            "commit_checkpoint_size_threshold_mb".to_owned(),
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
@@ -232,6 +259,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.sync.call.timeout".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.ssl.ca.location".to_owned(),
+            "properties.ssl.ca.pem".to_owned(),
+            "properties.ssl.certificate.location".to_owned(),
+            "properties.ssl.certificate.pem".to_owned(),
+            "properties.ssl.key.location".to_owned(),
+            "properties.ssl.key.pem".to_owned(),
+            "properties.ssl.key.password".to_owned(),
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
@@ -240,13 +274,17 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.statistics.interval.ms".to_owned(),
             "properties.client.id".to_owned(),
             "properties.enable.ssl.certificate.verification".to_owned(),
+            "properties.reconnect.backoff.ms".to_owned(),
+            "properties.reconnect.backoff.max.ms".to_owned(),
+            "properties.socket.connection.setup.timeout.ms".to_owned(),
+            "properties.retry.backoff.ms".to_owned(),
+            "properties.retry.backoff.max.ms".to_owned(),
             "properties.allow.auto.create.topics".to_owned(),
             "properties.queue.buffering.max.messages".to_owned(),
             "properties.queue.buffering.max.kbytes".to_owned(),
             "properties.queue.buffering.max.ms".to_owned(),
             "properties.enable.idempotence".to_owned(),
             "properties.message.send.max.retries".to_owned(),
-            "properties.retry.backoff.ms".to_owned(),
             "properties.batch.num.messages".to_owned(),
             "properties.batch.size".to_owned(),
             "properties.message.timeout.ms".to_owned(),
@@ -267,6 +305,14 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         [
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // TurbopufferConfig
+    map.try_insert(
+        std::any::type_name::<TurbopufferConfig>().to_owned(),
+        [
+            "write_batch_size".to_owned(),
+            "max_linger_second".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // Jdbc
@@ -291,6 +337,13 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
         [
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.ssl.ca.location".to_owned(),
+            "properties.ssl.ca.pem".to_owned(),
+            "properties.ssl.certificate.location".to_owned(),
+            "properties.ssl.certificate.pem".to_owned(),
+            "properties.ssl.key.location".to_owned(),
+            "properties.ssl.key.pem".to_owned(),
+            "properties.ssl.key.password".to_owned(),
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),

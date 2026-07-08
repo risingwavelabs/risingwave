@@ -18,13 +18,10 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, SecretId};
+use risingwave_common::license::Feature;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
-use risingwave_pb::serverless_backfill_controller::{
-    ProvisionRequest, node_group_controller_service_client,
-};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
-use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -38,17 +35,35 @@ use crate::handler::util::{
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::plan_node::{
+    BackfillType, Explain, StreamPlanRef as PlanRef, ensure_sync_log_store_fragment_root,
+};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{SESSION_MANAGER, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::ordinal;
+use crate::utils::{MV_REFRESH_INTERVAL_SEC_KEY, ordinal};
 use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
+
+pub(crate) struct StreamingJobResourceOptions {
+    pub resource_group: Option<String>,
+    pub serverless_backfill_enabled: Option<bool>,
+}
+
+pub(crate) fn extract_streaming_job_resource_options(
+    with_options: &mut WithOptions,
+) -> StreamingJobResourceOptions {
+    StreamingJobResourceOptions {
+        resource_group: with_options.remove(RESOURCE_GROUP_KEY),
+        serverless_backfill_enabled: with_options
+            .remove(CLOUD_SERVERLESS_BACKFILL_ENABLED)
+            .map(|value| value.parse::<bool>().unwrap_or(false)),
+    }
+}
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -88,7 +103,7 @@ pub(super) fn get_column_names(
 }
 
 /// Bind and generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub fn explain_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
@@ -98,7 +113,7 @@ pub fn gen_create_mv_plan(
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(&query)?;
-    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode, None)
 }
 
 /// Generate create MV plan from a bound query
@@ -109,6 +124,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    refresh_interval_sec: Option<u64>,
 ) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
@@ -135,18 +151,27 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
+
+    let backfill_type = if refresh_interval_sec.is_some() {
+        plan_root.require_snapshot_backfill_for_batch_refresh()?;
+        BackfillType::SnapshotBackfill
+    } else {
+        plan_root.derive_backfill_type(true)
+    };
+
     let materialize = plan_root.gen_materialize_plan(
         database_id,
         schema_id,
         table_name,
         definition,
         emit_on_window_close,
+        backfill_type,
     )?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    let plan: PlanRef = materialize.into();
+    let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -190,29 +215,46 @@ pub async fn handle_create_mv(
     .await
 }
 
-/// Send a provision request to the serverless backfill controller
-pub async fn provision_resource_group(sbc_addr: String) -> Result<String> {
-    let request = tonic::Request::new(ProvisionRequest {});
-    let mut client =
-        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
-            sbc_addr.clone(),
-        )
-        .await
-        .map_err(|e| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "unable to reach serverless backfill controller at addr {}: {}",
-                sbc_addr,
-                e.as_report()
-            )))
-        })?;
+pub(crate) fn resolve_streaming_job_resource_type(
+    session: &SessionImpl,
+    with_options: &mut WithOptions,
+) -> Result<streaming_job_resource_type::ResourceType> {
+    let StreamingJobResourceOptions {
+        resource_group,
+        serverless_backfill_enabled,
+    } = extract_streaming_job_resource_options(with_options);
 
-    match client.provision(request).await {
-        Ok(resp) => Ok(resp.into_inner().resource_group),
-        Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(
-            "serverless backfill controller returned error :{}",
-            e.as_report()
-        )))),
+    if resource_group.is_some() {
+        Feature::ResourceGroup.check_available()?;
     }
+
+    let is_serverless_backfill = match serverless_backfill_enabled {
+        Some(value) => value,
+        None => {
+            if resource_group.is_some() {
+                false
+            } else {
+                session.config().enable_serverless_backfill()
+            }
+        }
+    };
+
+    if resource_group.is_some() && is_serverless_backfill {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Please do not specify serverless backfilling and resource group together".to_owned(),
+        )));
+    }
+
+    let resource_type = if is_serverless_backfill {
+        assert_eq!(resource_group, None);
+        streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
+    } else if let Some(group) = resource_group {
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    };
+
+    Ok(resource_type)
 }
 
 fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
@@ -250,7 +292,7 @@ pub async fn handle_create_mv_bound(
         "CREATE MATERIALIZED VIEW",
     )?;
 
-    let (table, graph, dependencies, resource_type) = {
+    let (table, graph, dependencies, resource_type, refresh_interval_sec) = {
         gen_create_mv_graph(
             handler_args,
             name,
@@ -260,8 +302,7 @@ pub async fn handle_create_mv_bound(
             dependent_secrets,
             columns,
             emit_mode,
-        )
-        .await?
+        )?
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -284,6 +325,7 @@ pub async fn handle_create_mv_bound(
             dependencies,
             resource_type,
             if_not_exists,
+            refresh_interval_sec,
         ),
         &session,
         "CREATE MATERIALIZED VIEW",
@@ -296,7 +338,8 @@ pub async fn handle_create_mv_bound(
     ))
 }
 
-pub(crate) async fn gen_create_mv_graph(
+#[expect(clippy::type_complexity)]
+pub(crate) fn gen_create_mv_graph(
     handler_args: HandlerArgs,
     name: ObjectName,
     query: BoundQuery,
@@ -310,33 +353,13 @@ pub(crate) async fn gen_create_mv_graph(
     PbStreamFragmentGraph,
     HashSet<ObjectId>,
     streaming_job_resource_type::ResourceType,
+    Option<u64>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
-    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
-
-    if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup.check_available()?;
-    }
-
-    let serverless_backfill_from_with = with_options
-        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .map(|value| value.parse::<bool>().unwrap_or(false));
-    let is_serverless_backfill = match serverless_backfill_from_with {
-        Some(value) => value,
-        None => {
-            if resource_group.is_some() {
-                false
-            } else {
-                handler_args.session.config().enable_serverless_backfill()
-            }
-        }
-    };
-
-    if resource_group.is_some() && is_serverless_backfill {
-        return Err(RwError::from(InvalidInputSyntax(
-            "Please do not specify serverless backfilling and resource group together".to_owned(),
-        )));
-    }
+    let refresh_interval_sec = with_options.refresh_interval_sec()?;
+    with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
+    let resource_type =
+        resolve_streaming_job_resource_type(handler_args.session.as_ref(), &mut with_options)?;
 
     if !with_options.is_empty() {
         // get other useful fields by `remove`, the logic here is to reject unknown options.
@@ -346,40 +369,6 @@ pub(crate) async fn gen_create_mv_graph(
         ))));
     }
 
-    let sbc_addr = match SESSION_MANAGER.get() {
-        Some(manager) => manager.env().sbc_address(),
-        None => "",
-    }
-    .to_owned();
-
-    if is_serverless_backfill && sbc_addr.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
-        )));
-    }
-
-    let resource_type = if is_serverless_backfill {
-        assert_eq!(resource_group, None);
-        match provision_resource_group(sbc_addr).await {
-            Err(e) => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "failed to provision serverless backfill nodes: {}",
-                    e.as_report()
-                ))));
-            }
-            Ok(group) => {
-                tracing::info!(
-                    resource_group = group,
-                    "provisioning serverless backfill resource group"
-                );
-                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
-            }
-        }
-    } else if let Some(group) = resource_group {
-        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
-    } else {
-        streaming_job_resource_type::ResourceType::Regular(true)
-    };
     let context = OptimizerContext::from_handler_args(handler_args);
     let has_order_by = !query.order.is_empty();
     if has_order_by {
@@ -388,20 +377,18 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
     }
 
-    if resource_type.resource_group().is_some()
-        && !context
-            .session_ctx()
-            .config()
-            .streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-    }
-
     let context: OptimizerContextRef = context.into();
     let session = context.session_ctx().as_ref();
 
-    let (plan, table) =
-        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+    let (plan, table) = gen_create_mv_plan_bound(
+        session,
+        context.clone(),
+        query,
+        name,
+        columns,
+        emit_mode,
+        refresh_interval_sec,
+    )?;
 
     let backfill_order = plan_backfill_order(
         session,
@@ -428,7 +415,13 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_type))
+    Ok((
+        table,
+        graph,
+        dependencies,
+        resource_type,
+        refresh_interval_sec,
+    ))
 }
 
 #[cfg(test)]

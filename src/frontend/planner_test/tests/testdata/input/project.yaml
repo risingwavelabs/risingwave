@@ -12,7 +12,8 @@
   sql: create table t (id int, value string) append only;
   expected_outputs: []
 # Test openai_embedding function with MaterializedExprs for impure function
-- before:
+- name: materialize impure select-list expressions by default on upsert stream
+  before:
     - create_table
   sql: |
     select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
@@ -20,6 +21,15 @@
   expected_outputs:
     - logical_plan
     - batch_plan
+    - stream_plan
+- name: skip impure select-list materialization with unsafe session option
+  before:
+    - create_table
+  sql: |
+    set streaming_unsafe_allow_unmaterialized_impure_expr = true;
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
+    from t;
+  expected_outputs:
     - stream_plan
 # Test mixed pure and impure expressions with openai_embedding
 - before:

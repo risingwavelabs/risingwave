@@ -38,11 +38,17 @@ use crate::error::ConnectorResult;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
 /// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
+/// Match `pg_class` and `pg_namespace` by exact catalog names instead of casting a
+/// constructed string to `regclass`, as unquoted `regclass` input folds mixed-case
+/// table names to lower case.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
     FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-    WHERE i.indrelid = ($1 || '.' || $2)::regclass
+    WHERE n.nspname = $1
+      AND c.relname = $2
       AND i.indisprimary = true
     ORDER BY array_position(i.indkey, a.attnum)
 "#;

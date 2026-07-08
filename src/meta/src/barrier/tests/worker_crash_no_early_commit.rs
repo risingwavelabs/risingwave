@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -95,6 +95,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         self.0.send(ContextRequest::MarkReady).unwrap();
     }
 
+    async fn resolve_log_store_epoch<'a>(
+        &'a self,
+        _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+        _since_epoch: u64,
+    ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+        Ok(Default::default())
+    }
+
     async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
         unreachable!()
     }
@@ -160,6 +168,32 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<()> {
         unimplemented!()
     }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        _job_id: JobId,
+        _database_id: DatabaseId,
+        _last_committed_epoch: u64,
+    ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+    {
+        unimplemented!()
+    }
+
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _reports: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
+        >,
+    ) -> MetaResult<Vec<SinkId>> {
+        unimplemented!()
+    }
+
+    async fn commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _sink_ids: Vec<SinkId>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
 }
 
 #[tokio::test]
@@ -221,7 +255,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let initial_epoch = test_epoch(100);
 
     let fragment_model = |fragment_id: FragmentId, job_id: JobId, table_id: TableId| {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         LoadedFragment::from(fragment::Model {
             fragment_id,
             job_id,
@@ -249,10 +283,12 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         adaptive_parallelism_strategy: None,
         parallelism: StreamingParallelism::Fixed(1),
         backfill_parallelism: None,
+        backfill_adaptive_parallelism_strategy: None,
         backfill_orders: None,
         max_parallelism: 1,
         specific_resource_group: Some(resource_group.to_owned()),
         is_serverless_backfill: false,
+        refresh_interval_sec: None,
     };
     let job_model1 = build_job_model(job_id1, worker1_group);
     let job_model2 = build_job_model(job_id2, worker2_group);
@@ -286,9 +322,9 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 StreamingJobExtraInfo {
                     timezone: None,
                     config_override: Arc::<str>::from(""),
-                    adaptive_parallelism_strategy: None,
                     job_definition: "".to_owned(),
                     backfill_orders: None,
+                    refresh_interval_sec: None,
                 },
             ),
             (
@@ -296,9 +332,9 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 StreamingJobExtraInfo {
                     timezone: None,
                     config_override: Arc::<str>::from(""),
-                    adaptive_parallelism_strategy: None,
                     job_definition: "".to_owned(),
                     backfill_orders: None,
+                    refresh_interval_sec: None,
                 },
             ),
         ]),

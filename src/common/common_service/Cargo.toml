@@ -9,8 +9,10 @@ repository = { workspace = true }
 
 [dependencies]
 async-trait = "0.1"
+await-tree = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true, features = ["query"] }
+either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
 prometheus = { version = "0.14" }

@@ -254,7 +254,7 @@ impl SourceManager {
             .map(|(upstream_actor_id, actor_id)| (*upstream_actor_id, *actor_id))
             .collect();
         let assignment = align_splits(
-            aligned_actors.into_iter(),
+            aligned_actors,
             |actor_id| get_upstream_actor_splits(prev_fragment_id, actor_id),
             fragment_id,
             prev_fragment_id,
@@ -671,7 +671,7 @@ pub struct SplitDiffOptions {
     pub enable_adaptive: bool,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for SplitDiffOptions {
     fn default() -> Self {
         SplitDiffOptions {

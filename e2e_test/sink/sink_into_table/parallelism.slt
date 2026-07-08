@@ -20,9 +20,10 @@ statement ok
 create sink s_simple_1 into m_simple as select v1, v2 from t_simple with (type = 'append-only');
 
 query I
-select distinct parallelism from rw_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1');
+select distinct parallelism from rw_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1') order by parallelism;
 ----
 2
+3
 
 statement ok
 insert into t_simple select * from generate_series(1, 100);

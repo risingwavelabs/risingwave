@@ -26,10 +26,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
 };
-use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
@@ -66,17 +66,17 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
-use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
-use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -84,7 +84,7 @@ use crate::manager::{
 };
 use crate::model::{
     DownstreamFragmentRelation, FragmentDownstreamRelation, FragmentId as CatalogFragmentId,
-    StreamContext, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::cdc::{
     parallel_cdc_table_backfill_fragment, try_init_parallel_cdc_table_snapshot_splits,
@@ -93,9 +93,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -167,6 +167,9 @@ pub enum DdlCommand {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -192,6 +195,7 @@ pub enum DdlCommand {
         definition: String,
     },
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterDatabaseResourceGroup(DatabaseId, Option<String>, bool),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
@@ -231,6 +235,7 @@ impl DdlCommand {
                 subscription_id, ..
             } => Right(subscription_id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseResourceGroup(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
@@ -259,6 +264,7 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterDatabaseResourceGroup(_, _, _)
             | DdlCommand::AlterStreamingJobConfig(_, _, _)
             | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
@@ -281,6 +287,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -352,6 +359,49 @@ impl CreatingStreamingJobPermit {
 }
 
 impl DdlController {
+    fn validate_specified_parallelism(
+        specified_parallelism: Option<NonZeroUsize>,
+        specified_backfill_parallelism: Option<NonZeroUsize>,
+        max_parallelism: NonZeroUsize,
+    ) -> MetaResult<()> {
+        if let Some(parallelism) = specified_parallelism
+            && parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified parallelism {} should not exceed max parallelism {}",
+                parallelism,
+                max_parallelism,
+            );
+        }
+        if let Some(backfill_parallelism) = specified_backfill_parallelism
+            && backfill_parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified backfill parallelism {} should not exceed max parallelism {}",
+                backfill_parallelism,
+                max_parallelism,
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_serverless_backfill_enabled(
+        &self,
+        resource_type: &streaming_job_resource_type::ResourceType,
+    ) -> MetaResult<()> {
+        if matches!(
+            resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
+        ) && self.env.opts.serverless_backfill_controller_addr.is_empty()
+        {
+            bail_invalid_parameter!(
+                "Serverless Backfill is disabled. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature"
+            );
+        }
+
+        Ok(())
+    }
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -360,6 +410,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -370,6 +421,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
+            iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -387,7 +439,6 @@ impl DdlController {
     /// would be a huge hassle and pain if we don't spawn here.
     ///
     /// Though returning `Option`, it's always `Some`, to simplify the handling logic
-    #[allow(clippy::large_stack_frames)]
     pub async fn run_command(&self, command: DdlCommand) -> MetaResult<Option<WaitVersion>> {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
@@ -428,6 +479,9 @@ impl DdlController {
                     dependencies,
                     resource_type,
                     if_not_exists,
+                    refresh_interval_sec,
+                    replace_sink,
+                    since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -435,6 +489,9 @@ impl DdlController {
                         dependencies,
                         resource_type,
                         if_not_exists,
+                        refresh_interval_sec,
+                        replace_sink,
+                        since_timestamp_epoch,
                     )
                     .await
                 }
@@ -488,6 +545,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
+                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
+                        .await
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
@@ -550,7 +611,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job_backfill_parallelism(
         &self,
         job_id: JobId,
-        parallelism: Option<StreamingParallelism>,
+        parallelism: Option<ParallelismPolicy>,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("altering backfill parallelism for job {}", job_id);
@@ -751,6 +812,21 @@ impl DdlController {
         Ok(version)
     }
 
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_resource_group(database_id, resource_group)
+            .await?;
+
+        Ok(version)
+    }
+
     // The 'secret' part of the request we receive from the frontend is in plaintext;
     // here, we need to encrypt it before storing it in the catalog.
     fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
@@ -902,15 +978,12 @@ impl DdlController {
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
-        let stream_scan_fragment = table_fragments
-            .fragments
-            .values()
-            .filter(|f| {
+        let stream_scan_fragment =
+            Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
                     || f.fragment_type_mask
                         .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .exactly_one()
+            }))
             .ok()
             .with_context(|| {
                 format!(
@@ -1023,13 +1096,42 @@ impl DdlController {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
-        if let StreamingJob::Sink(sink) = &streaming_job
-            && let Some(target_table) = sink.target_table
-        {
-            self.validate_table_for_sink(target_table).await?;
-        }
+        let replace_sink_info = if let Some(old_sink_id) = replace_sink {
+            let StreamingJob::Sink(sink) = &streaming_job else {
+                bail!("replace sink requires a sink job")
+            };
+            if sink.target_table.is_some() {
+                bail_not_implemented!("replace sink into table")
+            }
+
+            Some(old_sink_id)
+        } else {
+            if let StreamingJob::Sink(sink) = &streaming_job
+                && let Some(target_table) = sink.target_table
+            {
+                self.validate_table_for_sink(target_table).await?;
+            }
+            None
+        };
+        self.validate_serverless_backfill_enabled(&resource_type)?;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        let adaptive_parallelism_strategy =
+            (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
+                parse_strategy(&fragment_graph.adaptive_parallelism_strategy)
+                    .expect("adaptive parallelism strategy should be validated in frontend")
+            });
+        let backfill_adaptive_parallelism_strategy = (!fragment_graph
+            .backfill_adaptive_parallelism_strategy
+            .is_empty())
+        .then(|| {
+            parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
+                .expect("backfill adaptive parallelism strategy should be validated in frontend")
+        });
+
         let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
@@ -1041,6 +1143,10 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                adaptive_parallelism_strategy,
+                backfill_adaptive_parallelism_strategy,
+                replace_sink_info.as_ref(),
+                refresh_interval_sec,
             )
             .await
         {
@@ -1064,13 +1170,23 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
-        tracing::debug!(
-            id = %job_id,
-            definition = streaming_job.definition(),
-            create_type = streaming_job.create_type().as_str_name(),
-            job_type = ?streaming_job.job_type(),
-            "starting streaming job",
-        );
+        if let Some(old_sink_id) = replace_sink_info.as_ref() {
+            tracing::debug!(
+                old_sink_id = %old_sink_id,
+                new_sink_id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                "starting replacement sink",
+            );
+        } else {
+            tracing::debug!(
+                id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                job_type = ?streaming_job.job_type(),
+                "starting streaming job",
+            );
+        }
         // TODO: acquire permits for recovered background DDLs.
         let permit = self
             .creating_streaming_job_permits
@@ -1088,21 +1204,31 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-
-        // create streaming job.
-        match self
-            .create_streaming_job_inner(
+        // Generate streaming job metadata and issue the create command in two steps, so that the
+        // error phase is classified at the barrier command boundary.
+        let create_result = match self
+            .generate_streaming_job(
                 ctx,
                 streaming_job,
                 fragment_graph,
-                resource_type,
-                permit,
+                resource_type.clone(),
                 streaming_job_model,
+                replace_sink_info,
+                since_timestamp_epoch,
             )
             .await
         {
+            Ok((stream_job_fragments, ctx)) => self
+                .stream_manager
+                .create_streaming_job(stream_job_fragments, ctx, permit)
+                .await
+                .map_err(|err| (err, true)),
+            Err(err) => Err((err, false)),
+        };
+
+        match create_result {
             Ok(version) => Ok(version),
-            Err(err) => {
+            Err((err, is_cancelled)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1116,10 +1242,10 @@ impl DdlController {
                 let (aborted, _) = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
+                    .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
                 if aborted {
-                    tracing::warn!(id = %job_id, "aborted streaming job");
+                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
@@ -1135,15 +1261,16 @@ impl DdlController {
     }
 
     #[await_tree::instrument(boxed)]
-    async fn create_streaming_job_inner(
+    async fn generate_streaming_job(
         &self,
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
         streaming_job_model: streaming_job::Model,
-    ) -> MetaResult<NotificationVersion> {
+        replace_sink: Option<SinkId>,
+        since_timestamp_epoch: Option<u64>,
+    ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
@@ -1162,15 +1289,17 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
-        let (ctx, stream_job_fragments) = self
+        let (mut ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
                 fragment_graph,
                 resource_type,
                 streaming_job_model,
+                since_timestamp_epoch,
             )
             .await?;
+        ctx.replace_sink = replace_sink;
 
         let streaming_job = &ctx.streaming_job;
 
@@ -1202,10 +1331,23 @@ impl DdlController {
             }
             StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
-                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?;
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
+                // For Iceberg pk-index sinks, spawn the per-sink commit worker now
+                // so it's ready to receive epoch reports from the very first
+                // barrier instead of relying on lazy registration on every
+                // commit.
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
+                {
+                    let iceberg_config =
+                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
+                    self.iceberg_pk_index_sink_manager
+                        .register_sink(sink.id, iceberg_config)
+                        .await
+                        .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
+                }
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1246,23 +1388,34 @@ impl DdlController {
         }
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
-        self.metadata_manager
-            .catalog_controller
-            .prepare_stream_job_fragments(
-                &stream_job_fragments,
-                streaming_job,
-                false,
-                Some(backfill_orders),
-            )
-            .await?;
+        // Replacement sinks use a temporary catalog name before cutover, so do not notify
+        // frontend about their creating catalog.
+        let notify_creating = replace_sink.is_none();
+        if notify_creating {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_stream_job_fragments(
+                    &stream_job_fragments,
+                    streaming_job,
+                    false,
+                    Some(backfill_orders),
+                )
+                .await?;
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_streaming_job(
+                    stream_job_fragments.stream_job_id(),
+                    || stream_job_fragments.fragments.values(),
+                    &stream_job_fragments.downstreams,
+                    false,
+                    None,
+                    Some(backfill_orders),
+                )
+                .await?;
+        }
 
-        // create streaming jobs.
-        let version = self
-            .stream_manager
-            .create_streaming_job(stream_job_fragments, ctx, permit)
-            .await?;
-
-        Ok(version)
+        Ok((stream_job_fragments, ctx))
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
@@ -1300,6 +1453,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1316,7 +1470,6 @@ impl DdlController {
                 database_id,
                 removed_streaming_job_ids,
                 removed_state_table_ids,
-                removed_fragments.iter().map(|id| *id as _).collect(),
                 removed_sink_fragment_by_targets
                     .into_iter()
                     .map(|(target, sinks)| {
@@ -1382,8 +1535,16 @@ impl DdlController {
 
             for sink_id in iceberg_sink_ids {
                 self.iceberg_compaction_manager
-                    .clear_iceberg_commits_by_sink_id(sink_id);
+                    .clear_iceberg_maintenance_by_sink_id(sink_id);
             }
+        }
+
+        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
+        // including user-created sinks with arbitrary names (not just the
+        // `__iceberg_sink_%` auto-created ones above).
+        if !removed_iceberg_pk_index_sink_ids.is_empty() {
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
         }
 
         // remove secrets.
@@ -1468,19 +1629,6 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
-                // TODO: Remove this guard when auto schema refresh sink fully supports drop column.
-                if !removed_columns.is_empty() {
-                    return Err(anyhow!(
-                        "new table columns does not contains all original columns. new: {:?}, original: {:?}, not included: {:?}",
-                        table.columns,
-                        original_table_columns,
-                        removed_columns
-                            .iter()
-                            .map(|col| col.column_id())
-                            .collect_vec()
-                    )
-                    .into());
-                }
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
@@ -1705,9 +1853,11 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                unreachable!(
-                    "Job with Initial status should not notify frontend and therefore should not arrive here"
-                );
+                self.metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(job_id.id(), true)
+                    .await?;
+                IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {
                 self.stream_manager
@@ -1719,86 +1869,6 @@ impl DdlController {
         };
 
         Ok(version)
-    }
-
-    /// Resolve the parallelism of the stream job based on the given information.
-    ///
-    /// Returns error if user specifies a parallelism that cannot be satisfied.
-    fn resolve_stream_parallelism(
-        &self,
-        specified: Option<NonZeroUsize>,
-        max: NonZeroUsize,
-        cluster_info: &StreamingClusterInfo,
-        resource_group: String,
-    ) -> MetaResult<NonZeroUsize> {
-        let available = NonZeroUsize::new(cluster_info.parallelism(&resource_group));
-        DdlController::resolve_stream_parallelism_inner(
-            specified,
-            max,
-            available,
-            &self.env.opts.default_parallelism,
-            &resource_group,
-        )
-    }
-
-    fn resolve_stream_parallelism_inner(
-        specified: Option<NonZeroUsize>,
-        max: NonZeroUsize,
-        available: Option<NonZeroUsize>,
-        default_parallelism: &DefaultParallelism,
-        resource_group: &str,
-    ) -> MetaResult<NonZeroUsize> {
-        let Some(available) = available else {
-            bail_unavailable!(
-                "no available slots to schedule in resource group \"{}\", \
-                 have you allocated any compute nodes within this resource group?",
-                resource_group
-            );
-        };
-
-        if let Some(specified) = specified {
-            if specified > max {
-                bail_invalid_parameter!(
-                    "specified parallelism {} should not exceed max parallelism {}",
-                    specified,
-                    max,
-                );
-            }
-            if specified > available {
-                tracing::warn!(
-                    resource_group,
-                    specified_parallelism = specified.get(),
-                    available_parallelism = available.get(),
-                    "specified parallelism exceeds available slots, scheduling with specified value",
-                );
-            }
-            return Ok(specified);
-        }
-
-        // Use default parallelism when no specific parallelism is provided by the user.
-        let default_parallelism = match default_parallelism {
-            DefaultParallelism::Full => available,
-            DefaultParallelism::Default(num) => {
-                if *num > available {
-                    tracing::warn!(
-                        resource_group,
-                        configured_parallelism = num.get(),
-                        available_parallelism = available.get(),
-                        "default parallelism exceeds available slots, scheduling with configured value",
-                    );
-                }
-                *num
-            }
-        };
-
-        if default_parallelism > max {
-            tracing::warn!(
-                max_parallelism = max.get(),
-                resource_group,
-                "default parallelism exceeds max parallelism, capping to max",
-            );
-        }
-        Ok(default_parallelism.min(max))
     }
 
     /// Builds the actor graph:
@@ -1814,11 +1884,15 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
-        let specified_parallelism = fragment_graph.specified_parallelism();
-        let specified_backfill_parallelism = fragment_graph.specified_backfill_parallelism();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
+        Self::validate_specified_parallelism(
+            fragment_graph.specified_parallelism(),
+            fragment_graph.specified_backfill_parallelism(),
+            max_parallelism,
+        )?;
 
         // 1. Fragment Level ordering graph
         let fragment_backfill_ordering = fragment_graph.create_fragment_backfill_ordering();
@@ -1884,46 +1958,17 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group = if let Some(group) = resource_type.resource_group() {
-            group
-        } else {
-            self.metadata_manager
-                .get_database_resource_group(stream_job.database_id())
-                .await?
-        };
+        let database_resource_group = self
+            .metadata_manager
+            .get_database_resource_group(stream_job.database_id())
+            .await?;
         let is_serverless_backfill = matches!(
             &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(true)
         );
 
         // 3. Build the actor graph.
-        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
-
-        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
-        let parallelism = self.resolve_stream_parallelism(
-            initial_parallelism,
-            max_parallelism,
-            &cluster_info,
-            resource_group.clone(),
-        )?;
-
-        let parallelism = if initial_parallelism.is_some() {
-            parallelism.get()
-        } else {
-            // Prefer job-level override for initial scheduling, fallback to system strategy.
-            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
-                Some(strategy) => strategy,
-                None => self
-                    .env
-                    .system_params_reader()
-                    .await
-                    .adaptive_parallelism_strategy(),
-            };
-            adaptive_strategy.compute_target_parallelism(parallelism.get())
-        };
-
-        let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
-        let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1937,20 +1982,8 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
-        // Otherwise, it defaults to FIXED based on deduction.
-        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
-            _ => TableParallelism::Fixed(parallelism.get()),
-        };
-
-        let stream_job_fragments = StreamJobFragments::new(
-            id,
-            graph,
-            stream_ctx.clone(),
-            table_parallelism,
-            max_parallelism.get(),
-        );
+        let stream_job_fragments =
+            StreamJobFragments::new(id, graph, stream_ctx.clone(), max_parallelism.get());
 
         if let Some(mview_fragment) = stream_job_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
@@ -2009,7 +2042,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            database_resource_group: resource_group,
+            database_resource_group,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
@@ -2022,7 +2055,11 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
-            streaming_job_model,
+            resource_type,
+            streaming_job_model: streaming_job_model.clone(),
+            replace_sink: None,
+            refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
+            since_timestamp_epoch,
         };
 
         Ok((
@@ -2180,15 +2217,7 @@ impl DdlController {
             .get_database_resource_group(stream_job.database_id())
             .await?;
 
-        // XXX: what is this parallelism?
-        // Is it "assigned parallelism"?
-        let parallelism = NonZeroUsize::new(match old_fragments.assigned_parallelism {
-            TableParallelism::Fixed(n) => n,
-            TableParallelism::Adaptive | TableParallelism::Custom => 1,
-        })
-        .expect("The number of actors in the original table fragment should be greater than 0");
-
-        let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -2208,13 +2237,8 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let stream_job_fragments = StreamJobFragments::new(
-            tmp_job_id,
-            graph,
-            stream_ctx,
-            old_fragments.assigned_parallelism,
-            old_fragments.max_parallelism,
-        );
+        let stream_job_fragments =
+            StreamJobFragments::new(tmp_job_id, graph, stream_ctx, old_fragments.max_parallelism);
 
         if let Some(sinks) = &auto_refresh_schema_sinks {
             for sink in sinks {
@@ -2533,67 +2557,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_specified_parallelism_exceeds_available() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            Some(NonZeroUsize::new(100).unwrap()),
-            NonZeroUsize::new(256).unwrap(),
+    fn test_validate_specified_parallelism_accepts_within_max() {
+        DdlController::validate_specified_parallelism(
             Some(NonZeroUsize::new(4).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
+            Some(NonZeroUsize::new(8).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
         )
         .unwrap();
-        assert_eq!(result.get(), 100);
     }
 
     #[test]
-    fn test_allows_default_parallelism_over_available() {
-        let result = DdlController::resolve_stream_parallelism_inner(
+    fn test_validate_specified_parallelism_rejects_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            Some(NonZeroUsize::new(9).unwrap()),
             None,
-            NonZeroUsize::new(256).unwrap(),
-            Some(NonZeroUsize::new(4).unwrap()),
-            &DefaultParallelism::Default(NonZeroUsize::new(50).unwrap()),
-            "default",
-        )
-        .unwrap();
-        assert_eq!(result.get(), 50);
-    }
-
-    #[test]
-    fn test_full_parallelism_capped_by_max() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            None,
-            NonZeroUsize::new(6).unwrap(),
-            Some(NonZeroUsize::new(10).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
-        )
-        .unwrap();
-        assert_eq!(result.get(), 6);
-    }
-
-    #[test]
-    fn test_no_available_slots_returns_error() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            None,
-            NonZeroUsize::new(4).unwrap(),
-            None,
-            &DefaultParallelism::Full,
-            "default",
+            NonZeroUsize::new(8).unwrap(),
         );
         assert!(matches!(
             result,
-            Err(ref e) if matches!(e.inner(), MetaErrorInner::Unavailable(_))
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
         ));
     }
 
     #[test]
-    fn test_specified_over_max_returns_error() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            Some(NonZeroUsize::new(8).unwrap()),
-            NonZeroUsize::new(4).unwrap(),
-            Some(NonZeroUsize::new(10).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
+    fn test_validate_specified_parallelism_rejects_backfill_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            None,
+            Some(NonZeroUsize::new(9).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
         );
         assert!(matches!(
             result,

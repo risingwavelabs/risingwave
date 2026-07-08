@@ -16,7 +16,7 @@ use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, ListArray};
 use risingwave_common::types::ListValue;
 
 use super::*;
-use crate::expr::{BoxedExpression, Expression};
+use crate::expr::BoxedExpression;
 
 /// Wraps a scalar function that takes a list as input as an aggregate function.
 #[derive(Debug)]

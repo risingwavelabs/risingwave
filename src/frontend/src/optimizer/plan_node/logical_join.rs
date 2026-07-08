@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
@@ -1098,7 +1097,7 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+            if ctx.backfill_type().is_snapshot_backfill() {
                 return Err(RwError::from(ErrorCode::NotSupported(
                     "Temporal join with snapshot backfill not supported".into(),
                     "Please use arrangement backfill".into(),
@@ -1229,7 +1228,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_backfill_type(new_scan, BackfillType::Replicated);
         Ok((
             new_stream_table_scan,
             new_predicate,
@@ -1420,7 +1419,9 @@ impl LogicalJoin {
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
-            *right.inputs().iter().exactly_one().unwrap().distribution(),
+            *Itertools::exactly_one(right.inputs().iter())
+                .unwrap()
+                .distribution(),
             Distribution::Single
         );
 
@@ -1852,7 +1853,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1916,7 +1917,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_semi_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1996,7 +1997,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2071,7 +2072,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(DataType::Int32, format!("v{}", i)))
             .collect();
@@ -2242,7 +2243,7 @@ mod tests {
     #[tokio::test]
     async fn test_join_column_prune_with_order_required() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2326,7 +2327,7 @@ mod tests {
         // Right Semi/Anti Join:
         //  Schema: [r0, r1, r2]
         //  FD: r0 --> {r1, r2}
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let left = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "l0"),

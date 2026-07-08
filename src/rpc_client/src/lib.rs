@@ -15,11 +15,6 @@
 //! Wrapper gRPC clients, which help constructing the request and destructing the
 //! response gRPC message structs.
 
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(associated_type_defaults)]
-#![feature(coroutines)]
-#![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]

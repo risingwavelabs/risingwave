@@ -5,6 +5,9 @@ on:
     branches:
       - 'release-[0-9]*.[0-9]*'
 
+env:
+  GH_TOKEN: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
+
 jobs:
   bump-main-branch-version:
     runs-on: ubuntu-latest
@@ -15,12 +18,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Bump main branch version
         id: bump
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ ! "${{ github.ref_name }}" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
             echo "Branch ${{ github.ref_name }} does not match strict X.Y format. Exiting."
@@ -78,7 +79,7 @@ jobs:
         env:
           NEW_VERSION: ${{ steps.bump.outputs.NEW_VERSION }}
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
           title: "chore: bump main branch version to ${{ env.NEW_VERSION }}"
           body: "This PR automatically bumps the main branch version after creating ${{ github.ref_name }} branch."
           base: main
