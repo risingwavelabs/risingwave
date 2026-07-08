@@ -52,6 +52,7 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openssl \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
-COPY --from=rust-builder /risingwave/bin/risectl /usr/local/bin/risectl
+RUN mkdir -p /risingwave/bin
+COPY --from=rust-builder /risingwave/bin/risectl /risingwave/bin/risectl
 
-ENTRYPOINT [ "/usr/local/bin/risectl" ]
+ENTRYPOINT [ "/risingwave/bin/risectl" ]
