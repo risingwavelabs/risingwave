@@ -16,6 +16,30 @@ select * from test_table where name like 'test\_table';
 ----
 test_table
 
+query BBB
+select
+    'ABC_123' like 'ABC\_123' escape '\',
+    'ABCD123' like 'ABC\_123' escape '\',
+    'ABC\123' like 'ABC\\123' escape '\';
+----
+t f t
+
+query B
+select 'abc' like 'abc\' escape '\';
+----
+f
+
+query BBB
+select
+    'abc' like 'a_c' escape '',
+    'a_c' like 'a\_c' escape '',
+    'a\_c' like 'a\_c' escape '';
+----
+t f t
+
+statement error LIKE pattern must not end with escape character
+SELECT '____' LIKE '_____' ESCAPE '_';
+
 statement ok
 drop table test_table;
 
