@@ -1,0 +1,38 @@
+control substitution on
+
+# This test expects a non-empty Delta Lake table on Azure Data Lake Storage Gen2.
+# The ADLS address and service-principal credentials are intentionally supplied
+# by environment variables so CI and developers can point the test at their own
+# secured test account.
+
+statement ok
+CREATE SECRET deltalake_adls_client_secret WITH (
+    backend = 'meta'
+) AS '${RISEDEV_DELTALAKE_ADLS_CLIENT_SECRET}';
+
+statement ok
+CREATE SOURCE deltalake_adls_source
+WITH (
+    connector = 'deltalake',
+    location = '${RISEDEV_DELTALAKE_ADLS_LOCATION}',
+    azure.client.id = '${RISEDEV_DELTALAKE_ADLS_CLIENT_ID}',
+    azure.client.secret = secret deltalake_adls_client_secret,
+    azure.tenant.id = '${RISEDEV_DELTALAKE_ADLS_TENANT_ID}'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW deltalake_adls_mv AS SELECT * FROM deltalake_adls_source;
+
+query B retry 10 backoff 3s
+SELECT count(*) > 0 FROM deltalake_adls_mv;
+----
+t
+
+statement ok
+DROP MATERIALIZED VIEW deltalake_adls_mv;
+
+statement ok
+DROP SOURCE deltalake_adls_source;
+
+statement ok
+DROP SECRET deltalake_adls_client_secret;
