@@ -1941,8 +1941,8 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_struct_reorder_decodes_by_declared_order() {
-        // Actual file struct: st<inner<b: Utf8, a: Int32>> (inner children reordered vs declared).
+    fn test_nested_struct_reorder_and_superset_decode_by_declared() {
+        // File inner is reordered and a superset: inner<b, a, c>; declared inner<a, b>.
         let inner: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![
             (
                 Arc::new(ArrowField::new("b", ArrowType::Utf8, true)),
@@ -1951,71 +1951,6 @@ mod tests {
             (
                 Arc::new(ArrowField::new("a", ArrowType::Int32, true)),
                 Arc::new(arrow_array::Int32Array::from(vec![Some(1)])) as arrow_array::ArrayRef,
-            ),
-        ]));
-        let st: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![(
-            Arc::new(ArrowField::new("inner", inner.data_type().clone(), true)),
-            inner,
-        )]));
-
-        // Declared: st<inner<a: Int32, b: Varchar>>.
-        let declared_field = ArrowField::new(
-            "st",
-            ArrowType::Struct(
-                vec![ArrowField::new(
-                    "inner",
-                    ArrowType::Struct(
-                        vec![
-                            ArrowField::new("a", ArrowType::Int32, true),
-                            ArrowField::new("b", ArrowType::Utf8, true),
-                        ]
-                        .into(),
-                    ),
-                    true,
-                )]
-                .into(),
-            ),
-            true,
-        );
-        let converted = IcebergArrowConvert
-            .array_from_arrow_array(&declared_field, &st)
-            .unwrap();
-
-        // Decoded type follows the DECLARED nested order/types, not the file order.
-        assert_eq!(
-            converted.data_type(),
-            RwType::Struct(StructType::new(vec![(
-                "inner",
-                RwType::Struct(StructType::new(vec![
-                    ("a", RwType::Int32),
-                    ("b", RwType::Varchar),
-                ])),
-            )])),
-        );
-        // Values are aligned by name, so no by-index mixup.
-        let ArrayImpl::Struct(s) = &converted else {
-            panic!("expected RW struct");
-        };
-        assert_eq!(
-            s.value_at(0).unwrap().to_owned_scalar(),
-            StructValue::new(vec![Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::Int32(1)),
-                Some(ScalarImpl::Utf8("x".into())),
-            ])))]),
-        );
-    }
-
-    #[test]
-    fn test_nested_struct_superset_drops_extra_child() {
-        // Actual inner is a superset: inner<a, b, c>; declared inner<a, b>.
-        let inner: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![
-            (
-                Arc::new(ArrowField::new("a", ArrowType::Int32, true)),
-                Arc::new(arrow_array::Int32Array::from(vec![Some(1)])) as arrow_array::ArrayRef,
-            ),
-            (
-                Arc::new(ArrowField::new("b", ArrowType::Utf8, true)),
-                Arc::new(arrow_array::StringArray::from(vec![Some("x")])) as arrow_array::ArrayRef,
             ),
             (
                 Arc::new(ArrowField::new("c", ArrowType::Int32, true)),
@@ -2048,6 +1983,7 @@ mod tests {
         let converted = IcebergArrowConvert
             .array_from_arrow_array(&declared_field, &st)
             .unwrap();
+
         assert_eq!(
             converted.data_type(),
             RwType::Struct(StructType::new(vec![(
@@ -2057,6 +1993,16 @@ mod tests {
                     ("b", RwType::Varchar),
                 ])),
             )])),
+        );
+        let ArrayImpl::Struct(s) = &converted else {
+            panic!("expected RW struct");
+        };
+        assert_eq!(
+            s.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Utf8("x".into())),
+            ])))]),
         );
     }
 
