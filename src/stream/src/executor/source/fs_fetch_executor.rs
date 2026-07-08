@@ -28,6 +28,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
+use risingwave_connector::source::deltalake::OpendalDeltaLake;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
@@ -184,6 +185,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                         }
                         risingwave_connector::source::ConnectorProperties::Azblob(_) => {
                             let split: OpendalFsSplit<OpendalAzblob> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        risingwave_connector::source::ConnectorProperties::DeltaLake(_) => {
+                            let split: OpendalFsSplit<OpendalDeltaLake> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
                             SplitImpl::from(split)
                         }

@@ -27,6 +27,7 @@ use thiserror_ext::AsReport as _;
 use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use crate::source::deltalake::{build_delta_lake_list_stream, refresh_interval_sec};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
     DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
@@ -109,6 +110,10 @@ impl SourceReader {
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
+            }
+            ConnectorProperties::DeltaLake(prop) => {
+                list_interval_sec = refresh_interval_sec(&prop);
+                Ok(build_delta_lake_list_stream(*prop, list_interval_sec))
             }
             ConnectorProperties::PosixFs(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);

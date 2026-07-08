@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::deltalake::OpendalDeltaLake;
 use risingwave_connector::source::filesystem::opendal_source::{
     OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
@@ -159,6 +160,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             risingwave_connector::source::ConnectorProperties::Azblob(_) => {
                 FsFetchExecutor::<_, OpendalAzblob>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source.rate_limit,
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::DeltaLake(_) => {
+                FsFetchExecutor::<_, OpendalDeltaLake>::new(
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,

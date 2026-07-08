@@ -25,6 +25,8 @@ use avro::extract_avro_table_schema;
 pub mod debezium;
 pub mod iceberg;
 use iceberg::extract_iceberg_columns;
+pub mod deltalake;
+use deltalake::extract_deltalake_columns;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;
@@ -319,6 +321,12 @@ async fn bind_columns_from_source_for_non_cdc(
             if options_with_secret.is_iceberg_connector() {
                 Some(
                     extract_iceberg_columns(&options_with_secret)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else if options_with_secret.is_deltalake_connector() {
+                Some(
+                    extract_deltalake_columns(&options_with_secret)
                         .await
                         .map_err(|err| ProtocolError(err.to_report_string()))?,
                 )

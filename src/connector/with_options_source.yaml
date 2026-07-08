@@ -150,6 +150,58 @@ DatagenProperties:
       datagen will create v1 by self-incrementing from 1 to 1000
       datagen will create v2 by randomly generating from `default_min` to `default_max`
     required: false
+DeltaLakeProperties:
+  fields:
+  - name: location
+    field_type: String
+    required: true
+  - name: azblob.container_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_name
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.account_key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.credentials.sas_token
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azblob.endpoint_url
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azure.client.id
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azure.client.secret
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azure.tenant.id
+    field_type: String
+    required: false
+    default: Default::default
+  - name: azure.use.azure.cli
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: refresh.interval.sec
+    field_type: u64
+    required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
+    required: false
+    default: Default::default
 GcsProperties:
   fields:
   - name: gcs.bucket_name

@@ -236,6 +236,12 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
     }
 
+    pub fn is_deltalake_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_deltalake_connector())
+    }
+
     pub fn is_kafka_connector(&self) -> bool {
         self.catalog
             .as_ref()
@@ -249,7 +255,7 @@ impl Source {
     }
 
     pub fn requires_singleton(&self) -> bool {
-        self.is_iceberg_connector() || self.is_batch_connector()
+        self.is_iceberg_connector() || self.is_deltalake_connector() || self.is_batch_connector()
     }
 
     /// Currently, only iceberg source supports time travel.

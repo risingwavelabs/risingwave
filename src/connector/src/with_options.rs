@@ -23,6 +23,7 @@ use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::ExternalCdcTableType;
+use crate::source::deltalake::DELTALAKE_CONNECTOR;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     ADBC_SNOWFLAKE_CONNECTOR, AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR,
@@ -180,13 +181,21 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         connector == ICEBERG_CONNECTOR
     }
 
+    #[inline(always)]
+    fn is_deltalake_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == DELTALAKE_CONNECTOR
+    }
+
     fn connector_need_pk(&self) -> bool {
-        // Currently only iceberg connector doesn't need primary key
+        // Currently only iceberg and deltalake connectors don't need primary key.
         // introduced in https://github.com/risingwavelabs/risingwave/pull/14971
         // XXX: This seems not the correct way. Iceberg doesn't necessarily lack a PK.
         // "batch source" doesn't need a PK?
         // For streaming, if it has a PK, do we want to use it? It seems not safe.
-        !self.is_iceberg_connector()
+        !self.is_iceberg_connector() && !self.is_deltalake_connector()
     }
 
     fn is_legacy_fs_connector(&self) -> bool {
@@ -202,6 +211,7 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
                     || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
+                    || s.eq_ignore_ascii_case(DELTALAKE_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -228,7 +238,10 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     }
 
     fn requires_singleton(&self) -> bool {
-        self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_batch_connector()
+        self.is_new_fs_connector()
+            || self.is_iceberg_connector()
+            || self.is_deltalake_connector()
+            || self.is_batch_connector()
     }
 }
 

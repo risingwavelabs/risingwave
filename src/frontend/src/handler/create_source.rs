@@ -895,12 +895,23 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    if with_properties.is_iceberg_connector() {
+    if with_properties.is_iceberg_connector() || with_properties.is_deltalake_connector() {
+        let connector_name = if with_properties.is_iceberg_connector() {
+            "Iceberg"
+        } else {
+            "Delta Lake"
+        };
         if is_create_source && !sql_pk_names.is_empty() {
             return Err(ErrorCode::NotSupported(
-                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
+                format!(
+                    "PRIMARY KEY is not supported for {} CREATE SOURCE in continuous ingestion mode.",
+                    connector_name
+                )
                     .to_owned(),
-                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
+                format!(
+                    "{} streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause.",
+                    connector_name
+                )
                     .to_owned(),
             )
             .into());
@@ -910,11 +921,12 @@ pub async fn bind_create_source_or_table_with_connector(
         // are problematic. They are treated as normal user columns, so they will be lost if we
         // allow user to specify columns. See `extract_iceberg_columns`.
         if !sql_columns_defs.is_empty() {
-            return Err(RwError::from(InvalidInputSyntax(
-                r#"Schema is automatically inferred for iceberg source and should not be specified
+            return Err(RwError::from(InvalidInputSyntax(format!(
+                r#"Schema is automatically inferred for {} source and should not be specified
 
-HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-            )));
+HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#,
+                connector_name
+            ))));
         }
     }
 

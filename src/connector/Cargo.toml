@@ -28,7 +28,7 @@ sink-bigquery = [
     "dep:google-cloud-bigquery",
     "dep:google-cloud-googleapis",
 ]
-sink-deltalake = ["dep:deltalake"]
+sink-deltalake = []
 # TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
 sink-google_pubsub = ["dep:google-cloud-googleapis"]
 sink-clickhouse = ["dep:clickhouse"]
@@ -70,7 +70,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
     "rustls-tls",
 ], optional = true }
 csv = "1.4"
-deltalake = { workspace = true, optional = true }
+deltalake = { workspace = true }
 duration-str = "0.18.0"
 easy-ext = "1"
 either = "1"
@@ -107,6 +107,7 @@ num-bigint = "0.4"
 opendal = { workspace = true, features = [
     "executors-tokio",
     "services-azblob",
+    "services-azdls",
     "services-fs",
     "services-gcs",
     "services-memory",

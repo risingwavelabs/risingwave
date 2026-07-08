@@ -15,6 +15,7 @@
 pub mod prelude {
     // import all split enumerators
     pub use crate::source::datagen::DatagenSplitEnumerator;
+    pub use crate::source::deltalake::DeltaLakeSplitEnumerator;
     pub use crate::source::filesystem::LegacyS3SplitEnumerator;
     pub use crate::source::filesystem::opendal_source::OpendalEnumerator;
     pub use crate::source::google_pubsub::PubsubSplitEnumerator as GooglePubsubSplitEnumerator;
@@ -48,6 +49,7 @@ pub mod batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
+pub mod deltalake;
 pub mod filesystem;
 pub mod google_pubsub;
 pub mod kafka;
