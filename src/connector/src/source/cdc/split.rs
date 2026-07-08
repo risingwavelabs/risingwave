@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
+use crate::source::cdc::external::postgres::PostgresOffset;
 use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mysql, Postgres, SqlServer};
 use crate::source::{SplitId, SplitMetaData};
 
@@ -244,31 +245,22 @@ impl CdcSplitTrait for PostgresCdcSplit {
         // Only `lsn_commit` and `lsn_proc` are monotonic under correct
         // dbz behavior.
         //
-        // Snapshot-phase offsets carry no comparable LSN, so they always
-        // pass through. Heartbeat / non-LSN-bearing offsets also pass
-        // through (extracts return None on missing fields).
-        if self.inner.snapshot_done && new_snapshot_done {
-            let new_lsn_commit = extract_postgres_lsn_commit_from_offset_str(&last_seen_offset);
-            let new_lsn_proc = extract_postgres_lsn_proc_from_offset_str(&last_seen_offset);
-            let old_lsn_commit = self.pg_lsn_commit();
-            let old_lsn_proc = self.pg_lsn_proc();
-
-            let commit_regressed = matches!(
-                (new_lsn_commit, old_lsn_commit),
-                (Some(new), Some(old)) if new < old
-            );
-            let proc_regressed = matches!(
-                (new_lsn_proc, old_lsn_proc),
-                (Some(new), Some(old)) if new < old
-            );
-
-            if commit_regressed || proc_regressed {
+        // If both offsets are parseable as streaming Postgres offsets, use
+        // the same `(lsn_commit, lsn_proc)` ordering as snapshot backfill
+        // deduplication. Snapshot / heartbeat / incomplete offsets are not
+        // comparable and pass through.
+        if let (Some(old_offset), Some(new_offset)) = (
+            self.inner
+                .start_offset
+                .as_deref()
+                .and_then(parse_postgres_offset_from_offset_str),
+            parse_postgres_offset_from_offset_str(&last_seen_offset),
+        ) {
+            if new_offset < old_offset {
                 tracing::warn!(
                     split_id = self.inner.split_id,
-                    ?old_lsn_commit,
-                    ?new_lsn_commit,
-                    ?old_lsn_proc,
-                    ?new_lsn_proc,
+                    ?old_offset,
+                    ?new_offset,
                     "Rejecting backward Postgres CDC offset update; \
                      keeping current state to prevent state-table regression."
                 );
@@ -549,6 +541,10 @@ pub fn extract_postgres_lsn_from_offset_str(offset_str: &str) -> Option<u64> {
     lsn.as_u64()
 }
 
+fn parse_postgres_offset_from_offset_str(offset_str: &str) -> Option<PostgresOffset> {
+    PostgresOffset::parse_debezium_offset(offset_str).ok()
+}
+
 /// Extract PostgreSQL `lsn_commit` from a CDC offset JSON string.
 ///
 /// `lsn_commit` is the WAL position of the last COMMIT message dbz has
@@ -649,8 +645,6 @@ mod tests {
     #[test]
     fn test_postgres_offset_monotonic_guard_rejects_backward_lsn() {
         let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
-        // Mark snapshot as done so we enter the streaming-phase guard.
-        split.inner.snapshot_done = true;
 
         // Push a backward LSN -- must be rejected, current offset kept.
         split
@@ -662,7 +656,6 @@ mod tests {
     #[test]
     fn test_postgres_offset_monotonic_guard_allows_forward_lsn() {
         let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
-        split.inner.snapshot_done = true;
 
         split.update_offset(pg_streaming_offset_json(250)).unwrap();
         assert_eq!(split.pg_lsn(), Some(250));
@@ -671,7 +664,6 @@ mod tests {
     #[test]
     fn test_postgres_offset_monotonic_guard_allows_equal_lsn() {
         let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
-        split.inner.snapshot_done = true;
 
         // Equal is allowed (no regression).
         split.update_offset(pg_streaming_offset_json(200)).unwrap();
@@ -680,12 +672,21 @@ mod tests {
 
     #[test]
     fn test_postgres_offset_snapshot_phase_bypasses_guard() {
+        let snapshot_offset = r#"{
+            "sourcePartition": {"server": "RW_CDC_1001"},
+            "sourceOffset": {
+                "last_snapshot_record": false,
+                "lsn": 150,
+                "txId": 12345,
+                "ts_usec": 1700000000000000
+            },
+            "isHeartbeat": false
+        }"#;
         let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
-        // snapshot_done stays false -- still in snapshot phase.
-        assert!(!split.inner.snapshot_done);
 
-        // Even with a smaller LSN, snapshot-phase offsets pass through.
-        split.update_offset(pg_streaming_offset_json(150)).unwrap();
+        // Snapshot / incomplete offsets do not have a comparable streaming
+        // `lsn_proc`, so they pass through even when the plain `lsn` is lower.
+        split.update_offset(snapshot_offset.to_owned()).unwrap();
         assert_eq!(split.pg_lsn(), Some(150));
     }
 
@@ -696,7 +697,6 @@ mod tests {
         // catastrophic case.
         let initial = pg_streaming_offset_json_full(200, 200, 200);
         let mut split = PostgresCdcSplit::new(1, Some(initial), None);
-        split.inner.snapshot_done = true;
 
         // lsn_commit 200 -> 150, but lsn / lsn_proc stay at 200.
         let new = pg_streaming_offset_json_full(200, 200, 150);
@@ -716,7 +716,6 @@ mod tests {
         // WalPositionLocator's dedup key on restart.
         let initial = pg_streaming_offset_json_full(200, 200, 200);
         let mut split = PostgresCdcSplit::new(1, Some(initial), None);
-        split.inner.snapshot_done = true;
 
         // lsn_proc 200 -> 150, but lsn / lsn_commit stay at 200.
         let new = pg_streaming_offset_json_full(200, 150, 200);
@@ -726,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn test_postgres_offset_interleaved_tx_lsn_proc_drop_rejected() {
+    fn test_postgres_offset_interleaved_tx_lsn_proc_drop_allowed_by_commit_lsn() {
         // Concurrent overlapping transactions under PG logical
         // replication produce a state-table chunk where the per-event
         // `lsn` and `lsn_proc` move backwards while `lsn_commit`
@@ -734,23 +733,17 @@ mod tests {
         // order, and the earlier-begin transaction's INSERT has a
         // smaller physical LSN even though it commits later).
         //
-        // We guard *both* lsn_commit and lsn_proc for resume safety,
-        // so this update is rejected and the split state is held at
-        // the previous values. The chunk itself is already emitted
-        // downstream; the only effect is the next actor recovery may
-        // replay a small window of events, which downstream MV upsert
-        // absorbs idempotently.
+        // Use the same Postgres offset ordering as #22503: compare
+        // `lsn_commit` first, then `lsn_proc`. Since the commit LSN
+        // advances, this update is not a regression.
         let initial = pg_streaming_offset_json_full(33_967_592, 33_967_592, 33_893_392);
         let mut split = PostgresCdcSplit::new(1, Some(initial), None);
-        split.inner.snapshot_done = true;
 
         let new = pg_streaming_offset_json_full(33_918_336, 33_918_336, 33_969_832);
         split.update_offset(new).unwrap();
 
-        // Update rejected because lsn_proc would regress. State held
-        // at the previous values.
-        assert_eq!(split.pg_lsn_commit(), Some(33_893_392));
-        assert_eq!(split.pg_lsn_proc(), Some(33_967_592));
+        assert_eq!(split.pg_lsn_commit(), Some(33_969_832));
+        assert_eq!(split.pg_lsn_proc(), Some(33_918_336));
     }
 
     #[test]
