@@ -18,10 +18,7 @@ use futures_async_stream::try_stream;
 use prometheus::core::GenericCounter;
 use risingwave_common::array::arrow::arrow_array_iceberg::{ArrayRef, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef;
-use risingwave_common::array::arrow::{
-    IcebergArrowConvert, is_parquet_field_match_source_schema,
-    is_parquet_schema_match_source_schema,
-};
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_field_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::types::{Datum, ScalarImpl};
@@ -129,39 +126,19 @@ impl ParquetParser {
                         self.find_parquet_column(&record_batch, rw_column_name)
                         && is_parquet_field_match_source_schema(parquet_field, rw_data_type)
                     {
-                        let arrow_field = if is_parquet_schema_match_source_schema(
-                            parquet_field.data_type(),
-                            rw_data_type,
-                        ) {
-                            IcebergArrowConvert
-                                .to_arrow_field(rw_column_name, rw_data_type)
-                                .map_err(|e| {
-                                    crate::parser::AccessError::ParquetParser {
-                                        message: format!(
-                                            "to_arrow_field failed, column='{}', rw_type='{}', offset={}, error={}",
-                                            rw_column_name, rw_data_type, self.offset, e.as_report()
-                                        )
-                                    }
-                                })?
-                        } else if IcebergArrowConvert
-                            .type_from_field(parquet_field)
-                            .is_ok_and(|inferred| &inferred == rw_data_type)
-                        {
-                            // Extension-typed match (e.g. variant): only the
-                            // parquet-side field carries the metadata to convert.
-                            parquet_field.as_ref().clone()
-                        } else {
-                            return Err(crate::parser::AccessError::ParquetParser {
-                                message: format!(
-                                    "column '{}' matches the source schema only via an extension \
-                                     type (e.g. variant), which requires the parquet field type \
-                                     to map exactly to the declared type; declared '{}', parquet \
-                                     field '{:?}', offset={}",
-                                    rw_column_name, rw_data_type, parquet_field, self.offset
-                                ),
-                            }
-                            .into());
-                        };
+                        // The match guard above verified this column converts to the
+                        // declared type; decode by the declared-side field, which for
+                        // variant carries the extension name that `from_array` routes on.
+                        let arrow_field = IcebergArrowConvert
+                            .to_arrow_field(rw_column_name, rw_data_type)
+                            .map_err(|e| {
+                                crate::parser::AccessError::ParquetParser {
+                                    message: format!(
+                                        "to_arrow_field failed, column='{}', rw_type='{}', offset={}, error={}",
+                                        rw_column_name, rw_data_type, self.offset, e.as_report()
+                                    )
+                                }
+                            })?;
                         let array_impl = IcebergArrowConvert
                             .array_from_arrow_array(&arrow_field, parquet_column)
                             .map_err(|e| {
