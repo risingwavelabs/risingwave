@@ -271,8 +271,6 @@ fn variant_arrow_field(name: &str) -> arrow_schema::Field {
 }
 
 fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
-    use arrow_array::Array as _;
-
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
     // The upstream decoder for the shredded encoding still panics (or silently nulls)
     // on data it cannot handle, so reject it wholesale like the iceberg-rust scan does.
@@ -281,8 +279,13 @@ fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, 
             "shredded variant (with a `typed_value` field) is not supported yet",
         ));
     }
-    let metadata_array = variant_array.metadata_field();
-    let value_array = variant_array.value_field();
+    // The physical binary layout is constant across the batch, so resolve the typed
+    // accessors once here rather than re-dispatching and downcasting per row.
+    let metadata_accessor = BinaryArrayAccessor::resolve(variant_array.metadata_field())?;
+    let value_accessor = variant_array
+        .value_field()
+        .map(BinaryArrayAccessor::resolve)
+        .transpose()?;
     let mut builder = VariantArrayBuilder::new(variant_array.len());
 
     for idx in 0..variant_array.len() {
@@ -295,17 +298,9 @@ fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, 
         // RW's canonical form, which the byte-wise `Eq`/`Ord` of VARIANT relies on.
         // TODO: rows of a batch virtually always share one metadata dictionary;
         // cache the validated metadata instead of re-validating it per row.
-        let variant_result = match value_array {
+        let variant_result = match &value_accessor {
             Some(value) if value.is_valid(idx) => {
-                match (
-                    binary_array_value(metadata_array, idx),
-                    binary_array_value(value, idx),
-                ) {
-                    (Some(metadata), Some(value)) => VariantVal::from_parts(metadata, value),
-                    _ => Err(anyhow::anyhow!(
-                        "variant metadata/value is not a binary array"
-                    )),
-                }
+                VariantVal::from_parts(metadata_accessor.value(idx), value.value(idx))
             }
             // Per spec, a missing `value` means variant null.
             _ => Ok(VariantVal::null()),
@@ -327,15 +322,49 @@ fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, 
     Ok(ArrayImpl::Variant(builder.finish()))
 }
 
-/// Reads the raw bytes at `index` from a binary-like Arrow array, returning `None` if the array
-/// is not one of the binary physical layouts a parquet reader may produce for variant fields.
-fn binary_array_value(array: &ArrayRef, index: usize) -> Option<&[u8]> {
-    use arrow_schema::DataType;
-    match array.data_type() {
-        DataType::Binary => Some(array.as_binary::<i32>().value(index)),
-        DataType::LargeBinary => Some(array.as_binary::<i64>().value(index)),
-        DataType::BinaryView => Some(array.as_binary_view().value(index)),
-        _ => None,
+/// A binary-like Arrow array with its physical layout resolved once per batch, so
+/// the per-row hot path just indexes the already-downcast array.
+///
+/// `VariantArray::try_new` validates the `metadata` and `value` fields as `Binary`,
+/// `LargeBinary`, or `BinaryView` before we get here, so [`resolve`](Self::resolve)
+/// covers every layout a variant field can carry and its error arm is unreachable
+/// for arrays taken from a `VariantArray`.
+enum BinaryArrayAccessor<'a> {
+    Binary(&'a arrow_array::BinaryArray),
+    LargeBinary(&'a arrow_array::LargeBinaryArray),
+    BinaryView(&'a arrow_array::BinaryViewArray),
+}
+
+impl<'a> BinaryArrayAccessor<'a> {
+    fn resolve(array: &'a ArrayRef) -> Result<Self, ArrayError> {
+        use arrow_schema::DataType;
+        match array.data_type() {
+            DataType::Binary => Ok(Self::Binary(array.as_binary::<i32>())),
+            DataType::LargeBinary => Ok(Self::LargeBinary(array.as_binary::<i64>())),
+            DataType::BinaryView => Ok(Self::BinaryView(array.as_binary_view())),
+            other => Err(ArrayError::from_arrow(format!(
+                "variant metadata/value has unsupported binary layout: {other}"
+            ))),
+        }
+    }
+
+    #[inline]
+    fn is_valid(&self, index: usize) -> bool {
+        use arrow_array::Array as _;
+        match self {
+            Self::Binary(array) => array.is_valid(index),
+            Self::LargeBinary(array) => array.is_valid(index),
+            Self::BinaryView(array) => array.is_valid(index),
+        }
+    }
+
+    #[inline]
+    fn value(&self, index: usize) -> &[u8] {
+        match self {
+            Self::Binary(array) => array.value(index),
+            Self::LargeBinary(array) => array.value(index),
+            Self::BinaryView(array) => array.value(index),
+        }
     }
 }
 
