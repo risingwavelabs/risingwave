@@ -4389,6 +4389,7 @@ dependencies = [
  "buoyant_kernel",
  "ctor 0.10.1",
  "deltalake-aws",
+ "deltalake-azure",
  "deltalake-core",
  "deltalake-gcp",
 ]
@@ -4418,6 +4419,20 @@ dependencies = [
  "typed-builder 0.23.0",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "deltalake-azure"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1b7099351f8d452374d75eda599cd7633a50f4a36ec318532ec6c5d1f9d908d"
+dependencies = [
+ "bytes",
+ "deltalake-core",
+ "object_store",
+ "thiserror 2.0.17",
+ "tokio",
+ "url",
 ]
 
 [[package]]

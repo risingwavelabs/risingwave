@@ -56,6 +56,7 @@ use crate::sink::{
 
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
+const ADLS_DEFAULT_AUTHORITY_HOST: &str = "https://login.microsoftonline.com";
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 
@@ -69,6 +70,21 @@ pub struct DeltaLakeCommon {
 
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
+
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
+    #[serde(rename = "adlsgen2.tenant_id")]
+    pub adlsgen2_tenant_id: Option<String>,
+    #[serde(rename = "adlsgen2.client_id")]
+    pub adlsgen2_client_id: Option<String>,
+    #[serde(rename = "adlsgen2.client_secret")]
+    pub adlsgen2_client_secret: Option<String>,
+    #[serde(rename = "adlsgen2.authority_host")]
+    pub adlsgen2_authority_host: Option<String>,
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
@@ -79,6 +95,8 @@ pub struct DeltaLakeCommon {
 impl EnforceSecret for DeltaLakeCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "gcs.service.account",
+        "adlsgen2.account_key",
+        "adlsgen2.client_secret",
     };
 
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -122,6 +140,12 @@ impl DeltaLakeCommon {
                 let url = Url::parse(&gcs_path).map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
                 deltalake::open_table_with_storage_options(url, storage_options).await?
             }
+            DeltaTableUrl::Azure(azure_path) => {
+                let storage_options = self.build_delta_lake_config_for_adls()?;
+                deltalake::azure::register_handlers(None);
+                let url = Self::normalize_adls_url(&azure_path).map_err(SinkError::DeltaLake)?;
+                deltalake::open_table_with_storage_options(url, storage_options).await?
+            }
         };
         Ok(table)
     }
@@ -131,13 +155,170 @@ impl DeltaLakeCommon {
             Ok(DeltaTableUrl::S3(path.to_owned()))
         } else if path.starts_with("gs://") {
             Ok(DeltaTableUrl::Gcs(path.to_owned()))
+        } else if path.starts_with("abfs://")
+            || path.starts_with("abfss://")
+            || path.starts_with("az://")
+            || path.starts_with("adl://")
+            || path.starts_with("azure://")
+            || Self::is_adls_https_url(path)
+        {
+            Ok(DeltaTableUrl::Azure(path.to_owned()))
         } else if let Some(path) = path.strip_prefix("file://") {
             Ok(DeltaTableUrl::Local(path.to_owned()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
-                "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
+                "path should start with 's3://','s3a://'(s3), gs://(gcs), abfs:// or abfss://(adls), https://<account>.dfs.core.windows.net/<container>/...(adls), or file://(local)"
             )))
         }
+    }
+
+    fn is_adls_https_url(path: &str) -> bool {
+        Url::parse(path)
+            .ok()
+            .filter(|url| url.scheme() == "https")
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .is_some_and(|host| {
+                host.ends_with(".dfs.core.windows.net")
+                    || host.ends_with(".blob.core.windows.net")
+                    || host.ends_with(".dfs.fabric.microsoft.com")
+                    || host.ends_with(".blob.fabric.microsoft.com")
+            })
+    }
+
+    fn normalize_adls_url(path: &str) -> std::result::Result<Url, anyhow::Error> {
+        let url = Url::parse(path)?;
+        if url.scheme() != "https" {
+            return Ok(url);
+        }
+
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow!("ADLS HTTPS URL must include a host"))?;
+        let mut segments = url
+            .path_segments()
+            .ok_or_else(|| anyhow!("ADLS HTTPS URL must include a container path segment"))?
+            .filter(|segment| !segment.is_empty());
+        let container = segments
+            .next()
+            .ok_or_else(|| anyhow!("ADLS HTTPS URL must include a container path segment"))?;
+        if container.contains('.') {
+            return Err(anyhow!("ADLS container name must not contain '.'"));
+        }
+
+        let mut abfss_path = format!("abfss://{}@{}", container, host);
+        let rest: Vec<_> = segments.collect();
+        if !rest.is_empty() {
+            abfss_path.push('/');
+            abfss_path.push_str(&rest.join("/"));
+        }
+        if let Some(query) = url.query() {
+            abfss_path.push('?');
+            abfss_path.push_str(query);
+        }
+        Url::parse(&abfss_path).map_err(Into::into)
+    }
+
+    fn build_delta_lake_config_for_adls(&self) -> Result<HashMap<String, String>> {
+        fn nonempty(v: &Option<String>) -> Option<&str> {
+            v.as_deref().filter(|s| !s.trim().is_empty())
+        }
+
+        let account_name = nonempty(&self.adlsgen2_account_name);
+        let account_key = nonempty(&self.adlsgen2_account_key);
+        let endpoint = nonempty(&self.adlsgen2_endpoint);
+        let tenant_id = nonempty(&self.adlsgen2_tenant_id);
+        let client_id = nonempty(&self.adlsgen2_client_id);
+        let client_secret = nonempty(&self.adlsgen2_client_secret);
+        let authority_host = nonempty(&self.adlsgen2_authority_host);
+
+        let any_sp_field = tenant_id.is_some()
+            || client_id.is_some()
+            || client_secret.is_some()
+            || authority_host.is_some();
+        let all_sp_required = tenant_id.is_some() && client_id.is_some() && client_secret.is_some();
+
+        if account_key.is_some() && any_sp_field {
+            return Err(SinkError::Config(anyhow!(
+                "adlsgen2: cannot configure both shared-key auth \
+                 (adlsgen2.account_key) and service-principal auth \
+                 (adlsgen2.tenant_id / adlsgen2.client_id / adlsgen2.client_secret / \
+                 adlsgen2.authority_host) simultaneously. Specify exactly one auth mode."
+            )));
+        }
+        if any_sp_field && !all_sp_required {
+            return Err(SinkError::Config(anyhow!(
+                "adlsgen2: service-principal auth requires all three of \
+                 adlsgen2.tenant_id, adlsgen2.client_id, and adlsgen2.client_secret \
+                 to be set. (adlsgen2.authority_host is optional and defaults to the \
+                 public Azure AAD endpoint.)"
+            )));
+        }
+
+        if let Some(host) = authority_host {
+            let parsed = Url::parse(host).map_err(|_| {
+                SinkError::Config(anyhow!(
+                    "adlsgen2.authority_host does not parse as a URL ({} chars)",
+                    host.len()
+                ))
+            })?;
+            if parsed.scheme() != "https" {
+                return Err(SinkError::Config(anyhow!(
+                    "adlsgen2.authority_host must use the https scheme, got {}",
+                    parsed.scheme()
+                )));
+            }
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                return Err(SinkError::Config(anyhow!(
+                    "adlsgen2.authority_host must not contain userinfo"
+                )));
+            }
+            if parsed.query().is_some() || parsed.fragment().is_some() {
+                return Err(SinkError::Config(anyhow!(
+                    "adlsgen2.authority_host must not contain a query or fragment"
+                )));
+            }
+            if !matches!(parsed.path(), "" | "/") {
+                return Err(SinkError::Config(anyhow!(
+                    "adlsgen2.authority_host must not contain a path component"
+                )));
+            }
+        }
+
+        let mut storage_options = HashMap::new();
+        if let Some(account_name) = account_name {
+            storage_options.insert(
+                "azure_storage_account_name".to_owned(),
+                account_name.to_owned(),
+            );
+        }
+        if let Some(account_key) = account_key {
+            storage_options.insert(
+                "azure_storage_account_key".to_owned(),
+                account_key.to_owned(),
+            );
+        }
+        if let Some(endpoint) = endpoint {
+            storage_options.insert("azure_storage_endpoint".to_owned(), endpoint.to_owned());
+        }
+        if let (Some(tenant_id), Some(client_id), Some(client_secret)) =
+            (tenant_id, client_id, client_secret)
+        {
+            storage_options.insert("azure_storage_tenant_id".to_owned(), tenant_id.to_owned());
+            storage_options.insert("azure_storage_client_id".to_owned(), client_id.to_owned());
+            storage_options.insert(
+                "azure_storage_client_secret".to_owned(),
+                client_secret.to_owned(),
+            );
+            storage_options.insert(
+                "azure_storage_authority_host".to_owned(),
+                authority_host
+                    .unwrap_or(ADLS_DEFAULT_AUTHORITY_HOST)
+                    .trim_end_matches('/')
+                    .to_owned(),
+            );
+        }
+
+        Ok(storage_options)
     }
 
     async fn build_delta_lake_config_for_aws(&self) -> Result<HashMap<String, String>> {
@@ -188,6 +369,7 @@ enum DeltaTableUrl {
     S3(String),
     Local(String),
     Gcs(String),
+    Azure(String),
 }
 
 #[serde_as]
@@ -750,9 +932,125 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
+    use super::{DeltaLakeCommon, DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
     use crate::sink::writer::SinkWriter;
     use crate::sink::{SinglePhaseCommitCoordinator, TwoPhaseCommitCoordinator};
+
+    #[test]
+    fn test_adls_table_url_detection() {
+        assert!(matches!(
+            DeltaLakeCommon::get_table_url("abfss://standard@xxx.dfs.core.windows.net/yyy/abc")
+                .unwrap(),
+            super::DeltaTableUrl::Azure(_)
+        ));
+        assert!(matches!(
+            DeltaLakeCommon::get_table_url("https://xxx.dfs.core.windows.net/standard/yyy/abc")
+                .unwrap(),
+            super::DeltaTableUrl::Azure(_)
+        ));
+    }
+
+    #[test]
+    fn test_normalize_adls_https_url() {
+        let url = DeltaLakeCommon::normalize_adls_url(
+            "https://xxx.dfs.core.windows.net/standard/yyy/abc",
+        )
+        .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "abfss://standard@xxx.dfs.core.windows.net/yyy/abc"
+        );
+
+        let url = DeltaLakeCommon::normalize_adls_url(
+            "abfss://standard@xxx.dfs.core.windows.net/yyy/abc",
+        )
+        .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "abfss://standard@xxx.dfs.core.windows.net/yyy/abc"
+        );
+    }
+
+    #[test]
+    fn test_build_adls_shared_key_config() {
+        let properties = btreemap! {
+            "connector".to_owned() => "deltalake".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => "abfss://standard@xxx.dfs.core.windows.net/yyy/abc".to_owned(),
+            "adlsgen2.account_name".to_owned() => "xxx".to_owned(),
+            "adlsgen2.account_key".to_owned() => "shared-key".to_owned(),
+            "adlsgen2.endpoint".to_owned() => "https://xxx.dfs.core.windows.net".to_owned(),
+        };
+
+        let config = DeltaLakeConfig::from_btreemap(properties).unwrap();
+        let storage_options = config.common.build_delta_lake_config_for_adls().unwrap();
+        assert_eq!(
+            storage_options.get("azure_storage_account_name").unwrap(),
+            "xxx"
+        );
+        assert_eq!(
+            storage_options.get("azure_storage_account_key").unwrap(),
+            "shared-key"
+        );
+        assert_eq!(
+            storage_options.get("azure_storage_endpoint").unwrap(),
+            "https://xxx.dfs.core.windows.net"
+        );
+    }
+
+    #[test]
+    fn test_build_adls_service_principal_config() {
+        let properties = btreemap! {
+            "connector".to_owned() => "deltalake".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => "abfss://standard@xxx.dfs.core.windows.net/yyy/abc".to_owned(),
+            "adlsgen2.account_name".to_owned() => "xxx".to_owned(),
+            "adlsgen2.tenant_id".to_owned() => "tenant".to_owned(),
+            "adlsgen2.client_id".to_owned() => "client".to_owned(),
+            "adlsgen2.client_secret".to_owned() => "secret".to_owned(),
+            "adlsgen2.authority_host".to_owned() => "https://login.microsoftonline.us/".to_owned(),
+        };
+
+        let config = DeltaLakeConfig::from_btreemap(properties).unwrap();
+        let storage_options = config.common.build_delta_lake_config_for_adls().unwrap();
+        assert_eq!(
+            storage_options.get("azure_storage_tenant_id").unwrap(),
+            "tenant"
+        );
+        assert_eq!(
+            storage_options.get("azure_storage_client_id").unwrap(),
+            "client"
+        );
+        assert_eq!(
+            storage_options.get("azure_storage_client_secret").unwrap(),
+            "secret"
+        );
+        assert_eq!(
+            storage_options.get("azure_storage_authority_host").unwrap(),
+            "https://login.microsoftonline.us"
+        );
+    }
+
+    #[test]
+    fn test_adls_rejects_mixed_auth_config() {
+        let properties = btreemap! {
+            "connector".to_owned() => "deltalake".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => "abfss://standard@xxx.dfs.core.windows.net/yyy/abc".to_owned(),
+            "adlsgen2.account_key".to_owned() => "shared-key".to_owned(),
+            "adlsgen2.tenant_id".to_owned() => "tenant".to_owned(),
+            "adlsgen2.client_id".to_owned() => "client".to_owned(),
+            "adlsgen2.client_secret".to_owned() => "secret".to_owned(),
+        };
+
+        let config = DeltaLakeConfig::from_btreemap(properties).unwrap();
+        let error = config
+            .common
+            .build_delta_lake_config_for_adls()
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cannot configure both shared-key auth"));
+    }
 
     #[tokio::test]
     async fn test_deltalake() {

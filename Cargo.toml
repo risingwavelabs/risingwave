@@ -153,7 +153,7 @@ axum-extra = "0.10"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
-deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
+deltalake = { version = "0.32.0", features = ["s3", "gcs", "azure"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { version = "0.21.2", features = ["serde", "tracing"] }
 futures-async-stream = "0.2.13"
