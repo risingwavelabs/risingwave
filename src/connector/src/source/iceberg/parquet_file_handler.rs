@@ -274,6 +274,14 @@ pub fn get_project_mask(
                     if is_parquet_field_match_source_schema(arrow_field, rw_data_type) {
                         Some(pos)
                     } else {
+                        // The parquet column exists but its type does not match the declared
+                        // schema; it is NULL-filled rather than decoded to a diverging type.
+                        tracing::warn!(
+                            column = %column.name,
+                            declared_type = %rw_data_type,
+                            parquet_field = ?arrow_field,
+                            "parquet column does not match the declared source schema; it will be NULL-filled",
+                        );
                         None
                     }
                 })
