@@ -35,9 +35,6 @@ const MIN_BLOCK_META_ENCODED_LEN: usize = 24;
 /// Persisted metadata format version for partitioned SST metadata.
 pub const PARTITIONED_META_VERSION: u32 = 3;
 
-/// Persisted shard-policy enum value for splitting metadata by a fixed number of data blocks.
-pub const META_SHARD_POLICY_FIXED_BLOCK_COUNT: u32 = 1;
-
 /// Index entry that points to one encoded metadata shard body.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MetaShardDesc {
@@ -112,7 +109,6 @@ pub struct MetaPartitionIndex {
     pub block_count: u32,
     pub shard_count: u32,
     pub filter_type: u32,
-    pub shard_policy: u32,
     pub shards: Vec<MetaShardDesc>,
 }
 
@@ -264,7 +260,6 @@ impl MetaPartitionIndex {
         buf.put_u32_le(self.block_count);
         buf.put_u32_le(self.shard_count);
         buf.put_u32_le(self.filter_type);
-        buf.put_u32_le(self.shard_policy);
         assert_eq!(self.shard_count as usize, self.shards.len());
         for shard in &self.shards {
             shard.encode(&mut buf);
@@ -289,7 +284,6 @@ impl MetaPartitionIndex {
         let block_count = get_u32_le_checked(buf, "partitioned meta block_count")?;
         let shard_count = get_u32_le_checked(buf, "partitioned meta shard_count")?;
         let filter_type = get_u32_le_checked(buf, "partitioned meta filter_type")?;
-        let shard_policy = get_u32_le_checked(buf, "partitioned meta shard_policy")?;
         ensure_count_fits_remaining(
             shard_count as usize,
             buf.len(),
@@ -315,7 +309,6 @@ impl MetaPartitionIndex {
             block_count,
             shard_count,
             filter_type,
-            shard_policy,
             shards,
         };
         index.validate(cursor + PARTITIONED_META_FOOTER_LEN)?;
@@ -332,7 +325,6 @@ impl MetaPartitionIndex {
             + 4 // block_count
             + 4 // shard_count
             + 4 // filter_type
-            + 4 // shard_policy
             + self
                 .shards
                 .iter()
@@ -604,7 +596,6 @@ mod tests {
                 .sum(),
             shard_count: descs.len() as u32,
             filter_type: 1,
-            shard_policy: META_SHARD_POLICY_FIXED_BLOCK_COUNT,
             shards: descs,
         };
         index.estimated_size = offset as u32 + index.encoded_size() as u32;
@@ -788,7 +779,6 @@ mod tests {
         body.put_u32_le(1); // block_count
         body.put_u32_le(u32::MAX); // shard_count
         body.put_u32_le(1); // filter_type
-        body.put_u32_le(META_SHARD_POLICY_FIXED_BLOCK_COUNT);
 
         assert!(MetaPartitionIndex::decode(&encode_index_body_with_footer(&body)).is_err());
     }
