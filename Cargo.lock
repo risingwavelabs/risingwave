@@ -14801,7 +14801,7 @@ dependencies = [
 [[package]]
 name = "sqlx"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -14813,7 +14813,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "bigdecimal 0.4.10",
@@ -14857,7 +14857,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -14869,7 +14869,7 @@ dependencies = [
 [[package]]
 name = "sqlx-macros-core"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "dotenvy",
  "either",
@@ -14894,7 +14894,7 @@ dependencies = [
 [[package]]
 name = "sqlx-mysql"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -14940,7 +14940,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -14983,7 +14983,7 @@ dependencies = [
 [[package]]
 name = "sqlx-sqlite"
 version = "0.8.2"
-source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=d43f1f28c0a2ec28144d81fdf78706ce30002b59#d43f1f28c0a2ec28144d81fdf78706ce30002b59"
 dependencies = [
  "atoi",
  "chrono",
