@@ -14,6 +14,7 @@
 
 pub mod hummock_storage;
 pub mod local_hummock_storage;
+pub(crate) mod table_change_log_manager;
 mod vector_writer;
 pub mod version;
 
