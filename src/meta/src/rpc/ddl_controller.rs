@@ -1453,6 +1453,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_sink_ids,
             removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
 
@@ -1530,13 +1531,15 @@ impl DdlController {
         // stop sink coordinators for iceberg table sinks
         if !iceberg_sink_ids.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids.clone())
+                .stop_sink_coordinator(iceberg_sink_ids)
                 .await;
+        }
 
-            for sink_id in iceberg_sink_ids {
-                self.iceberg_compaction_manager
-                    .clear_iceberg_maintenance_by_sink_id(sink_id);
-            }
+        // Covers user-created iceberg sinks dropped via CASCADE, which are not in
+        // `removed_iceberg_table_sinks` above.
+        for sink_id in removed_iceberg_sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(sink_id);
         }
 
         // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,

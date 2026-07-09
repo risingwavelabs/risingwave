@@ -143,6 +143,10 @@ pub struct ReleaseContext {
     /// Dropped iceberg table sinks
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 
+    /// Dropped iceberg sink ids. Used to clear iceberg maintenance (compaction
+    /// schedule and snapshot expiration) in `IcebergCompactionManager`.
+    pub(crate) removed_iceberg_sink_ids: Vec<SinkId>,
+
     /// Dropped Iceberg pk-index sink ids. Used to unregister per-sink commit workers
     /// owned by `IcebergPkIndexSinkManager`. Filtered via `is_iceberg_pk_index_sink` on
     /// the sink properties so user-created pk-index sinks (any name) are included.
