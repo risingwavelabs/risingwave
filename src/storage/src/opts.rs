@@ -164,6 +164,7 @@ pub struct StorageOpts {
 
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
+    pub table_change_log_cache_capacity: u64,
 
     pub iceberg_compaction_enable_validate: bool,
     pub iceberg_compaction_max_record_batch_rows: usize,
@@ -308,6 +309,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_concurrent_uploading_sst_count,
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
+            table_change_log_cache_capacity: c.storage.table_change_log_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
 

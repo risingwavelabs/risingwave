@@ -381,6 +381,26 @@ message GetCurrentVersionResponse {
   HummockVersion current_version = 2;
 }
 
+message GetTableChangeLogsRequest {
+  message TableFilter {
+    repeated uint32 table_ids = 1;
+  }
+  // If true, returns only the epoch without the full log bodies.
+  bool epoch_only = 1;
+  bool exclude_empty = 2;
+  // Defines the epoch range to fetch.
+  optional uint64 start_epoch_inclusive = 3;
+  optional uint64 end_epoch_inclusive = 4;
+  // Defines the tables to fetch.
+  optional TableFilter table_ids = 5;
+  // Limit the number of `EpochNewChangeLog` returned for each table.
+  optional uint32 limit = 6;
+}
+
+message GetTableChangeLogsResponse {
+  map<uint32, TableChangeLog> table_change_logs = 1;
+}
+
 message UnpinVersionRequest {
   uint32 context_id = 1;
 }
@@ -957,6 +977,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
+  rpc GetTableChangeLogs(GetTableChangeLogsRequest) returns (GetTableChangeLogsResponse);
 
   // iceberg
   rpc SubscribeIcebergCompactionEvent(stream iceberg_compaction.SubscribeIcebergCompactionEventRequest) returns (stream iceberg_compaction.SubscribeIcebergCompactionEventResponse);
