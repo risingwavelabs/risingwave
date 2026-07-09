@@ -340,7 +340,6 @@ pub struct MetaShard {
     pub shard_idx: u32,
     pub first_block_idx: u32,
     pub block_metas: Vec<BlockMeta>,
-    pub filter_type: u32,
     pub filter: Vec<u8>,
 }
 
@@ -364,7 +363,6 @@ impl MetaShard {
         first_block_idx: u32,
         expected_block_count: u32,
         expected_smallest_key: &[u8],
-        filter_type: u32,
         mut buf: &[u8],
     ) -> HummockResult<Self> {
         let block_meta_count =
@@ -422,7 +420,6 @@ impl MetaShard {
             shard_idx,
             first_block_idx,
             block_metas,
-            filter_type,
             filter,
         })
     }
@@ -556,7 +553,6 @@ mod tests {
             shard_idx,
             first_block_idx,
             block_metas,
-            filter_type: 1,
             filter: vec![shard_idx as u8, 9, 8, 7],
         }
     }
@@ -647,7 +643,6 @@ mod tests {
                 desc.first_block_idx,
                 desc.block_count,
                 &desc.smallest_key,
-                1,
                 &body,
             )
             .unwrap(),
@@ -714,10 +709,10 @@ mod tests {
         let body = shard.encode_body_to_bytes();
 
         assert!(
-            MetaShard::decode_body(0, 0, 3, &shard.block_metas[0].smallest_key, 1, &body).is_err()
+            MetaShard::decode_body(0, 0, 3, &shard.block_metas[0].smallest_key, &body).is_err()
         );
 
-        assert!(MetaShard::decode_body(0, 0, 2, &test_key(99), 1, &body).is_err());
+        assert!(MetaShard::decode_body(0, 0, 2, &test_key(99), &body).is_err());
 
         let mut bad_order = shard;
         bad_order.block_metas[1].smallest_key = bad_order.block_metas[0].smallest_key.clone();
@@ -727,7 +722,6 @@ mod tests {
                 0,
                 2,
                 &bad_order.block_metas[0].smallest_key,
-                1,
                 &bad_order.encode_body_to_bytes(),
             )
             .is_err()
@@ -805,7 +799,6 @@ mod tests {
                 desc.first_block_idx,
                 desc.block_count,
                 &desc.smallest_key,
-                1,
                 &truncated_body,
             )
             .is_err()
@@ -817,7 +810,7 @@ mod tests {
         let mut body = Vec::new();
         body.put_u32_le(u32::MAX); // block_meta_count
 
-        assert!(MetaShard::decode_body(0, 0, u32::MAX, &test_key(0), 1, &body).is_err());
+        assert!(MetaShard::decode_body(0, 0, u32::MAX, &test_key(0), &body).is_err());
     }
 
     fn reencode_index(mut index: MetaPartitionIndex) -> MetaPartitionIndex {
