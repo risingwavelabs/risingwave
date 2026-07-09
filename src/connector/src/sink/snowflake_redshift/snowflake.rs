@@ -769,26 +769,30 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
         let schema_change_op = schema_change
             .op
             .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
-        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
-            return Err(SinkError::Coordinator(anyhow!(
-                "Only AddColumns schema change is supported for Snowflake sink"
-            )));
-        };
         let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
-        client
-            .execute_alter_add_columns(
-                &add_columns
-                    .fields
-                    .into_iter()
-                    .map(|f| {
-                        let dt = DataType::from(f.data_type.unwrap());
-                        Ok((f.name, convert_snowflake_data_type(&dt)?))
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            )
-            .await
+        match schema_change_op {
+            SinkSchemaChangeOp::AddColumns(add_columns) => {
+                client
+                    .execute_alter_add_columns(
+                        &add_columns
+                            .fields
+                            .into_iter()
+                            .map(|f| {
+                                let dt = DataType::from(f.data_type.unwrap());
+                                Ok((f.name, convert_snowflake_data_type(&dt)?))
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    )
+                    .await
+            }
+            SinkSchemaChangeOp::DropColumns(drop_columns) => {
+                client
+                    .execute_alter_drop_columns(&drop_columns.column_names)
+                    .await
+            }
+        }
     }
 }
 
@@ -846,6 +850,46 @@ impl SnowflakeJniClient {
         );
         self.jdbc_client
             .execute_sql_sync(vec![alter_add_column_target_table_sql])
+            .await?;
+
+        self.execute_create_merge_into_task().await?;
+        Ok(())
+    }
+
+    pub async fn execute_alter_drop_columns(&mut self, column_names: &[String]) -> Result<()> {
+        self.execute_drop_task().await?;
+        if let Some(pk_column_name) = column_names.iter().find(|name| {
+            self.snowflake_task_context
+                .pk_column_names
+                .as_ref()
+                .is_some_and(|pk_column_names| pk_column_names.contains(name))
+        }) {
+            return Err(SinkError::Coordinator(anyhow!(
+                "Cannot drop primary key column {} for Snowflake sink",
+                pk_column_name
+            )));
+        }
+        if let Some(names) = self.snowflake_task_context.all_column_names.as_mut() {
+            names.retain(|name| !column_names.contains(name));
+        }
+        if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
+            self.jdbc_client
+                .execute_sql_sync(build_alter_drop_column_sql(
+                    cdc_table_name,
+                    &self.snowflake_task_context.database,
+                    &self.snowflake_task_context.schema_name,
+                    column_names,
+                ))
+                .await?;
+        }
+
+        self.jdbc_client
+            .execute_sql_sync(build_alter_drop_column_sql(
+                &self.snowflake_task_context.target_table_name,
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                column_names,
+            ))
             .await?;
 
         self.execute_create_merge_into_task().await?;
@@ -1045,6 +1089,24 @@ fn build_alter_add_column_sql(
 ) -> String {
     let full_table_name = build_full_table_name(database, schema, table_name);
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, true)
+}
+
+fn build_alter_drop_column_sql(
+    table_name: &str,
+    database: &str,
+    schema: &str,
+    column_names: &[String],
+) -> Vec<String> {
+    let full_table_name = build_full_table_name(database, schema, table_name);
+    column_names
+        .iter()
+        .map(|name| {
+            format!(
+                r#"ALTER TABLE {} DROP COLUMN IF EXISTS "{}""#,
+                full_table_name, name
+            )
+        })
+        .collect()
 }
 
 fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String {
@@ -1502,6 +1564,46 @@ END;"#;
             sql.contains(r#"FROM @"test_db"."test_schema"."RW_S3_STAGE"/reservations/ "#),
             "unexpected pipe sql: {sql}"
         );
+    }
+
+    #[test]
+    fn test_build_alter_drop_column_sql() {
+        let sqls = build_alter_drop_column_sql(
+            "test_table",
+            "test_db",
+            "test_schema",
+            &["v2".to_owned(), "v3".to_owned()],
+        );
+        assert_eq!(
+            sqls,
+            vec![
+                r#"ALTER TABLE "test_db"."test_schema"."test_table" DROP COLUMN IF EXISTS "v2""#,
+                r#"ALTER TABLE "test_db"."test_schema"."test_table" DROP COLUMN IF EXISTS "v3""#,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_task_sql_after_drop_column() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_task_drop_column".to_owned()),
+            cdc_table_name: Some("test_cdc_table".to_owned()),
+            target_table_name: "test_target_table".to_owned(),
+            writer_target_interval_seconds: 60,
+            warehouse: Some("test_warehouse".to_owned()),
+            pk_column_names: Some(vec!["v1".to_owned()]),
+            all_column_names: Some(vec!["v1".to_owned(), "v3".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+
+        assert!(task_sql.contains(r#"target."v3" = source."v3""#));
+        assert!(task_sql.contains(r#"INSERT ("v1", "v3") VALUES (source."v1", source."v3")"#));
+        assert!(!task_sql.contains(r#""v2""#));
     }
 
     #[test]

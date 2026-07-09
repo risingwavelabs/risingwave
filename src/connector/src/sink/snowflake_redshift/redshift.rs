@@ -71,6 +71,18 @@ fn build_alter_add_column_sql(
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, false)
 }
 
+fn build_alter_drop_column_sql(
+    schema_name: Option<&str>,
+    table_name: &str,
+    column_names: &[String],
+) -> Vec<String> {
+    let full_table_name = build_full_table_name(schema_name, table_name);
+    column_names
+        .iter()
+        .map(|name| format!(r#"ALTER TABLE {} DROP COLUMN "{}""#, full_table_name, name))
+        .collect()
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RedShiftConfig {
@@ -678,29 +690,12 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
         let schema_change_op = schema_change
             .op
             .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
-        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
-            return Err(SinkError::Coordinator(anyhow!(
-                "Only AddColumns schema change is supported for Redshift sink"
-            )));
-        };
         if let Some(shutdown_sender) = &self.shutdown_sender {
             // Send shutdown signal to the periodic task before altering the table
             shutdown_sender
                 .send(())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
         }
-        let sql = build_alter_add_column_sql(
-            self.config.schema.as_deref(),
-            &self.config.table,
-            &add_columns
-                .fields
-                .iter()
-                .map(|f| {
-                    let dt = DataType::from(f.data_type.as_ref().unwrap());
-                    Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
-                })
-                .collect::<Result<Vec<_>>>()?,
-        );
         let check_column_exists = |e: anyhow::Error| {
             let err_str = e.to_report_string();
             if regex::Regex::new(".+ of relation .+ already exists")
@@ -713,40 +708,103 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             warn!("redshift sink columns already exists. skipped");
             Ok(())
         };
-        self.client
-            .execute_sql_sync(vec![sql.clone()])
-            .await
-            .or_else(check_column_exists)?;
+        let check_column_missing = |e: anyhow::Error| {
+            let err_str = e.to_report_string();
+            if !err_str.contains("does not exist") {
+                return Err(e);
+            }
+            warn!("redshift sink columns do not exist. skipped");
+            Ok(())
+        };
+
+        let mut dropped_column_names = Vec::new();
+        match &schema_change_op {
+            SinkSchemaChangeOp::AddColumns(add_columns) => {
+                let sql = build_alter_add_column_sql(
+                    self.config.schema.as_deref(),
+                    &self.config.table,
+                    &add_columns
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            let dt = DataType::from(f.data_type.as_ref().unwrap());
+                            Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                );
+                self.client
+                    .execute_sql_sync(vec![sql.clone()])
+                    .await
+                    .or_else(check_column_exists)?;
+            }
+            SinkSchemaChangeOp::DropColumns(drop_columns) => {
+                if let Some(pk_column_name) = drop_columns
+                    .column_names
+                    .iter()
+                    .find(|name| self.pk_column_names.contains(name))
+                {
+                    return Err(SinkError::Coordinator(anyhow!(
+                        "Cannot drop primary key column {} for Redshift sink",
+                        pk_column_name
+                    )));
+                }
+                dropped_column_names = drop_columns.column_names.clone();
+                self.client
+                    .execute_sql_sync(build_alter_drop_column_sql(
+                        self.config.schema.as_deref(),
+                        &self.config.table,
+                        &dropped_column_names,
+                    ))
+                    .await
+                    .or_else(check_column_missing)?;
+            }
+        }
         let merge_into_sql = if !self.is_append_only {
             let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
                 SinkError::Config(anyhow!(
                     "intermediate.table.name is required for non-append-only sink"
                 ))
             })?;
-            let sql = build_alter_add_column_sql(
-                self.config.schema.as_deref(),
-                cdc_table_name,
-                &add_columns
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        let dt = DataType::from(f.data_type.as_ref().unwrap());
-                        Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            );
-            self.client
-                .execute_sql_sync(vec![sql.clone()])
-                .await
-                .or_else(check_column_exists)?;
-            self.all_column_names
-                .extend(add_columns.fields.iter().map(|f| f.name.clone()));
             let target_schema_name = self.config.schema.as_deref();
             let effective_cdc_schema = self
                 .config
                 .intermediate_schema
                 .as_deref()
                 .or(target_schema_name);
+            match &schema_change_op {
+                SinkSchemaChangeOp::AddColumns(add_columns) => {
+                    let sql = build_alter_add_column_sql(
+                        effective_cdc_schema,
+                        cdc_table_name,
+                        &add_columns
+                            .fields
+                            .iter()
+                            .map(|f| {
+                                let dt = DataType::from(f.data_type.as_ref().unwrap());
+                                Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                    self.client
+                        .execute_sql_sync(vec![sql.clone()])
+                        .await
+                        .or_else(check_column_exists)?;
+                    self.all_column_names
+                        .extend(add_columns.fields.iter().map(|f| f.name.clone()));
+                }
+                SinkSchemaChangeOp::DropColumns(_) => {
+                    self.client
+                        .execute_sql_sync(build_alter_drop_column_sql(
+                            effective_cdc_schema,
+                            cdc_table_name,
+                            &dropped_column_names,
+                        ))
+                        .await
+                        .or_else(check_column_missing)?;
+                    self.all_column_names
+                        .retain(|name| !dropped_column_names.contains(name));
+                }
+            }
             let merge_into_sql = build_create_merge_into_task_sql(
                 effective_cdc_schema,
                 target_schema_name,
@@ -1000,6 +1058,40 @@ fn build_copy_into_sql(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sink::jdbc_jni_client::normalize_sql;
+
+    #[test]
+    fn test_build_alter_drop_column_sql() {
+        let sqls = build_alter_drop_column_sql(
+            Some("test_schema"),
+            "test_table",
+            &["v2".to_owned(), "v3".to_owned()],
+        );
+        assert_eq!(
+            sqls,
+            vec![
+                r#"ALTER TABLE "test_schema"."test_table" DROP COLUMN "v2""#,
+                r#"ALTER TABLE "test_schema"."test_table" DROP COLUMN "v3""#,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_sql_after_drop_column() {
+        let sqls = build_create_merge_into_task_sql(
+            Some("cdc_schema"),
+            Some("target_schema"),
+            "cdc_table",
+            "target_table",
+            &vec!["v1".to_owned()],
+            &vec!["v1".to_owned(), "v3".to_owned()],
+        );
+        let sql = normalize_sql(&sqls.join("\n"));
+
+        assert!(sql.contains(r#"UPDATE SET v1 = source.v1, v3 = source.v3"#));
+        assert!(sql.contains(r#"INSERT (v1, v3) VALUES (source.v1, source.v3)"#));
+        assert!(!sql.contains("v2"));
+    }
 
     #[test]
     fn test_convert_redshift_decimal_data_type() {
