@@ -460,6 +460,10 @@ HttpConfig:
       Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
       for `jsonb`.
     required: false
+  - name: batch_size
+    field_type: usize
+    comments: Maximum number of JSON payload rows to include in one HTTP request.
+    required: false
   - name: r#type
     field_type: String
     comments: Sink type, must be "append-only".
