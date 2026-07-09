@@ -163,27 +163,16 @@ mod tests {
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
-        let exprs = vec![
-            Box::new(LiteralExpression::new(
-                DataType::Int16,
-                Some(ScalarImpl::Int16(1)),
-            )) as BoxedExpression,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(2)),
-            )),
-            Box::new(LiteralExpression::new(
-                DataType::Int64,
-                Some(ScalarImpl::Int64(3)),
-            )),
-            Box::new(LiteralExpression::new(
+        let exprs: Vec<BoxedExpression> = vec![
+            LiteralExpression::new(DataType::Int16, Some(ScalarImpl::Int16(1))).into(),
+            LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(2))).into(),
+            LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(3))).into(),
+            LiteralExpression::new(
                 StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
                 Some(ScalarImpl::Struct(value)),
-            )),
-            Box::new(LiteralExpression::new(
-                DataType::Int64,
-                Some(ScalarImpl::Int64(0)),
-            )),
+            )
+            .into(),
+            LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(0))).into(),
         ];
         let schema = exprs
             .iter() // for each column

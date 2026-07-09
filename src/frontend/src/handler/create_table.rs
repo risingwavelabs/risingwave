@@ -1843,6 +1843,7 @@ pub async fn create_iceberg_engine_table(
         (ICEBERG_SINK_PREFIX.to_owned() + &sink_name.0.last().unwrap().real_value()).as_str(),
     );
     let create_sink_stmt = CreateSinkStatement {
+        or_replace: false,
         if_not_exists: false,
         sink_name,
         with_properties: WithProperties(vec![]),

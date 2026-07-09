@@ -17,7 +17,6 @@
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::Context;
 use enum_as_inner::EnumAsInner;
@@ -32,9 +31,7 @@ use risingwave_pb::expr::{
 };
 
 use crate::Result;
-use crate::expr::{
-    BoxedExpression, ExpectExt, Expression, LiteralExpression, Token, build_from_prost,
-};
+use crate::expr::{BoxedExpression, ExpectExt, LiteralExpression, Token, build_from_prost};
 
 /// Represents an aggregation function.
 // TODO(runji):
@@ -56,7 +53,7 @@ pub struct AggCall {
     pub column_orders: Vec<ColumnOrder>,
 
     /// Filter of aggregation.
-    pub filter: Option<Arc<dyn Expression>>,
+    pub filter: Option<BoxedExpression>,
 
     /// Should deduplicate the input before aggregation.
     pub distinct: bool,
@@ -83,7 +80,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()), /* TODO: non-strict filter in streaming */
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?), /* TODO: non-strict filter in streaming */
             None => None,
         };
         let direct_args = agg_call
@@ -121,7 +118,7 @@ impl AggCall {
     }
 
     pub fn with_filter(mut self, filter: BoxedExpression) -> Self {
-        self.filter = Some(filter.into());
+        self.filter = Some(filter);
         self
     }
 }

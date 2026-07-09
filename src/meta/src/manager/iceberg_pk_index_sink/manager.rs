@@ -19,18 +19,18 @@ use anyhow::anyhow;
 use parking_lot::RwLock;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata as PbIcebergV3SinkMetadata;
+use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use super::coordinator::IcebergV3Coordinator;
+use super::coordinator::IcebergPkIndexSinkCoordinator;
 
-type CoordinatorRef = Arc<Mutex<IcebergV3Coordinator>>;
+type CoordinatorRef = Arc<Mutex<IcebergPkIndexSinkCoordinator>>;
 
-/// Manager for the Iceberg V3 sink path, cheap to clone.
+/// Manager for the Iceberg pk-index sink path, cheap to clone.
 #[derive(Clone)]
-pub struct IcebergV3SinkManager {
+pub struct IcebergPkIndexSinkManager {
     inner: Arc<ManagerInner>,
 }
 
@@ -41,9 +41,9 @@ struct ManagerInner {
     coordinators: RwLock<HashMap<SinkId, CoordinatorRef>>,
 }
 
-impl IcebergV3SinkManager {
+impl IcebergPkIndexSinkManager {
     pub fn new(db: DatabaseConnection) -> Self {
-        IcebergV3SinkManager {
+        IcebergPkIndexSinkManager {
             inner: Arc::new(ManagerInner {
                 db,
                 coordinators: RwLock::new(HashMap::new()),
@@ -51,18 +51,19 @@ impl IcebergV3SinkManager {
         }
     }
 
-    /// Register an Iceberg V3 sink so its commit coordinator is ready to receive epoch reports. Builds and
+    /// Register an Iceberg pk-index sink so its commit coordinator is ready to receive epoch reports. Builds and
     /// fully initializes the coordinator (loading the iceberg table and draining any recovered pending
     /// commits) BEFORE inserting it, so a successful return means the sink is ready to serve. Idempotent:
     /// registering the same `sink_id` replaces the existing coordinator.
-    pub async fn register_v3_sink(
+    pub async fn register_sink(
         &self,
         sink_id: SinkId,
         iceberg_config: IcebergConfig,
     ) -> anyhow::Result<()> {
         // Initialize (load + recover + drain) outside the map lock; this is the slow, fallible part.
         let coordinator =
-            IcebergV3Coordinator::init(sink_id, iceberg_config, self.inner.db.clone()).await?;
+            IcebergPkIndexSinkCoordinator::init(sink_id, iceberg_config, self.inner.db.clone())
+                .await?;
 
         let prev = self
             .inner
@@ -72,18 +73,18 @@ impl IcebergV3SinkManager {
         if prev.is_some() {
             // Replacing an existing coordinator. Any in-flight commit on the old one keeps it alive via its
             // own `Arc` until it finishes; the snapshot_id idempotency check guards against double-commit.
-            warn!(%sink_id, "iceberg v3 coordinator re-registered; replacing previous instance");
+            warn!(%sink_id, "iceberg pk-index sink coordinator re-registered; replacing previous instance");
         }
         Ok(())
     }
 
     /// Pre-commit phase for one epoch: persist the merged report under `pending_sink_state` (no iceberg IO).
     /// The barrier-complete path awaits this BEFORE issuing hummock `commit_epoch`.
-    pub async fn pre_commit_v3_epoch(
+    pub async fn pre_commit_epoch(
         &self,
         sink_id: SinkId,
         prev_epoch: u64,
-        reports: Vec<PbIcebergV3SinkMetadata>,
+        reports: Vec<PbIcebergPkIndexSinkMetadata>,
     ) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
         coordinator
@@ -95,14 +96,14 @@ impl IcebergV3SinkManager {
 
     /// Commit phase for one epoch: run an iceberg `overwrite_files` transaction and mark its pending row
     /// committed. The barrier-complete path awaits this AFTER hummock `commit_epoch`.
-    pub async fn commit_v3_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
+    pub async fn commit_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
         coordinator.lock().await.commit().await
     }
 
     /// Unregister the given `sink_id`(s)' coordinator(s) (e.g. at DROP SINK time). Unregistering an unknown
     /// `sink_id` is a no-op.
-    pub fn unregister_v3_sinks(&self, sink_ids: Vec<SinkId>) {
+    pub fn unregister_sinks(&self, sink_ids: Vec<SinkId>) {
         let mut coordinators = self.inner.coordinators.write();
         for sink_id in sink_ids {
             coordinators.remove(&sink_id);
@@ -122,7 +123,7 @@ impl IcebergV3SinkManager {
             .cloned()
             .ok_or_else(|| {
                 anyhow!(
-                    "iceberg v3 coordinator for sink {} is not registered",
+                    "iceberg pk-index sink coordinator for sink {} is not registered",
                     sink_id
                 )
             })

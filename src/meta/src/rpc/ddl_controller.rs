@@ -76,7 +76,7 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -168,6 +168,7 @@ pub enum DdlCommand {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
         since_timestamp_epoch: Option<u64>,
     },
     DropStreamingJob {
@@ -286,7 +287,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
-    iceberg_v3_sink_manager: IcebergV3SinkManager,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -409,7 +410,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -420,7 +421,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -479,6 +480,7 @@ impl DdlController {
                     resource_type,
                     if_not_exists,
                     refresh_interval_sec,
+                    replace_sink,
                     since_timestamp_epoch,
                 } => {
                     ctrl.create_streaming_job(
@@ -488,6 +490,7 @@ impl DdlController {
                         resource_type,
                         if_not_exists,
                         refresh_interval_sec,
+                        replace_sink,
                         since_timestamp_epoch,
                     )
                     .await
@@ -1094,15 +1097,27 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        replace_sink: Option<SinkId>,
         since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
-        if let StreamingJob::Sink(sink) = &streaming_job
-            && let Some(target_table) = sink.target_table
-        {
-            self.validate_table_for_sink(target_table).await?;
-        }
-        self.validate_serverless_backfill_enabled(&resource_type)?;
+        let replace_sink_info = if let Some(old_sink_id) = replace_sink {
+            let StreamingJob::Sink(sink) = &streaming_job else {
+                bail!("replace sink requires a sink job")
+            };
+            if sink.target_table.is_some() {
+                bail_not_implemented!("replace sink into table")
+            }
 
+            Some(old_sink_id)
+        } else {
+            if let StreamingJob::Sink(sink) = &streaming_job
+                && let Some(target_table) = sink.target_table
+            {
+                self.validate_table_for_sink(target_table).await?;
+            }
+            None
+        };
+        self.validate_serverless_backfill_enabled(&resource_type)?;
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let adaptive_parallelism_strategy =
             (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
@@ -1130,6 +1145,7 @@ impl DdlController {
                 &fragment_graph.backfill_parallelism,
                 adaptive_parallelism_strategy,
                 backfill_adaptive_parallelism_strategy,
+                replace_sink_info.as_ref(),
                 refresh_interval_sec,
             )
             .await
@@ -1154,13 +1170,23 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
-        tracing::debug!(
-            id = %job_id,
-            definition = streaming_job.definition(),
-            create_type = streaming_job.create_type().as_str_name(),
-            job_type = ?streaming_job.job_type(),
-            "starting streaming job",
-        );
+        if let Some(old_sink_id) = replace_sink_info.as_ref() {
+            tracing::debug!(
+                old_sink_id = %old_sink_id,
+                new_sink_id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                "starting replacement sink",
+            );
+        } else {
+            tracing::debug!(
+                id = %job_id,
+                definition = streaming_job.definition(),
+                create_type = streaming_job.create_type().as_str_name(),
+                job_type = ?streaming_job.job_type(),
+                "starting streaming job",
+            );
+        }
         // TODO: acquire permits for recovered background DDLs.
         let permit = self
             .creating_streaming_job_permits
@@ -1187,6 +1213,7 @@ impl DdlController {
                 fragment_graph,
                 resource_type.clone(),
                 streaming_job_model,
+                replace_sink_info,
                 since_timestamp_epoch,
             )
             .await
@@ -1241,6 +1268,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
         streaming_job_model: streaming_job::Model,
+        replace_sink: Option<SinkId>,
         since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
@@ -1261,7 +1289,7 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
-        let (ctx, stream_job_fragments) = self
+        let (mut ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
@@ -1271,6 +1299,7 @@ impl DdlController {
                 since_timestamp_epoch,
             )
             .await?;
+        ctx.replace_sink = replace_sink;
 
         let streaming_job = &ctx.streaming_job;
 
@@ -1306,15 +1335,16 @@ impl DdlController {
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
-                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // For Iceberg pk-index sinks, spawn the per-sink commit worker now
                 // so it's ready to receive epoch reports from the very first
                 // barrier instead of relying on lazy registration on every
                 // commit.
-                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
+                {
                     let iceberg_config =
-                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
-                    self.iceberg_v3_sink_manager
-                        .register_v3_sink(sink.id, iceberg_config)
+                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
+                    self.iceberg_pk_index_sink_manager
+                        .register_sink(sink.id, iceberg_config)
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
                 }
@@ -1358,15 +1388,32 @@ impl DdlController {
         }
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
-        self.metadata_manager
-            .catalog_controller
-            .prepare_stream_job_fragments(
-                &stream_job_fragments,
-                streaming_job,
-                false,
-                Some(backfill_orders),
-            )
-            .await?;
+        // Replacement sinks use a temporary catalog name before cutover, so do not notify
+        // frontend about their creating catalog.
+        let notify_creating = replace_sink.is_none();
+        if notify_creating {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_stream_job_fragments(
+                    &stream_job_fragments,
+                    streaming_job,
+                    false,
+                    Some(backfill_orders),
+                )
+                .await?;
+        } else {
+            self.metadata_manager
+                .catalog_controller
+                .prepare_streaming_job(
+                    stream_job_fragments.stream_job_id(),
+                    || stream_job_fragments.fragments.values(),
+                    &stream_job_fragments.downstreams,
+                    false,
+                    None,
+                    Some(backfill_orders),
+                )
+                .await?;
+        }
 
         Ok((stream_job_fragments, ctx))
     }
@@ -1406,7 +1453,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
-            removed_iceberg_v3_sink_ids,
+            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1492,12 +1539,12 @@ impl DdlController {
             }
         }
 
-        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
         // including user-created sinks with arbitrary names (not just the
         // `__iceberg_sink_%` auto-created ones above).
-        if !removed_iceberg_v3_sink_ids.is_empty() {
-            self.iceberg_v3_sink_manager
-                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
+        if !removed_iceberg_pk_index_sink_ids.is_empty() {
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
         }
 
         // remove secrets.
@@ -2010,6 +2057,7 @@ impl DdlController {
             is_serverless_backfill,
             resource_type,
             streaming_job_model: streaming_job_model.clone(),
+            replace_sink: None,
             refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
             since_timestamp_epoch,
         };

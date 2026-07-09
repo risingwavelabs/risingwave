@@ -47,6 +47,10 @@ message AddMutation {
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   // Use downstream_fragment_id as keys.
   map<uint32, NewUpstreamSink> new_upstream_sinks = 8;
+  // All actors to be dropped while adding the new streaming job.
+  repeated uint32 dropped_actors = 9;
+  // Sink ids whose log store must be drained before this add barrier can be collected.
+  repeated uint32 sink_log_store_flush = 10;
 }
 
 message StopMutation {
@@ -384,7 +388,7 @@ message IcebergWithPkIndexWriterNode {
   catalog.Table pk_index_table = 2;
 }
 
-message IcebergWithPkIndexDvMergerNode {
+message IcebergWithPkIndexPositionDeleteMergerNode {
   SinkDesc sink_desc = 1;
 }
 
@@ -1200,7 +1204,7 @@ message StreamNode {
     GapFillNode gap_fill = 154;
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
     IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
-    IcebergWithPkIndexDvMergerNode iceberg_with_pk_index_dv_merger = 157;
+    IcebergWithPkIndexPositionDeleteMergerNode iceberg_with_pk_index_position_delete_merger = 157;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -274,6 +274,21 @@ impl ListArray {
 
     /// Apply the function on the underlying elements.
     /// e.g. `map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]`
+    pub fn map_inner_sync<E, F>(self, f: F) -> std::result::Result<ListArray, E>
+    where
+        F: FnOnce(ArrayImpl) -> std::result::Result<ArrayImpl, E>,
+    {
+        let new_value = (f)(*self.value)?;
+
+        Ok(Self {
+            offsets: self.offsets,
+            bitmap: self.bitmap,
+            value: Box::new(new_value),
+        })
+    }
+
+    /// Apply the async function on the underlying elements.
+    /// e.g. `map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]`
     pub async fn map_inner<E, Fut, F>(self, f: F) -> std::result::Result<ListArray, E>
     where
         F: FnOnce(ArrayImpl) -> Fut,

@@ -178,14 +178,13 @@ impl EnforceSecret for IcebergConnection {
 impl Connection for IcebergConnection {
     async fn validate_connection(&self) -> ConnectorResult<()> {
         let common = &self.common;
+        let is_rest_catalog = common.is_rest_catalog()?;
 
         let info = match &common.warehouse_path {
             Some(warehouse_path) => {
                 let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                 let url = Url::parse(warehouse_path);
-                if (url.is_err() || is_s3_tables)
-                    && matches!(common.catalog_type(), "rest" | "rest_rust")
-                {
+                if (url.is_err() || is_s3_tables) && is_rest_catalog {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
                     // so we allow it to pass here.
@@ -204,7 +203,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if matches!(common.catalog_type(), "rest" | "rest_rust") {
+                if is_rest_catalog {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
@@ -303,7 +302,10 @@ impl Connection for IcebergConnection {
         if let Some(jdbc_password) = &self.jdbc_password {
             java_map.insert("jdbc.password".to_owned(), jdbc_password.to_owned());
         }
-        let catalog = iceberg_common.create_catalog(&java_map).await?;
+        let catalog = iceberg_common
+            .resolve_catalog_config(java_map)?
+            .create_catalog()
+            .await?;
         // test catalog by `table_exists` api
         let test_table_ident = IcebergTableIdentifier {
             database_name: Some("test_database".to_owned()),

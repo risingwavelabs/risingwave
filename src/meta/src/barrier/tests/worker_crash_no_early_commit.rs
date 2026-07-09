@@ -179,16 +179,19 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn pre_commit_iceberg_v3_sink_metadata(
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
         _reports: Vec<
-            risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+            risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
         >,
     ) -> MetaResult<Vec<SinkId>> {
         unimplemented!()
     }
 
-    async fn commit_iceberg_v3_sink_metadata(&self, _sink_ids: Vec<SinkId>) -> MetaResult<()> {
+    async fn commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _sink_ids: Vec<SinkId>,
+    ) -> MetaResult<()> {
         unimplemented!()
     }
 }

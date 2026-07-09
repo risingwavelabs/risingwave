@@ -41,7 +41,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -57,6 +56,51 @@ use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
+
+// The TimestampHandling/TimestamptzHandling/TimeHandling parser's behavior depends on the debezium.time.precision.mode setting:
+// - If left unset, Debezium defaults to time.precision.mode=microseconds (per debezium.properties), and the parser uses Micro.
+// - If set to "connect", Debezium uses time.precision.mode=connect, and the parser uses Milli by design.
+// - If set to any other value, Debezium applies that specific value, and the default parser is used to maintain backward compatibility.
+pub(crate) fn get_cdc_json_parse_handling_from_properties(
+    properties: &BTreeMap<String, String>,
+) -> (
+    Option<TimestampHandling>,
+    Option<TimestamptzHandling>,
+    Option<TimeHandling>,
+    Option<BigintUnsignedHandlingMode>,
+) {
+    let (timestamp_handling, timestamptz_handling, time_handling) = match properties
+        .get("debezium.time.precision.mode")
+    {
+        None => (
+            Some(TimestampHandling::Micro),
+            Some(TimestamptzHandling::Micro),
+            Some(TimeHandling::Micro),
+        ),
+        Some(m) if m == "connect" => (
+            Some(TimestampHandling::Milli),
+            Some(TimestamptzHandling::Milli),
+            Some(TimeHandling::Milli),
+        ),
+        Some(other) => {
+            // backward compatibility.
+            tracing::warn!(
+                "Unsupported debezium.time.precision.mode = {other}, fall back to default parser."
+            );
+            (None, None, None)
+        }
+    };
+    let bigint_unsigned_handling = properties
+        .get("debezium.bigint.unsigned.handling.mode")
+        .is_some_and(|v| v == "precise")
+        .then_some(BigintUnsignedHandlingMode::Precise);
+    (
+        timestamp_handling,
+        timestamptz_handling,
+        time_handling,
+        bigint_unsigned_handling,
+    )
+}
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -265,7 +309,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -303,30 +346,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .await
             .expect("Retry create cdc table reader until success.")
         });
-        let timestamp_handling: Option<TimestampHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestampHandling::Milli);
-        let timestamptz_handling: Option<TimestamptzHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestamptzHandling::Milli);
-        let time_handling: Option<TimeHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimeHandling::Milli);
-        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
-            .properties
-            .get("debezium.bigint.unsigned.handling.mode")
-            .map(|v| v == "precise")
-            .unwrap_or(false)
-            .then_some(BigintUnsignedHandlingMode::Precise);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -489,6 +510,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
             'backfill_loop: loop {
+                let mut should_bypass_snapshot_stream_patch =
+                    self.rate_limit_rps.is_some_and(|val| val == 0);
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let mut snapshot_read_row_cnt: usize = 0;
@@ -552,17 +575,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                         == ThrottleType::Backfill
                                                     && entry.rate_limit != self.rate_limit_rps
                                                 {
-                                                    self.rate_limit_rps = entry.rate_limit;
-                                                    rate_limit_to_zero = self
+                                                    // If self.rate_limit_rps is 0, the snapshot stream does not establish a snapshot_read.
+                                                    // Consequently, the later snapshot stream patch is bypassed.
+                                                    should_bypass_snapshot_stream_patch = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     needs_rebuild_snapshot = true;
                                                 }
                                             }
-                                            Mutation::Update(UpdateMutation {
-                                                dropped_actors,
-                                                ..
-                                            }) if dropped_actors.contains(&self.actor_ctx.id) => {
+                                            mutation if mutation.is_stop(self.actor_ctx.id) => {
                                                 // the actor has been dropped, exit the backfill loop
                                                 tracing::info!(
                                                     %table_id,
@@ -578,7 +600,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
-                                    if can_start_new_snapshot {
+                                    if can_start_new_snapshot || needs_rebuild_snapshot {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
@@ -634,10 +656,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
-
-                                        if needs_rebuild_snapshot {
-                                            continue 'backfill_loop;
-                                        }
                                     }
                                 }
                                 Message::Chunk(chunk) => {
@@ -728,15 +746,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 assert!(pending_barrier.is_some(), "pending_barrier must exist");
                 let pending_barrier = pending_barrier.unwrap();
 
+                // The snapshot stream patch:
                 // Here we have to ensure the snapshot stream is consumed at least once,
                 // since the barrier event can kick in anytime.
                 // Otherwise, the result set of the new snapshot stream may become empty.
                 // It maybe a cancellation bug of the mysql driver.
                 let (_, mut snapshot_stream) = backfill_stream.into_inner();
-
-                // skip consume the snapshot stream if it is paused or rate limit to 0
-                if !is_snapshot_paused
-                    && !rate_limit_to_zero
+                // Resume the snapshot stream so that the snapshot stream patch won't block.
+                if !should_bypass_snapshot_stream_patch && is_snapshot_paused {
+                    snapshot_valve.resume();
+                }
+                if !should_bypass_snapshot_stream_patch
                     && let Some(msg) = snapshot_stream
                         .next()
                         .instrument_await("consume_snapshot_stream_once")
@@ -774,6 +794,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             yield Message::Barrier(pending_barrier);
                             // end of backfill loop, since backfill has finished
                             break 'backfill_loop;
+                        }
+                        Some(_) if is_snapshot_paused => {
+                            // Since the snapshot stream is paused, drop the chunk.
                         }
                         Some(chunk) => {
                             // Raise the current pk position.

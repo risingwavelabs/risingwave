@@ -689,7 +689,7 @@ mod tests {
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_deref().unwrap().is_stop()
+            }) if mutation.as_deref().unwrap().is_stop_mutation()
         );
 
         for handle in handles {

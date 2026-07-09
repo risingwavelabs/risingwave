@@ -27,7 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
@@ -239,7 +239,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command(&self, command: PostCollectCommand) -> MetaResult<()> {
-        command.post_collect(self).await
+        Box::pin(command.post_collect(self)).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -411,24 +411,22 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument]
-    async fn pre_commit_iceberg_v3_sink_metadata(
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergV3SinkMetadata>,
+        reports: Vec<PbIcebergPkIndexSinkMetadata>,
     ) -> MetaResult<Vec<SinkId>> {
-        let grouped = group_v3_reports_by_sink(reports)?;
+        let grouped = group_reports_by_sink(reports)?;
         let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
         let futs = FuturesUnordered::new();
         for (sink_id, (prev_epoch, reports)) in grouped {
             if reports.is_empty() {
                 continue;
             }
-            let manager = &self.iceberg_v3_sink_manager;
+            let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
                 (
                     sink_id,
-                    manager
-                        .pre_commit_v3_epoch(sink_id, prev_epoch, reports)
-                        .await,
+                    manager.pre_commit_epoch(sink_id, prev_epoch, reports).await,
                 )
             });
         }
@@ -443,16 +441,16 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if errs.is_empty() {
             Ok(success_ids)
         } else {
-            Err(aggregate_v3_sink_errors("pre-commit", errs).into())
+            Err(aggregate_sink_errors("pre-commit", errs).into())
         }
     }
 
     #[await_tree::instrument]
-    async fn commit_iceberg_v3_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+    async fn commit_iceberg_pk_index_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
         let futs = FuturesUnordered::new();
         for sink_id in sink_ids {
-            let manager = &self.iceberg_v3_sink_manager;
-            futs.push(async move { (sink_id, manager.commit_v3_epoch(sink_id).await) });
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move { (sink_id, manager.commit_epoch(sink_id).await) });
         }
 
         let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
@@ -463,7 +461,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if errs.is_empty() {
             Ok(())
         } else {
-            Err(aggregate_v3_sink_errors("commit", errs).into())
+            Err(aggregate_sink_errors("commit", errs).into())
         }
     }
 }
@@ -471,7 +469,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 /// Combine per-sink errors from a fan-out into a single `anyhow::Error`. The first failing
 /// sink's error is used as the source so the original chain is preserved; the message lists
 /// every failing `sink_id` and its error stringified.
-fn aggregate_v3_sink_errors(
+fn aggregate_sink_errors(
     phase: &'static str,
     mut errs: Vec<(SinkId, anyhow::Error)>,
 ) -> anyhow::Error {
@@ -491,10 +489,10 @@ fn aggregate_v3_sink_errors(
     ))
 }
 
-fn group_v3_reports_by_sink(
-    reports: Vec<PbIcebergV3SinkMetadata>,
-) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)>> {
-    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)> = HashMap::new();
+fn group_reports_by_sink(
+    reports: Vec<PbIcebergPkIndexSinkMetadata>,
+) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)>> {
+    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)> = HashMap::new();
     for r in reports {
         let sink_id = r.sink_id;
         let prev_epoch = r.prev_epoch;
@@ -840,8 +838,10 @@ impl PostCollectCommand {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
+                    replace_sink,
                     ..
                 } = info;
+                let new_job_id = stream_job_fragments.stream_job_id();
                 let new_sink_downstream =
                     if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
                         let new_downstreams = ctx.new_sink_downstream.clone();
@@ -854,14 +854,15 @@ impl PostCollectCommand {
                         None
                     };
 
-                barrier_manager_context
+                let old_state_table_ids = barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id(),
+                        new_job_id,
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
+                        replace_sink.as_ref(),
                     )
                     .await?;
 
@@ -874,6 +875,22 @@ impl PostCollectCommand {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
+
+                if let Some(old_sink_id) = replace_sink {
+                    barrier_manager_context
+                        .sink_manager
+                        .stop_sink_coordinator(vec![old_sink_id])
+                        .await;
+                    cleanup_dropped_streaming_jobs(
+                        &barrier_manager_context.refresh_manager,
+                        &barrier_manager_context.hummock_manager,
+                        &barrier_manager_context.metadata_manager,
+                        [old_sink_id.as_job_id()],
+                        old_state_table_ids.expect("replace sink should return old state tables"),
+                        "replace_sink",
+                    )
+                    .await?;
+                }
             }
             PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
@@ -910,6 +927,7 @@ impl PostCollectCommand {
                         upstream_fragment_downstreams,
                         None,
                         Some(&resolved_split_assignment),
+                        None,
                     )
                     .await?;
 
@@ -923,6 +941,7 @@ impl PostCollectCommand {
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment
+                                None,
                             )
                             .await?;
                     }

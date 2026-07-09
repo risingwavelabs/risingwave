@@ -17,14 +17,14 @@ use std::collections::HashMap;
 use anyhow::Result;
 use iceberg::spec::DataFile;
 
-pub fn backfill_dv_partitions(
+pub fn backfill_delete_file_partitions(
     writer_files: &[DataFile],
-    dv_delete_files: &mut [DataFile],
+    delete_files: &mut [DataFile],
 ) -> Result<()> {
-    if dv_delete_files.is_empty() {
+    if delete_files.is_empty() {
         return Ok(());
     }
-    let mut waiting_delete_files = dv_delete_files
+    let mut waiting_delete_files = delete_files
         .iter_mut()
         .filter(|dv| dv.partition().fields().is_empty())
         .map(|dv| (dv.referenced_data_file().unwrap(), dv))
@@ -44,7 +44,7 @@ pub fn backfill_dv_partitions(
 
     if !waiting_delete_files.is_empty() {
         anyhow::bail!(
-            "backfill iceberg v3 sink delete files failed, missing referenced data files: {:?}",
+            "backfill iceberg pk-index sink delete files failed, missing referenced data files: {:?}",
             waiting_delete_files.keys().collect::<Vec<_>>()
         );
     }
@@ -91,12 +91,12 @@ mod tests {
     #[test]
     fn empty_inputs_noop() -> Result<()> {
         let mut dvs: Vec<DataFile> = vec![];
-        backfill_dv_partitions(&[], &mut dvs)?;
+        backfill_delete_file_partitions(&[], &mut dvs)?;
         assert!(dvs.is_empty());
 
         let writers = [writer_file("data/a.parquet", struct_with_int(7))];
         let mut dvs: Vec<DataFile> = vec![];
-        backfill_dv_partitions(&writers, &mut dvs)?;
+        backfill_delete_file_partitions(&writers, &mut dvs)?;
 
         assert!(dvs.is_empty());
         Ok(())
@@ -107,7 +107,7 @@ mod tests {
         let writers = [writer_file("data/a.parquet", struct_with_int(42))];
         let mut dvs = vec![dv_file("dv/a.puff", "data/a.parquet", Struct::empty())];
 
-        backfill_dv_partitions(&writers, &mut dvs)?;
+        backfill_delete_file_partitions(&writers, &mut dvs)?;
 
         assert_eq!(dvs[0].partition(), &struct_with_int(42));
         Ok(())
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn dv_referencing_older_snapshot_left_alone() -> Result<()> {
         // DV references a data file NOT in the uncommitted writer set — its
-        // partition was correctly populated by DvMerger from the older
+        // partition was correctly populated by PositionDeleteMerger from the older
         // snapshot and must not be overwritten.
         let writers = [writer_file("data/a.parquet", struct_with_int(1))];
         let dv_partition = struct_with_int(99);
@@ -126,7 +126,7 @@ mod tests {
             dv_partition.clone(),
         )];
 
-        backfill_dv_partitions(&writers, &mut dvs)?;
+        backfill_delete_file_partitions(&writers, &mut dvs)?;
 
         assert_eq!(dvs[0].partition(), &dv_partition, "must not overwrite");
         Ok(())
@@ -144,7 +144,7 @@ mod tests {
             dv_file("dv/b.puff", "data/b.parquet", Struct::empty()),
         ];
 
-        backfill_dv_partitions(&writers, &mut dvs)?;
+        backfill_delete_file_partitions(&writers, &mut dvs)?;
 
         assert_eq!(dvs[0].partition(), &struct_with_int(1));
         assert_eq!(

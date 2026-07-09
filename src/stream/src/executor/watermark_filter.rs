@@ -20,7 +20,7 @@ use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
 use risingwave_expr::Result as ExprResult;
 use risingwave_expr::expr::{
-    ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
+    InputRefExpression, LiteralExpression, NonStrictExpression, SyncExpressionBoxExt,
     build_func_non_strict,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
