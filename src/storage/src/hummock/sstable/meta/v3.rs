@@ -26,7 +26,7 @@ const PARTITIONED_META_FOOTER_LEN: usize = 16;
 
 // Lower bound for one MetaShardDesc: fixed-width fields plus smallest-key length prefix,
 // excluding the variable-length smallest-key bytes.
-const MIN_META_SHARD_DESC_ENCODED_LEN: usize = 32;
+const MIN_META_SHARD_DESC_ENCODED_LEN: usize = 28;
 
 // Lower bound for one BlockMeta: fixed-width fields plus smallest-key length prefix,
 // excluding the variable-length smallest-key bytes.
@@ -49,7 +49,6 @@ pub struct MetaShardDesc {
 
 impl MetaShardDesc {
     fn encode(&self, mut buf: impl BufMut) {
-        buf.put_u32_le(self.first_block_idx);
         buf.put_u32_le(self.block_count);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
         buf.put_u64_le(self.offset);
@@ -57,8 +56,7 @@ impl MetaShardDesc {
         buf.put_u64_le(self.checksum);
     }
 
-    fn decode(shard_idx: u32, buf: &mut &[u8]) -> HummockResult<Self> {
-        let first_block_idx = get_u32_le_checked(buf, "meta shard first_block_idx")?;
+    fn decode(shard_idx: u32, first_block_idx: u32, buf: &mut &[u8]) -> HummockResult<Self> {
         let block_count = get_u32_le_checked(buf, "meta shard block_count")?;
         let smallest_key = get_length_prefixed_slice_checked(buf, "meta shard smallest_key")?;
         let offset = get_u64_le_checked(buf, "meta shard offset")?;
@@ -76,8 +74,7 @@ impl MetaShardDesc {
     }
 
     fn encoded_size(&self) -> usize {
-        4 // first_block_idx
-            + 4 // block_count
+        4 // block_count
             + 4 // smallest_key len
             + self.smallest_key.len()
             + 8 // offset
@@ -241,7 +238,7 @@ impl MetaPartitionIndex {
         buf
     }
 
-    pub fn encode_to(&self, mut buf: impl BufMut + AsRef<[u8]>) {
+    fn encode_to(&self, mut buf: impl BufMut + AsRef<[u8]>) {
         let start = buf.as_ref().len();
         self.encode_body(&mut buf);
         let end = buf.as_ref().len();
@@ -252,7 +249,7 @@ impl MetaPartitionIndex {
         buf.put_u32_le(MAGIC);
     }
 
-    pub fn encode_body(&self, mut buf: impl BufMut) {
+    fn encode_body(&self, mut buf: impl BufMut) {
         buf.put_u32_le(self.estimated_size);
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(&mut buf, &self.smallest_key);
@@ -291,8 +288,15 @@ impl MetaPartitionIndex {
             "partitioned meta shard_count",
         )?;
         let mut shards = Vec::with_capacity(shard_count as usize);
+        let mut next_first_block_idx = 0u32;
         for shard_idx in 0..shard_count {
-            shards.push(MetaShardDesc::decode(shard_idx, buf)?);
+            let shard = MetaShardDesc::decode(shard_idx, next_first_block_idx, buf)?;
+            next_first_block_idx = next_first_block_idx
+                .checked_add(shard.block_count)
+                .ok_or_else(|| {
+                    HummockError::decode_error("partitioned meta block count overflow")
+                })?;
+            shards.push(shard);
         }
         if !buf.is_empty() {
             return Err(HummockError::decode_error(format!(
@@ -315,7 +319,7 @@ impl MetaPartitionIndex {
         Ok(index)
     }
 
-    pub fn encoded_size(&self) -> usize {
+    fn encoded_size(&self) -> usize {
         4 // estimated_size
             + 4 // key_count
             + 4 // smallest_key len
@@ -344,8 +348,7 @@ pub struct MetaShard {
 }
 
 impl MetaShard {
-    pub fn encode_body(&self, mut buf: impl BufMut) {
-        buf.put_u32_le(self.block_metas.len() as u32);
+    fn encode_body(&self, mut buf: impl BufMut) {
         for block_meta in &self.block_metas {
             block_meta.encode(&mut buf);
         }
@@ -365,19 +368,12 @@ impl MetaShard {
         expected_smallest_key: &[u8],
         mut buf: &[u8],
     ) -> HummockResult<Self> {
-        let block_meta_count =
-            get_u32_le_checked(&mut buf, "meta shard block_meta_count")? as usize;
-        if block_meta_count != expected_block_count as usize {
-            return Err(HummockError::decode_error(format!(
-                "partitioned meta shard {} block count mismatch: desc {} body {}",
-                shard_idx, expected_block_count, block_meta_count
-            )));
-        }
+        let block_meta_count = expected_block_count as usize;
         ensure_count_fits_remaining(
             block_meta_count,
             buf.len(),
             MIN_BLOCK_META_ENCODED_LEN,
-            "meta shard block_meta_count",
+            "meta shard block_count",
         )?;
         let mut block_metas = Vec::with_capacity(block_meta_count);
         for _ in 0..block_meta_count {
@@ -424,9 +420,8 @@ impl MetaShard {
         })
     }
 
-    pub fn encoded_body_size(&self) -> usize {
-        4 // block meta count
-            + self
+    fn encoded_body_size(&self) -> usize {
+        self
                 .block_metas
                 .iter()
                 .map(BlockMeta::encoded_size)
@@ -679,16 +674,16 @@ mod tests {
     }
 
     #[test]
-    fn test_partitioned_meta_rejects_block_range_gap_or_overlap() {
-        let mut gap = sample_index();
-        gap.shards[1].first_block_idx = 3;
-        gap = reencode_index(gap);
-        assert!(MetaPartitionIndex::decode(&gap.encode_to_bytes()).is_err());
+    fn test_partitioned_meta_rejects_block_count_mismatch() {
+        let mut too_many = sample_index();
+        too_many.shards[1].block_count += 1;
+        too_many = reencode_index(too_many);
+        assert!(MetaPartitionIndex::decode(&too_many.encode_to_bytes()).is_err());
 
-        let mut overlap = sample_index();
-        overlap.shards[1].first_block_idx = 1;
-        overlap = reencode_index(overlap);
-        assert!(MetaPartitionIndex::decode(&overlap.encode_to_bytes()).is_err());
+        let mut too_few = sample_index();
+        too_few.shards[1].block_count -= 1;
+        too_few = reencode_index(too_few);
+        assert!(MetaPartitionIndex::decode(&too_few.encode_to_bytes()).is_err());
     }
 
     #[test]
@@ -780,7 +775,6 @@ mod tests {
     #[test]
     fn test_meta_shard_rejects_checksum_valid_malformed_shard_body() {
         let mut truncated_body = Vec::new();
-        truncated_body.put_u32_le(1); // block_meta_count
         truncated_body.put_u32_le(0); // partial block meta fixed fields
         let desc = MetaShardDesc {
             shard_idx: 0,
@@ -806,9 +800,8 @@ mod tests {
     }
 
     #[test]
-    fn test_meta_shard_rejects_checksum_valid_huge_block_meta_count() {
-        let mut body = Vec::new();
-        body.put_u32_le(u32::MAX); // block_meta_count
+    fn test_meta_shard_rejects_checksum_valid_huge_expected_block_count() {
+        let body = Vec::new();
 
         assert!(MetaShard::decode_body(0, 0, u32::MAX, &test_key(0), &body).is_err());
     }
