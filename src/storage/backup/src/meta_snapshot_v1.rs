@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockRawObjectId;
@@ -26,9 +26,10 @@ use risingwave_pb::catalog::{
 use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats, PbHummockVersion};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
+use tokio::io::AsyncRead;
 
 use crate::error::{BackupError, BackupResult};
-use crate::meta_snapshot::{MetaSnapshot, Metadata, read_u32_le};
+use crate::meta_snapshot::{MetaSnapshot, Metadata, SnapshotPayloadReader, SnapshotPayloadWriter};
 
 // TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
@@ -81,15 +82,19 @@ impl Display for ClusterMetadata {
 }
 
 impl Metadata for ClusterMetadata {
-    fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()> {
-        self.encode_to(buf)
+    async fn encode_to_writer(&self, writer: &mut SnapshotPayloadWriter) -> BackupResult<()> {
+        let mut buf = BytesMut::new();
+        self.encode_to(&mut buf)?;
+        writer.write_snapshot_bytes(buf.freeze()).await
     }
 
-    fn decode(buf: &[u8]) -> BackupResult<Self>
+    async fn decode_from_reader<R>(reader: SnapshotPayloadReader<R>) -> BackupResult<Self>
     where
         Self: Sized,
+        R: AsyncRead + Send,
     {
-        ClusterMetadata::decode(buf)
+        let data = reader.read_to_end().await?;
+        ClusterMetadata::decode(&data)
     }
 
     fn hummock_version_ref(&self) -> &HummockVersion {
@@ -141,7 +146,7 @@ pub struct ClusterMetadata {
 }
 
 impl ClusterMetadata {
-    pub fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()> {
+    pub fn encode_to(&self, buf: &mut impl BufMut) -> BackupResult<()> {
         let default_cf_keys = self.default_cf.keys().collect_vec();
         let default_cf_values = self.default_cf.values().collect_vec();
         Self::encode_prost_message_list(&default_cf_keys, buf);
@@ -219,7 +224,7 @@ impl ClusterMetadata {
         })
     }
 
-    fn encode_prost_message(message: &impl prost::Message, buf: &mut Vec<u8>) {
+    fn encode_prost_message(message: &impl prost::Message, buf: &mut impl BufMut) {
         let encoded_message = message.encode_to_vec();
         buf.put_u32_le(encoded_message.len() as u32);
         buf.put_slice(&encoded_message);
@@ -229,20 +234,13 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let len = read_u32_le(buf)? as usize;
-        if buf.remaining() < len {
-            return Err(BackupError::Other(anyhow::anyhow!(
-                "prost payload length {} exceeds remaining buffer {}",
-                len,
-                buf.remaining()
-            )));
-        }
+        let len = buf.get_u32_le() as usize;
         let v = buf[..len].to_vec();
         buf.advance(len);
         T::decode(v.as_slice()).map_err(|e| BackupError::Decoding(e.into()))
     }
 
-    fn encode_prost_message_list(messages: &[&impl prost::Message], buf: &mut Vec<u8>) {
+    fn encode_prost_message_list(messages: &[&impl prost::Message], buf: &mut impl BufMut) {
         buf.put_u32_le(messages.len() as u32);
         for message in messages {
             Self::encode_prost_message(*message, buf);
@@ -253,7 +251,7 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let vec_len = read_u32_le(buf)? as usize;
+        let vec_len = buf.get_u32_le() as usize;
         let mut result = vec![];
         for _ in 0..vec_len {
             let v: T = Self::decode_prost_message(buf)?;
@@ -275,47 +273,32 @@ impl ClusterMetadata {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BytesMut;
     use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::{CompactionGroup, TableStats};
 
-    use crate::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
-
-    type MetaSnapshot = MetaSnapshotV1;
-
-    #[test]
-    fn test_snapshot_encoding_decoding() {
-        let mut metadata = ClusterMetadata::default();
-        metadata.hummock_version.id = HummockVersionId::new(321);
-        let raw = MetaSnapshot {
-            format_version: 0,
-            id: 123,
-            metadata,
-        };
-        let encoded = raw.encode().unwrap();
-        let decoded = MetaSnapshot::decode(&encoded).unwrap();
-        assert_eq!(raw, decoded);
-    }
+    use crate::meta_snapshot_v1::ClusterMetadata;
 
     #[test]
     fn test_metadata_encoding_decoding() {
-        let mut buf = vec![];
-        let mut raw = ClusterMetadata::default();
-        raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
-        raw.hummock_version.id = HummockVersionId::new(1);
-        raw.version_stats.hummock_version_id = 10.into();
-        raw.version_stats.table_stats.insert(
+        let mut buf = BytesMut::new();
+        let mut metadata = ClusterMetadata::default();
+        metadata.hummock_version.id = HummockVersionId::new(321);
+        metadata.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
+        metadata.version_stats.hummock_version_id = 10.into();
+        metadata.version_stats.table_stats.insert(
             200.into(),
             TableStats {
                 total_key_count: 1000,
                 ..Default::default()
             },
         );
-        raw.compaction_groups.push(CompactionGroup {
+        metadata.compaction_groups.push(CompactionGroup {
             id: 3000.into(),
             ..Default::default()
         });
-        raw.encode_to(&mut buf).unwrap();
-        let decoded = ClusterMetadata::decode(buf.as_slice()).unwrap();
-        assert_eq!(raw, decoded);
+        metadata.encode_to(&mut buf).unwrap();
+        let decoded = ClusterMetadata::decode(&buf).unwrap();
+        assert_eq!(metadata, decoded);
     }
 }

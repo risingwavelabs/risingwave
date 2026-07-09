@@ -11389,6 +11389,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
+ "tracing",
  "twox-hash",
 ]
 
@@ -12753,11 +12754,13 @@ dependencies = [
  "crc32fast",
  "fail",
  "futures",
+ "futures-async-stream",
  "itertools 0.14.0",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
+ "pin-project-lite",
  "prometheus",
  "reqwest 0.12.25",
  "risingwave_common",

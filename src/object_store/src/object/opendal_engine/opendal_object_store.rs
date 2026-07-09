@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -166,12 +165,12 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        range: Range<usize>,
+        range: impl ObjectRangeBounds,
     ) -> ObjectResult<ObjectDataStream> {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-        let range: Range<u64> = (range.start as u64)..(range.end as u64);
+        let range = range.map(|v| *v as u64);
 
         // The layer specified first will be executed first.
         // `TimeoutLayer` must be specified before `RetryLayer`.
