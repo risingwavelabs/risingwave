@@ -21,6 +21,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, JsonbRef, ScalarRefImpl};
 use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -34,7 +35,9 @@ use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam, Sin
 pub const HTTP_SINK: &str = "http";
 const HTTP_SINK_PAYLOAD_COLUMN: &str = "payload";
 const HTTP_SINK_URL_COLUMN: &str = "url";
+const DEFAULT_HTTP_SINK_BATCH_SIZE: usize = 1;
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct HttpConfig {
     /// The endpoint URL to POST data to.
@@ -43,6 +46,10 @@ pub struct HttpConfig {
     /// Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
     /// for `jsonb`.
     pub content_type: Option<String>,
+
+    /// Maximum number of JSON payload rows to include in one HTTP request.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub batch_size: Option<usize>,
 
     /// Sink type, must be "append-only".
     pub r#type: String,
@@ -73,6 +80,11 @@ impl HttpConfig {
                 "HTTP sink only supports append-only mode"
             )));
         }
+        if config.batch_size == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`batch_size` must be greater than 0"
+            )));
+        }
 
         Ok((config, headers))
     }
@@ -92,6 +104,7 @@ fn validate_http_sink(
     schema: &Schema,
     url: Option<&str>,
     content_type: Option<&str>,
+    batch_size: Option<usize>,
     headers: &BTreeMap<String, String>,
 ) -> Result<HttpSink> {
     if !is_append_only && !ignore_delete {
@@ -174,6 +187,17 @@ fn validate_http_sink(
             payload_type
         )));
     }
+    if payload_type != DataType::Jsonb && batch_size.is_some() {
+        return Err(SinkError::Config(anyhow!(
+            "HTTP sink batch_size option only supports jsonb payload"
+        )));
+    }
+    let batch_size = batch_size.unwrap_or(DEFAULT_HTTP_SINK_BATCH_SIZE);
+    if batch_size > 1 && matches!(url, HttpUrl::Dynamic { .. }) {
+        return Err(SinkError::Config(anyhow!(
+            "HTTP sink batch_size greater than 1 does not support dynamic url column"
+        )));
+    }
 
     let mut header_map = HeaderMap::new();
     header_map.insert(
@@ -204,6 +228,7 @@ fn validate_http_sink(
         url,
         payload_index,
         header_map,
+        batch_size,
     })
 }
 
@@ -212,6 +237,7 @@ pub struct HttpSink {
     url: HttpUrl,
     payload_index: usize,
     header_map: HeaderMap,
+    batch_size: usize,
 }
 
 impl EnforceSecret for HttpSink {
@@ -237,6 +263,7 @@ impl TryFrom<SinkParam> for HttpSink {
             &schema,
             config.url.as_deref(),
             config.content_type.as_deref(),
+            config.batch_size,
             &headers,
         )
     }
@@ -256,6 +283,7 @@ impl Sink for HttpSink {
             self.url.clone(),
             self.payload_index,
             self.header_map.clone(),
+            self.batch_size,
         )?
         .into_log_sinker(usize::MAX))
     }
@@ -265,10 +293,16 @@ pub struct HttpSinkWriter {
     client: reqwest::Client,
     url: HttpUrl,
     payload_index: usize,
+    batch_size: usize,
 }
 
 impl HttpSinkWriter {
-    fn new(url: HttpUrl, payload_index: usize, header_map: HeaderMap) -> Result<Self> {
+    fn new(
+        url: HttpUrl,
+        payload_index: usize,
+        header_map: HeaderMap,
+        batch_size: usize,
+    ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .default_headers(header_map)
             .build()
@@ -279,6 +313,7 @@ impl HttpSinkWriter {
             client,
             url,
             payload_index,
+            batch_size,
         })
     }
 
@@ -333,6 +368,29 @@ impl HttpSinkWriter {
             }
             None => None, // skip NULL rows
         })
+    }
+
+    async fn send_payload(&self, url: reqwest::Url, payload: String) -> Result<()> {
+        let resp = self
+            .client
+            .post(url)
+            .body(payload)
+            .send()
+            .await
+            .context("HTTP request failed")
+            .map_err(SinkError::Http)?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(SinkError::Http(anyhow!(
+                "HTTP sink received non-success response: {} {}",
+                status,
+                body
+            )));
+        }
+
+        Ok(())
     }
 }
 
@@ -403,35 +461,54 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            if op != Op::Insert {
-                continue;
+        if self.batch_size == 1 {
+            for (op, row) in chunk.rows() {
+                if op != Op::Insert {
+                    continue;
+                }
+
+                let Some(payload) = self.extract_payload(&row)? else {
+                    continue;
+                };
+                let Some(url) = self.extract_url(&row)? else {
+                    continue;
+                };
+
+                self.send_payload(url, payload).await?;
+            }
+        } else {
+            let HttpUrl::Static(url) = &self.url else {
+                return Err(SinkError::Http(anyhow!(
+                    "HTTP sink batch_size greater than 1 requires static url"
+                )));
+            };
+            let mut payload_buffer = String::new();
+            let mut payload_count = 0;
+
+            for (op, row) in chunk.rows() {
+                if op != Op::Insert {
+                    continue;
+                }
+
+                let Some(payload) = self.extract_payload(&row)? else {
+                    continue;
+                };
+
+                if payload_count > 0 {
+                    payload_buffer.push('\n');
+                }
+                payload_buffer.push_str(&payload);
+                payload_count += 1;
+
+                if payload_count >= self.batch_size {
+                    self.send_payload(url.clone(), std::mem::take(&mut payload_buffer))
+                        .await?;
+                    payload_count = 0;
+                }
             }
 
-            let Some(payload) = self.extract_payload(&row)? else {
-                continue;
-            };
-            let Some(url) = self.extract_url(&row)? else {
-                continue;
-            };
-
-            let resp = self
-                .client
-                .post(url)
-                .body(payload)
-                .send()
-                .await
-                .context("HTTP request failed")
-                .map_err(SinkError::Http)?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                return Err(SinkError::Http(anyhow!(
-                    "HTTP sink received non-success response: {} {}",
-                    status,
-                    body
-                )));
+            if payload_count > 0 {
+                self.send_payload(url.clone(), payload_buffer).await?;
             }
         }
 

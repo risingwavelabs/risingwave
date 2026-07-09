@@ -71,8 +71,13 @@ grep -Fx '{"key":"value"}' "$HTTP_SINK_OUTPUT"
 grep -q '"event"' "$HTTP_SINK_OUTPUT"
 grep -Fx 'dynamic url payload' "$HTTP_SINK_OUTPUT"
 grep -Fx 'dynamic url as select payload' "$HTTP_SINK_OUTPUT"
-# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb + 2 from dynamic URL tests
-test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 6
+grep -Fx '{"batch":1}' "$HTTP_SINK_OUTPUT"
+grep -Fx '{"batch":2}' "$HTTP_SINK_OUTPUT"
+grep -Fx '{"batch":3}' "$HTTP_SINK_OUTPUT"
+# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb + 2 from dynamic URL tests + 3 from batched payload test
+test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 9
+# The batched payload test writes 3 rows with batch_size = 2, producing 2 HTTP requests.
+test "$(wc -l < "$HTTP_SINK_HEADERS")" -eq 8
 # Verify the custom header set via header.x_test = 'rw-http-sink' was sent
 grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
 # Verify inferred default content types for varchar and jsonb payloads
