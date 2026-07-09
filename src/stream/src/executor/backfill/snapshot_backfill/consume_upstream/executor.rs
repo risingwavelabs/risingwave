@@ -20,9 +20,7 @@ use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
-use risingwave_common_rate_limit::{
-    MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
-};
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
 use rw_futures_util::drop_either_future;
@@ -146,12 +144,12 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         'on_new_stream: loop {
             loop {
                 let barrier = {
-                    let rate_limited_stream = rate_limit_stream(&mut stream, &self.rate_limiter);
-                    pin_mut!(rate_limited_stream);
-
                     loop {
+                        if self.rate_limiter.rate_limit().is_paused() {
+                            break receive_next_barrier(&mut self.barrier_rx).await?;
+                        }
                         let future1 = receive_next_barrier(&mut self.barrier_rx);
-                        let future2 = rate_limited_stream.try_next().map(|result| {
+                        let future2 = stream.try_next().map(|result| {
                             result
                                 .and_then(|opt| opt.ok_or_else(|| anyhow!("end of stream").into()))
                         });
@@ -162,6 +160,8 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                                 break barrier;
                             }
                             Either::Right(Ok(chunk)) => {
+                                assert!(!self.rate_limiter.rate_limit().is_paused());
+                                self.rate_limiter.wait(chunk.cardinality() as _).await;
                                 yield Message::Chunk(chunk);
                             }
                             Either::Left(Err(e)) | Either::Right(Err(e)) => {
@@ -172,6 +172,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                 };
 
                 if let Some(chunk) = stream.consume_builder() {
+                    self.rate_limiter.wait(chunk.cardinality() as _).await;
                     yield Message::Chunk(chunk);
                 }
                 stream
@@ -269,20 +270,6 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                 }
             }
         }
-    }
-}
-
-// The future returned by `.next()` is cancellation safe even if the whole stream is dropped.
-#[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-async fn rate_limit_stream<'a>(
-    stream: &'a mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
-    rate_limiter: &'a RateLimiter,
-) {
-    while let Some(chunk) = stream.try_next().await? {
-        let quota = chunk.cardinality();
-        // the chunk is yielded immediately without any await point breaking in, so the stream is cancellation safe.
-        yield chunk;
-        rate_limiter.wait(quota as _).await;
     }
 }
 
