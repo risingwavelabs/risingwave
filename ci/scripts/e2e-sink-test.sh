@@ -73,10 +73,31 @@ grep -Fx 'put payload' "$HTTP_SINK_OUTPUT"
 grep -q '"event"' "$HTTP_SINK_OUTPUT"
 grep -Fx 'dynamic url payload' "$HTTP_SINK_OUTPUT"
 grep -Fx 'dynamic url as select payload' "$HTTP_SINK_OUTPUT"
-# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from PUT + 1 from jsonb + 2 from dynamic URL tests
-test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 7
+python3 - "$HTTP_SINK_OUTPUT" <<'PY'
+import json
+import sys
+
+batch_values = []
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            body = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if set(body) == {"batch"}:
+            batch_values.append(body["batch"])
+
+assert batch_values == [1, 2, 3], batch_values
+PY
+# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from PUT + 1 from jsonb + 2 from dynamic URL tests + 3 from batched payload test
+test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 10
+# The batched payload test writes 3 rows with batch_size = 2, producing 2 HTTP requests.
+test "$(wc -l < "$HTTP_SINK_HEADERS")" -eq 9
 # Verify the default method remains POST and an explicitly configured PUT is honored
-test "$(grep -c '^POST$' "$HTTP_SINK_METHODS")" -eq 6
+test "$(grep -c '^POST$' "$HTTP_SINK_METHODS")" -eq 8
 test "$(grep -c '^PUT$' "$HTTP_SINK_METHODS")" -eq 1
 # Verify the custom header set via header.x_test = 'rw-http-sink' was sent
 grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
