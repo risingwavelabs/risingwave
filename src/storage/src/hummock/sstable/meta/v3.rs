@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,13 +23,19 @@ use crate::hummock::sstable::{BlockMeta, MAGIC};
 use crate::hummock::{HummockError, HummockResult};
 
 const PARTITIONED_META_FOOTER_LEN: usize = 16;
+
+// Lower bound for one MetaShardDesc: fixed-width fields plus smallest-key length prefix,
+// excluding the variable-length smallest-key bytes.
 const MIN_META_SHARD_DESC_ENCODED_LEN: usize = 32;
+
+// Lower bound for one BlockMeta: fixed-width fields plus smallest-key length prefix,
+// excluding the variable-length smallest-key bytes.
 const MIN_BLOCK_META_ENCODED_LEN: usize = 24;
 
 /// Persisted metadata format version for partitioned SST metadata.
 pub const PARTITIONED_META_VERSION: u32 = 3;
 
-/// Shard policy that splits metadata by a fixed number of data blocks.
+/// Persisted shard-policy enum value for splitting metadata by a fixed number of data blocks.
 pub const META_SHARD_POLICY_FIXED_BLOCK_COUNT: u32 = 1;
 
 /// Index entry that points to one encoded metadata shard body.

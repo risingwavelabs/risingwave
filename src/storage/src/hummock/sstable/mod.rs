@@ -53,7 +53,6 @@ pub use filter::{
     DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions,
     NoneFilterBuilder,
 };
-pub use meta::v3::*;
 pub use utils::{CompressionAlgorithm, xxhash64_checksum, xxhash64_verify};
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::xxh64;
