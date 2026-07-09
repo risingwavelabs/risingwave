@@ -29,7 +29,6 @@ use prometheus::{Histogram, IntGauge, IntGaugeVec};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionDelta};
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use tokio::spawn;
@@ -560,29 +559,8 @@ impl HummockEventHandler {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = (**pinned_version).clone();
                 {
-                    let mut table_change_log_to_apply_guard =
-                        pinned_version.table_change_log_write_lock();
                     for version_delta in version_deltas {
                         assert_eq!(version_to_apply.id, version_delta.prev_id);
-
-                        // apply change-log-delta
-                        {
-                            let mut state_table_info = version_to_apply.state_table_info.clone();
-                            let (changed_table_info, _is_commit_epoch) = state_table_info
-                                .apply_delta(
-                                    &version_delta.state_table_info_delta,
-                                    &version_delta.removed_table_ids,
-                                );
-
-                            HummockVersionCommon::<SstableInfo>::apply_change_log_delta(
-                                &mut *table_change_log_to_apply_guard,
-                                &version_delta.change_log_delta,
-                                &version_delta.removed_table_ids,
-                                &version_delta.state_table_info_delta,
-                                &changed_table_info,
-                            );
-                        }
-
                         let local_hummock_version_delta =
                             LocalHummockVersionDelta::from(version_delta);
                         if let Some(sst_delta_infos) = &mut sst_delta_infos {
@@ -593,7 +571,14 @@ impl HummockEventHandler {
                             );
                         }
 
-                        version_to_apply.apply_version_delta(&local_hummock_version_delta);
+                        HummockVersionCommon::apply_version_delta_common(
+                            &mut version_to_apply.id,
+                            &mut version_to_apply.levels,
+                            &mut version_to_apply.table_watermarks,
+                            &mut version_to_apply.state_table_info,
+                            &mut version_to_apply.vector_indexes,
+                            &local_hummock_version_delta,
+                        );
                     }
                 }
 
@@ -961,7 +946,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::version::LocalHummockVersion;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -991,7 +976,7 @@ mod tests {
         let epoch0 = test_epoch(233);
 
         let initial_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            LocalHummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1.into(),
                 state_table_info: HashMap::from_iter([(
                     TEST_TABLE_ID,
@@ -1144,7 +1129,7 @@ mod tests {
         let epoch0 = test_epoch(233);
 
         let initial_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            LocalHummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1.into(),
                 state_table_info: HashMap::from_iter([
                     (

@@ -217,6 +217,7 @@ impl<T> TableChangeLogCommon<T> {
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
+pub type TableChangeLogs = HashMap<TableId, TableChangeLog>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLogCommon<T> {
@@ -225,6 +226,12 @@ pub struct EpochNewChangeLogCommon<T> {
     // epochs are sorted in ascending order
     pub non_checkpoint_epochs: Vec<u64>,
     pub checkpoint_epoch: u64,
+}
+
+impl EpochNewChangeLog {
+    pub fn change_log_ssts(&self) -> impl Iterator<Item = &SstableInfo> + '_ {
+        self.new_value.iter().chain(self.old_value.iter())
+    }
 }
 
 pub(crate) fn resolve_pb_log_epochs(epochs: &Vec<u64>) -> (Vec<u64>, u64) {

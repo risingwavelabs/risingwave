@@ -15,6 +15,7 @@
 use anyhow::{Context, anyhow};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
+use risingwave_hummock_sdk::version::LocalHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
@@ -320,7 +321,7 @@ impl NotificationServiceImpl {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
         let hummock_version = self
             .hummock_manager
-            .on_current_version(|version| version.into())
+            .on_current_version(|version| LocalHummockVersion::from_version(version).to_protobuf())
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
