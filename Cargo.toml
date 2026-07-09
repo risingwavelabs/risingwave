@@ -420,6 +420,8 @@ faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb
 # v0.5.2+0.12.0 adds gzip/zstd encoding features while remaining compatible with workspace version ^0.5.1.
 madsim-tonic = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
 madsim-tonic-build = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
+madsim-macros = { git = "https://github.com/risingwavelabs/madsim.git", rev = "66e049aff3b50536db1a7973e2ee0d497bb21875" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.

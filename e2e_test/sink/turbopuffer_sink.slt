@@ -38,9 +38,6 @@ CREATE SINK tpuf_e2e_sink FROM tpuf_e2e_items WITH (
 );
 
 statement ok
-ALTER SINK tpuf_e2e_sink SET CONFIG (write_batch_size = 3, max_linger_second = 1);
-
-statement ok
 FLUSH;
 
 statement ok

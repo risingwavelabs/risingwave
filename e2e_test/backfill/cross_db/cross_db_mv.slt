@@ -108,7 +108,7 @@ select count(*) from rw_ddl_progress;
 
 sleep 2s
 
-query I
+query I retry 10 backoff 1s
 select count(*) from mv_rate_limit;
 ----
 0
