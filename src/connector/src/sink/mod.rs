@@ -298,6 +298,7 @@ pub fn validate_sink_unknown_fields(config: &impl UnknownFields) -> Result<()> {
         SINK_SNAPSHOT_OPTION,
         SINK_USER_IGNORE_DELETE_OPTION,
         SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        SINK_USER_FORCE_COMPACTION,
         "backfill_rate_limit",
         "primary_key",
         "sink_rate_limit",
@@ -1271,6 +1272,7 @@ mod tests {
             (CONNECTOR_TYPE_KEY, "redis"),
             (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
             ("primary_key", "id"),
+            (SINK_USER_FORCE_COMPACTION, "true"),
             ("redis.url", "redis://127.0.0.1:6379"),
         ]))
         .unwrap();
