@@ -237,6 +237,11 @@ pub struct MetaMetrics {
     /// The number of compaction groups that have been triggered to move
     pub merge_compaction_group_count: IntCounterVec,
 
+    /// Orphan iceberg sink maintenance entries removed by self-healing, labeled
+    /// by the detection path ("dispatch" or "gc"). A non-zero rate means some
+    /// sink removal path failed to clean up iceberg maintenance.
+    pub iceberg_compaction_orphan_sink_removed_count: IntCounterVec,
+
     // ********************************** Auto Schema Change ************************************
     pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
     pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
@@ -885,6 +890,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let iceberg_compaction_orphan_sink_removed_count = register_int_counter_vec_with_registry!(
+            "meta_iceberg_compaction_orphan_sink_removed_count",
+            "Count of orphan iceberg sink maintenance entries removed by self-healing",
+            &["path"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "storage_time_travel_version_replay_latency",
             "The latency(ms) of replaying a hummock version for time travel",
@@ -1042,6 +1055,7 @@ impl MetaMetrics {
             auto_schema_change_success_cnt,
             auto_schema_change_latency,
             merge_compaction_group_count,
+            iceberg_compaction_orphan_sink_removed_count,
             time_travel_version_replay_latency,
             compaction_group_count,
             compaction_group_size,

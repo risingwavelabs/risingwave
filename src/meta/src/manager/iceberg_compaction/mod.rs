@@ -21,7 +21,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
 use risingwave_connector::sink::SinkParam;
@@ -104,22 +103,46 @@ impl IcebergCompactionManager {
         )
     }
 
-    async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {
-        let prost_sink_catalog = self
+    /// `Ok(None)` means the sink no longer exists in the catalog; transient
+    /// metastore errors are propagated as `Err`.
+    async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<Option<SinkParam>> {
+        let Some(prost_sink_catalog) = self
             .metadata_manager
             .catalog_controller
             .get_sink_by_id(sink_id)
             .await?
-            .ok_or_else(|| anyhow!("Sink not found: {}", sink_id))?;
+        else {
+            return Ok(None);
+        };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
-        Ok(param)
+        Ok(Some(param))
     }
 
-    async fn load_iceberg_config(&self, sink_id: SinkId) -> MetaResult<IcebergConfig> {
-        let sink_param = self.get_sink_param(sink_id).await?;
+    /// `Ok(None)` means the sink no longer exists in the catalog.
+    async fn load_iceberg_config(&self, sink_id: SinkId) -> MetaResult<Option<IcebergConfig>> {
+        let Some(sink_param) = self.get_sink_param(sink_id).await? else {
+            return Ok(None);
+        };
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
-        Ok(iceberg_config)
+        Ok(Some(iceberg_config))
+    }
+
+    /// Removes maintenance entries for a sink that no longer exists in the
+    /// catalog, so a removal path that missed cleanup cannot leave permanent
+    /// orphans. Kept observable via an error log and a counter metric.
+    fn remove_orphan_iceberg_maintenance(&self, sink_id: SinkId, path: &str) {
+        tracing::error!(
+            iceberg_component = "compaction_scheduler",
+            iceberg_operation = path,
+            sink_id = %sink_id,
+            "iceberg_maintenance_orphan_sink_removed",
+        );
+        self.metrics
+            .iceberg_compaction_orphan_sink_removed_count
+            .with_label_values(&[path])
+            .inc();
+        self.clear_iceberg_maintenance_by_sink_id(sink_id);
     }
 
     /// Clear the iceberg maintenance state of the sink aborted by

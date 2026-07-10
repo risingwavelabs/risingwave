@@ -87,7 +87,11 @@ impl IcebergCompactionManager {
     pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
         let now = chrono::Utc::now().timestamp_millis();
 
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
+        let Some(iceberg_config) = self.load_iceberg_config(sink_id).await? else {
+            // The sink is gone but a removal path missed the maintenance cleanup.
+            self.remove_orphan_iceberg_maintenance(sink_id, "gc");
+            return Ok(());
+        };
         if !iceberg_config.enable_snapshot_expiration {
             let mut guard = self.inner.write();
             guard.snapshot_expiration_sink_ids.remove(&sink_id);

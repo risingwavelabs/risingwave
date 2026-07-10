@@ -16,8 +16,8 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_connector::connector_common::{
     IcebergCommittedSnapshot, IcebergSinkCompactionUpdate,
 };
@@ -402,23 +402,16 @@ impl CompactionTrack {
 pub(crate) struct IcebergCompactionHandle {
     sink_id: SinkId,
     task_type: TaskType,
-    inner: Arc<RwLock<IcebergCompactionManagerInner>>,
-    metadata_manager: MetadataManager,
+    manager: IcebergCompactionManagerRef,
     handle_success: bool,
 }
 
 impl IcebergCompactionHandle {
-    fn new(
-        sink_id: SinkId,
-        task_type: TaskType,
-        inner: Arc<RwLock<IcebergCompactionManagerInner>>,
-        metadata_manager: MetadataManager,
-    ) -> Self {
+    fn new(sink_id: SinkId, task_type: TaskType, manager: IcebergCompactionManagerRef) -> Self {
         Self {
             sink_id,
             task_type,
-            inner,
-            metadata_manager,
+            manager,
             handle_success: false,
         }
     }
@@ -431,18 +424,18 @@ impl IcebergCompactionHandle {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 
         let Some(prost_sink_catalog) = self
+            .manager
             .metadata_manager
             .catalog_controller
             .get_sink_by_id(self.sink_id)
             .await?
         else {
-            tracing::warn!(
-                iceberg_component = "compaction_scheduler",
-                iceberg_operation = "dispatch_task",
-                sink_id = %self.sink_id,
-                task_id,
-                "iceberg_compaction_dispatch_sink_not_found",
-            );
+            // The sink is gone but a removal path missed the maintenance cleanup.
+            // Drop the orphan entries instead of reverting the track, so they
+            // cannot occupy dispatch slots forever.
+            self.handle_success = true;
+            self.manager
+                .remove_orphan_iceberg_maintenance(self.sink_id, "dispatch");
             return Ok(());
         };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
@@ -458,7 +451,7 @@ impl IcebergCompactionHandle {
 
         if result.is_ok() {
             let mut should_cancel_sent_task = false;
-            let mut guard = self.inner.write();
+            let mut guard = self.manager.inner.write();
             let mut dispatched = false;
             if let Some(track) = guard.sink_schedules.get_mut(&self.sink_id)
                 && track.is_pending_dispatch()
@@ -504,7 +497,7 @@ impl IcebergCompactionHandle {
 impl Drop for IcebergCompactionHandle {
     fn drop(&mut self) {
         let waiter = {
-            let mut guard = self.inner.write();
+            let mut guard = self.manager.inner.write();
             if !self.handle_success
                 && let Some(track) = guard.sink_schedules.get_mut(&self.sink_id)
                 && track.is_pending_dispatch()
@@ -665,7 +658,11 @@ impl IcebergCompactionManager {
 
         let loaded_config = if should_refresh_config {
             match self.load_iceberg_config(sink_id).await {
-                Ok(config) => Some(config),
+                Ok(Some(config)) => Some(config),
+                Ok(None) => {
+                    tracing::warn!("Sink not found when loading iceberg config: {}", sink_id);
+                    None
+                }
                 Err(e) => {
                     tracing::warn!(
                         error = ?e.as_report(),
@@ -928,7 +925,7 @@ impl IcebergCompactionManager {
     }
 
     pub(crate) fn get_top_n_iceberg_commit_sink_ids(
-        &self,
+        self: &Arc<Self>,
         n: usize,
     ) -> Vec<IcebergCompactionHandle> {
         let now = Instant::now();
@@ -960,8 +957,7 @@ impl IcebergCompactionManager {
                     Some(IcebergCompactionHandle::new(
                         sink_id,
                         task_type,
-                        self.inner.clone(),
-                        self.metadata_manager.clone(),
+                        self.clone(),
                     ))
                 })
                 .collect();
