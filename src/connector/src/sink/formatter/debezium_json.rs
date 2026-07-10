@@ -27,7 +27,7 @@ use crate::sink::encoder::{
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
-pub(crate) const KEY_SCHEMA_ENABLE: &str = "schemas.enable";
+pub(crate) const SCHEMAS_ENABLE: &str = "schemas.enable";
 
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
@@ -373,10 +373,14 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, StructType};
 
     use super::*;
+    use crate::sink::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+    use crate::sink::formatter::SinkFormatterImpl;
     use crate::sink::utils::chunk_to_json;
 
     const SCHEMA_JSON_RESULT: &str = r#"{"fields":[{"field":"before","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"after","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"source","fields":[{"field":"db","optional":false,"type":"string"},{"field":"table","optional":true,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Source","optional":false,"type":"struct"},{"field":"op","optional":false,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Envelope","optional":false,"type":"struct"}"#;
@@ -436,6 +440,79 @@ mod tests {
             serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")
                 .unwrap()
         );
+
+        Ok(())
+    }
+
+    async fn format_debezium_json_insert(schemas_enable: Option<&str>) -> Result<(Value, Value)> {
+        let chunk = StreamChunk::from_pretty(
+            " i T
+            + 1 Alice",
+        );
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".into(),
+            },
+        ]);
+        let options = schemas_enable
+            .map(|value| BTreeMap::from([(SCHEMAS_ENABLE.to_owned(), value.to_owned())]))
+            .unwrap_or_default();
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::Debezium,
+            encode: SinkEncode::Json,
+            options,
+            secret_refs: Default::default(),
+            key_encode: None,
+            connection_id: None,
+        };
+        let formatter = SinkFormatterImpl::new(
+            &format_desc,
+            schema,
+            vec![0],
+            "test_db".to_owned(),
+            "test_table".to_owned(),
+            "test-topic",
+        )
+        .await?;
+
+        let SinkFormatterImpl::DebeziumJson(formatter) = formatter else {
+            unreachable!("debezium json format should build DebeziumJson formatter")
+        };
+        let mut formatted = formatter.format_chunk(&chunk).collect::<Result<Vec<_>>>()?;
+        assert_eq!(formatted.len(), 1);
+        let (key, value) = formatted.pop().unwrap();
+        Ok((key.unwrap(), value.unwrap()))
+    }
+
+    #[tokio::test]
+    async fn test_debezium_json_formatter_outputs_schema_by_default() -> Result<()> {
+        let (key, value) = format_debezium_json_insert(None).await?;
+
+        assert!(key.get("schema").is_some());
+        assert_eq!(key["payload"], json!({"id": 1}));
+        assert!(value.get("schema").is_some());
+        assert_eq!(value["payload"]["after"], json!({"id": 1, "name": "Alice"}));
+        assert_eq!(value["payload"]["op"], "c");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_debezium_json_formatter_omits_schema_when_disabled() -> Result<()> {
+        let (key, value) = format_debezium_json_insert(Some("false")).await?;
+
+        assert!(key.get("schema").is_none());
+        assert_eq!(key.as_object().unwrap().len(), 1);
+        assert_eq!(key["payload"], json!({"id": 1}));
+        assert!(value.get("schema").is_none());
+        assert_eq!(value.as_object().unwrap().len(), 1);
+        assert_eq!(value["payload"]["after"], json!({"id": 1, "name": "Alice"}));
+        assert_eq!(value["payload"]["op"], "c");
 
         Ok(())
     }
