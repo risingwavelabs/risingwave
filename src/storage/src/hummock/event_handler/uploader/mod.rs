@@ -1988,7 +1988,7 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1))
+            .new_pin_version(test_hummock_version(epoch1).into())
             .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert_eq!(
@@ -2088,7 +2088,7 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1))
+            .new_pin_version(test_hummock_version(epoch1).into())
             .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
@@ -2130,7 +2130,7 @@ pub(crate) mod tests {
         let new_pinned_version = uploader
             .context
             .pinned_version
-            .new_pin_version(test_hummock_version(epoch1))
+            .new_pin_version(test_hummock_version(epoch1).into())
             .unwrap();
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.data().syncing_data.is_empty());
@@ -2164,19 +2164,19 @@ pub(crate) mod tests {
         let epoch5 = epoch4.next_epoch();
         let epoch6 = epoch5.next_epoch();
         let version1 = initial_pinned_version
-            .new_pin_version(test_hummock_version(epoch1))
+            .new_pin_version(test_hummock_version(epoch1).into())
             .unwrap();
         let version2 = initial_pinned_version
-            .new_pin_version(test_hummock_version(epoch2))
+            .new_pin_version(test_hummock_version(epoch2).into())
             .unwrap();
         let version3 = initial_pinned_version
-            .new_pin_version(test_hummock_version(epoch3))
+            .new_pin_version(test_hummock_version(epoch3).into())
             .unwrap();
         let version4 = initial_pinned_version
-            .new_pin_version(test_hummock_version(epoch4))
+            .new_pin_version(test_hummock_version(epoch4).into())
             .unwrap();
         let version5 = initial_pinned_version
-            .new_pin_version(test_hummock_version(epoch5))
+            .new_pin_version(test_hummock_version(epoch5).into())
             .unwrap();
 
         uploader.start_epochs_for_test([epoch6]);
