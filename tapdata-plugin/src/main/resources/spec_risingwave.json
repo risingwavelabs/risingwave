@@ -7,7 +7,8 @@
     "id": "risingwave",
     "tags": [
       "Database",
-      "Streaming"
+      "Streaming",
+      "ssl"
     ]
   },
   "configOptions": {
@@ -161,6 +162,73 @@
             }
           },
           "x-index": 90
+        },
+        "OPTIONAL_FIELDS": {
+          "type": "void",
+          "properties": {
+            "sslmode": {
+              "required": false,
+              "type": "string",
+              "title": "${sslmode}",
+              "default": "prefer",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "x-decorator-props": {
+                "tooltip": "${sslmodeTip}"
+              },
+              "x-component-props": {
+                "options": [
+                  {"label": "Prefer (recommended)", "value": "prefer"},
+                  {"label": "Require", "value": "require"},
+                  {"label": "Disable", "value": "disable"}
+                ]
+              },
+              "x-index": 100
+            },
+            "extParams": {
+              "required": false,
+              "type": "string",
+              "title": "${extParams}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "x-decorator-props": {
+                "tooltip": "${extParamsTip}"
+              },
+              "x-index": 110
+            },
+            "timezone": {
+              "required": false,
+              "type": "string",
+              "title": "${timezone}",
+              "default": "",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "x-decorator-props": {
+                "tooltip": "${timezoneTip}"
+              },
+              "x-component-props": {
+                "options": [
+                  {"label": "", "value": ""},
+                  {"label": "UTC", "value": "+00:00"},
+                  {"label": "UTC+1", "value": "+01:00"},
+                  {"label": "UTC+2", "value": "+02:00"},
+                  {"label": "UTC+3", "value": "+03:00"},
+                  {"label": "UTC+4", "value": "+04:00"},
+                  {"label": "UTC+5", "value": "+05:00"},
+                  {"label": "UTC+6", "value": "+06:00"},
+                  {"label": "UTC+7", "value": "+07:00"},
+                  {"label": "UTC+8", "value": "+08:00"},
+                  {"label": "UTC+9", "value": "+09:00"},
+                  {"label": "UTC+10", "value": "+10:00"},
+                  {"label": "UTC-5", "value": "-05:00"},
+                  {"label": "UTC-6", "value": "-06:00"},
+                  {"label": "UTC-7", "value": "-07:00"},
+                  {"label": "UTC-8", "value": "-08:00"}
+                ]
+              },
+              "x-index": 120
+            }
+          }
         }
       }
     }
@@ -168,7 +236,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
-      "doc": "RisingWave is a Postgres-compatible streaming database. This connector writes data to RisingWave tables using the PostgreSQL wire protocol.",
+      "doc": "docs/risingwave_en_US.md",
       "host": "Host",
       "hostTip": "RisingWave server hostname or IP address",
       "port": "Port",
@@ -186,10 +254,16 @@
       "ingestEndpoint": "Ingest Endpoint",
       "ingestEndpointTip": "Full WebSocket ingest base endpoint, including scheme, for example ws://host:4560 or wss://host:4560. Only used in WebSocket streaming mode.",
       "webhookSecret": "Webhook Secret",
-      "webhookSecretTip": "Shared secret used to sign the initial WebSocket auth frame when the target RisingWave table uses VALIDATE."
+      "webhookSecretTip": "Shared secret used to sign the initial WebSocket auth frame when the target RisingWave table uses VALIDATE.",
+      "sslmode": "SSL Mode",
+      "sslmodeTip": "SSL connection mode. Use 'prefer' for local (auto-negotiate) or 'require' for RisingWave Cloud.",
+      "extParams": "Extra Parameters",
+      "extParamsTip": "Additional JDBC connection parameters, e.g. socketTimeout=60&tcpKeepAlive=true",
+      "timezone": "Timezone",
+      "timezoneTip": "Timezone for datetime data processing. Leave empty to use system default."
     },
     "zh_CN": {
-      "doc": "RisingWave 是一个兼容 PostgreSQL 协议的流式数据库。此连接器使用 PostgreSQL 线协议将数据写入 RisingWave 表。",
+      "doc": "docs/risingwave_zh_CN.md",
       "host": "主机",
       "hostTip": "RisingWave 服务器主机名或 IP 地址",
       "port": "端口",
@@ -207,7 +281,13 @@
       "ingestEndpoint": "Ingest 地址",
       "ingestEndpointTip": "完整的 WebSocket ingest 基础地址，需包含协议，例如 ws://host:4560 或 wss://host:4560。仅在 WebSocket 流式模式下使用。",
       "webhookSecret": "Webhook 密钥",
-      "webhookSecretTip": "当目标 RisingWave 表使用 VALIDATE 时，用于签名初始 WebSocket 认证消息的共享密钥。"
+      "webhookSecretTip": "当目标 RisingWave 表使用 VALIDATE 时，用于签名初始 WebSocket 认证消息的共享密钥。",
+      "sslmode": "SSL 模式",
+      "sslmodeTip": "SSL 连接模式。本地用 'prefer'（自动协商），RisingWave Cloud 用 'require'。",
+      "extParams": "额外参数",
+      "extParamsTip": "额外的 JDBC 连接参数，例如 socketTimeout=60&tcpKeepAlive=true",
+      "timezone": "时区",
+      "timezoneTip": "日期时间数据处理的时区。留空使用系统默认。"
     }
   },
   "dataTypes": {

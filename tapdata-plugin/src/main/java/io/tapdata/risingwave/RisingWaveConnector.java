@@ -618,6 +618,16 @@ public class RisingWaveConnector implements TapConnector {
         sql.append(")");
         if ("streaming".equals(ingestMode)) {
             sql.append(" WITH (connector = 'webhook')");
+            // If a webhook secret is configured, add VALIDATE clause so the table
+            // requires HMAC-SHA256 signature verification on the WebSocket init frame.
+            // This matches the WsIngestClient signing logic.
+            if (wsWebhookSecret != null && !wsWebhookSecret.isEmpty()) {
+                String escapedSecret = wsWebhookSecret.replace("'", "''");
+                sql.append(" VALIDATE AS secure_compare(")
+                   .append("headers->>'x-rw-signature', ")
+                   .append("'sha256=' || encode(hmac('").append(escapedSecret)
+                   .append("', payload, 'sha256'), 'hex'))");
+            }
         }
 
         debugLog("createTable() sql=" + sql);
@@ -675,8 +685,16 @@ public class RisingWaveConnector implements TapConnector {
         Properties props = new Properties();
         props.setProperty("user", user);
         props.setProperty("password", password);
-        props.setProperty("ssl", "false");
-        props.setProperty("sslmode", "disable");
+        // SSL mode: prefer by default (works for both local non-TLS and cloud TLS deployments).
+        // Cloud deployments require TLS for SNI-based tenant routing.
+        String sslmode = cfg.getString("sslmode");
+        if (sslmode == null || sslmode.isEmpty()) sslmode = "prefer";
+        props.setProperty("sslmode", sslmode);
+        // Extra JDBC parameters
+        String extParams = cfg.getString("extParams");
+        if (extParams != null && !extParams.isEmpty()) {
+            url += "&" + extParams;
+        }
         return DriverManager.getConnection(url, props);
     }
 

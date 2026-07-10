@@ -1,23 +1,49 @@
 # Tapdata RisingWave Plugin Handoff
 
-Status date: 2026-06-17
+Status date: 2026-07-10 (updated)
+Original date: 2026-06-17
 Workspace used for validation: `/Users/william/conductor/workspaces/risingwave/milan`
-Branch observed: `yiming/test-tapdata`
+Branch: `wenym1/tapdata-plugin`
 
 This document is intended to be self-contained enough to continue the Tapdata RisingWave plugin work in a new workspace.
 
 ## Current Status
 
-The Tapdata RisingWave plugin has been updated and smoke-tested against the newer RisingWave websocket ingest payload protocol.
+The Tapdata RisingWave plugin has been updated, smoke-tested, and verified end-to-end against RisingWave Cloud (v3.0.1) via WebSocket ingest.
 
 Validated path:
 
-1. PostgreSQL source table in local Postgres.
+1. Mock Source or PostgreSQL source in Tapdata.
 2. Tapdata pipeline using the RisingWave connector in `streaming` mode.
-3. RisingWave target table auto-created as a webhook-backed table.
+3. RisingWave target table auto-created as a webhook-backed table (with VALIDATE clause when webhook secret is configured).
 4. Tapdata initial sync writes rows through RisingWave websocket ingest.
 5. Tapdata CDC writes update, insert, and delete through the same websocket stream.
 6. RisingWave target table reaches the expected final state.
+
+## Changes since 2026-06-17 (2026-07-10 update)
+
+### Build system
+- **PDK dependency fixed**: Replaced non-public `io.tapdata:tapdata-pdk-all:2.0.7-SNAPSHOT` with the official split dependencies `io.tapdata:tapdata-pdk-api:2.0.8-SNAPSHOT` + `io.tapdata:tapdata-api:2.0.8-SNAPSHOT` (from `https://nexus.tapdata.net/repository/maven-snapshots/`). This matches how official connectors (postgres, doris) in `tapdata/tapdata-connectors` declare dependencies.
+- **PDK source**: The PDK API source lives in `tapdata/tapdata-common-lib` repo, `plugin-kit/` directory (the old `tapdata/idaas-pdk` repo is archived).
+- **Java 11** target (matches wenym's original).
+
+### UX improvements
+- **Icon added**: `src/main/resources/icons/risingwave.png` (real RisingWave wave logo).
+- **Documentation added**: `docs/risingwave_en_US.md` and `docs/risingwave_zh_CN.md`.
+- **`doc` field fixed**: Changed from inline text to markdown file path (matching official connector convention).
+- **SSL mode field**: Added `sslmode` config field (default `prefer`). Cloud needs `require` for TLS SNI tenant routing.
+- **Extra parameters + timezone fields** added to spec.
+- **`ssl` tag** added to connector tags.
+
+### DDL generation
+- **VALIDATE clause**: `createTable` now adds `VALIDATE AS secure_compare(...)` when `webhookSecret` is configured. Previously no signature verification.
+
+### SSL fix
+- Changed JDBC `sslmode` from hardcoded `disable` to configurable (default `prefer`). Fixes "failed to get tenant identifier" on RisingWave Cloud.
+
+### Version requirements
+- WebSocket streaming mode requires RisingWave **3.0.0+** (PR #25444).
+- JDBC mode works with any RisingWave version.
 
 Current touched files:
 

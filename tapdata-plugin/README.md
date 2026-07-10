@@ -1,27 +1,33 @@
 # Tapdata PDK Connector for RisingWave
 
 A [Tapdata PDK](https://github.com/tapdata/tapdata) connector that lets Tapdata write data to
-RisingWave. It uses the PostgreSQL JDBC driver internally, since RisingWave is PostgreSQL
-wire-protocol compatible.
+RisingWave. Supports two write modes:
+
+- **JDBC mode** (default): standard SQL `INSERT`/`UPDATE`/`DELETE` via PostgreSQL wire protocol
+- **WebSocket streaming mode**: high-throughput streaming DML via RisingWave's WebSocket ingest
+  endpoint with asynchronous ACKs
 
 ## What it does
 
-- Replicates tables from any Tapdata source (e.g. PostgreSQL) into RisingWave
+- Replicates tables from any Tapdata source (e.g. PostgreSQL, MySQL, Mock Source) into RisingWave
 - Supports batch snapshot sync and CDC (change-data-capture) streaming
+- In streaming mode, auto-creates webhook-backed tables (`WITH (connector = 'webhook')`)
 - Handles RisingWave SQL dialect differences from PostgreSQL automatically
   (strips `varchar(N)` lengths, `numeric(p,s)` precision, etc.)
+- HMAC-SHA256 signed WebSocket init frame for `VALIDATE`-protected tables
 
 ## Prerequisites
 
-| Component  | Version tested | Notes |
-|------------|---------------|-------|
-| Java       | 11+           | Maven build only |
-| Maven      | 3.8+          |       |
-| Docker     | any           | Runs Tapdata |
-| RisingWave | any           | Must be reachable from Docker container |
-| PostgreSQL | 13+           | Example source; any Tapdata source works |
+| Component  | Version | Notes |
+|------------|---------|-------|
+| Java       | 11+     | Build only; runtime provided by Tapdata engine |
+| Maven      | 3.8+    | |
+| Docker     | any     | Runs Tapdata |
+| RisingWave | 3.0.0+  | WebSocket streaming requires 3.0.0+ (PR #25444); JDBC mode works with any version |
 
 ## Build
+
+The connector depends on Tapdata PDK API published to Tapdata's Nexus snapshot repository.
 
 ```bash
 cd tapdata-plugin
@@ -29,18 +35,25 @@ mvn package -DskipTests
 # Produces: target/risingwave-connector-1.0-SNAPSHOT.jar
 ```
 
+> **Note:** The `pom.xml` uses `io.tapdata:tapdata-pdk-api:2.0.8-SNAPSHOT` and
+> `io.tapdata:tapdata-api:2.0.8-SNAPSHOT` from `https://nexus.tapdata.net/repository/maven-snapshots/`.
+> Match the PDK version to the Tapdata engine version in your deployment (check
+> `BOOT-INF/lib/tapdata-pdk-api-*.jar` inside the engine's `tm.jar`).
+
 ## Deploy to Tapdata
 
-### 1. Start Tapdata (if not already running)
+### 1. Start Tapdata
 
 ```bash
 docker run -d --name tapdata \
   --add-host=host.docker.internal:host-gateway \
   -p 3030:3030 \
+  -e app_type=DAAS \
   ghcr.io/tapdata/tapdata:latest
 ```
 
-Wait ~60 seconds for startup, then open http://localhost:3030 to confirm it's up.
+Wait ~3 minutes for startup, then open http://localhost:3030.
+Default login: `admin@admin.com` / `admin`.
 
 ### 2. Register the connector
 
@@ -48,21 +61,15 @@ Wait ~60 seconds for startup, then open http://localhost:3030 to confirm it's up
 # Copy JAR into the container
 docker cp target/risingwave-connector-1.0-SNAPSHOT.jar tapdata:/tmp/rw-connector.jar
 
-# Register via pdk-deploy
+# Register via pdk-deploy (use -l to replace latest version)
 docker exec tapdata java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
   -a <your-access-code> \
+  -l \
   /tmp/rw-connector.jar
 ```
 
-Your access code is shown in the Tapdata UI under **Settings → Access Code**, or you can
-find it via the API:
-
-```bash
-curl -s http://localhost:3030/api/users/generatetoken \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"accesscode":"<your-access-code>"}'
-```
+Your access code is shown in the Tapdata UI under **Settings -> Access Code**.
 
 ### 3. Restart Tapdata to load the new connector
 
@@ -70,94 +77,77 @@ curl -s http://localhost:3030/api/users/generatetoken \
 docker restart tapdata
 ```
 
-Wait for it to come back up (~40 seconds).
+### 4. Verify in UI
 
-## Run the end-to-end demo (PostgreSQL → RisingWave)
+Go to **Connections -> Create Connection**. You should see **RisingWave** with an icon.
+Click it to see the connection configuration help (from `docs/risingwave_en_US.md`).
+
+## Connection parameters
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| host | Yes | - | RisingWave hostname or IP |
+| port | Yes | 4566 | RisingWave SQL port |
+| database | Yes | dev | Database name |
+| schema | No | public | Target schema |
+| user | Yes | root | Database user |
+| password | No | - | Database password |
+| Write Mode | No | jdbc | `jdbc` or `streaming` |
+| Ingest Endpoint | No | ws://host.docker.internal:4560 | WebSocket ingest base URL (streaming only) |
+| Webhook Secret | No | - | HMAC secret for WebSocket init frame (streaming only) |
+| SSL Mode | No | prefer | `prefer`, `require`, or `disable` |
+| Extra Parameters | No | - | Additional JDBC params, e.g. `socketTimeout=60` |
+| Timezone | No | - | Timezone for datetime processing |
+
+### Cloud vs Local
+
+| Deployment | SQL Port | WS Ingest Port | SSL |
+|------------|----------|---------------|-----|
+| Local (`risedev`) | 4566 | 4560 | prefer (no TLS) |
+| RisingWave Cloud | 4566 | 443 (`wss://`) | require (TLS SNI routing) |
+
+For RisingWave Cloud, set:
+- **SSL Mode**: `require`
+- **Ingest Endpoint**: `wss://your-cluster.risingwave.cloud`
+- **Webhook Secret**: the secret used in the table's `VALIDATE` clause
+
+## Run the end-to-end demo (PostgreSQL -> RisingWave)
 
 The `setup_pipeline.py` script creates a full pipeline using the TapFlow Python SDK.
 
 ### Prerequisites for the demo
 
-1. **PostgreSQL** running locally on port 5432, database `tapdata_demo` with a table `orders`,
-   WAL level set to logical, and a publication created:
-
-   ```sql
-   ALTER SYSTEM SET wal_level = logical;
-   -- restart PostgreSQL --
-   CREATE DATABASE tapdata_demo;
-   \c tapdata_demo
-   CREATE TABLE orders (
-     id serial PRIMARY KEY,
-     customer_name varchar(100) NOT NULL,
-     product varchar(100) NOT NULL,
-     quantity int NOT NULL,
-     price numeric(10,2) NOT NULL,
-     status varchar(20) DEFAULT 'pending',
-     created_at timestamp DEFAULT now()
-   );
-   INSERT INTO orders (customer_name, product, quantity, price) VALUES
-     ('Alice', 'Laptop', 1, 999.99),
-     ('Bob',   'Phone',  2, 499.99);
-   CREATE PUBLICATION tapdata_pub FOR TABLE orders;
-   ```
-
-2. **RisingWave** running locally on port 4566 (e.g. via `./risedev d` in the RisingWave repo).
-
-3. **TapFlow SDK** installed:
-
-   ```bash
-   python3 -m venv /tmp/tapflow_env
-   /tmp/tapflow_env/bin/pip install tapflow
-   ```
+1. **PostgreSQL** running locally on port 5432 with logical replication enabled
+2. **RisingWave** running (local via `./risedev d` or cloud)
+3. **TapFlow SDK** installed: `pip install tapflow`
 
 ### Run the pipeline
 
 ```bash
-/tmp/tapflow_env/bin/python3 setup_pipeline.py
+TAPDATA_SERVER=127.0.0.1:3030 \
+TAPDATA_RW_HOST=<rw-host> \
+TAPDATA_RW_PORT=4566 \
+TAPDATA_RW_INGEST_ENDPOINT=ws://host.docker.internal:4560 \
+python3 setup_pipeline.py
 ```
 
-The script:
-1. Logs into Tapdata
-2. Creates a PostgreSQL source connection pointing at `host.docker.internal:5432/tapdata_demo`
-3. Creates a RisingWave target connection pointing at `host.docker.internal:4566/dev`
-4. Creates and starts the replication pipeline `pg_to_risingwave_native`
+## Architecture
 
-### Verify
-
-```bash
-# Check rows in RisingWave
-psql -h localhost -p 4566 -U root -d dev -c "SELECT * FROM orders ORDER BY id;"
 ```
-
-### Test CDC
-
-Insert a new row in PostgreSQL and watch it appear in RisingWave within ~10 seconds:
-
-```bash
-psql -h localhost -p 5432 -U <user> -d tapdata_demo \
-  -c "INSERT INTO orders (customer_name, product, quantity, price) VALUES ('CDC Test', 'Widget', 1, 9.99);"
-
-# A few seconds later:
-psql -h localhost -p 4566 -U root -d dev \
-  -c "SELECT * FROM orders ORDER BY id DESC LIMIT 1;"
+RisingWaveConnector.java    - PDK connector (init, DDL, DML, two write modes)
+WsIngestClient.java         - WebSocket client (init, batch, ACK, HMAC signing)
+spec_risingwave.json        - Tapdata connector spec (form schema, i18n, data types)
+icons/risingwave.png        - Connector icon
+docs/risingwave_en_US.md    - English documentation
+docs/risingwave_zh_CN.md    - Chinese documentation
 ```
-
-## Connection parameters
-
-| Field    | Default | Description |
-|----------|---------|-------------|
-| host     | —       | RisingWave hostname or IP |
-| port     | 4566    | RisingWave port |
-| database | dev     | Database name |
-| schema   | public  | Target schema |
-| user     | root    | Database user |
-| password | (empty) | Database password |
-| ingestEndpoint | ws://host:4560 | Full WebSocket ingest endpoint base, including `ws://` or `wss://` |
-| webhookSecret | (empty) | Shared secret used to sign the initial WebSocket auth frame |
 
 ## Known limitations
 
-- RisingWave does not support `ALTER TABLE` for adding/dropping columns, so schema evolution
-  requires dropping and recreating the table.
-- `ON CONFLICT DO UPDATE` (upsert) requires the target table to have a primary key.
-- Array and composite PostgreSQL types are not mapped; they fall back to `text`.
+- `ON CONFLICT DO UPDATE` (upsert) requires the target table to have a primary key
+- Array and composite PostgreSQL types are not mapped; they fall back to `text`
+- Webhook tables reject `NOT NULL`; streaming mode omits it in DDL
+- Existing plain tables cannot be upgraded to webhook tables in-place
+- DDL/schema changes are not propagated automatically
+- `varchar(N)` and `numeric(p,s)` are simplified for RisingWave compatibility
+- Target-only (cannot be used as a source)

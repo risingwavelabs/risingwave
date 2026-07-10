@@ -24,8 +24,14 @@
         <!-- Tapdata PDK API - provided at runtime by Tapdata engine -->
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>tapdata-pdk-all</artifactId>
-            <version>2.0.7-SNAPSHOT</version>
+            <artifactId>tapdata-pdk-api</artifactId>
+            <version>2.0.8-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>tapdata-api</artifactId>
+            <version>2.0.8-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
 
@@ -36,6 +42,23 @@
             <version>${postgresql.version}</version>
         </dependency>
     </dependencies>
+
+    <repositories>
+        <repository>
+            <id>nexus-snapshots</id>
+            <name>nexus-maven-snapshot</name>
+            <url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
+            <releases><enabled>false</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+        <repository>
+            <id>nexus-releases</id>
+            <name>nexus-maven-release</name>
+            <url>https://nexus.tapdata.net/repository/maven-releases/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
 
     <build>
         <plugins>
@@ -71,8 +94,8 @@
                                         <Implementation-Vendor>io.tapdata</Implementation-Vendor>
                                         <Implementation-Version>${project.version}</Implementation-Version>
                                         <Git-Build-Time>${maven.build.timestamp}</Git-Build-Time>
-                                        <PDK-API-Version>2.0.7-SNAPSHOT</PDK-API-Version>
-                                        <Tapdata-API-Version>2.0.7-SNAPSHOT</Tapdata-API-Version>
+                                        <PDK-API-Version>2.0.8-SNAPSHOT</PDK-API-Version>
+                                        <Tapdata-API-Version>2.0.8-SNAPSHOT</Tapdata-API-Version>
                                     </manifestEntries>
                                 </transformer>
                             </transformers>
