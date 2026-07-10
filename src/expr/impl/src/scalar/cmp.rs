@@ -39,6 +39,7 @@ use risingwave_expr::{ExprError, Result, function};
 #[function("equal(varchar, varchar) -> boolean")]
 #[function("equal(bytea, bytea) -> boolean")]
 #[function("equal(jsonb, jsonb) -> boolean")]
+#[function("equal(variant, variant) -> boolean")]
 #[function("equal(anyarray, anyarray) -> boolean")]
 #[function("equal(struct, struct) -> boolean")]
 pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -68,6 +69,7 @@ where
 #[function("not_equal(varchar, varchar) -> boolean")]
 #[function("not_equal(bytea, bytea) -> boolean")]
 #[function("not_equal(jsonb, jsonb) -> boolean")]
+#[function("not_equal(variant, variant) -> boolean")]
 #[function("not_equal(anyarray, anyarray) -> boolean")]
 #[function("not_equal(struct, struct) -> boolean")]
 pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -218,6 +220,7 @@ where
 #[function("is_distinct_from(interval, time) -> boolean")]
 #[function("is_distinct_from(varchar, varchar) -> boolean")]
 #[function("is_distinct_from(bytea, bytea) -> boolean")]
+#[function("is_distinct_from(variant, variant) -> boolean")]
 #[function("is_distinct_from(anyarray, anyarray) -> boolean")]
 #[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
@@ -250,6 +253,7 @@ where
 #[function("is_not_distinct_from(interval, time) -> boolean")]
 #[function("is_not_distinct_from(varchar, varchar) -> boolean")]
 #[function("is_not_distinct_from(bytea, bytea) -> boolean")]
+#[function("is_not_distinct_from(variant, variant) -> boolean")]
 #[function("is_not_distinct_from(anyarray, anyarray) -> boolean")]
 #[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
@@ -452,7 +456,7 @@ fn check_not_null<'a>(
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::{Decimal, F32, F64, Timestamp};
+    use risingwave_common::types::{Decimal, F32, F64, Timestamp, VariantVal};
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;
@@ -537,6 +541,38 @@ mod tests {
         let expr = build_from_pretty("(is_not_distinct_from:boolean $0:int4 $1:int4)");
         let result = expr.eval(&input).await.unwrap();
         assert_eq!(&result, target.column_at(0));
+    }
+
+    #[tokio::test]
+    async fn test_variant_equality() {
+        let object_ab: VariantVal = r#"{"a":1,"b":[2]}"#.parse().unwrap();
+        let object_ba: VariantVal = r#"{"b":[2],"a":1}"#.parse().unwrap();
+        let other: VariantVal = r#"{"a":2}"#.parse().unwrap();
+
+        let lhs = VariantArray::from_iter([Some(object_ab.clone()), Some(object_ab), None, None])
+            .into_ref();
+        let rhs =
+            VariantArray::from_iter([Some(object_ba), Some(other.clone()), None, Some(other)])
+                .into_ref();
+        let input = DataChunk::new(vec![lhs, rhs], 4);
+
+        for (function, expected) in [
+            ("equal", [Some(true), Some(false), None, None]),
+            ("not_equal", [Some(false), Some(true), None, None]),
+            (
+                "is_distinct_from",
+                [Some(false), Some(true), Some(false), Some(true)],
+            ),
+            (
+                "is_not_distinct_from",
+                [Some(true), Some(false), Some(true), Some(false)],
+            ),
+        ] {
+            let expr = build_from_pretty(format!("({function}:boolean $0:variant $1:variant)"));
+            let result = expr.eval(&input).await.unwrap();
+            let result: &BoolArray = result.as_ref().into();
+            assert_eq!(result.iter().collect::<Vec<_>>(), expected);
+        }
     }
 
     use risingwave_common::array::*;
