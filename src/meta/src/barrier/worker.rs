@@ -57,6 +57,7 @@ use crate::barrier::{
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -310,6 +311,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -329,6 +331,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await

@@ -34,6 +34,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
 use crate::rpc::metrics::MetaMetrics;
@@ -119,6 +120,14 @@ impl IcebergCompactionManager {
         let sink_param = self.get_sink_param(sink_id).await?;
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
         Ok(iceberg_config)
+    }
+
+    /// Clear the iceberg maintenance state of the sink aborted by
+    /// `try_abort_creating_streaming_job`, if any.
+    pub fn clear_maintenance_for_aborted_job(&self, abort_result: &AbortCreatingJobResult) {
+        if let Some(sink_id) = abort_result.aborted_sink_id {
+            self.clear_iceberg_maintenance_by_sink_id(sink_id);
+        }
     }
 }
 

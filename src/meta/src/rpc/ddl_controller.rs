@@ -1239,12 +1239,14 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
+                let abort_result = self
                     .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                if aborted {
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
+                if abort_result.aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1856,10 +1858,13 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                self.metadata_manager
+                let abort_result = self
+                    .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

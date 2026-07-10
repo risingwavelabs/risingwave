@@ -159,6 +159,8 @@ pub(crate) struct CleanedDirtyStreamingJobs {
     /// Only populated for per-database recovery.
     pub(crate) dropped_table_ids: Vec<TableId>,
     pub(crate) source_ids: Vec<SourceId>,
+    /// Cleaned dirty sink jobs, whose iceberg maintenance state must be cleared.
+    pub(crate) sink_ids: Vec<SinkId>,
 }
 
 impl CatalogController {
@@ -515,6 +517,11 @@ impl CatalogController {
             .iter()
             .map(|obj| obj.oid.as_job_id())
             .collect_vec();
+        let dirty_sink_ids = dirty_job_objs
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Sink)
+            .map(|obj| obj.oid.as_sink_id())
+            .collect_vec();
         let dirty_job_table_ids = dirty_job_ids
             .iter()
             .map(|job_id| job_id.as_mv_table_id())
@@ -663,6 +670,7 @@ impl CatalogController {
             streaming_job_ids: dirty_job_ids,
             dropped_table_ids,
             source_ids: dirty_associated_source_ids,
+            sink_ids: dirty_sink_ids,
         })
     }
 
