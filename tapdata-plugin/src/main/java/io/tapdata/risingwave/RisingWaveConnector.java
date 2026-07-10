@@ -682,6 +682,11 @@ public class RisingWaveConnector implements TapConnector {
 
         String url = "jdbc:postgresql://" + host + ":" + port + "/" + database +
                 "?socketTimeout=30&loginTimeout=30&tcpKeepAlive=true";
+        // Timezone: if configured, pass as JDBC session timezone via options
+        String timezone = cfg.getString("timezone");
+        if (timezone != null && !timezone.isEmpty()) {
+            url += "&options=-c%20timezone%3D" + timezone;
+        }
         Properties props = new Properties();
         props.setProperty("user", user);
         props.setProperty("password", password);

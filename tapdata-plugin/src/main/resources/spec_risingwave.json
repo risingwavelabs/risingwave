@@ -50,7 +50,7 @@
         },
         "port": {
           "required": true,
-          "type": "string",
+          "type": "number",
           "title": "${port}",
           "default": 4566,
           "x-decorator": "FormItem",
