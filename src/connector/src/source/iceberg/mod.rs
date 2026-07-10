@@ -13,9 +13,10 @@
 // limitations under the License.
 
 pub mod parquet_file_handler;
+pub mod planner;
 
 pub mod metrics;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -29,6 +30,10 @@ use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
+pub use planner::{
+    IcebergIncrementalScan, IcebergScanMetricsLabels, IcebergScanPlan, IcebergScanPlanner,
+    IcebergScanProjection, IcebergScanTaskBatchMode, IcebergScanTaskPlanner, PersistedFileScanTask,
+};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
@@ -132,19 +137,6 @@ impl UnknownFields for IcebergProperties {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct IcebergFileScanTaskJsonStr(String);
-
-impl IcebergFileScanTaskJsonStr {
-    pub fn deserialize(&self) -> FileScanTask {
-        serde_json::from_str(&self.0).unwrap()
-    }
-
-    pub fn serialize(task: &FileScanTask) -> Self {
-        Self(serde_json::to_string(task).unwrap())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IcebergFileScanTask {
     Data(Vec<FileScanTask>),
@@ -187,12 +179,17 @@ pub struct IcebergSplit {
 }
 
 impl IcebergSplit {
+    #[allow(deprecated)]
     pub fn empty(iceberg_scan_type: IcebergScanType) -> Self {
         let task = match iceberg_scan_type {
             IcebergScanType::DataScan => IcebergFileScanTask::Data(vec![]),
             IcebergScanType::EqualityDeleteScan => IcebergFileScanTask::EqualityDelete(vec![]),
             IcebergScanType::PositionDeleteScan => IcebergFileScanTask::PositionDelete(vec![]),
-            _ => unimplemented!(),
+            IcebergScanType::Unspecified | IcebergScanType::CountStar => {
+                // These scan types do not carry file tasks. Keep the split serializable without
+                // introducing a new empty-task variant.
+                IcebergFileScanTask::Data(vec![])
+            }
         };
         Self {
             split_id: 0,
@@ -212,11 +209,15 @@ impl SplitMetaData for IcebergSplit {
     }
 
     fn encode_to_json(&self) -> JsonbVal {
-        serde_json::to_value(self.clone()).unwrap().into()
+        serde_json::to_value(self.clone())
+            .expect("iceberg split serialization should not fail")
+            .into()
     }
 
     fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
-        unimplemented!()
+        // Iceberg source progress is tracked by persisted file tasks in the stream state table.
+        // A split does not carry an intra-file offset until partial-file reads are supported.
+        Ok(())
     }
 }
 
@@ -435,61 +436,7 @@ impl IcebergSplitEnumerator {
         file_scan_tasks: Vec<FileScanTask>,
         split_num: usize,
     ) -> Vec<Vec<FileScanTask>> {
-        use std::cmp::{Ordering, Reverse};
-
-        #[derive(Default)]
-        struct FileScanTaskGroup {
-            idx: usize,
-            tasks: Vec<FileScanTask>,
-            total_length: u64,
-        }
-
-        impl Ord for FileScanTaskGroup {
-            fn cmp(&self, other: &Self) -> Ordering {
-                // when total_length is the same, we will sort by index
-                if self.total_length == other.total_length {
-                    self.idx.cmp(&other.idx)
-                } else {
-                    self.total_length.cmp(&other.total_length)
-                }
-            }
-        }
-
-        impl PartialOrd for FileScanTaskGroup {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
-        }
-
-        impl Eq for FileScanTaskGroup {}
-
-        impl PartialEq for FileScanTaskGroup {
-            fn eq(&self, other: &Self) -> bool {
-                self.total_length == other.total_length
-            }
-        }
-
-        let mut heap = BinaryHeap::new();
-        // push all groups into heap
-        for idx in 0..split_num {
-            heap.push(Reverse(FileScanTaskGroup {
-                idx,
-                tasks: vec![],
-                total_length: 0,
-            }));
-        }
-
-        for file_task in file_scan_tasks {
-            let mut group = heap.peek_mut().unwrap();
-            group.0.total_length += file_task.length;
-            group.0.tasks.push(file_task);
-        }
-
-        // convert heap into vec and extract tasks
-        heap.into_vec()
-            .into_iter()
-            .map(|reverse_group| reverse_group.0.tasks)
-            .collect()
+        IcebergScanTaskPlanner::split_n_vecs(file_scan_tasks, split_num)
     }
 }
 
