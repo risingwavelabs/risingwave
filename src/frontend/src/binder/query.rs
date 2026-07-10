@@ -28,7 +28,7 @@ use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::BindingCte;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
+use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter, ExprVisitor, Parameter};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -36,8 +36,8 @@ use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<ColumnOrder>,
-    pub limit: Option<u64>,
-    pub offset: Option<u64>,
+    pub limit: Option<ExprImpl>,
+    pub offset: Option<ExprImpl>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
 }
@@ -139,7 +139,25 @@ impl RewriteExprsRecursive for BoundQuery {
         self.extra_order_exprs = new_extra_order_exprs;
 
         self.body.rewrite_exprs_recursive(rewriter);
+
+        // Rewrite LIMIT/OFFSET too so bind parameters (`$n`) inside them are
+        // substituted; they are finally folded to a constant in the planner.
+        self.limit = self.limit.take().map(|e| rewriter.rewrite_expr(e));
+        self.offset = self.offset.take().map(|e| rewriter.rewrite_expr(e));
     }
+}
+
+/// Whether an expression tree contains a bind parameter (`$n`).
+fn expr_has_parameter(expr: &ExprImpl) -> bool {
+    struct HasParameter(bool);
+    impl ExprVisitor for HasParameter {
+        fn visit_parameter(&mut self, _: &Parameter) {
+            self.0 = true;
+        }
+    }
+    let mut visitor = HasParameter(false);
+    visitor.visit_expr(expr);
+    visitor.0
 }
 
 impl Binder {
@@ -166,18 +184,16 @@ impl Binder {
         result
     }
 
-    /// Bind a `LIMIT` or `OFFSET` expression down to a constant `u64`.
+    /// Bind a `LIMIT` or `OFFSET` expression, casting it to `bigint`.
     ///
-    /// The expression must be castable to `bigint` and evaluate to a non-negative
-    /// integer constant. Following PostgreSQL, a `NULL` result is treated as
-    /// `null_value` (no limit for `LIMIT`, zero offset for `OFFSET`). `clause` is
-    /// the clause name (`"LIMIT"` / `"OFFSET"`) used in error messages.
-    fn bind_limit_or_offset_expr(
-        &mut self,
-        clause: &str,
-        expr: Expr,
-        null_value: u64,
-    ) -> Result<u64> {
+    /// The value is finally folded to a non-negative constant `u64` in the
+    /// planner (see `eval_limit_or_offset`), once any bind parameters (`$n`)
+    /// have been substituted. If the expression is *already* constant we
+    /// validate it here as well, so that a bad literal (negative value or an
+    /// evaluation error) fails at bind time rather than after later side
+    /// effects such as `CREATE TABLE AS`. `clause` is the clause name
+    /// (`"LIMIT"` / `"OFFSET"`) used in error messages.
+    fn bind_limit_or_offset_expr(&mut self, clause: &str, expr: Expr) -> Result<ExprImpl> {
         let bound = self.bind_expr(&expr)?;
         // wrong type error is handled here
         let cast_to_bigint = bound.cast_assign(&DataType::Int64).map_err(|_| {
@@ -188,6 +204,9 @@ impl Binder {
                 .into(),
             ))
         })?;
+        // Eagerly validate a constant so errors surface at bind time. A
+        // non-constant (e.g. `$n`, resolved only after parameter substitution)
+        // and a constant `NULL` are handled later in the planner.
         match cast_to_bigint.try_fold_const() {
             Some(Ok(Some(datum))) => {
                 let value = datum.as_int64();
@@ -197,28 +216,33 @@ impl Binder {
                     )
                     .into());
                 }
-                Ok(*value as u64)
             }
-            // If evaluated to NULL, we follow PG to treat NULL as `null_value`.
-            Some(Ok(None)) => Ok(null_value),
-            // not const error
-            None => Err(ErrorCode::ExprError(
-                format!(
-                    "expects an integer or expression that can be evaluated to an integer after {clause}, but found non-const expression"
+            Some(Err(e)) => {
+                return Err(ErrorCode::ExprError(
+                    format!(
+                        "expects an integer or expression that can be evaluated to an integer after {clause},\nbut the evaluation of the expression returns error:{}",
+                        e.as_report()
+                    )
+                    .into(),
                 )
-                .into(),
-            )
-            .into()),
-            // eval error
-            Some(Err(e)) => Err(ErrorCode::ExprError(
-                format!(
-                    "expects an integer or expression that can be evaluated to an integer after {clause},\nbut the evaluation of the expression returns error:{}",
-                    e.as_report()
+                .into());
+            }
+            // A non-constant that depends on a bind parameter (`$n`) is folded
+            // in the planner, after substitution. Any other non-constant (e.g.
+            // `random()`) is rejected here, so the error still precedes side
+            // effects such as `CREATE TABLE AS`.
+            None if !expr_has_parameter(&cast_to_bigint) => {
+                return Err(ErrorCode::ExprError(
+                    format!(
+                        "expects an integer or expression that can be evaluated to an integer after {clause}, but found non-const expression"
+                    )
+                    .into(),
                 )
-                .into(),
-            )
-            .into()),
+                .into());
+            }
+            Some(Ok(None)) | None => {}
         }
+        Ok(cast_to_bigint)
     }
 
     /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
@@ -252,14 +276,12 @@ impl Binder {
             (Some(limit), None) => Some(limit.clone()),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
-        // Following PostgreSQL, a `NULL` LIMIT is treated as no limit, while a
-        // `NULL` OFFSET is treated as zero.
         let limit = limit
-            .map(|expr| self.bind_limit_or_offset_expr("LIMIT", expr, u64::MAX))
+            .map(|expr| self.bind_limit_or_offset_expr("LIMIT", expr))
             .transpose()?;
         let offset = offset
             .clone()
-            .map(|expr| self.bind_limit_or_offset_expr("OFFSET", expr, 0))
+            .map(|expr| self.bind_limit_or_offset_expr("OFFSET", expr))
             .transpose()?;
 
         if let Some(with) = with {

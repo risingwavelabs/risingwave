@@ -14,9 +14,11 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::PROJECTED_ROW_ID_COLUMN_NAME;
+use thiserror_ext::AsReport;
 
 use crate::binder::BoundQuery;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, PlanRoot};
@@ -38,6 +40,11 @@ impl Planner {
             with_ties,
             extra_order_exprs,
         } = query;
+
+        // Bind parameters (`$n`) inside LIMIT/OFFSET have been substituted by
+        // now, so fold them to constant `u64`s here (see #23345).
+        let limit = eval_limit_or_offset(limit, "LIMIT", u64::MAX)?;
+        let offset = eval_limit_or_offset(offset, "OFFSET", 0)?;
 
         let extra_order_exprs_len = extra_order_exprs.len();
         let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
@@ -76,4 +83,56 @@ impl Planner {
             PlanRoot::new_with_logical_plan(plan, RequiredDist::Any, order, out_fields, out_names);
         Ok(root)
     }
+}
+
+/// Fold a bound `LIMIT`/`OFFSET` expression to a constant `u64`.
+///
+/// Called from the planner, after any bind parameters (`$n`) have been
+/// substituted, so a value that was deferred at bind time can now be
+/// evaluated. Following PostgreSQL, a `NULL` result maps to `null_value`
+/// (no limit for `LIMIT`, zero for `OFFSET`).
+fn eval_limit_or_offset(
+    expr: Option<ExprImpl>,
+    clause: &str,
+    null_value: u64,
+) -> Result<Option<u64>> {
+    let Some(expr) = expr else {
+        return Ok(None);
+    };
+    let value = match expr.try_fold_const() {
+        Some(Ok(Some(datum))) => {
+            let value = datum.as_int64();
+            if *value < 0 {
+                return Err(ErrorCode::ExprError(
+                    format!("{clause} must not be negative, but found: {}", *value).into(),
+                )
+                .into());
+            }
+            *value as u64
+        }
+        // If evaluated to NULL, follow PG and treat it as `null_value`.
+        Some(Ok(None)) => null_value,
+        // not const error
+        None => {
+            return Err(ErrorCode::ExprError(
+                format!(
+                    "expects an integer or expression that can be evaluated to an integer after {clause}, but found non-const expression"
+                )
+                .into(),
+            )
+            .into());
+        }
+        // eval error
+        Some(Err(e)) => {
+            return Err(ErrorCode::ExprError(
+                format!(
+                    "expects an integer or expression that can be evaluated to an integer after {clause},\nbut the evaluation of the expression returns error:{}",
+                    e.as_report()
+                )
+                .into(),
+            )
+            .into());
+        }
+    };
+    Ok(Some(value))
 }
