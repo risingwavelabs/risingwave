@@ -14,6 +14,7 @@
 
 use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::KeyComparator;
+use risingwave_hummock_sdk::key::{EPOCH_LEN, TABLE_PREFIX_LEN};
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::sstable::utils::{
@@ -82,8 +83,7 @@ impl MetaShardDesc {
         + 8 // checksum
     }
 
-    /// Validate the shard body length and checksum against this descriptor.
-    pub fn validate_body(&self, body: &[u8]) -> HummockResult<()> {
+    fn validate_body(&self, body: &[u8]) -> HummockResult<()> {
         if body.len() != self.len as usize {
             return Err(HummockError::decode_error(format!(
                 "partitioned meta shard {} body length mismatch: desc {} actual {}",
@@ -93,6 +93,19 @@ impl MetaShardDesc {
             )));
         }
         xxhash64_verify(body, self.checksum)
+    }
+
+    /// Decode a shard body after validating it against this descriptor.
+    pub fn decode_body(&self, body: &[u8]) -> HummockResult<MetaShard> {
+        self.validate_body(body)?;
+        validate_encoded_full_key(&self.smallest_key, "meta shard smallest_key")?;
+        MetaShard::decode_body(
+            self.shard_idx,
+            self.first_block_idx,
+            self.block_count,
+            &self.smallest_key,
+            body,
+        )
     }
 }
 
@@ -128,11 +141,8 @@ impl MetaPartitionIndex {
                 "partitioned meta index has no shard",
             ));
         }
-        if self.smallest_key.is_empty() || self.largest_key.is_empty() {
-            return Err(HummockError::decode_error(
-                "partitioned meta index has empty boundary key",
-            ));
-        }
+        validate_encoded_full_key(&self.smallest_key, "partitioned meta index smallest_key")?;
+        validate_encoded_full_key(&self.largest_key, "partitioned meta index largest_key")?;
         if KeyComparator::compare_encoded_full_key(&self.smallest_key, &self.largest_key)
             == std::cmp::Ordering::Greater
         {
@@ -154,7 +164,7 @@ impl MetaPartitionIndex {
 
         let index_offset = self.estimated_size as usize - encoded_len;
         let mut expected_first_block_idx = 0u32;
-        let mut expected_shard_offset = Some(0usize);
+        let mut expected_shard_offset = None;
         let mut last_smallest_key: Option<&[u8]> = None;
         for (shard_idx, shard) in self.shards.iter().enumerate() {
             if shard.shard_idx as usize != shard_idx {
@@ -175,12 +185,10 @@ impl MetaPartitionIndex {
                     shard_idx, expected_first_block_idx, shard.first_block_idx
                 )));
             }
-            if shard.smallest_key.is_empty() {
-                return Err(HummockError::decode_error(format!(
-                    "partitioned meta shard {} has empty smallest key",
-                    shard_idx
-                )));
-            }
+            validate_encoded_full_key(
+                &shard.smallest_key,
+                &format!("partitioned meta shard {shard_idx} smallest_key"),
+            )?;
             if let Some(last_smallest_key) = last_smallest_key
                 && KeyComparator::compare_encoded_full_key(last_smallest_key, &shard.smallest_key)
                     != std::cmp::Ordering::Less
@@ -221,6 +229,12 @@ impl MetaPartitionIndex {
                 .ok_or_else(|| {
                     HummockError::decode_error("partitioned meta block count overflow")
                 })?;
+        }
+        if expected_shard_offset != Some(index_offset) {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta final shard ends at {:?}, expected index offset {}",
+                expected_shard_offset, index_offset
+            )));
         }
         if expected_first_block_idx != self.block_count {
             return Err(HummockError::decode_error(format!(
@@ -361,7 +375,7 @@ impl MetaShard {
         buf
     }
 
-    pub fn decode_body(
+    fn decode_body(
         shard_idx: u32,
         first_block_idx: u32,
         expected_block_count: u32,
@@ -392,6 +406,12 @@ impl MetaShard {
                 "partitioned meta shard {} has no block meta",
                 shard_idx
             )));
+        }
+        for (idx, block_meta) in block_metas.iter().enumerate() {
+            validate_encoded_full_key(
+                &block_meta.smallest_key,
+                &format!("partitioned meta shard {shard_idx} block meta {idx} smallest_key"),
+            )?;
         }
         if block_metas[0].smallest_key != expected_smallest_key {
             return Err(HummockError::decode_error(format!(
@@ -494,6 +514,18 @@ fn get_length_prefixed_slice_checked(buf: &mut &[u8], field: &str) -> HummockRes
     Ok(value)
 }
 
+fn validate_encoded_full_key(key: &[u8], field: &str) -> HummockResult<()> {
+    const MIN_ENCODED_FULL_KEY_LEN: usize = TABLE_PREFIX_LEN + EPOCH_LEN;
+
+    if key.len() < MIN_ENCODED_FULL_KEY_LEN {
+        return Err(HummockError::decode_error(format!(
+            "{field} too short for encoded full key: need at least {MIN_ENCODED_FULL_KEY_LEN} bytes, got {}",
+            key.len()
+        )));
+    }
+    Ok(())
+}
+
 fn decode_block_meta_checked(buf: &mut &[u8]) -> HummockResult<BlockMeta> {
     ensure_remaining(buf, 20, "block meta fixed fields")?;
     let offset = buf.get_u32_le();
@@ -516,6 +548,7 @@ fn decode_block_meta_checked(buf: &mut &[u8]) -> HummockResult<BlockMeta> {
 mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::panic::rw_catch_unwind;
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
@@ -552,8 +585,11 @@ mod tests {
         }
     }
 
-    fn index_from_shards(shards: &[MetaShard]) -> MetaPartitionIndex {
-        let mut offset = 0u64;
+    fn index_from_shards_at_offset(
+        shards: &[MetaShard],
+        initial_offset: u64,
+    ) -> MetaPartitionIndex {
+        let mut offset = initial_offset;
         let mut descs = Vec::with_capacity(shards.len());
         for shard in shards {
             let body = shard.encode_body_to_bytes();
@@ -593,6 +629,10 @@ mod tests {
         index
     }
 
+    fn index_from_shards(shards: &[MetaShard]) -> MetaPartitionIndex {
+        index_from_shards_at_offset(shards, 0)
+    }
+
     fn sample_index() -> MetaPartitionIndex {
         index_from_shards(&[shard(0, 0, 2), shard(1, 2, 2)])
     }
@@ -618,6 +658,16 @@ mod tests {
     }
 
     #[test]
+    fn test_partitioned_meta_index_round_trip_with_data_prefix() {
+        let index = index_from_shards_at_offset(&[shard(0, 0, 2), shard(1, 2, 2)], 4096);
+
+        assert_eq!(
+            MetaPartitionIndex::decode(&index.encode_to_bytes()).unwrap(),
+            index
+        );
+    }
+
+    #[test]
     fn test_meta_shard_round_trip_and_desc_validation() {
         let shard = shard(0, 0, 2);
         let body = shard.encode_body_to_bytes();
@@ -631,18 +681,7 @@ mod tests {
             checksum: xxhash64_checksum(&body),
         };
 
-        desc.validate_body(&body).unwrap();
-        assert_eq!(
-            MetaShard::decode_body(
-                desc.shard_idx,
-                desc.first_block_idx,
-                desc.block_count,
-                &desc.smallest_key,
-                &body,
-            )
-            .unwrap(),
-            shard
-        );
+        assert_eq!(desc.decode_body(&body).unwrap(), shard);
     }
 
     #[test]
@@ -687,11 +726,15 @@ mod tests {
     }
 
     #[test]
-    fn test_partitioned_meta_rejects_bad_shard_offset_or_meta_offset_boundary() {
+    fn test_partitioned_meta_rejects_shard_gaps_or_bad_meta_offset_boundary() {
         let mut gap = sample_index();
         gap.shards[1].offset += 1;
         gap = reencode_index(gap);
         assert!(MetaPartitionIndex::decode(&gap.encode_to_bytes()).is_err());
+
+        let mut final_gap = sample_index();
+        final_gap.shards[1].len -= 1;
+        assert!(MetaPartitionIndex::decode(&final_gap.encode_to_bytes()).is_err());
 
         let mut crosses_index = sample_index();
         crosses_index.shards[1].len += 1;
@@ -703,24 +746,34 @@ mod tests {
         let shard = shard(0, 0, 2);
         let body = shard.encode_body_to_bytes();
 
-        assert!(
-            MetaShard::decode_body(0, 0, 3, &shard.block_metas[0].smallest_key, &body).is_err()
-        );
+        let mut bad_count = MetaShardDesc {
+            shard_idx: 0,
+            first_block_idx: 0,
+            block_count: 3,
+            smallest_key: shard.block_metas[0].smallest_key.clone(),
+            offset: 0,
+            len: body.len() as u32,
+            checksum: xxhash64_checksum(&body),
+        };
+        assert!(bad_count.decode_body(&body).is_err());
 
-        assert!(MetaShard::decode_body(0, 0, 2, &test_key(99), &body).is_err());
+        bad_count.block_count = 2;
+        bad_count.smallest_key = test_key(99);
+        assert!(bad_count.decode_body(&body).is_err());
 
         let mut bad_order = shard;
         bad_order.block_metas[1].smallest_key = bad_order.block_metas[0].smallest_key.clone();
-        assert!(
-            MetaShard::decode_body(
-                0,
-                0,
-                2,
-                &bad_order.block_metas[0].smallest_key,
-                &bad_order.encode_body_to_bytes(),
-            )
-            .is_err()
-        );
+        let bad_order_body = bad_order.encode_body_to_bytes();
+        let bad_order_desc = MetaShardDesc {
+            shard_idx: 0,
+            first_block_idx: 0,
+            block_count: 2,
+            smallest_key: bad_order.block_metas[0].smallest_key.clone(),
+            offset: 0,
+            len: bad_order_body.len() as u32,
+            checksum: xxhash64_checksum(&bad_order_body),
+        };
+        assert!(bad_order_desc.decode_body(&bad_order_body).is_err());
     }
 
     #[test]
@@ -739,11 +792,11 @@ mod tests {
 
         let mut bad_len = desc.clone();
         bad_len.len += 1;
-        assert!(bad_len.validate_body(&body).is_err());
+        assert!(bad_len.decode_body(&body).is_err());
 
         let mut bad_checksum = desc;
         bad_checksum.checksum ^= 1;
-        assert!(bad_checksum.validate_body(&body).is_err());
+        assert!(bad_checksum.decode_body(&body).is_err());
     }
 
     #[test]
@@ -773,6 +826,46 @@ mod tests {
     }
 
     #[test]
+    fn test_partitioned_meta_rejects_short_full_keys_without_panicking() {
+        let short_key = vec![0; TABLE_PREFIX_LEN + EPOCH_LEN - 1];
+
+        let mut short_index_boundary = sample_index();
+        short_index_boundary.smallest_key = short_key.clone();
+        short_index_boundary = reencode_index(short_index_boundary);
+        assert_decode_returns_err_without_panicking(|| {
+            MetaPartitionIndex::decode(&short_index_boundary.encode_to_bytes())
+        });
+
+        let mut short_index_largest_key = sample_index();
+        short_index_largest_key.largest_key = short_key.clone();
+        short_index_largest_key = reencode_index(short_index_largest_key);
+        assert_decode_returns_err_without_panicking(|| {
+            MetaPartitionIndex::decode(&short_index_largest_key.encode_to_bytes())
+        });
+
+        let mut short_shard_key = sample_index();
+        short_shard_key.shards[1].smallest_key = short_key.clone();
+        short_shard_key = reencode_index(short_shard_key);
+        assert_decode_returns_err_without_panicking(|| {
+            MetaPartitionIndex::decode(&short_shard_key.encode_to_bytes())
+        });
+
+        let mut shard = shard(0, 0, 2);
+        shard.block_metas[1].smallest_key = short_key;
+        let body = shard.encode_body_to_bytes();
+        let desc = MetaShardDesc {
+            shard_idx: shard.shard_idx,
+            first_block_idx: shard.first_block_idx,
+            block_count: shard.block_metas.len() as u32,
+            smallest_key: shard.block_metas[0].smallest_key.clone(),
+            offset: 0,
+            len: body.len() as u32,
+            checksum: xxhash64_checksum(&body),
+        };
+        assert_decode_returns_err_without_panicking(|| desc.decode_body(&body));
+    }
+
+    #[test]
     fn test_meta_shard_rejects_checksum_valid_malformed_shard_body() {
         let mut truncated_body = Vec::new();
         truncated_body.put_u32_le(0); // partial block meta fixed fields
@@ -786,29 +879,37 @@ mod tests {
             checksum: xxhash64_checksum(&truncated_body),
         };
 
-        desc.validate_body(&truncated_body).unwrap();
-        assert!(
-            MetaShard::decode_body(
-                desc.shard_idx,
-                desc.first_block_idx,
-                desc.block_count,
-                &desc.smallest_key,
-                &truncated_body,
-            )
-            .is_err()
-        );
+        assert!(desc.decode_body(&truncated_body).is_err());
     }
 
     #[test]
     fn test_meta_shard_rejects_checksum_valid_huge_expected_block_count() {
         let body = Vec::new();
 
-        assert!(MetaShard::decode_body(0, 0, u32::MAX, &test_key(0), &body).is_err());
+        let desc = MetaShardDesc {
+            shard_idx: 0,
+            first_block_idx: 0,
+            block_count: u32::MAX,
+            smallest_key: test_key(0),
+            offset: 0,
+            len: 0,
+            checksum: xxhash64_checksum(&body),
+        };
+
+        assert!(desc.decode_body(&body).is_err());
     }
 
     fn reencode_index(mut index: MetaPartitionIndex) -> MetaPartitionIndex {
         let shard_body_len: u32 = index.shards.iter().map(|shard| shard.len).sum();
         index.estimated_size = shard_body_len + index.encoded_size() as u32;
         index
+    }
+
+    fn assert_decode_returns_err_without_panicking<T>(f: impl FnOnce() -> HummockResult<T>) {
+        assert!(
+            rw_catch_unwind(std::panic::AssertUnwindSafe(f))
+                .expect("malformed metadata must not panic")
+                .is_err()
+        );
     }
 }
