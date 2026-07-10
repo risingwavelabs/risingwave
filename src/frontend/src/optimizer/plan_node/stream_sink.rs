@@ -371,16 +371,30 @@ impl StreamSink {
             )
         }
 
-        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
-        // might not be valid. We should reject the cases referencing such columns in primary key.
+        // The "upsert" property is defined based on a specific stream key: columns other than the
+        // stream key might not be valid. We should reject the cases referencing such columns in
+        // primary key unless the user explicitly opts in to the unsafe behavior.
         if let StreamKind::Upsert = input.stream_kind()
             && let Some(downstream_pk) = &downstream_pk
             && !downstream_pk.iter().all(|i| derived_pk.contains(i))
         {
-            bail_bind_error!(
-                "When sinking from an upsert stream, \
-                 the downstream primary key must be the same as or a subset of the one derived from the stream."
-            )
+            let unsafe_allow_pk_mismatch = input
+                .ctx()
+                .session_ctx()
+                .config()
+                .streaming_unsafe_allow_upsert_sink_pk_mismatch();
+            if !unsafe_allow_pk_mismatch {
+                bail_bind_error!(
+                    "When sinking from an upsert stream, \
+                     the downstream primary key must be the same as or a subset of the one derived from the stream."
+                )
+            }
+            input.ctx().session_ctx().notice_to_user(
+                "Unsafe upsert sink primary-key mismatch is allowed by session variable \
+                 `streaming_unsafe_allow_upsert_sink_pk_mismatch`. This may leave stale rows in \
+                 the downstream system if a downstream primary-key column changes without its \
+                 old value being emitted.",
+            );
         }
 
         if let Some(upstream_table) = &auto_refresh_schema_from_table

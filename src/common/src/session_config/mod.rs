@@ -258,6 +258,14 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     streaming_unsafe_allow_unmaterialized_impure_expr: bool,
 
+    /// Unsafe: allow an upsert sink to use downstream primary-key columns that are not part of
+    /// the upstream stream key.
+    ///
+    /// This may leave stale rows in the downstream system if a downstream primary-key column
+    /// changes without the upsert stream providing its old value.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_upsert_sink_pk_mismatch: bool,
+
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
     streaming_separate_consecutive_join: bool,
