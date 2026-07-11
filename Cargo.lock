@@ -12031,7 +12031,7 @@ dependencies = [
  "easy-ext",
  "either",
  "elasticsearch",
- "enum-as-inner 0.6.1",
+ "enum-as-inner 0.7.0",
  "expect-test",
  "firestore",
  "fs-err",

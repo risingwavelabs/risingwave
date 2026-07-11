@@ -427,15 +427,7 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         DataType::Boolean => JsonValue::Bool(scalar.into_bool()),
         DataType::Int16 => JsonValue::Number(scalar.into_int16().into()),
         DataType::Int32 => JsonValue::Number(scalar.into_int32().into()),
-        DataType::Int64 => {
-            // JSON numbers have limited precision, use string for large integers
-            let v = scalar.into_int64();
-            if v.abs() > (1i64 << 53) {
-                JsonValue::String(v.to_string())
-            } else {
-                JsonValue::Number(v.into())
-            }
-        }
+        DataType::Int64 => JsonValue::Number(scalar.into_int64().into()),
         DataType::Float32 => {
             let f = scalar.into_float32().0;
             serde_json::Number::from_f64(f as f64)
@@ -554,6 +546,19 @@ mod tests {
         assert!(validate_firestore_document_id("").is_err());
         assert!(validate_firestore_document_id(".").is_err());
         assert!(validate_firestore_document_id("..").is_err());
+    }
+
+    #[test]
+    fn test_format_int64_as_integer_value() -> Result<()> {
+        assert_eq!(
+            format_datum(Some(ScalarRefImpl::Int64(i64::MIN)), &DataType::Int64)?,
+            JsonValue::Number(i64::MIN.into())
+        );
+        assert_eq!(
+            format_datum(Some(ScalarRefImpl::Int64(i64::MAX)), &DataType::Int64)?,
+            JsonValue::Number(i64::MAX.into())
+        );
+        Ok(())
     }
 }
 
