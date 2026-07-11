@@ -103,12 +103,14 @@ def _(outer_panels: Panels):
                             ),
                             "CPU Saturation (k8s limit) - {{namespace}}/{{pod}}",
                         ),
+                        # `max by` dedups duplicate kube-state-metrics series (HA replicas or BYOC
+                        # federation) so the group_left join doesn't fail with many-to-many matching.
                         panels.target(
                             alert_when(
                                 "changes(("
-                                + 'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"} '
+                                + 'max by (namespace,pod,container) (kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}) '
                                 + "* on (namespace,pod,container) group_left (reason) "
-                                + 'kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod",reason!~"Completed"}'
+                                + 'max by (namespace,pod,container,reason) (kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod",reason!~"Completed"})'
                                 + ")[$__rate_interval:])"
                             ),
                             "[{{reason}}] {{container}} {{pod}}",
