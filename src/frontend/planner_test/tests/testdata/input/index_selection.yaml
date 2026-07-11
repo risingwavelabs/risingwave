@@ -424,6 +424,14 @@
     select * from test_table where name like 'test\_table_2';
   expected_outputs:
   - batch_plan
+- name: restrict rewrite LIKE with ESCAPE as a binary expression
+  sql: |
+    create table some_trades(id varchar);
+    select * from some_trades
+    where id like '%\_%' escape '\'
+      and id not like 'DROPFEED%';
+  expected_outputs:
+  - batch_plan
 - sql: |
     create table t1 (k1 int primary key, v1 int);
     create table t2 (k2 int primary key, v2 int);
