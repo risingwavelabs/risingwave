@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem::{size_of, size_of_val};
-use std::sync::LazyLock;
 
 use bytes::Bytes;
 use risingwave_common_estimate_size::EstimateSize;
@@ -24,11 +23,6 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Scalar, VariantRef, VariantVal};
-
-/// A valid placeholder returned by raw iteration for SQL NULL entries. Raw array access may inspect
-/// the physical value before applying the null bitmap, so NULL entries cannot expose an empty,
-/// invalid Variant buffer.
-static NULL_VARIANT_PLACEHOLDER: LazyLock<VariantVal> = LazyLock::new(VariantVal::null);
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VariantArrayBuilder {
@@ -155,9 +149,6 @@ impl Array for VariantArray {
     type RefItem<'a> = VariantRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        if unsafe { !self.bitmap.is_set_unchecked(idx) } {
-            return NULL_VARIANT_PLACEHOLDER.as_scalar_ref();
-        }
         VariantRef::from_serialized(self.serialized_at_unchecked(idx))
             .expect("variant array element should contain valid variant bytes")
     }

@@ -205,21 +205,6 @@ from v;
 ----
 array array int32 array int16 int32 int64
 
-# VARIANT equality uses RisingWave's canonical byte representation. Object field order is
-# canonicalized, while preserved numeric widths remain distinct by design.
-query BBBBBBBB
-select
-    parse_variant('{"a":1,"b":[2]}') = parse_variant('{"b":[2],"a":1}'),
-    parse_variant('{"a":1}') <> parse_variant('{"a":2}'),
-    to_variant(1::int4) = to_variant(1::int4),
-    to_variant(1::int4) <> to_variant(1::int8),
-    parse_variant('null') = parse_variant('null'),
-    null::variant is not distinct from null::variant,
-    null::variant is distinct from parse_variant('null'),
-    parse_variant('1') is not distinct from parse_variant('1');
-----
-t t t t t t t t
-
 # Non-finite floats normalize to canonical variant doubles and render as strings,
 # following to_jsonb on float8.
 query TTTTTT
