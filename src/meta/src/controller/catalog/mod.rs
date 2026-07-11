@@ -833,7 +833,7 @@ impl CatalogController {
             {
                 continue;
             }
-            if !Self::is_direct_iceberg_comment_sink(&sink, table) {
+            if !Self::is_direct_iceberg_comment_sink(&sink) {
                 continue;
             }
             sinks.push(PbSink::from(ObjectModel(
@@ -845,9 +845,8 @@ impl CatalogController {
         Ok(sinks)
     }
 
-    fn is_direct_iceberg_comment_sink(sink: &sink::Model, table: &table::Model) -> bool {
-        sink.name == format!("{}{}", ICEBERG_SINK_PREFIX, table.name)
-            || sink.sink_from_name == table.name
+    fn is_direct_iceberg_comment_sink(sink: &sink::Model) -> bool {
+        sink.is_direct_iceberg_comment_sink
     }
 
     async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {

@@ -75,6 +75,7 @@ pub struct Model {
     pub sink_from_name: String,
     pub sink_format_desc: Option<SinkFormatDesc>,
     pub target_table: Option<TableId>,
+    pub is_direct_iceberg_comment_sink: bool,
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub original_target_columns: Option<ColumnCatalogArray>,
@@ -136,6 +137,7 @@ impl From<PbSink> for ActiveModel {
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
             target_table: Set(pb_sink.target_table),
+            is_direct_iceberg_comment_sink: Set(pb_sink.is_direct_iceberg_comment_sink),
             secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
             original_target_columns: Set(Some(pb_sink.original_target_columns.into())),
             auto_refresh_schema_from_table: Set(pb_sink.auto_refresh_schema_from_table),

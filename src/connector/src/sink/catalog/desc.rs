@@ -121,6 +121,7 @@ impl SinkDesc {
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
             auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
+            is_direct_iceberg_comment_sink: false,
             target_table: self.target_table,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,

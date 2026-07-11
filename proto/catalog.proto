@@ -237,6 +237,9 @@ message Sink {
   //
   // Should not directly access this field. Use method `ignore_delete()` instead.
   bool raw_ignore_delete = 28;
+
+  // Whether this Iceberg sink is directly created from a table or materialized view.
+  bool is_direct_iceberg_comment_sink = 29;
 }
 
 message Subscription {

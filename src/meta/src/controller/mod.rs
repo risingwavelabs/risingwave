@@ -383,6 +383,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             stream_job_status,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
             target_table: value.0.target_table,
+            is_direct_iceberg_comment_sink: value.0.is_direct_iceberg_comment_sink,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type,

@@ -83,6 +83,7 @@ mod tests {
         name: &str,
         connector: &str,
         sink_from_name: &str,
+        is_direct_iceberg_comment_sink: bool,
     ) -> MetaResult<()> {
         sink::ActiveModel {
             sink_id: Set(sink_id),
@@ -103,6 +104,7 @@ mod tests {
             sink_from_name: Set(sink_from_name.to_owned()),
             sink_format_desc: Set(None),
             target_table: Set(None),
+            is_direct_iceberg_comment_sink: Set(is_direct_iceberg_comment_sink),
             secret_ref: Set(None),
             original_target_columns: Set(None),
             auto_refresh_schema_from_table: Set(None),
@@ -200,6 +202,7 @@ mod tests {
             "direct_table_iceberg_sink",
             ICEBERG_SINK,
             "comment_src",
+            true,
         )
         .await?;
         insert_test_dependency(&txn, table_id.as_object_id(), direct_table_sink_obj.oid).await?;
@@ -238,6 +241,7 @@ mod tests {
             "direct_mv_iceberg_sink",
             ICEBERG_SINK,
             "comment_mv",
+            true,
         )
         .await?;
         insert_test_dependency(&txn, mv_id.as_object_id(), direct_mv_sink_obj.oid).await?;
@@ -256,6 +260,7 @@ mod tests {
             "derived_iceberg_sink",
             ICEBERG_SINK,
             "derived_iceberg_sink",
+            false,
         )
         .await?;
         insert_test_dependency(&txn, table_id.as_object_id(), derived_sink_obj.oid).await?;
@@ -274,6 +279,7 @@ mod tests {
             "direct_kafka_sink",
             "kafka",
             "comment_src",
+            false,
         )
         .await?;
         insert_test_dependency(&txn, table_id.as_object_id(), non_iceberg_sink_obj.oid).await?;

@@ -536,12 +536,14 @@ pub async fn gen_sink_plan(
             )
             .collect();
 
-    let sink_catalog = sink_desc.into_catalog(
+    let mut sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
         session.user_id(),
         connector_conn_ref,
     );
+    sink_catalog.is_direct_iceberg_comment_sink =
+        connector.eq_ignore_ascii_case(ICEBERG_SINK) && direct_sink_from_name.is_some();
 
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {

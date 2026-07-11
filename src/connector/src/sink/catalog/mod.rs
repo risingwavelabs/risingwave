@@ -347,6 +347,7 @@ pub struct SinkCatalog {
     /// Name for the table info for Debezium sink
     pub sink_from_name: String,
     pub auto_refresh_schema_from_table: Option<TableId>,
+    pub is_direct_iceberg_comment_sink: bool,
 
     pub target_table: Option<TableId>,
 
@@ -404,6 +405,7 @@ impl SinkCatalog {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
+            is_direct_iceberg_comment_sink: self.is_direct_iceberg_comment_sink,
         }
     }
 
@@ -507,6 +509,7 @@ impl From<PbSink> for SinkCatalog {
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
             auto_refresh_schema_from_table: pb.auto_refresh_schema_from_table,
+            is_direct_iceberg_comment_sink: pb.is_direct_iceberg_comment_sink,
             target_table: pb.target_table,
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
