@@ -13,12 +13,15 @@ def _(outer_panels: Panels):
                     "Termination reasons (OOMKilled, etc...)",
                     "The reasons for the termination of the containers.",
                     [
-                        # `max by` dedups duplicate kube-state-metrics series (HA replicas or BYOC
-                        # federation) so the group_left join doesn't fail with many-to-many matching.
+                        # kube-state-metrics may be scraped by multiple sources (HA replicas, BYOC
+                        # federation). Join timestamp<->reason within each source first (full label
+                        # set keeps sources apart), then `max by` dedups across sources.
                         panels.target(
-                            'max by (namespace,pod,container) (kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"})'
-                            '* 1000'
-                            '* on (namespace,pod,container) group_left (reason) max by (namespace,pod,container,reason) (kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"})',
+                            'max by (cluster,namespace,pod,container,reason) ('
+                            'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}'
+                            ' * ignoring(reason) group_left(reason) '
+                            'kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}'
+                            ') * 1000',
                             "[{{reason}}] {{container}} {{pod}}",
                         )
                     ],
