@@ -432,6 +432,10 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        for sink_id in &cleaned_dirty_jobs.sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(*sink_id);
+        }
         if database_id.is_some() {
             // Per-database recovery does not run the global Hummock purge below. Unregister the
             // dirty jobs cleaned in this database through the normal dropped-table cleanup path.

@@ -390,9 +390,9 @@ mod tests {
         txn.commit().await?;
         drop(inner);
 
-        let (aborted, database_id) = mgr.try_abort_creating_streaming_job(job_id, true).await?;
-        assert!(aborted);
-        assert_eq!(database_id, Some(TEST_DATABASE_ID));
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, true).await?;
+        assert!(abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
 
         let err = rx
             .await
