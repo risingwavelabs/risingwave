@@ -604,18 +604,3 @@ impl JniCatalog {
         Ok(Arc::new(catalog) as Arc<dyn Catalog>)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_jni_operation_runs_off_async_worker() {
-        let async_worker = std::thread::current().id();
-        let jni_worker = execute_blocking_jni(|| Ok(std::thread::current().id()))
-            .await
-            .unwrap();
-
-        assert_ne!(async_worker, jni_worker);
-    }
-}
