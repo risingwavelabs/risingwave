@@ -137,7 +137,10 @@ impl HummockManager {
             new_checkpoint_id,
             old_checkpoint_id,
         ) = {
-            let versioning_guard = self.versioning.read().await;
+            let versioning_guard = self
+                .versioning
+                .read_with_process_name("version_checkpoint_build")
+                .await;
             let versioning: &Versioning = versioning_guard.deref();
             let current_version = versioning.current_version.clone();
             let old_checkpoint: &HummockVersionCheckpoint = &versioning.checkpoint;
@@ -287,7 +290,10 @@ impl HummockManager {
             gc_stale_object_stats(&new_checkpoint.stale_objects, min_pinned_version_id);
         // 3. hold write lock briefly and update in memory state
         let current_version_for_metrics = {
-            let mut versioning_guard = self.versioning.write().await;
+            let mut versioning_guard = self
+                .versioning
+                .write_with_process_name("version_checkpoint_install")
+                .await;
             let versioning = versioning_guard.deref_mut();
             assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
             versioning.checkpoint = new_checkpoint;
