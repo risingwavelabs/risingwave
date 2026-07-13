@@ -506,9 +506,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             .map(|p| IcebergCommitResult::try_from_serialized_bytes(&p))
             .collect::<Result<Vec<_>>>()?;
 
-        let snapshot_committed = self
-            .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
-            .await?;
+        let snapshot_committed = self.is_snapshot_id_in_iceberg(snapshot_id).await?;
 
         if snapshot_committed {
             tracing::info!(
@@ -815,12 +813,12 @@ impl IcebergSinkCommitter {
     /// During pre-commit metadata, we record the `snapshot_id` corresponding to each batch of files.
     /// Therefore, the logic for checking whether all files in this batch are present in Iceberg
     /// has been changed to verifying if their corresponding `snapshot_id` exists in Iceberg.
-    async fn is_snapshot_id_in_iceberg(
-        &self,
-        iceberg_config: &IcebergConfig,
-        snapshot_id: i64,
-    ) -> Result<bool> {
-        let table = iceberg_config.load_table().await?;
+    async fn is_snapshot_id_in_iceberg(&self, snapshot_id: i64) -> Result<bool> {
+        let table = self
+            .catalog
+            .load_table(self.table.identifier())
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err).context("reload iceberg table")))?;
         if table.metadata().snapshot_by_id(snapshot_id).is_some() {
             Ok(true)
         } else {
@@ -1076,7 +1074,10 @@ impl IcebergSinkCommitter {
                 tokio::time::sleep(Duration::from_secs(30)).await;
 
                 // Refresh table after the wait so the next check sees latest snapshots.
-                self.table = self.config.load_table().await?;
+                let table_ident = self.table.identifier().clone();
+                self.table = self.catalog.load_table(&table_ident).await.map_err(|err| {
+                    SinkError::Iceberg(anyhow!(err).context("reload iceberg table"))
+                })?;
             }
         }
         Ok(())
