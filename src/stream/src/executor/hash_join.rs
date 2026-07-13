@@ -989,6 +989,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 side_match.i2o_mapping.clone(),
             ));
 
+        let join_matched_rows_from_storage = ctx
+            .streaming_metrics
+            .join_matched_rows_from_storage
+            .with_guarded_label_values(&[
+                &ctx.id.to_string(),
+                &ctx.fragment_id.to_string(),
+                &side_update.ht.table_id().to_string(),
+            ]);
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row)) = r else {
@@ -1014,6 +1022,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     CacheResult::NeverMatch
                 }
             };
+            // Join-key matches for this probe row, counted per matched build-side row in
+            // `handle_match_rows`. Don't sum yielded chunk sizes instead: `JoinChunkBuilder`
+            // batches across probe rows, so per-row counts would be wrong.
+            //
+            // A cache lookup is all-or-nothing, so on a `Miss` all matches are read from the state
+            // store and `total_matches` equals the storage-read count.
+            let lookup_was_miss = matches!(cache_lookup_result, CacheResult::Miss);
             let mut total_matches = 0;
 
             macro_rules! match_rows {
@@ -1029,6 +1044,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         cond,
                         append_only_optimize,
                         entry_state_max_rows,
+                        &mut total_matches,
                     )
                 };
             }
@@ -1038,23 +1054,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 {
                     #[for_await]
                     for chunk in match_rows!(Insert) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
+                        yield chunk?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete =>
                 {
                     #[for_await]
                     for chunk in match_rows!(Delete) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
+                        yield chunk?;
                     }
                 }
             };
 
             join_matched_join_keys.observe(total_matches as _);
+            join_matched_rows_from_storage
+                .observe(if lookup_was_miss { total_matches } else { 0 } as _);
             if total_matches > high_join_amplification_threshold {
                 let join_key_data_types = side_update.ht.join_key_data_types();
                 let key = key.deserialize(join_key_data_types)?;
@@ -1100,6 +1114,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         cond: &'a mut Option<NonStrictExpression>,
         append_only_optimize: bool,
         entry_state_max_rows: usize,
+        total_matches: &'a mut usize,
     ) {
         let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
         let mut entry_state: JoinEntryState<E> = JoinEntryState::default();
@@ -1157,6 +1172,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     cached_rows.values_mut(&side_match.all_data_types)
                 {
                     let matched_row = matched_row?;
+                    *total_matches += 1;
                     if let Some(chunk) = match_row!(
                         match_order_key_indices,
                         match_degree_state,
@@ -1183,6 +1199,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 #[for_await]
                 for matched_row in matched_rows {
                     let (encoded_pk, matched_row) = matched_row?;
+                    *total_matches += 1;
 
                     let mut matched_row_ref = None;
 
