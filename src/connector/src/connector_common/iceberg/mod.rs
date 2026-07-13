@@ -458,12 +458,15 @@ impl<'a> ResolvedIcebergCatalogConfig<'a> {
                 catalog_name,
                 catalog_impl,
                 java_catalog_props,
-            } => jni_catalog::JniCatalog::build_catalog(
-                file_io_props,
-                catalog_name,
-                catalog_impl.class_name(),
-                java_catalog_props,
-            ),
+            } => {
+                jni_catalog::JniCatalog::build_catalog(
+                    file_io_props,
+                    catalog_name,
+                    catalog_impl.class_name(),
+                    java_catalog_props,
+                )
+                .await
+            }
             CatalogBuildPlan::Mock => Ok(Arc::new(mock_catalog::MockCatalog {})),
         }
     }
