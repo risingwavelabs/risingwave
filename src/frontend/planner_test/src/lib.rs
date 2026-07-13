@@ -39,6 +39,7 @@ use risingwave_frontend::{
     Binder, Explain, FrontendOpts, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
     WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
+use risingwave_license::{LicenseKey, LicenseManager};
 use risingwave_sqlparser::ast::{
     AstOption, BackfillOrderStrategy, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
@@ -566,18 +567,22 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp = Box::pin(explain::handle_explain(
+                    let ret = match Box::pin(explain::handle_explain(
                         handler_args,
                         *statement,
                         options,
                         analyze,
                     ))
-                    .await?;
-
-                    let explain_output = get_explain_output(rsp).await;
-                    let ret = TestCaseResult {
-                        explain_output: Some(explain_output),
-                        ..Default::default()
+                    .await
+                    {
+                        Ok(rsp) => TestCaseResult {
+                            explain_output: Some(get_explain_output(rsp).await),
+                            ..Default::default()
+                        },
+                        Err(error) => TestCaseResult {
+                            planner_error: Some(error.to_report_string()),
+                            ..Default::default()
+                        },
                     };
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -883,11 +888,12 @@ impl TestCase {
                     "test_table".into(),
                     format_desc,
                     false,
+                    false,
+                    false,
                     None,
                     None,
                     false,
                     None,
-                    true,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -963,6 +969,8 @@ pub fn test_data_dir() -> PathBuf {
 }
 
 pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    LicenseManager::get().refresh(LicenseKey::default().as_ref());
+
     let file_name = file_path.file_name().unwrap().to_str().unwrap();
     println!("-- running {file_name} --");
 

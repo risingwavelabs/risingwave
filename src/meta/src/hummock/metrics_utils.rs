@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockVersionId,
 };
+use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedVersion, HummockVersionStats, LevelType,
@@ -37,7 +38,6 @@ use risingwave_pb::hummock::{
 
 use super::compaction::selector::DynamicLevelSelectorCore;
 use super::compaction::{CompactionDeveloperConfig, get_compression_algorithm};
-use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -520,14 +520,52 @@ pub fn trigger_pin_unpin_version_state(
     }
 }
 
+pub struct GcStaleObjectStats {
+    old_version_object_size: u64,
+    old_version_object_count: u64,
+    stale_object_size: u64,
+    stale_object_count: u64,
+}
+
+pub fn gc_stale_object_stats(
+    stale_objects: &HashMap<HummockVersionId, PbStaleObjects>,
+    min_pinned_version_id: HummockVersionId,
+) -> GcStaleObjectStats {
+    let mut old_version_object_size = 0;
+    let mut old_version_object_count = 0;
+    let mut stale_object_size = 0;
+    let mut stale_object_count = 0;
+    stale_objects.iter().for_each(|(id, objects)| {
+        if *id <= min_pinned_version_id {
+            stale_object_size += objects.total_file_size;
+            stale_object_count += objects.id.len() as u64;
+        } else {
+            old_version_object_size += objects.total_file_size;
+            old_version_object_count += objects.id.len() as u64;
+        }
+    });
+    GcStaleObjectStats {
+        old_version_object_size,
+        old_version_object_count,
+        stale_object_size,
+        stale_object_count,
+    }
+}
+
 pub fn trigger_gc_stat(
     metrics: &MetaMetrics,
-    checkpoint: &HummockVersionCheckpoint,
-    min_pinned_version_id: HummockVersionId,
+    checkpoint_version: &HummockVersion,
     current_table_change_log: &HashMap<TableId, TableChangeLog>,
+    stale_object_stats: GcStaleObjectStats,
 ) {
+    let GcStaleObjectStats {
+        old_version_object_size,
+        old_version_object_count,
+        stale_object_size,
+        stale_object_count,
+    } = stale_object_stats;
     let mut current_version_object_size_map: HashMap<_, _> =
-        version_object_size_map(&checkpoint.version);
+        version_object_size_map(checkpoint_version);
     // Note: Because table change logs do not support MVCC, their objects are tracked
     // exclusively in current_version_object, rather than in old_version_object or stale_object.
     current_version_object_size_map.extend(current_table_change_log.values().flat_map(
@@ -540,19 +578,6 @@ pub fn trigger_gc_stat(
     ));
     let current_version_object_size = current_version_object_size_map.values().sum::<u64>();
     let current_version_object_count = current_version_object_size_map.len();
-    let mut old_version_object_size = 0;
-    let mut old_version_object_count = 0;
-    let mut stale_object_size = 0;
-    let mut stale_object_count = 0;
-    checkpoint.stale_objects.iter().for_each(|(id, objects)| {
-        if *id <= min_pinned_version_id {
-            stale_object_size += objects.total_file_size;
-            stale_object_count += objects.id.len() as u64;
-        } else {
-            old_version_object_size += objects.total_file_size;
-            old_version_object_count += objects.id.len() as u64;
-        }
-    });
     metrics
         .current_version_object_size
         .set(current_version_object_size as _);

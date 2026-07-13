@@ -21,6 +21,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use educe::Educe;
 use either::Either;
 use foyer::Hint;
 use futures::future::{ready, try_join_all};
@@ -257,6 +258,25 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
+
+pub type FlushedStateTableReader<S, SD = BasicSerde> = StateTableFlushedSnapshotReader<
+    <<S as StateStore>::Local as LocalStateStore>::FlushedSnapshotReader,
+    SD,
+>;
+
+#[derive(Educe)]
+#[educe(Clone)]
+pub struct StateTableFlushedSnapshotReader<R, SD = BasicSerde>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    reader: Arc<R>,
+    pk_serde: OrderedRowSerde,
+    vnodes: Arc<Bitmap>,
+    row_serde: Arc<SD>,
+    metrics: Option<StateTableMetrics>,
+}
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
@@ -670,11 +690,6 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
         self
     }
 
-    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
-        self.output_column_ids = Some(output_column_ids);
-        self
-    }
-
     pub fn enable_vnode_key_stats(mut self, enable: bool, config: &StreamingConfig) -> Self {
         self.enable_vnode_key_stats = Some(enable);
         self.enable_state_table_vnode_stats_pruning =
@@ -684,6 +699,15 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
 
     pub fn with_metrics(mut self, metrics: StateTableMetrics) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+}
+
+impl<S: StateStore, SD: ValueRowSerde, PreloadAllRow>
+    StateTableBuilder<S, SD, true, PreloadAllRow>
+{
+    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
+        self.output_column_ids = Some(output_column_ids);
         self
     }
 }
@@ -1065,7 +1089,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
         table_desc: &StorageTableDesc,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
-        fragment_id: u32,
+        fragment_id: FragmentId,
     ) -> Self {
         let table_id = table_desc.table_id;
         let table_columns: Vec<ColumnDesc> =
@@ -1107,7 +1131,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             prefix_hint_len: table_desc.read_prefix_len_hint as usize,
             retention_seconds: table_desc.retention_seconds,
             versioned: table_desc.versioned,
-            fragment_id: fragment_id.into(),
+            fragment_id,
             clean_watermark_index: None,
             store,
             vnodes,
@@ -1170,6 +1194,16 @@ where
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         self.distribution.vnodes()
+    }
+
+    pub fn flushed_snapshot_reader(&self) -> FlushedStateTableReader<S, SD> {
+        StateTableFlushedSnapshotReader {
+            reader: Arc::new(self.row_store.state_store.new_flushed_snapshot_reader()),
+            pk_serde: self.pk_serde.clone(),
+            vnodes: self.distribution.vnodes().clone(),
+            row_serde: self.row_store.row_serde.clone(),
+            metrics: self.row_store.metrics.clone(),
+        }
     }
 
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
@@ -1488,7 +1522,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     "mem-table operation inconsistent! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
                     self.table_id,
                     vnode,
-                    &key,
+                    key,
                     prev.debug_fmt(&*self.row_serde),
                     new.debug_fmt(&*self.row_serde),
                 )
@@ -1820,6 +1854,45 @@ impl FromVnodeBytes for () {
     fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
 }
 
+impl<R, SD> StateTableFlushedSnapshotReader<R, SD>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
+    }
+
+    /// Scans flushed local state without reading uncommitted mem-table data.
+    pub async fn iter_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'static>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let iter = self
+            .reader
+            .iter(
+                prefixed_range_with_vnode(memcomparable_range, vnode),
+                ReadOptions {
+                    prefix_hint: None,
+                    prefetch_options,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                },
+            )
+            .await?;
+        let row_serde = self.row_serde.clone();
+        Ok(iter
+            .into_stream(move |(_key, value)| Ok(OwnedRow::new(row_serde.deserialize(value)?)))
+            .map_err(Into::into))
+    }
+}
+
 // Iterator functions
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
@@ -1841,7 +1914,13 @@ where
         Ok(self
             .iter_kv_with_pk_range::<()>(pk_range, vnode, prefetch_options)
             .await?
-            .map_ok(|(_, row)| row))
+            .map_ok(|(_, row)| {
+                if IS_REPLICATED {
+                    row.project(&self.output_indices).into_owned_row()
+                } else {
+                    row
+                }
+            }))
     }
 
     pub async fn iter_keyed_row_with_vnode(
@@ -1854,19 +1933,6 @@ where
             .iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
             .await?
             .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
-    }
-
-    pub async fn iter_with_vnode_and_output_indices(
-        &self,
-        vnode: VirtualNode,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl RowStream<'_>> {
-        assert!(IS_REPLICATED);
-        let stream = self
-            .iter_with_vnode(vnode, pk_range, prefetch_options)
-            .await?;
-        Ok(stream.map(|row| row.map(|row| row.project(&self.output_indices).into_owned_row())))
     }
 }
 
@@ -2069,7 +2135,13 @@ where
     ) -> StreamExecutorResult<impl RowStream<'_>> {
         let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
             .await?;
-        Ok(stream.map_ok(|(_, row)| row))
+        Ok(stream.map_ok(|(_, row)| {
+            if IS_REPLICATED {
+                row.project(&self.output_indices).into_owned_row()
+            } else {
+                row
+            }
+        }))
     }
 
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same

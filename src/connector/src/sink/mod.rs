@@ -49,6 +49,7 @@ pub mod sqlserver;
 feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
+pub mod turbopuffer;
 pub mod utils;
 pub mod writer;
 pub mod prelude {
@@ -128,6 +129,7 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
+                { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
@@ -244,6 +246,10 @@ pub const SINK_USER_IGNORE_DELETE_OPTION: &str = "ignore_delete";
 /// Alias for [`SINK_USER_IGNORE_DELETE_OPTION`], kept for backward compatibility.
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
+/// When enabled, the sink executor preserves distinct upstream stream-key changes that map to the
+/// same downstream primary key instead of compacting them into one final-state update within a
+/// barrier. Upstream changes under the same stream key may still be compacted earlier.
+pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {

@@ -27,6 +27,9 @@ upload_retry_attempts = 5
 read_attempt_timeout_ms = 16000
 read_retry_attempts = 6
 
+[frontend]
+unsafe_enable_local_fs_connector = true
+
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 5

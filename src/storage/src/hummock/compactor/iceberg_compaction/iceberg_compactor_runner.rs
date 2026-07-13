@@ -32,7 +32,7 @@ use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_heuristic_output_parallelism,
+    iceberg_compaction_enable_heuristic_output_parallelism, iceberg_compaction_enable_prefetch,
     iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -76,6 +76,10 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
     pub max_concurrent_closes: usize,
+    /// Whether to prefetch entire data files before compaction.
+    /// See `StorageConfig::iceberg_compaction_enable_prefetch` for full documentation.
+    #[builder(default = "iceberg_compaction_enable_prefetch()")]
+    pub enable_prefetch: bool,
     #[builder]
     pub target_binpack_group_size_mb: Option<u64>,
     #[builder]
@@ -110,6 +114,7 @@ impl Debug for IcebergCompactionTaskStatistics {
 #[derive(Debug)]
 pub struct IcebergCompactionPlanRunner {
     pub task_id: u64,
+    pub sink_id: u32,
     pub plan_index: usize,
 
     pub catalog: Arc<dyn Catalog>,
@@ -175,6 +180,11 @@ impl IcebergCompactionPlanRunner {
 
     pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
         let task_id = self.task_id;
+        let sink_id = self.sink_id;
+        let plan_index = self.plan_index;
+        let task_type = self.task_type;
+        let table_ident = self.table_ident.clone();
+        let branch = self.branch.clone();
         let unique_ident = self.unique_ident();
         let now = std::time::Instant::now();
 
@@ -194,9 +204,16 @@ impl IcebergCompactionPlanRunner {
         tokio::select! {
             _ = shutdown_rx => {
                 tracing::info!(
+                    iceberg_component = "compaction_worker",
+                    iceberg_operation = "execute_plan",
                     task_id = task_id,
+                    sink_id = sink_id,
+                    plan_index = plan_index,
+                    task_type = ?task_type,
+                    table = %table_ident,
+                    branch = %branch,
                     unique_ident = %unique_ident,
-                    "Plan cancelled"
+                    "iceberg_compaction_plan_cancelled",
                 );
                 Err(HummockError::compaction_executor("Plan cancelled"))
             }
@@ -204,19 +221,33 @@ impl IcebergCompactionPlanRunner {
                 match &result {
                     Ok(stats) => {
                         tracing::info!(
+                            iceberg_component = "compaction_worker",
+                            iceberg_operation = "execute_plan",
                             task_id = task_id,
+                            sink_id = sink_id,
+                            plan_index = plan_index,
+                            task_type = ?task_type,
+                            table = %table_ident,
+                            branch = %branch,
                             unique_ident = %unique_ident,
                             elapsed_millis = now.elapsed().as_millis(),
                             stats = ?stats,
-                            "Plan completed successfully"
+                            "iceberg_compaction_plan_succeeded",
                         );
                     }
                     Err(e) => {
                         tracing::warn!(
+                            iceberg_component = "compaction_worker",
+                            iceberg_operation = "execute_plan",
                             error = %e.as_report(),
                             task_id = task_id,
+                            sink_id = sink_id,
+                            plan_index = plan_index,
+                            task_type = ?task_type,
+                            table = %table_ident,
+                            branch = %branch,
                             unique_ident = %unique_ident,
-                            "Plan failed"
+                            "iceberg_compaction_plan_failed",
                         );
                     }
                 }
@@ -239,10 +270,14 @@ impl IcebergCompactionPlanRunner {
     ) -> HummockResult<RewriteFilesStat> {
         if !compaction_plan.has_files() {
             tracing::info!(
+                iceberg_component = "compaction_worker",
+                iceberg_operation = "plan_compaction",
                 task_id,
                 plan_index,
+                task_type = ?task_type,
                 table = %table_ident,
-                "skip empty iceberg compaction plan"
+                branch = %branch,
+                "iceberg_compaction_plan_skipped_empty",
             );
             return Ok(RewriteFilesStat::default());
         }
@@ -262,6 +297,7 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
+            .enable_prefetch(config.enable_prefetch)
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
@@ -271,14 +307,17 @@ impl IcebergCompactionPlanRunner {
             })?;
 
         tracing::info!(
+            iceberg_component = "compaction_worker",
+            iceberg_operation = "execute_plan",
             task_id = task_id,
             plan_index = plan_index,
             task_type = ?task_type,
             table = %table_ident,
+            branch = %branch,
             input_parallelism = compaction_plan.recommended_executor_parallelism(),
             output_parallelism = compaction_plan.recommended_output_parallelism(),
             statistics = ?statistics,
-            "Iceberg compaction plan started"
+            "iceberg_compaction_plan_started",
         );
 
         let retry_config = CommitManagerRetryConfig::default();
@@ -441,7 +480,7 @@ pub async fn create_task_execution(
         task_type,
     } = iceberg_compaction_task;
 
-    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
+    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     let catalog = iceberg_config
@@ -567,9 +606,14 @@ pub async fn create_task_execution(
 
     if compaction_plans.is_empty() {
         tracing::info!(
+            iceberg_component = "compaction_worker",
+            iceberg_operation = "plan_task",
             task_id = task_id,
+            sink_id = sink_id,
+            task_type = ?parsed_task_type,
             table = %table_ident,
-            "No files to compact, skip the task"
+            branch = %branch,
+            "iceberg_compaction_task_skipped_no_files",
         );
         return Ok(IcebergTaskExecution {
             sink_id,
@@ -582,6 +626,7 @@ pub async fn create_task_execution(
     for (plan_index, compaction_plan) in compaction_plans.into_iter().enumerate() {
         runners.push(IcebergCompactionPlanRunner {
             task_id,
+            sink_id,
             plan_index,
             catalog: catalog.clone(),
             table_ident: table_ident.clone(),
@@ -595,14 +640,38 @@ pub async fn create_task_execution(
     }
 
     tracing::info!(
+        iceberg_component = "compaction_worker",
+        iceberg_operation = "plan_task",
         task_id = task_id,
+        sink_id = sink_id,
+        task_type = ?parsed_task_type,
         table = %table_ident,
+        branch = %branch,
         plan_count = runners.len(),
-        "Created plan runners for iceberg compaction task"
+        "iceberg_compaction_task_planned",
     );
 
     Ok(IcebergTaskExecution {
         sink_id,
         plan_runners: runners,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runner_config_enable_prefetch_default_is_false() {
+        let config = IcebergCompactorRunnerConfigBuilder::default()
+            .target_binpack_group_size_mb(None)
+            .min_group_size_mb(None)
+            .min_group_file_count(None)
+            .build()
+            .expect("failed to build IcebergCompactorRunnerConfig with defaults");
+        assert!(
+            !config.enable_prefetch,
+            "enable_prefetch must default to false to match StorageConfig default"
+        );
+    }
 }

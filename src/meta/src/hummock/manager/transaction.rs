@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
@@ -47,7 +48,7 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
     metrics.delta_log_count.set(total_number as _);
 }
 
-fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
+pub(super) fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .version_size
         .set(current_version.estimated_encode_len() as i64);
@@ -57,12 +58,13 @@ fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion)
 }
 
 pub(super) struct HummockVersionTransaction<'a> {
-    orig_version: &'a mut HummockVersion,
+    orig_version: &'a mut Arc<HummockVersion>,
     orig_deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
     orig_table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
     notification_manager: &'a NotificationManager,
     table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
     meta_metrics: &'a MetaMetrics,
+    version_stat_tx: &'a tokio::sync::mpsc::UnboundedSender<Arc<HummockVersion>>,
 
     pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>, HashSet<TableId>)>,
     disable_apply_to_txn: bool,
@@ -71,13 +73,14 @@ pub(super) struct HummockVersionTransaction<'a> {
 
 impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn new(
-        version: &'a mut HummockVersion,
+        version: &'a mut Arc<HummockVersion>,
         deltas: &'a mut BTreeMap<HummockVersionId, HummockVersionDelta>,
         table_change_log: &'a mut HashMap<TableId, TableChangeLog>,
         notification_manager: &'a NotificationManager,
         table_committed_epoch_notifiers: Option<&'a Mutex<TableCommittedEpochNotifiers>>,
         meta_metrics: &'a MetaMetrics,
         opts: &'a MetaOpts,
+        version_stat_tx: &'a tokio::sync::mpsc::UnboundedSender<Arc<HummockVersion>>,
     ) -> Self {
         Self {
             orig_version: version,
@@ -89,6 +92,7 @@ impl<'a> HummockVersionTransaction<'a> {
             table_committed_epoch_notifiers,
             meta_metrics,
             opts,
+            version_stat_tx,
         }
     }
 
@@ -104,7 +108,7 @@ impl<'a> HummockVersionTransaction<'a> {
         if let Some((version, _, _)) = &self.pre_applied_version {
             version
         } else {
-            self.orig_version
+            self.orig_version.as_ref()
         }
     }
 
@@ -120,7 +124,7 @@ impl<'a> HummockVersionTransaction<'a> {
         let (version, deltas, gc_change_log_deltas) =
             self.pre_applied_version.get_or_insert_with(|| {
                 (
-                    self.orig_version.clone(),
+                    self.orig_version.as_ref().clone(),
                     Vec::with_capacity(1),
                     HashSet::new(),
                 )
@@ -249,7 +253,7 @@ impl<'a> HummockVersionTransaction<'a> {
 impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas, gc_change_log_deltas)) = self.pre_applied_version {
-            *self.orig_version = version;
+            *self.orig_version = Arc::new(version);
             for delta in &deltas {
                 HummockVersion::apply_change_log_delta(
                     self.orig_table_change_log,
@@ -291,7 +295,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
             }
 
             trigger_delta_log_stats(self.meta_metrics, self.orig_deltas.len());
-            trigger_version_stat(self.meta_metrics, self.orig_version);
+            let _ = self.version_stat_tx.send(self.orig_version.clone());
         }
     }
 }

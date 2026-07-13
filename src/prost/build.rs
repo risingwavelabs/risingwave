@@ -196,6 +196,9 @@ for_all_wrapped_id_fields! (
         AlterDatabaseParamRequest {
             database_id: DatabaseId,
         }
+        AlterDatabaseResourceGroupRequest {
+            database_id: DatabaseId,
+        }
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
@@ -226,7 +229,7 @@ for_all_wrapped_id_fields! (
             table_id: JobId,
         }
         AlterResourceGroupRequest {
-            table_id: TableId,
+            job_id: JobId,
         }
         AlterSecretRequest {
             database_id: DatabaseId,
@@ -326,6 +329,10 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        ReplaceJobPlan.ReplaceSink {
+            old_sink_id: SinkId,
+            dependencies: ObjectId,
         }
         ResetSourceRequest {
             source_id: SourceId,
@@ -774,8 +781,10 @@ for_all_wrapped_id_fields! (
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
             added_actors: ActorId,
+            dropped_actors: ActorId,
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
+            sink_log_store_flush: SinkId,
         }
         BackfillOrder {
             order: RelationId,
@@ -910,6 +919,10 @@ for_all_wrapped_id_fields! (
             load_finished_source_ids: SourceId,
             partial_graph_id: PartialGraphId,
         }
+        BarrierCompleteResponse.CdcSourceOffsetUpdated {
+            reporter_actor_id: ActorId,
+            source_id: SourceId,
+        }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
             actor_id: ActorId,
@@ -917,6 +930,10 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
+        }
+        BarrierCompleteResponse.IcebergPkIndexSinkMetadata {
+            reporter_actor_id: ActorId,
+            sink_id: SinkId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
@@ -1116,6 +1133,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
         .type_attribute(
+            "stream_plan.StreamNode.node_body",
+            "#[derive(::prost_helpers::StreamNodeBodyVariants)]",
+        )
+        .type_attribute(
             "node_body",
             "#[strum_discriminants(derive(::strum::Display, Hash))]",
         )
@@ -1185,7 +1206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_writer")
-        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_dv_merger")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_position_delete_merger")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.
@@ -1285,7 +1306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs_err::write(
             &out_file,
             format!(
-                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                "#![allow(clippy::useless_conversion)]\n#![allow(clippy::useless_borrows_in_formatting)]\nuse crate::{}::*;\n{}",
                 module_path_id, file_content
             ),
         )?;

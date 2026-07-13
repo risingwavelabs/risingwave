@@ -233,6 +233,7 @@ pub enum ShutdownMsg {
 }
 
 /// A token which can be used to signal a shutdown request.
+#[derive(Clone)]
 pub struct ShutdownSender(tokio::sync::watch::Sender<ShutdownMsg>);
 
 impl ShutdownSender {

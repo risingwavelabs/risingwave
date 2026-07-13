@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono_tz::Tz;
@@ -100,6 +100,8 @@ pub enum DateHandlingMode {
 pub enum TimestampHandlingMode {
     Milli,
     String,
+    /// ISO 8601 string without a timezone suffix.
+    Iso8601String,
 }
 
 #[derive(Clone, Copy)]
@@ -141,15 +143,23 @@ impl TimestamptzHandlingMode {
 }
 
 #[derive(Clone)]
+pub struct DorisJsonConfig {
+    pub decimal_scale: HashMap<String, u8>,
+    pub variant_columns: HashSet<String>,
+}
+
+#[derive(Clone)]
 pub enum CustomJsonType {
     // Doris's json need date is string.
     // The internal order of the struct should follow the insertion order.
     // The decimal needs verification and calibration.
-    Doris(HashMap<String, u8>),
+    Doris(DorisJsonConfig),
     // Es's json need jsonb is struct
     Es,
     // starrocks' need jsonb is struct
     StarRocks,
+    // turbopuffer expects serial and decimal attributes to match `int` and `float` schema types.
+    Turbopuffer,
     None,
 }
 
@@ -157,6 +167,7 @@ pub enum CustomJsonType {
 ///
 /// - `String`: encode jsonb as string. `[1, true, "foo"] -> "[1, true, \"foo\"]"`
 /// - `Dynamic`: encode jsonb as json type dynamically. `[1, true, "foo"] -> [1, true, "foo"]`
+#[derive(Clone, Copy)]
 pub enum JsonbHandlingMode {
     String,
     Dynamic,

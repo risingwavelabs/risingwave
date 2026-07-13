@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 
@@ -199,6 +199,12 @@ pub struct MetaNodeOpts {
         default_value = "./secrets"
     )]
     pub temp_secret_file_dir: String,
+
+    /// Address of the serverless backfill controller.
+    /// Needed if meta receives a streaming job with serverless backfill enabled.
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -584,9 +590,10 @@ pub fn start(
 
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            config.session_init,
             shutdown,
         ))
         .await

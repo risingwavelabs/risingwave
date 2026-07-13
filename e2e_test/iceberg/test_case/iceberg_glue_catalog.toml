@@ -1,0 +1,5 @@
+init_sqls = []
+
+slt = 'test_case/iceberg_glue_catalog.slt'
+
+drop_sqls = []

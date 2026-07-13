@@ -14,7 +14,6 @@
 
 use std::sync::LazyLock;
 
-use async_trait::async_trait;
 use auto_impl::auto_impl;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::log::LogSuppressor;
@@ -24,7 +23,7 @@ use thiserror_ext::AsReport;
 
 use crate::ExprError;
 use crate::error::Result;
-use crate::expr::{Expression, ValueImpl};
+use crate::expr::{AsyncExpression, ExpressionInfo, SyncExpression, ValueImpl};
 
 /// Report an error during evaluation.
 #[auto_impl(&, Arc)]
@@ -59,7 +58,7 @@ impl EvalErrorReport for LogReport {
     }
 }
 
-/// A wrapper of [`Expression`] that evaluates in a non-strict way. Basically...
+/// A wrapper of an expression that evaluates in a non-strict way. Basically...
 /// - When an error occurs during chunk-level evaluation, pad with NULL for each failed row.
 /// - Report all error occurred during row-level evaluation to the [`EvalErrorReport`].
 pub(crate) struct NonStrict<E, R> {
@@ -81,7 +80,7 @@ where
 
 impl<E, R> NonStrict<E, R>
 where
-    E: Expression,
+    E: ExpressionInfo,
     R: EvalErrorReport,
 {
     pub fn new(inner: E, report: R) -> Self {
@@ -89,70 +88,111 @@ where
     }
 }
 
-// TODO: avoid the overhead of extra boxing.
-#[async_trait]
-impl<E, R> Expression for NonStrict<E, R>
+impl<E, R> ExpressionInfo for NonStrict<E, R>
 where
-    E: Expression,
+    E: ExpressionInfo,
     R: EvalErrorReport,
 {
     fn return_type(&self) -> DataType {
         self.inner.return_type()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(match self.inner.eval(input).await {
+    fn input_ref_index(&self) -> Option<usize> {
+        self.inner.input_ref_index()
+    }
+}
+
+macro_rules! non_strict_eval_array {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        Ok(match forward!($mode, $this.inner, eval($input)) {
             Ok(array) => array,
             Err(ExprError::Multiple(array, errors)) => {
                 for error in errors {
-                    self.report.report(error);
+                    $this.report.report(error);
                 }
                 array
             }
             Err(e) => {
-                self.report.report(e);
-                let mut builder = self.return_type().create_array_builder(input.capacity());
-                builder.append_n_null(input.capacity());
+                $this.report.report(e);
+                let mut builder = $this.return_type().create_array_builder($input.capacity());
+                builder.append_n_null($input.capacity());
                 builder.finish().into()
             }
         })
-    }
+    }};
+}
 
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        Ok(match self.inner.eval_v2(input).await {
+macro_rules! non_strict_eval_value {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        Ok(match forward!($mode, $this.inner, eval_v2($input)) {
             Ok(array) => array,
             Err(ExprError::Multiple(array, errors)) => {
                 for error in errors {
-                    self.report.report(error);
+                    $this.report.report(error);
                 }
                 array.into()
             }
             Err(e) => {
-                self.report.report(e);
+                $this.report.report(e);
                 ValueImpl::Scalar {
                     value: None,
-                    capacity: input.capacity(),
+                    capacity: $input.capacity(),
                 }
             }
         })
-    }
+    }};
+}
 
-    /// Evaluate expression on a single row, report error and return NULL if failed.
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        Ok(match self.inner.eval_row(input).await {
+macro_rules! non_strict_eval_row {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        Ok(match forward!($mode, $this.inner, eval_row($input)) {
             Ok(datum) => datum,
             Err(error) => {
-                self.report.report(error);
+                $this.report.report(error);
                 None // NULL
             }
         })
+    }};
+}
+
+impl<E, R> SyncExpression for NonStrict<E, R>
+where
+    E: SyncExpression,
+    R: EvalErrorReport,
+{
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        non_strict_eval_array!(sync, self, input)
+    }
+
+    fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        non_strict_eval_value!(sync, self, input)
+    }
+
+    /// Evaluate expression on a single row, report error and return NULL if failed.
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        non_strict_eval_row!(sync, self, input)
     }
 
     fn eval_const(&self) -> Result<Datum> {
         self.inner.eval_const() // do not handle error
     }
+}
 
-    fn input_ref_index(&self) -> Option<usize> {
-        self.inner.input_ref_index()
+impl<E, R> AsyncExpression for NonStrict<E, R>
+where
+    E: AsyncExpression,
+    R: EvalErrorReport,
+{
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        non_strict_eval_array!(async, self, input)
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        non_strict_eval_value!(async, self, input)
+    }
+
+    /// Evaluate expression on a single row, report error and return NULL if failed.
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        non_strict_eval_row!(async, self, input)
     }
 }

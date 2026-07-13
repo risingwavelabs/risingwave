@@ -409,7 +409,7 @@ mod tests {
             .collect_vec();
 
         let (last_timestamp, first_timestamps) = timestamps.split_last().unwrap();
-        let first_timestamp = first_timestamps.iter().unique().exactly_one().unwrap();
+        let first_timestamp = Itertools::exactly_one(first_timestamps.iter().unique()).unwrap();
 
         // Check vnodes.
         let expected_vnodes = vnodes().cycle();

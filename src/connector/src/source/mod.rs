@@ -70,6 +70,7 @@ use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+use monitor::{ConnectorAckFailureType, GLOBAL_SOURCE_METRICS};
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 use utils::feature_gated_source_mod;
@@ -187,15 +188,55 @@ impl WaitCheckpointTask {
             }
             WaitCheckpointTask::AckPulsarMessage(ack_array) => {
                 if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
-                    let encode_message_id_data = to_cumulative_ack
+                    let Some(encode_message_id_data) = to_cumulative_ack
                         .as_bytea()
                         .iter()
                         .last()
                         .flatten()
                         .map(|x| x.to_owned())
-                        .unwrap();
-                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
-                        let _ = ack_tx.send(encode_message_id_data);
+                    else {
+                        GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                            source_name,
+                            "pulsar",
+                            ConnectorAckFailureType::EmptyMessageId,
+                        );
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            "skip Pulsar ack because the checkpoint ack batch has no message id",
+                        );
+                        return;
+                    };
+
+                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await else {
+                        GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                            source_name,
+                            "pulsar",
+                            ConnectorAckFailureType::ChannelMissing,
+                        );
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            "skip Pulsar ack because the ack channel is missing",
+                        );
+                        return;
+                    };
+
+                    if let Err(e) = ack_tx.send(encode_message_id_data) {
+                        GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                            source_name,
+                            "pulsar",
+                            ConnectorAckFailureType::ChannelSendError,
+                        );
+                        tracing::warn!(
+                            source_id = source_id_label,
+                            source_name,
+                            ack_channel_id,
+                            error = %e.as_report(),
+                            "failed to send Pulsar ack message id to the reader ack channel",
+                        );
                     }
                 }
             }
@@ -207,14 +248,21 @@ impl WaitCheckpointTask {
                     source_id_label: &str,
                     source_name: &str,
                 ) {
+                    if ack_ids.is_empty() {
+                        return;
+                    }
                     tracing::trace!("acking pubsub messages {:?}", ack_ids);
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, subscription.ack(ack_ids)).await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            GLOBAL_SOURCE_METRICS
+                                .inc_connector_ack_success_count(source_name, "pubsub");
+                        }
                         Ok(Err(e)) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "pubsub", "error"])
-                                .inc();
+                            GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                                source_name,
+                                "pubsub",
+                                ConnectorAckFailureType::Error,
+                            );
                             tracing::error!(
                                 source_id = source_id_label,
                                 source_name,
@@ -223,10 +271,11 @@ impl WaitCheckpointTask {
                             )
                         }
                         Err(_) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "pubsub", "timeout"])
-                                .inc();
+                            GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                                source_name,
+                                "pubsub",
+                                ConnectorAckFailureType::Timeout,
+                            );
                             tracing::error!(
                                 source_id = source_id_label,
                                 source_name,
@@ -277,12 +326,16 @@ impl WaitCheckpointTask {
                         Ok::<(), String>(())
                     };
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, fut).await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            GLOBAL_SOURCE_METRICS
+                                .inc_connector_ack_success_count(source_name, "nats_jetstream");
+                        }
                         Ok(Err(e)) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "nats_jetstream", "error"])
-                                .inc();
+                            GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                                source_name,
+                                "nats_jetstream",
+                                ConnectorAckFailureType::Error,
+                            );
                             tracing::error!(
                                 source_id = source_id_label,
                                 source_name,
@@ -292,10 +345,11 @@ impl WaitCheckpointTask {
                             );
                         }
                         Err(_) => {
-                            crate::source::monitor::GLOBAL_SOURCE_METRICS
-                                .connector_ack_failure_count
-                                .with_label_values(&[source_name, "nats_jetstream", "timeout"])
-                                .inc();
+                            GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
+                                source_name,
+                                "nats_jetstream",
+                                ConnectorAckFailureType::Timeout,
+                            );
                             tracing::error!(
                                 source_id = source_id_label,
                                 source_name,

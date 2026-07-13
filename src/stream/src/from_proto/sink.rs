@@ -194,6 +194,8 @@ fn validate_payload_schema(
     }
 }
 
+impl_stream_node_body!(Sink(SinkNode) => SinkExecutorBuilder);
+
 impl ExecutorBuilder for SinkExecutorBuilder {
     type Node = SinkNode;
 

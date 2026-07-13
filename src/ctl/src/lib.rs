@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
@@ -23,7 +24,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
-    CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+    CompressionAlgorithm, SstableFilterLayout, SstableFilterType,
 };
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
 use thiserror_ext::AsReport;
@@ -202,11 +203,11 @@ enum HummockCommands {
         #[clap(long)]
         compression_algorithm: Option<String>,
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.
-        #[clap(long, requires = "sstable_filter_kind")]
-        sstable_filter_kind_level: Option<u32>,
-        /// Xor filter family to use for this level. Supported values: "xor16", "xor8".
-        #[clap(long, requires = "sstable_filter_kind_level")]
-        sstable_filter_kind: Option<String>,
+        #[clap(long, requires = "sstable_filter_type")]
+        sstable_filter_type_level: Option<u32>,
+        /// SST filter type to use for this level. Supported values: "none", "xor16", "xor8".
+        #[clap(long, requires = "sstable_filter_type_level")]
+        sstable_filter_type: Option<String>,
         /// LSM level index to update, e.g. 0 for L0, 6 for L6.
         #[clap(long, requires = "sstable_filter_layout")]
         sstable_filter_layout_level: Option<u32>,
@@ -214,7 +215,8 @@ enum HummockCommands {
         ///
         /// Supported values:
         /// - "auto": decide by heuristics (currently by kv-count threshold)
-        /// - "plain" / "normal": always use a single non-blocked filter, ignoring kv-count threshold
+        /// - "plain": always use a single non-blocked filter, ignoring kv-count threshold
+        /// - "blocked": always use block-based filters, ignoring kv-count threshold
         #[clap(long, requires = "sstable_filter_layout_level")]
         sstable_filter_layout: Option<String>,
         #[clap(long)]
@@ -520,6 +522,13 @@ enum MetaCommands {
         #[clap(long)]
         offsets: String,
     },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -634,11 +643,6 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
-#[expect(
-    clippy::large_stack_frames,
-    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
-              post-layout generator stores only one arm at a time (~13–16 KiB)."
-)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -727,8 +731,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             tombstone_reclaim_ratio,
             compression_level,
             compression_algorithm,
-            sstable_filter_kind_level,
-            sstable_filter_kind,
+            sstable_filter_type_level,
+            sstable_filter_type,
             sstable_filter_layout_level,
             sstable_filter_layout,
             max_l0_compact_level,
@@ -772,10 +776,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     } else {
                         None
                     },
-                    if let (Some(level), Some(filter_kind)) =
-                        (sstable_filter_kind_level, sstable_filter_kind)
+                    if let (Some(level), Some(filter_type)) =
+                        (sstable_filter_type_level, sstable_filter_type)
                     {
-                        Some(SstableFilterKind { level, filter_kind })
+                        Some(SstableFilterType { level, filter_type })
                     } else {
                         None
                     },
@@ -1033,6 +1037,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::InjectSourceOffsets { source_id, offsets }) => {
             cmd_impl::meta::inject_source_offsets(context, source_id, offsets).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }

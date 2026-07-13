@@ -27,7 +27,10 @@ use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
 use super::{SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError};
-use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
+use crate::connector_common::{
+    IcebergCatalogKind, IcebergCommon, IcebergTableIdentifier, ResolvedIcebergCatalogConfig,
+    iceberg_java_catalog_props_from_options,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 use crate::sink::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
@@ -126,11 +129,11 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const ORDER_KEY: &str = "order_key";
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
-pub(super) const PARQUET_CREATED_BY: &str =
-    concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
+pub const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -398,6 +401,7 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
+    /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
@@ -451,7 +455,8 @@ pub struct IcebergConfig {
     pub write_parquet_max_row_group_bytes: Option<usize>,
 
     /// Whether to enable PK index for upsert sink. Default is false.
-    /// It's used for V3 upsert iceberg sink to generate delete vectors.
+    /// For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+    /// position deletes instead of equality deletes.
     #[serde(
         rename = "enable_pk_index",
         default,
@@ -508,9 +513,9 @@ impl IcebergConfig {
             )));
         }
 
-        if self.format_version < FormatVersion::V3 {
+        if self.format_version < FormatVersion::V2 {
             return Err(SinkError::Config(anyhow!(
-                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 3"
+                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 2"
             )));
         }
 
@@ -527,6 +532,10 @@ impl IcebergConfig {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        if config.enable_compaction && !values.contains_key(COMPACTION_MAX_SNAPSHOTS_NUM) {
+            config.max_snapshots_num_before_compaction = Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM);
+        }
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -545,7 +554,11 @@ impl IcebergConfig {
                         SINK_TYPE_UPSERT
                     )));
                 }
-            } else {
+            } else if !config.enable_pk_index {
+                // When `enable_pk_index = true`, the planner auto-derives the iceberg pk
+                // from the upstream stream key, so the user does not need to spell it out
+                // in WITH options. The derived pk is written back into properties before
+                // this validation is consulted again at sink-construction time.
                 return Err(SinkError::Config(anyhow!(
                     "Must set `primary-key` in {}",
                     SINK_TYPE_UPSERT
@@ -558,17 +571,11 @@ impl IcebergConfig {
         config.validate_enable_pk_index()?;
 
         // All configs start with "catalog." will be treated as java configs.
-        config.java_catalog_props = values
-            .iter()
-            .filter(|(k, _v)| {
-                k.starts_with("catalog.")
-                    && k != &"catalog.uri"
-                    && k != &"catalog.type"
-                    && k != &"catalog.name"
-                    && k != &"catalog.header"
-            })
-            .map(|(k, v)| (k[8..].to_string(), v.clone()))
-            .collect();
+        config.java_catalog_props = iceberg_java_catalog_props_from_options(
+            values
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
 
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
@@ -579,6 +586,12 @@ impl IcebergConfig {
         if config.trigger_snapshot_count == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.trigger_snapshot_count` must be greater than 0"
+            )));
+        }
+
+        if config.max_snapshots_num_before_compaction == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.max_snapshots_num` must be greater than 0"
             )));
         }
 
@@ -601,16 +614,54 @@ impl IcebergConfig {
         self.common.catalog_type()
     }
 
-    pub async fn load_table(&self) -> Result<Table> {
+    pub fn catalog_kind(&self) -> Result<IcebergCatalogKind> {
         self.common
-            .load_table(&self.table, &self.java_catalog_props)
+            .resolve_catalog_kind()
+            .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    fn resolved_catalog_config(&self) -> Result<ResolvedIcebergCatalogConfig<'_>> {
+        self.common
+            .resolve_catalog_config(self.java_catalog_props.clone())
+            .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    pub async fn load_table(&self) -> Result<Table> {
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            let catalog =
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "mock_v3 catalog_type set but no mock catalog registered"
+                    ))
+                })?;
+            let table_id = self
+                .table
+                .to_table_ident()
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Unable to parse table name")))?;
+            let table = catalog
+                .load_table(&table_id)
+                .await
+                .map_err(|e| SinkError::Config(anyhow!(e).context("Failed to load mock table")))?;
+            return Ok(table);
+        }
+        self.resolved_catalog_config()?
+            .load_table(&self.table)
             .await
             .map_err(Into::into)
     }
 
     pub async fn create_catalog(&self) -> Result<Arc<dyn Catalog>> {
-        self.common
-            .create_catalog(&self.java_catalog_props)
+        #[cfg(any(test, madsim))]
+        if self.catalog_type() == "mock_v3" {
+            return Ok(
+                crate::sink::iceberg::mock_v3_catalog_registry::get().ok_or_else(|| {
+                    anyhow::anyhow!("mock_v3 catalog_type set but no mock catalog registered")
+                })?,
+            );
+        }
+        self.resolved_catalog_config()?
+            .create_catalog()
             .await
             .map_err(Into::into)
     }

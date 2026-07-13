@@ -19,9 +19,8 @@ use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
-    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig, SessionInitConfig,
 };
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
@@ -311,6 +310,7 @@ pub struct MetaOpts {
 
     pub enable_legacy_table_migration: bool,
     pub pause_on_next_bootstrap_offline: bool,
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl MetaOpts {
@@ -417,6 +417,7 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
         }
@@ -427,7 +428,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         mut init_system_params: SystemParams,
-        init_session_config: SessionConfig,
+        session_init: SessionInitConfig,
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -490,7 +491,7 @@ impl MetaSrvEnv {
             SessionParamsController::new(
                 meta_store_impl.clone(),
                 notification_manager.clone(),
-                init_session_config,
+                session_init,
             )
             .await?,
         );

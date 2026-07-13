@@ -47,6 +47,21 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Project"),
+                panels.timeseries_count(
+                    "Project Expression Inflight Window Size",
+                    "Number of messages waiting in ProjectExecutor's ordered projection window.",
+                    [
+                        panels.target(
+                            f"max({metric('stream_project_expr_inflight_window_size')}) by (fragment_id)",
+                            "max - fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_project_expr_inflight_window_size', actor_level_filter)}",
+                            "actor {{actor_id}} - fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.subheader("Temporal Join"),
                 panels.timeseries_actor_ops(
                     "Temporal Join Executor Cache",

@@ -68,7 +68,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
     let used_worker_slots = single_agg_fragment.used_worker_count();
 
     let (single_used_worker_id, should_be_one) =
-        used_worker_slots.into_iter().exactly_one().unwrap();
+        Itertools::exactly_one(used_worker_slots.into_iter()).unwrap();
 
     assert_eq!(should_be_one, 1);
 
@@ -126,7 +126,8 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     let used_worker_slots = single_agg_fragment.used_worker_count();
 
-    let (curr_used_worker_id, should_be_one) = used_worker_slots.into_iter().exactly_one().unwrap();
+    let (curr_used_worker_id, should_be_one) =
+        Itertools::exactly_one(used_worker_slots.into_iter()).unwrap();
     assert_eq!(should_be_one, 1);
     assert_ne!(single_used_worker_id, curr_used_worker_id);
     session

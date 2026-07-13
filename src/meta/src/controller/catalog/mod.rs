@@ -142,6 +142,11 @@ pub struct ReleaseContext {
 
     /// Dropped iceberg table sinks
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
+
+    /// Dropped Iceberg pk-index sink ids. Used to unregister per-sink commit workers
+    /// owned by `IcebergPkIndexSinkManager`. Filtered via `is_iceberg_pk_index_sink` on
+    /// the sink properties so user-created pk-index sinks (any name) are included.
+    pub(crate) removed_iceberg_pk_index_sink_ids: Vec<SinkId>,
 }
 
 #[derive(Default)]
@@ -642,7 +647,7 @@ impl CatalogController {
         let object_group = build_object_group_for_delete(
             to_notify_objs
                 .into_iter()
-                .chain(dirty_internal_table_objs.into_iter())
+                .chain(dirty_internal_table_objs)
                 .collect_vec(),
         );
 
