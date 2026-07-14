@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use futures::{Future, FutureExt, TryFuture};
 use rdkafka::ClientConfig;
 use rdkafka::error::KafkaError;
-use rdkafka::message::ToBytes;
+use rdkafka::message::{Header, OwnedHeaders, ToBytes};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use risingwave_common::array::StreamChunk;
@@ -54,6 +54,25 @@ use crate::{
 };
 
 pub const KAFKA_SINK: &str = "kafka";
+
+/// Parses a comma-separated list of `key:value` pairs into a vector of `(key, value)` tuples.
+///
+/// For example: `"X-Tenant-Id: tenant_id, X-User-Id: user_id"` becomes
+/// `[("X-Tenant-Id", "tenant_id"), ("X-User-Id", "user_id")]`.
+fn parse_kafka_header_string(s: &str) -> Vec<(String, String)> {
+    s.split(',')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, ':');
+            let key = parts.next()?.trim().to_string();
+            let value = parts.next()?.trim().to_string();
+            if key.is_empty() {
+                return None;
+            }
+            Some((key, value))
+        })
+        .collect()
+}
+
 
 const fn _default_max_retries() -> u32 {
     3
@@ -252,6 +271,16 @@ pub struct KafkaConfig {
 
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
+
+    /// Comma-separated list of static Kafka message headers to attach to every sink message,
+    /// in the format `key1:value1, key2:value2`.
+    ///
+    /// Example:
+    /// ```sql
+    /// headers = 'spring.kafka.serialization.selector: com.example.MyMessage'
+    /// ```
+    #[serde(rename = "headers")]
+    pub headers: Option<String>,
 }
 
 impl EnforceSecret for KafkaConfig {
@@ -424,6 +453,7 @@ struct KafkaPayloadWriter<'a> {
     inner: &'a FutureProducer<RwProducerContext>,
     add_future: DeliveryFutureManagerAddFuture<'a, KafkaSinkDeliveryFuture>,
     config: &'a KafkaConfig,
+    parsed_headers: &'a [(String, String)],
 }
 
 mod opaque_type {
@@ -442,6 +472,7 @@ pub struct KafkaSinkWriter {
     formatter: SinkFormatterImpl,
     inner: FutureProducer<RwProducerContext>,
     config: KafkaConfig,
+    parsed_headers: Vec<(String, String)>,
 }
 
 impl KafkaSinkWriter {
@@ -478,6 +509,11 @@ impl KafkaSinkWriter {
         Ok(KafkaSinkWriter {
             formatter,
             inner,
+            parsed_headers: config
+                .headers
+                .as_deref()
+                .map(parse_kafka_header_string)
+                .unwrap_or_default(),
             config: config.clone(),
         })
     }
@@ -495,6 +531,7 @@ impl AsyncTruncateSinkWriter for KafkaSinkWriter {
             inner: &mut self.inner,
             add_future,
             config: &self.config,
+            parsed_headers: &self.parsed_headers,
         };
         dispatch_sink_formatter_impl!(&self.formatter, formatter, {
             payload_writer.write_chunk(chunk, formatter).await
@@ -579,6 +616,16 @@ impl KafkaPayloadWriter<'_> {
         }
         if let Some(payload) = &event_object {
             record = record.payload(payload);
+        }
+        if !self.parsed_headers.is_empty() {
+            let mut headers = OwnedHeaders::new();
+            for (key, value) in self.parsed_headers {
+                headers = headers.insert(Header {
+                    key,
+                    value: Some(value.as_bytes()),
+                });
+            }
+            record = record.headers(headers);
         }
         // Send the data but not wait it to finish sinking
         // Will join all `DeliveryFuture` during commit
@@ -859,6 +906,7 @@ mod test {
                     inner: &sink.inner,
                     add_future: future_manager.start_write_chunk(i, j),
                     config: &sink.config,
+                    parsed_headers: &sink.parsed_headers,
                 };
                 match writer
                     .send_result(
