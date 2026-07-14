@@ -1,11 +1,14 @@
 # Tapdata PDK Connector for RisingWave
 
 A [Tapdata PDK](https://github.com/tapdata/tapdata) connector that lets Tapdata write data to
-RisingWave. Supports two write modes:
+RisingWave. Supports three write modes:
 
-- **JDBC mode** (default): standard SQL `INSERT`/`UPDATE`/`DELETE` via PostgreSQL wire protocol
-- **WebSocket streaming mode**: high-throughput streaming DML via RisingWave's WebSocket ingest
+- **WebSocket streaming mode** (default): streaming DML via RisingWave's WebSocket ingest
   endpoint with asynchronous ACKs
+- **WebSocket JSONB append-only mode**: stores each inserted source record as one JSONB document
+  in a `data` column; supports keyless models but rejects updates and deletes
+- **JDBC mode**: compatible fallback using standard SQL `INSERT`/`UPDATE`/`DELETE` via the
+  PostgreSQL wire protocol
 
 ## What it does
 
@@ -23,7 +26,7 @@ RisingWave. Supports two write modes:
 | Java       | 11+     | Build only; runtime provided by Tapdata engine |
 | Maven      | 3.8+    | |
 | Docker     | any     | Runs Tapdata |
-| RisingWave | 3.0.0+  | WebSocket streaming requires 3.0.0+ (PR #25444); JDBC mode works with any version |
+| RisingWave | 3.0.0+  | WebSocket streaming requires 3.0.0+; JDBC mode works with any version |
 
 ## Build
 
@@ -39,6 +42,48 @@ mvn package -DskipTests
 > `io.tapdata:tapdata-api:2.0.8-SNAPSHOT` from `https://nexus.tapdata.net/repository/maven-snapshots/`.
 > Match the PDK version to the Tapdata engine version in your deployment (check
 > `BOOT-INF/lib/tapdata-pdk-api-*.jar` inside the engine's `tm.jar`).
+
+## Test
+
+Run version parsing and compatibility tests without external services:
+
+```bash
+mvn test
+```
+
+With a local RisingWave instance listening on SQL port `4566` and WebSocket ingest port `4560`,
+run the live connection pre-check tests:
+
+```bash
+mvn -Drisingwave.it=true -Dtest=RisingWaveConnectionTestIT test
+```
+
+The live tests create a temporary webhook-backed table and perform a real WebSocket init,
+DML write, and ACK exchange. They also cover signed ingestion, an unreachable endpoint,
+a missing schema, logins that lack JDBC or streaming DDL privileges, and cleanup of temporary
+probe tables and users.
+
+To reproduce the persisted-but-lost-ACK boundary, install the Python `websockets` package, run the
+fault proxy in one terminal, and run the opt-in integration test in another:
+
+```bash
+python3 scripts/ws_ack_drop_proxy.py
+
+mvn -Drisingwave.it=true \
+  -Drisingwave.ackLossProxyEndpoint=ws://127.0.0.1:4561 \
+  -Dtest=RisingWaveAckLossIT test
+```
+
+The test proves that retrying a persisted keyed insert remains one row, while retrying the same
+keyless JSONB document appends a second row. The proxy and test are not part of the default suite.
+
+The local WebSocket/JDBC comparison is also opt-in:
+
+```bash
+mvn -Drisingwave.it=true -Drisingwave.benchmark=true \
+  -Drisingwave.benchmark.rows=10000 -Drisingwave.benchmark.batchSize=1000 \
+  -Dtest=RisingWaveWriteBenchmarkIT test
+```
 
 ## Deploy to Tapdata
 
@@ -92,12 +137,12 @@ Click it to see the connection configuration help (from `docs/risingwave_en_US.m
 | schema | No | public | Target schema |
 | user | Yes | root | Database user |
 | password | No | - | Database password |
-| Write Mode | No | jdbc | `jdbc` or `streaming` |
-| Ingest Endpoint | No | ws://host.docker.internal:4560 | WebSocket ingest base URL (streaming only) |
+| Write Mode | No | streaming | `streaming` (recommended), `streaming_jsonb` (append-only), or `jdbc` (compatible fallback) |
+| Ingest Endpoint | No | Blank | Leave blank to use `ws://<Host>:4560` automatically; set explicitly for TLS or a separate ingest host |
 | Webhook Secret | No | - | HMAC secret for WebSocket init frame (streaming only) |
 | SSL Mode | No | prefer | `prefer`, `require`, or `disable` |
 | Extra Parameters | No | - | Additional JDBC params, e.g. `socketTimeout=60` |
-| Timezone | No | - | Timezone for datetime processing |
+| Timezone | No | - | RisingWave session timezone as an IANA name, e.g. `UTC` or `Asia/Shanghai` |
 
 ### Cloud vs Local
 
@@ -108,7 +153,11 @@ Click it to see the connection configuration help (from `docs/risingwave_en_US.m
 
 For RisingWave Cloud, set:
 - **SSL Mode**: `require`
-- **Ingest Endpoint**: `wss://your-cluster.risingwave.cloud`
+- **Ingest Endpoint**: `wss://<your-cloud-sql-host>` (no port; Cloud uses 443)
+
+TLS uses the Java runtime's trusted CA store. Custom CA files and mutual-TLS client certificates
+aren't supported by this connector; the generic TapData certificate-upload panel is intentionally
+not exposed. RisingWave Cloud's publicly trusted server certificate doesn't require these uploads.
 - **Webhook Secret**: the secret used in the table's `VALIDATE` clause
 
 ## Run the end-to-end demo (PostgreSQL -> RisingWave)
@@ -125,6 +174,7 @@ The `setup_pipeline.py` script creates a full pipeline using the TapFlow Python 
 
 ```bash
 TAPDATA_SERVER=127.0.0.1:3030 \
+TAPDATA_ACCESS_CODE=<your-access-code> \
 TAPDATA_RW_HOST=<rw-host> \
 TAPDATA_RW_PORT=4566 \
 TAPDATA_RW_INGEST_ENDPOINT=ws://host.docker.internal:4560 \
@@ -133,8 +183,22 @@ python3 setup_pipeline.py
 
 ## Architecture
 
+WebSocket streaming requires every replicated table to have a primary key. Inserts and
+same-primary-key updates are sent as upserts. If an
+update changes any primary-key column, the connector sends a delete for the before image followed
+by an upsert for the after image in the same WebSocket batch. Deletes use the before image.
+
+WebSocket JSONB append-only mode creates each target as `data JSONB` without a primary key and
+stores the complete source record as the JSON document. It accepts insert events only. Update and
+delete events fail explicitly, and retries can append duplicates because this mode has no row
+identity or deduplication key. To avoid silent floating-point rounding in RisingWave's JSON-number
+decoder, Java `BigDecimal`/`BigInteger` values are stored as JSON strings in this mode.
+
+Runtime diagnostics use Tapdata's connector logger and contain batch metadata only. Record payloads,
+webhook secrets, signatures, and generated DDL are not logged by the connector.
+
 ```
-RisingWaveConnector.java    - PDK connector (init, DDL, DML, two write modes)
+RisingWaveConnector.java    - PDK connector (init, DDL, DML, three write modes)
 WsIngestClient.java         - WebSocket client (init, batch, ACK, HMAC signing)
 spec_risingwave.json        - Tapdata connector spec (form schema, i18n, data types)
 icons/risingwave.png        - Connector icon
@@ -144,7 +208,14 @@ docs/risingwave_zh_CN.md    - Chinese documentation
 
 ## Known limitations
 
-- `ON CONFLICT DO UPDATE` (upsert) requires the target table to have a primary key
+- JDBC keyed upsert requires a primary key and uses an explicit update-then-insert fallback because
+  RisingWave does not support PostgreSQL `ON CONFLICT`
+- WebSocket streaming rejects source models without a primary key; use JDBC mode for keyless tables
+- WebSocket JSONB append-only supports keyless inserts but not updates, deletes, or deduplicated retries
+- WebSocket JSONB append-only stores arbitrary-precision decimal/integer values as JSON strings
+  so their exact value is preserved
+- JDBC updates on keyless tables use the full before image; retries remain at-least-once because
+  a keyless row has no stable deduplication identity
 - Array and composite PostgreSQL types are not mapped; they fall back to `text`
 - Webhook tables reject `NOT NULL`; streaming mode omits it in DDL
 - Existing plain tables cannot be upgraded to webhook tables in-place

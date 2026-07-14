@@ -7,8 +7,7 @@
     "id": "risingwave",
     "tags": [
       "Database",
-      "Streaming",
-      "ssl"
+      "Streaming"
     ]
   },
   "configOptions": {
@@ -110,7 +109,7 @@
           "required": false,
           "type": "string",
           "title": "${ingestMode}",
-          "default": "jdbc",
+          "default": "streaming",
           "x-decorator": "FormItem",
           "x-component": "Select",
           "x-decorator-props": {
@@ -118,8 +117,9 @@
           },
           "x-component-props": {
             "options": [
-              {"label": "JDBC (compatible)", "value": "jdbc"},
-              {"label": "WebSocket streaming (high throughput)", "value": "streaming"}
+              {"label": "WebSocket streaming (recommended)", "value": "streaming"},
+              {"label": "WebSocket JSONB append-only", "value": "streaming_jsonb"},
+              {"label": "JDBC (compatible)", "value": "jdbc"}
             ]
           },
           "x-index": 70
@@ -128,17 +128,19 @@
           "required": false,
           "type": "string",
           "title": "${ingestEndpoint}",
-          "default": "ws://host.docker.internal:4560",
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-decorator-props": {
             "tooltip": "${ingestEndpointTip}"
           },
+          "x-component-props": {
+            "placeholder": "${ingestEndpointPlaceholder}"
+          },
           "x-reactions": {
             "dependencies": ["ingest_mode"],
             "fulfill": {
               "state": {
-                "visible": "{{$deps[0] === 'streaming'}}"
+                "visible": "{{$deps[0] === 'streaming' || $deps[0] === 'streaming_jsonb'}}"
               }
             }
           },
@@ -157,7 +159,7 @@
             "dependencies": ["ingest_mode"],
             "fulfill": {
               "state": {
-                "visible": "{{$deps[0] === 'streaming'}}"
+                "visible": "{{$deps[0] === 'streaming' || $deps[0] === 'streaming_jsonb'}}"
               }
             }
           },
@@ -202,29 +204,12 @@
               "title": "${timezone}",
               "default": "",
               "x-decorator": "FormItem",
-              "x-component": "Select",
+              "x-component": "Input",
               "x-decorator-props": {
                 "tooltip": "${timezoneTip}"
               },
               "x-component-props": {
-                "options": [
-                  {"label": "", "value": ""},
-                  {"label": "UTC", "value": "+00:00"},
-                  {"label": "UTC+1", "value": "+01:00"},
-                  {"label": "UTC+2", "value": "+02:00"},
-                  {"label": "UTC+3", "value": "+03:00"},
-                  {"label": "UTC+4", "value": "+04:00"},
-                  {"label": "UTC+5", "value": "+05:00"},
-                  {"label": "UTC+6", "value": "+06:00"},
-                  {"label": "UTC+7", "value": "+07:00"},
-                  {"label": "UTC+8", "value": "+08:00"},
-                  {"label": "UTC+9", "value": "+09:00"},
-                  {"label": "UTC+10", "value": "+10:00"},
-                  {"label": "UTC-5", "value": "-05:00"},
-                  {"label": "UTC-6", "value": "-06:00"},
-                  {"label": "UTC-7", "value": "-07:00"},
-                  {"label": "UTC-8", "value": "-08:00"}
-                ]
+                "placeholder": "UTC or Asia/Shanghai"
               },
               "x-index": 120
             }
@@ -250,9 +235,10 @@
       "password": "Password",
       "passwordTip": "Database password (leave empty if none)",
       "ingestMode": "Write Mode",
-      "ingestModeTip": "JDBC: standard SQL inserts (compatible). WebSocket streaming: high-throughput streaming DML with async acks.",
+      "ingestModeTip": "WebSocket streaming supports insert, update, and delete and requires a primary key. WebSocket JSONB append-only stores each inserted source record in one data JSONB column without requiring a primary key, but rejects updates and deletes. JDBC is the compatible fallback.",
       "ingestEndpoint": "Ingest Endpoint",
-      "ingestEndpointTip": "Full WebSocket ingest base endpoint, including scheme, for example ws://host:4560 or wss://host:4560. Only used in WebSocket streaming mode.",
+      "ingestEndpointPlaceholder": "Leave blank to use ws://<Host>:4560 automatically",
+      "ingestEndpointTip": "Optional WebSocket ingest base endpoint, including scheme, for example ws://host:4560 locally or wss://cloud-host for Cloud port 443. Leave blank to derive ws://<Host>:4560 from the Host field. Set it explicitly for TLS or a separate ingest host.",
       "webhookSecret": "Webhook Secret",
       "webhookSecretTip": "Shared secret used to sign the initial WebSocket auth frame when the target RisingWave table uses VALIDATE.",
       "sslmode": "SSL Mode",
@@ -260,7 +246,7 @@
       "extParams": "Extra Parameters",
       "extParamsTip": "Additional JDBC connection parameters, e.g. socketTimeout=60&tcpKeepAlive=true",
       "timezone": "Timezone",
-      "timezoneTip": "Timezone for datetime data processing. Leave empty to use system default."
+      "timezoneTip": "RisingWave session timezone as an IANA name, for example UTC or Asia/Shanghai. Leave empty to use the server default."
     },
     "zh_CN": {
       "doc": "docs/risingwave_zh_CN.md",
@@ -277,9 +263,10 @@
       "password": "密码",
       "passwordTip": "数据库密码（无密码则留空）",
       "ingestMode": "写入模式",
-      "ingestModeTip": "JDBC：标准 SQL 插入（兼容性好）。WebSocket 流式：高吞吐量流式 DML 与异步 ack。",
+      "ingestModeTip": "WebSocket 流式支持插入、更新和删除，并要求主键。WebSocket JSONB 仅追加模式把每条插入记录存入单个 data JSONB 列，不要求主键，但会拒绝更新和删除。JDBC 是兼容回退模式。",
       "ingestEndpoint": "Ingest 地址",
-      "ingestEndpointTip": "完整的 WebSocket ingest 基础地址，需包含协议，例如 ws://host:4560 或 wss://host:4560。仅在 WebSocket 流式模式下使用。",
+      "ingestEndpointPlaceholder": "留空将自动使用 ws://<主机>:4560",
+      "ingestEndpointTip": "可选的 WebSocket ingest 基础地址，需包含协议，例如本地 ws://host:4560，或使用 443 端口的 Cloud 地址 wss://cloud-host。留空时根据主机字段自动使用 ws://<主机>:4560；TLS 或独立 ingest 主机时请显式填写。",
       "webhookSecret": "Webhook 密钥",
       "webhookSecretTip": "当目标 RisingWave 表使用 VALIDATE 时，用于签名初始 WebSocket 认证消息的共享密钥。",
       "sslmode": "SSL 模式",
@@ -287,7 +274,7 @@
       "extParams": "额外参数",
       "extParamsTip": "额外的 JDBC 连接参数，例如 socketTimeout=60&tcpKeepAlive=true",
       "timezone": "时区",
-      "timezoneTip": "日期时间数据处理的时区。留空使用系统默认。"
+      "timezoneTip": "RisingWave 会话时区，使用 IANA 名称，例如 UTC 或 Asia/Shanghai。留空使用服务端默认值。"
     }
   },
   "dataTypes": {
