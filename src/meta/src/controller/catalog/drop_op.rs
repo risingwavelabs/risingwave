@@ -219,6 +219,21 @@ impl CatalogController {
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
+        // Iceberg sinks can be user-created with arbitrary names, so unlike the
+        // iceberg-table cleanup above, identify them by inspecting properties rather
+        // than by name prefix.
+        let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
+        for sink in Sink::find()
+            .filter(sink::Column::SinkId.is_in(removed_object_ids.clone()))
+            .all(&txn)
+            .await?
+        {
+            let properties = sink.properties.inner_ref();
+            if crate::manager::iceberg_compaction::is_iceberg_sink(properties) {
+                removed_iceberg_sink_ids.push(sink.sink_id);
+            }
+        }
+
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -433,6 +448,7 @@ impl CatalogController {
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
+                removed_iceberg_sink_ids,
             },
             version,
         ))

@@ -55,6 +55,7 @@ use crate::barrier::{
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -298,6 +299,7 @@ fn build_reschedule_from_context(
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -305,6 +307,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -323,6 +326,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_compaction_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await

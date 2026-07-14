@@ -1160,12 +1160,14 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
+                let abort_result = self
                     .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                if aborted {
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
+                if abort_result.aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1340,6 +1342,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1416,13 +1419,15 @@ impl DdlController {
         // stop sink coordinators for iceberg table sinks
         if !iceberg_sink_ids.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids.clone())
+                .stop_sink_coordinator(iceberg_sink_ids)
                 .await;
+        }
 
-            for sink_id in iceberg_sink_ids {
-                self.iceberg_compaction_manager
-                    .clear_iceberg_maintenance_by_sink_id(sink_id);
-            }
+        // Covers user-created iceberg sinks dropped via CASCADE, which are not in
+        // `removed_iceberg_table_sinks` above.
+        for sink_id in removed_iceberg_sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(sink_id);
         }
 
         // remove secrets.
@@ -1744,10 +1749,13 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                self.metadata_manager
+                let abort_result = self
+                    .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {
