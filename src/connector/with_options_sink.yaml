@@ -307,6 +307,14 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
+  - name: dynamodb.batch_write_retry_times
+    field_type: usize
+    required: false
+    default: '3'
+  - name: dynamodb.batch_write_retry_backoff_ms
+    field_type: u64
+    required: false
+    default: '100'
 ElasticSearchConfig:
   fields:
   - name: url
