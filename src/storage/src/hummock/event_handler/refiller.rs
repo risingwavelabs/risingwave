@@ -729,7 +729,9 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
         }
 
-        // Filter by table cache refill policy and vnodes.
+        // Filter by table cache refill policy and vnodes. A matching block admits its configured
+        // refill unit as a whole: splitting sparse vnode hits into smaller requests would increase
+        // object-store IOPS.
         tasks = match refill_kind {
             DataCacheRefillPath::Normal => self.filter_by_table_cache_refill_policy(tasks),
             DataCacheRefillPath::L0InsertOnly => {
