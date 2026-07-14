@@ -20,7 +20,6 @@
 //! (which serves V1/V2 sinks via gRPC). Future responsibilities such as
 //! per-sink compaction will live alongside the per-sink commit coordinator here.
 
-pub mod backfill;
 mod coordinator;
 mod manager;
 
