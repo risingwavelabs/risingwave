@@ -1183,4 +1183,67 @@ mod tests {
         assert!(matches!(tracker.status, CreateMviewStatus::Finished { .. }));
         assert!(tracker.is_finished());
     }
+
+    #[test]
+    fn tracking_job_new_without_source_backfill_has_no_source_change() {
+        use std::collections::BTreeMap;
+
+        let fragments = StreamJobFragments::for_test(JobId::new(1), BTreeMap::new());
+        let job = TrackingJob::new(&fragments);
+        assert!(job.source_change.is_none());
+    }
+
+    #[test]
+    fn tracking_job_new_with_source_backfill_tracks_finished_fragments() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use risingwave_common::id::SourceId;
+        use risingwave_pb::stream_plan::stream_node::NodeBody;
+        use risingwave_pb::stream_plan::{MergeNode, SourceBackfillNode};
+
+        use crate::model::Fragment;
+
+        let source_id = SourceId::new(42);
+        let backfill_fragment_id = FragmentId::new(2);
+        let upstream_source_fragment_id = FragmentId::new(1);
+
+        let nodes = PbStreamNode {
+            node_body: Some(NodeBody::SourceBackfill(Box::new(SourceBackfillNode {
+                upstream_source_id: source_id,
+                ..Default::default()
+            }))),
+            input: vec![PbStreamNode {
+                node_body: Some(NodeBody::Merge(Box::new(MergeNode {
+                    upstream_fragment_id: upstream_source_fragment_id,
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let fragment = Fragment {
+            fragment_id: backfill_fragment_id,
+            nodes,
+            ..Default::default()
+        };
+        let fragments = StreamJobFragments::for_test(
+            JobId::new(1),
+            BTreeMap::from([(backfill_fragment_id, fragment)]),
+        );
+
+        let job = TrackingJob::new(&fragments);
+        let Some(SourceChange::CreateJobFinished {
+            finished_backfill_fragments,
+        }) = job.source_change
+        else {
+            panic!("expected CreateJobFinished");
+        };
+        assert_eq!(
+            finished_backfill_fragments,
+            HashMap::from([(
+                source_id,
+                BTreeSet::from([(backfill_fragment_id, upstream_source_fragment_id)]),
+            )])
+        );
+    }
 }
