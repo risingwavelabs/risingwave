@@ -255,17 +255,16 @@ impl CdcSplitTrait for PostgresCdcSplit {
                 .as_deref()
                 .and_then(parse_postgres_offset_from_offset_str),
             parse_postgres_offset_from_offset_str(&last_seen_offset),
-        ) {
-            if new_offset < old_offset {
-                tracing::warn!(
-                    split_id = self.inner.split_id,
-                    ?old_offset,
-                    ?new_offset,
-                    "Rejecting backward Postgres CDC offset update; \
-                     keeping current state to prevent state-table regression."
-                );
-                return Ok(());
-            }
+        ) && new_offset < old_offset
+        {
+            tracing::warn!(
+                split_id = self.inner.split_id,
+                ?old_offset,
+                ?new_offset,
+                "Rejecting backward Postgres CDC offset update; \
+                 keeping current state to prevent state-table regression."
+            );
+            return Ok(());
         }
 
         self.inner.snapshot_done = new_snapshot_done;
