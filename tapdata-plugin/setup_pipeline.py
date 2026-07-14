@@ -7,7 +7,6 @@ import os
 import sys
 
 builtins.get_ipython = lambda: None
-sys.path.insert(0, '/opt/homebrew/lib/python3.13/site-packages')
 
 from tapflow.lib.login import login_with_access_code
 from tapflow.lib.data_pipeline.data_source import DataSource
@@ -15,7 +14,7 @@ from tapflow.lib.data_pipeline.pipeline import Pipeline, Flow
 from tapflow.lib.op_object import show_connectors, show_connections, show_jobs
 
 SERVER = os.environ.get("TAPDATA_SERVER", "127.0.0.1:3030")
-ACCESS_CODE = os.environ.get("TAPDATA_ACCESS_CODE", "3324cfdf-7d3e-4792-bd32-571638d4562f")
+ACCESS_CODE = os.environ.get("TAPDATA_ACCESS_CODE", "")
 JOB_NAME = os.environ.get("TAPDATA_JOB_NAME", "pg_to_risingwave_native")
 PG_CONNECTION = os.environ.get("TAPDATA_PG_CONNECTION", "PG_Source_postgres")
 RW_CONNECTION = os.environ.get("TAPDATA_RW_CONNECTION", "RW_Native_dev")
@@ -23,7 +22,7 @@ PG_HOST = os.environ.get("TAPDATA_PG_HOST", "host.docker.internal")
 PG_PORT = int(os.environ.get("TAPDATA_PG_PORT", "5432"))
 PG_DATABASE = os.environ.get("TAPDATA_PG_DATABASE", "postgres")
 PG_SCHEMA = os.environ.get("TAPDATA_PG_SCHEMA", "public")
-PG_USER = os.environ.get("TAPDATA_PG_USER", "william")
+PG_USER = os.environ.get("TAPDATA_PG_USER", "postgres")
 PG_PASSWORD = os.environ.get("TAPDATA_PG_PASSWORD", "")
 RW_HOST = os.environ.get("TAPDATA_RW_HOST", "host.docker.internal")
 RW_PORT = int(os.environ.get("TAPDATA_RW_PORT", "4566"))
@@ -36,6 +35,8 @@ TABLE = os.environ.get("TAPDATA_TABLE", "orders")
 print("=== Tapdata Pipeline Setup: PostgreSQL -> RisingWave (native connector) ===\n")
 
 print("[1/4] Logging in...")
+if not ACCESS_CODE:
+    raise RuntimeError("TAPDATA_ACCESS_CODE is required")
 ok = login_with_access_code(SERVER, ACCESS_CODE, interactive=False)
 if not ok:
     print("ERROR: Login failed!")
