@@ -40,8 +40,8 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
     "services-azfile",
 ] }
-prometheus = { version = "0.14", features = ["process"] }
 pin-project-lite = { workspace = true }
+prometheus = { version = "0.14", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
 spin = "0.10"

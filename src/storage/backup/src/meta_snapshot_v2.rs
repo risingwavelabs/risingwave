@@ -190,7 +190,7 @@ impl Metadata for MetadataV2 {
     async fn decode_from_reader(mut reader: SnapshotPayloadReader) -> BackupResult<Self> {
         let mut metadata = Self::default();
         decode_metadata_from_reader(&mut metadata, &mut reader).await?;
-        reader.finish().await?;
+        reader.finish_after_skipping_to_end().await?;
         Ok(metadata)
     }
 
@@ -692,5 +692,17 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(decoded, raw.metadata.hummock_sequences);
+
+        let decoded = MetaSnapshotV2::decode_from_stream(
+            store.streaming_read("future-section", ..).await.unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decoded.format_version, raw.format_version);
+        assert_eq!(decoded.id, raw.id);
+        assert_eq!(
+            decoded.metadata.hummock_sequences,
+            raw.metadata.hummock_sequences
+        );
     }
 }
