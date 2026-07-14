@@ -94,6 +94,18 @@ use crate::model::{
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
+/// Result of [`CatalogController::try_abort_creating_streaming_job`].
+pub struct AbortCreatingJobResult {
+    /// The job was aborted by this call or already gone. `false` means a background job
+    /// that has progressed past the initial status was left untouched.
+    pub aborted: bool,
+    /// The database of the job, if the job was found.
+    pub database_id: Option<DatabaseId>,
+    /// The aborted sink, if the aborted job was a sink; the caller should clear its iceberg
+    /// maintenance state via `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    pub aborted_sink_id: Option<SinkId>,
+}
+
 /// A planned fragment update for dependent sources when a connection's properties change.
 ///
 /// We keep it as a named struct (instead of a tuple) for readability and to avoid clippy
@@ -665,14 +677,12 @@ impl CatalogController {
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
-    /// It returns (true, _) if the job is not found or aborted.
-    /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
         mut job_id: JobId,
         is_cancelled: bool,
-    ) -> MetaResult<(bool, Option<DatabaseId>)> {
+    ) -> MetaResult<AbortCreatingJobResult> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -682,7 +692,11 @@ impl CatalogController {
                 id = %job_id,
                 "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
-            return Ok((true, None));
+            return Ok(AbortCreatingJobResult {
+                aborted: true,
+                database_id: None,
+                aborted_sink_id: None,
+            });
         };
         let database_id = obj
             .database_id
@@ -704,7 +718,11 @@ impl CatalogController {
                         id = %job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok((false, Some(database_id)));
+                    return Ok(AbortCreatingJobResult {
+                        aborted: false,
+                        database_id: Some(database_id),
+                        aborted_sink_id: None,
+                    });
                 }
             }
         }
@@ -889,7 +907,13 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
-        Ok((true, Some(database_id)))
+        let aborted_sink_id =
+            (original_obj_type == ObjectType::Sink).then(|| original_job_id.as_sink_id());
+        Ok(AbortCreatingJobResult {
+            aborted: true,
+            database_id: Some(database_id),
+            aborted_sink_id,
+        })
     }
 
     #[await_tree::instrument]

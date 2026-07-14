@@ -507,6 +507,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
+        iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
         refresh_manager.clone(),
@@ -530,6 +531,7 @@ pub async fn start_service_as_election_leader(
             hummock_manager.clone(),
             source_manager.clone(),
             refresh_manager.clone(),
+            iceberg_compaction_mgr.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
