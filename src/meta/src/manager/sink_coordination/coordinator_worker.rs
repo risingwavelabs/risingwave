@@ -717,26 +717,24 @@ impl CoordinatorWorker {
         two_phase_handler: &mut TwoPhaseCommitHandler,
         commit_request_alignment: CommitRequestAlignment,
     ) -> anyhow::Result<CoordinatorWorkerEvent> {
-        loop {
-            self.flush_drain_waiters_if_drained(two_phase_handler, commit_request_alignment);
+        self.flush_drain_waiters_if_drained(two_phase_handler, commit_request_alignment);
 
-            if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
-                && two_phase_handler.is_empty()
-            {
-                let pending_handle_ids = pending_handle_ids.clone();
-                self.handle_init_requests_impl(pending_handle_ids).await?;
-                self.curr_state = CoordinatorWorkerState::Running;
+        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
+            && two_phase_handler.is_empty()
+        {
+            let pending_handle_ids = pending_handle_ids.clone();
+            self.handle_init_requests_impl(pending_handle_ids).await?;
+            self.curr_state = CoordinatorWorkerState::Running;
+        }
+
+        select! {
+            next_handle_event = self.handle_manager.next_event() => {
+                Ok(CoordinatorWorkerEvent::HandleManagerEvent(next_handle_event?))
             }
 
-            select! {
-                next_handle_event = self.handle_manager.next_event() => {
-                    return Ok(CoordinatorWorkerEvent::HandleManagerEvent(next_handle_event?));
-                }
-
-                next_item_to_commit = two_phase_handler.next_to_commit() => {
-                    let (epoch, metadata, schema_change) = next_item_to_commit?;
-                    return Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change));
-                }
+            next_item_to_commit = two_phase_handler.next_to_commit() => {
+                let (epoch, metadata, schema_change) = next_item_to_commit?;
+                Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change))
             }
         }
     }
