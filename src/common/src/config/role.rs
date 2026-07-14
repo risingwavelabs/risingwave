@@ -28,6 +28,7 @@ pub enum Role {
     #[default]
     Both,
     /// No specific role, mostly for temporary usage like risectl or testing.
+    #[value(skip)]
     None,
 }
 

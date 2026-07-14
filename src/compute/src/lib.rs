@@ -245,3 +245,13 @@ pub fn default_resource_group() -> String {
 pub fn default_role() -> Role {
     Role::Both
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_role_rejects_none() {
+        assert!(ComputeNodeOpts::try_parse_from(["compute", "--role", "none"]).is_err());
+    }
+}
