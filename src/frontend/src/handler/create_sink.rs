@@ -773,7 +773,6 @@ async fn create_sink_or_replace(
                     .into());
                 }
 
-                ensure_replace_sink_not_iceberg_pk_index(&sink.properties)?;
                 sink.schema_id = original_sink.schema_id;
                 sink.database_id = original_sink.database_id;
                 sink.name = original_sink.name.clone();
@@ -890,8 +889,7 @@ fn prepare_replace_sink(
         )
         .into());
     }
-    let sink_with_options = WithOptions::try_from(stmt.with_properties.0.as_slice())?;
-    ensure_replace_sink_not_iceberg_pk_index(&sink_with_options)?;
+    ensure_replace_sink_not_iceberg_pk_index(&handle_args.with_options)?;
     match handle_args.with_options.get(SINK_SNAPSHOT_OPTION) {
         Some(value) if !value.eq_ignore_ascii_case("false") => {
             return Err(ErrorCode::InvalidInputSyntax(
