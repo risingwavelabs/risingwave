@@ -448,6 +448,8 @@ impl CoordinationHandleManager {
     async fn alter_parallelisms(
         &mut self,
         altered_handles: impl Iterator<Item = HandleId>,
+        drain_rx: &mut UnboundedReceiver<DrainRequest>,
+        drain_waiters: &mut Vec<DrainRequest>,
     ) -> anyhow::Result<HashSet<HandleId>> {
         let mut requests = AligningRequests::default();
         for handle_id in altered_handles {
@@ -460,7 +462,22 @@ impl CoordinationHandleManager {
             .cloned()
             .collect();
         while !remaining_handles.is_empty() || !requests.aligned() {
-            let (handle_id, event) = self.next_event().await?;
+            let (handle_id, event) = if remaining_handles.is_empty()
+                && requests.handle_ids.is_empty()
+            {
+                // With no handles left, wait for either a late replacement writer during
+                // rescaling or an explicit drain request that confirms the sink is stopping.
+                select! {
+                    drain_waiter = drain_rx.recv() => {
+                        let drain_waiter = drain_waiter.ok_or_else(|| anyhow!("end of drain request stream"))?;
+                        drain_waiters.push(drain_waiter);
+                        break;
+                    }
+                    next_event = self.next_event() => next_event?,
+                }
+            } else {
+                self.next_event().await?
+            };
             match event {
                 CoordinationHandleManagerEvent::NewHandle => {
                     requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
@@ -602,6 +619,9 @@ impl CoordinatorWorker {
         two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
+        if pending_handle_ids.is_empty() {
+            return Ok(());
+        }
         if two_phase_handler.has_uncommitted_schema_change() {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
@@ -740,7 +760,11 @@ impl CoordinatorWorker {
                     CoordinationHandleManagerEvent::UpdateVnodeBitmap => {
                         running_handles = self
                             .handle_manager
-                            .alter_parallelisms(pending_new_handles.drain(..).chain([handle_id]))
+                            .alter_parallelisms(
+                                pending_new_handles.drain(..).chain([handle_id]),
+                                &mut self.drain_rx,
+                                &mut self.drain_waiters,
+                            )
                             .await?;
                         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;
@@ -750,7 +774,11 @@ impl CoordinatorWorker {
                         self.handle_manager.stop_handle(handle_id)?;
                         running_handles = self
                             .handle_manager
-                            .alter_parallelisms(pending_new_handles.drain(..))
+                            .alter_parallelisms(
+                                pending_new_handles.drain(..),
+                                &mut self.drain_rx,
+                                &mut self.drain_waiters,
+                            )
                             .await?;
                         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;

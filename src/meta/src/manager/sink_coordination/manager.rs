@@ -918,6 +918,15 @@ mod tests {
             )
             .await
             .unwrap();
+
+        client.stop().await.unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            manager.wait_sink_commits_drained(param.sink_id, epoch2),
+        )
+        .await
+        .expect("drain request should not get stuck after the last writer stops")
+        .unwrap();
     }
 
     #[tokio::test]
