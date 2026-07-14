@@ -92,7 +92,7 @@ struct PartialGraphRunningState {
 impl PartialGraphRunningState {
     fn new(stat: Box<dyn PartialGraphStat>) -> Self {
         Self {
-            barrier_item_collector: BarrierItemCollector::new(),
+            barrier_item_collector: BarrierItemCollector::new(true),
             completing_epoch: None,
             stat,
         }
