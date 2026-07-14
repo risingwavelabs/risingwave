@@ -337,19 +337,29 @@ impl TableCacheRefillContext {
 }
 
 fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
-    let block_smallest_key = FullKey::decode(&sstable.meta.block_metas[block_index].smallest_key);
-    let block_largest_key = FullKey::decode(
-        sstable
-            .meta
-            .block_metas
-            .get(block_index + 1)
-            .map(|b| &b.smallest_key)
-            .unwrap_or_else(|| &sstable.meta.largest_key),
-    );
+    let block_meta = &sstable.meta.block_metas[block_index];
+    let block_smallest_key = FullKey::decode(&block_meta.smallest_key);
+    let table_key_end = match sstable.meta.block_metas.get(block_index + 1) {
+        // A table switch always starts a new block. The next table's smallest key has an
+        // unrelated vnode, so use the current table's terminal range instead.
+        Some(next_block_meta) if next_block_meta.table_id() != block_meta.table_id() => {
+            Bound::Unbounded
+        }
+        Some(next_block_meta) => Bound::Excluded(
+            FullKey::decode(&next_block_meta.smallest_key)
+                .user_key
+                .table_key,
+        ),
+        None => Bound::Excluded(
+            FullKey::decode(&sstable.meta.largest_key)
+                .user_key
+                .table_key,
+        ),
+    };
 
     let table_key_range = (
         Bound::Included(block_smallest_key.user_key.table_key),
-        Bound::Excluded(block_largest_key.user_key.table_key),
+        table_key_end,
     );
     vnode_range(&table_key_range)
 }
@@ -1149,13 +1159,14 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use bytes::Bytes;
     use parking_lot::Mutex;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::config::Role;
     use risingwave_common::config::streaming::CacheRefillPolicy;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::FullKey;
+    use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
@@ -1764,6 +1775,92 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_scoped_refill_handles_multi_table_vnode_boundary() {
+        let table_a = TableId::from(233);
+        let table_b = TableId::from(234);
+        let vnode_a = VirtualNode::COUNT_FOR_TEST - 1;
+        let sstable_store = mock_sstable_store().await;
+        let (sst, sst_info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            [
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table_a,
+                            prefix_slice_with_vnode(VirtualNode::from_index(vnode_a), b"table_a"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"a")),
+                ),
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table_b,
+                            prefix_slice_with_vnode(VirtualNode::ZERO, b"table_b"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"b")),
+                ),
+            ]
+            .into_iter(),
+            sstable_store.clone(),
+            vec![table_a.as_raw_id(), table_b.as_raw_id()],
+        )
+        .await;
+        assert_eq!(sst.block_count(), 2, "table switch must form a new block");
+
+        let generate = |streaming_vnodes| {
+            let sstable_store = sstable_store.clone();
+            let sst = sst.clone();
+            let sst_info = sst_info.clone();
+            let mut config = test_refill_config(CacheRefillPolicy::Streaming);
+            config.data_refill_levels.insert(0);
+            let context = CacheRefillContext {
+                config: Arc::new(config),
+                meta_refill_concurrency: None,
+                concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
+                sstable_store,
+                table_cache_refill_context_map: Arc::new(HashMap::from([(
+                    table_a,
+                    super::TableCacheRefillContext {
+                        streaming_vnode_bitmap: Some(streaming_vnodes),
+                        serving_vnode_bitmap: None,
+                        policy: CacheRefillPolicy::Streaming,
+                    },
+                )])),
+            };
+            async move {
+                DataCacheRefillTaskGenerator {
+                    context: &context,
+                    delta: &SstDeltaInfo {
+                        insert_sst_infos: vec![sst_info.clone()],
+                        delete_sst_object_ids: vec![2330.into()],
+                        insert_sst_level: 0,
+                    },
+                    ssts: std::slice::from_ref(&sst),
+                }
+                .generate()
+                .await
+            }
+        };
+
+        let matching_tasks =
+            generate(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode_a])).await;
+        assert_eq!(matching_tasks.len(), 1);
+        assert_eq!(matching_tasks[0].blks, 0..1);
+
+        let non_matching_tasks = generate(Bitmap::from_indices(
+            VirtualNode::COUNT_FOR_TEST,
+            [VirtualNode::ZERO.to_index()],
+        ))
+        .await;
+        assert!(non_matching_tasks.is_empty());
     }
 
     #[test]

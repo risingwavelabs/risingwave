@@ -10,13 +10,13 @@ What this script validates:
 1. The refill policy reported for the target job's internal tables matches
    `--expect-policy`, if provided.
 2. For the target job's internal tables, `stats.streaming[table_id]` equals the
-   union of vnode bitmaps from `stats.internal.streaming[table_id]`.
+   vnode ownership reported by the streaming actors in the catalog.
 
 Important note:
 `stats.internal.streaming` is worker-global refiller vnode state, using the
-table-level vnode union maintained by the refiller. Therefore this script only
-filters and validates the target job's internal tables. It does not require all
-entries in `stats.internal.streaming` to belong to the target job.
+table-level vnode union maintained by the refiller. It is logged only as a
+supplementary diagnostic and is not the expected source of truth. The catalog
+actor mapping is scoped to the target job's internal tables.
 
 Examples:
     psql_refill_validate.py --job-name s3 --job-type sink --mode streaming
@@ -540,10 +540,10 @@ def main() -> int:
 
         if args.mode in ("streaming", "both"):
             logger.info(
-                "Comparing streaming refill stats against internal refiller vnode distribution"
+                "Collecting expected streaming vnode distribution from catalog actor ownership"
             )
-            expected_streaming = project_internal_streaming_stats(
-                stats_by_worker, relevant_table_ids
+            expected_streaming = fetch_streaming_worker_vnodes(
+                conn, job_id, sorted(relevant_table_ids)
             )
             actual_streaming = project_mode_stats(
                 stats_by_worker, "streaming", relevant_table_ids
@@ -555,6 +555,15 @@ def main() -> int:
                     "streaming", expected_streaming, actual_streaming, internal_tables
                 )
             )
+
+            internal_streaming = project_internal_streaming_stats(
+                stats_by_worker, relevant_table_ids
+            )
+            if internal_streaming != actual_streaming:
+                logger.warning(
+                    "stats.internal.streaming differs from stats.streaming; "
+                    "catalog actor ownership remains the validation oracle"
+                )
 
         if args.mode in ("serving", "both"):
             logger.info("Collecting expected serving vnode distribution from meta serving mapping")
