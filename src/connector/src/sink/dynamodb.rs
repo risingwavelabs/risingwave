@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::{Context, anyhow};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
-use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
-use futures::prelude::TryFuture;
-use futures::prelude::future::TryFutureExt;
+use dynamodb::types::{AttributeValue, KeySchemaElement, TableStatus, WriteRequest};
+use futures::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
@@ -31,7 +30,6 @@ use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
 
-use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
@@ -39,6 +37,7 @@ use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
 
@@ -69,6 +68,20 @@ pub struct DynamoDbConfig {
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_future_send_nums: usize,
+
+    #[serde(
+        rename = "dynamodb.batch_write_retry_times",
+        default = "default_batch_write_retry_times"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub batch_write_retry_times: usize,
+
+    #[serde(
+        rename = "dynamodb.batch_write_retry_backoff_ms",
+        default = "default_batch_write_retry_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub batch_write_retry_backoff_ms: u64,
 }
 
 impl EnforceSecret for DynamoDbConfig {
@@ -83,6 +96,14 @@ fn default_max_batch_item_nums() -> usize {
 
 fn default_max_future_send_nums() -> usize {
     256
+}
+
+fn default_batch_write_retry_times() -> usize {
+    3
+}
+
+fn default_batch_write_retry_backoff_ms() -> u64 {
+    100
 }
 
 fn default_max_batch_rows() -> usize {
@@ -153,25 +174,9 @@ impl Sink for DynamoDbSink {
                 table_name
             )));
         }
-        let pk_set: HashSet<String> = self
-            .schema
-            .fields()
-            .iter()
-            .enumerate()
-            .filter(|(k, _)| self.pk_indices.contains(k))
-            .map(|(_, v)| v.name.clone())
-            .collect();
-        let key_schema = table.key_schema();
-
-        for key_element in key_schema.iter().map(|x| x.attribute_name()) {
-            if !pk_set.contains(key_element) {
-                return Err(SinkError::DynamoDb(anyhow!(
-                    "table {} key field {} not found in schema or not primary key",
-                    table_name,
-                    key_element
-                )));
-            }
-        }
+        let rw_pk_names = rw_pk_names(&self.schema, &self.pk_indices)?;
+        let dynamodb_keys = dynamodb_key_schema_names(table_name, table.key_schema())?;
+        validate_pk_matches_dynamodb_key_schema(table_name, &rw_pk_names, &dynamodb_keys)?;
 
         Ok(())
     }
@@ -208,24 +213,39 @@ struct DynamoDbRequest {
 }
 
 impl DynamoDbRequest {
-    fn extract_pk_values(&self) -> Option<Vec<AttributeValue>> {
-        let key = match (&self.inner.put_request(), &self.inner.delete_request()) {
-            (Some(put_req), None) => &put_req.item,
-            (None, Some(del_req)) => &del_req.key,
-            _ => return None,
+    fn extract_key(&self) -> Option<&HashMap<String, AttributeValue>> {
+        match (&self.inner.put_request(), &self.inner.delete_request()) {
+            (Some(put_req), None) => Some(&put_req.item),
+            (None, Some(del_req)) => Some(&del_req.key),
+            _ => None,
+        }
+    }
+
+    fn has_same_pk(&self, other: &Self) -> bool {
+        if self.key_items.is_empty() {
+            return false;
+        }
+
+        let Some(key) = self.extract_key() else {
+            return false;
         };
-        let vs = key
-            .iter()
-            .filter(|(k, _)| self.key_items.contains(k))
-            .map(|(_, v)| v.clone())
-            .collect();
-        Some(vs)
+        let Some(other_key) = other.extract_key() else {
+            return false;
+        };
+
+        self.key_items.iter().all(|key_item| {
+            matches!(
+                (key.get(key_item), other_key.get(key_item)),
+                (Some(value), Some(other_value)) if value == other_value
+            )
+        })
     }
 }
 
 pub struct DynamoDbSinkWriter {
     payload_writer: DynamoDbPayloadWriter,
     formatter: DynamoDbFormatter,
+    max_future_send_nums: usize,
 }
 
 impl DynamoDbSinkWriter {
@@ -244,23 +264,21 @@ impl DynamoDbSinkWriter {
                 table_name
             )));
         };
-        let dynamodb_keys = table
-            .key_schema
-            .unwrap_or_default()
-            .into_iter()
-            .map(|k| k.attribute_name)
-            .collect();
+        let dynamodb_keys = dynamodb_key_schema_names(table_name, table.key_schema())?;
 
         let payload_writer = DynamoDbPayloadWriter {
             client,
             table: config.table.clone(),
             dynamodb_keys,
             max_batch_item_nums: config.max_batch_item_nums,
+            batch_write_retry_times: config.batch_write_retry_times,
+            batch_write_retry_backoff_ms: config.batch_write_retry_backoff_ms,
         };
 
         Ok(Self {
             payload_writer,
             formatter: DynamoDbFormatter { schema },
+            max_future_send_nums: config.max_future_send_nums,
         })
     }
 
@@ -280,25 +298,21 @@ impl DynamoDbSinkWriter {
                 Op::UpdateDelete => {}
             }
         }
-        Ok(self.payload_writer.write_chunk(request_items))
+        Ok(self
+            .payload_writer
+            .write_chunk(request_items, self.max_future_send_nums))
     }
 }
 
-pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
-
 impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
-    type DeliveryFuture = DynamoDbSinkDeliveryFuture;
+    type DeliveryFuture = WriteChunkFuture;
 
-    #[define_opaque(DynamoDbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
-        mut add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        let futures = self.write_chunk_inner(chunk)?;
-        add_future
-            .add_future_may_await(futures.map_ok(|_: Vec<()>| ()))
-            .await?;
+        self.write_chunk_inner(chunk)?.map_ok(|_| ()).await?;
         Ok(())
     }
 }
@@ -371,47 +385,92 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
     Ok(attr)
 }
 
+fn rw_pk_names(schema: &Schema, pk_indices: &[usize]) -> Result<Vec<String>> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| {
+            schema
+                .fields()
+                .get(*pk_idx)
+                .map(|field| field.name.clone())
+                .ok_or_else(|| {
+                    SinkError::DynamoDb(anyhow!(
+                        "RisingWave primary key column index {} is out of range",
+                        pk_idx
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn dynamodb_key_schema_names(
+    table_name: &str,
+    key_schema: &[KeySchemaElement],
+) -> Result<Vec<String>> {
+    if key_schema.is_empty() {
+        return Err(SinkError::DynamoDb(anyhow!(
+            "table {} key schema is empty",
+            table_name
+        )));
+    }
+
+    Ok(key_schema
+        .iter()
+        .map(|key_element| key_element.attribute_name().to_owned())
+        .collect())
+}
+
+fn validate_pk_matches_dynamodb_key_schema(
+    table_name: &str,
+    rw_pk_names: &[String],
+    dynamodb_keys: &[String],
+) -> Result<()> {
+    let rw_pk_set = rw_pk_names.iter().collect::<BTreeSet<_>>();
+    let dynamodb_key_set = dynamodb_keys.iter().collect::<BTreeSet<_>>();
+    if rw_pk_names.len() != dynamodb_keys.len() || rw_pk_set != dynamodb_key_set {
+        return Err(SinkError::DynamoDb(anyhow!(
+            "DynamoDB table {} primary key {:?} must match RisingWave primary key {:?}",
+            table_name,
+            dynamodb_keys,
+            rw_pk_names
+        )));
+    }
+
+    Ok(())
+}
+
 mod write_chunk_future {
-    use core::result;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use anyhow::anyhow;
     use aws_sdk_dynamodb as dynamodb;
     use aws_sdk_dynamodb::client::Client;
-    use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-    use dynamodb::error::SdkError;
-    use dynamodb::operation::batch_write_item::{BatchWriteItemError, BatchWriteItemOutput};
     use dynamodb::types::{
         AttributeValue, DeleteRequest, PutRequest, ReturnConsumedCapacity,
         ReturnItemCollectionMetrics, WriteRequest,
     };
-    use futures::future::{Map, TryJoinAll};
-    use futures::prelude::Future;
-    use futures::prelude::future::{FutureExt, try_join_all};
+    use futures::{FutureExt, StreamExt, TryFuture, TryStreamExt, stream};
     use itertools::Itertools;
     use maplit::hashmap;
+    use tokio::time::sleep;
+    use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
-    use super::{DynamoDbRequest, Result, SinkError};
+    use super::{DynamoDbRequest, SinkError};
 
-    pub type WriteChunkFuture = TryJoinAll<
-        Map<
-            impl Future<
-                Output = result::Result<
-                    BatchWriteItemOutput,
-                    SdkError<BatchWriteItemError, HttpResponse>,
-                >,
-            >,
-            impl FnOnce(
-                result::Result<BatchWriteItemOutput, SdkError<BatchWriteItemError, HttpResponse>>,
-            ) -> Result<()>,
-        >,
-    >;
+    const MAX_BATCH_WRITE_RETRY_DELAY_MS: u64 = 2000;
+    const MAX_BATCH_WRITE_CONCURRENCY: usize = 256;
+
     pub struct DynamoDbPayloadWriter {
         pub client: Client,
         pub table: String,
         pub dynamodb_keys: Vec<String>,
         pub max_batch_item_nums: usize,
+        pub batch_write_retry_times: usize,
+        pub batch_write_retry_backoff_ms: u64,
     }
+
+    pub type WriteChunkFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
 
     impl DynamoDbPayloadWriter {
         pub fn write_one_insert(
@@ -447,47 +506,241 @@ mod write_chunk_future {
                 inner: req,
                 key_items: self.dynamodb_keys.clone(),
             };
-            if let Some(v) = r_req.extract_pk_values() {
-                request_items.retain(|item| {
-                    !item
-                        .extract_pk_values()
-                        .unwrap_or_default()
-                        .iter()
-                        .all(|x| v.contains(x))
-                });
-            }
+            request_items.retain(|item| !item.has_same_pk(&r_req));
             request_items.push(r_req);
         }
 
         #[define_opaque(WriteChunkFuture)]
-        pub fn write_chunk(&mut self, request_items: Vec<DynamoDbRequest>) -> WriteChunkFuture {
+        pub fn write_chunk(
+            &mut self,
+            request_items: Vec<DynamoDbRequest>,
+            max_future_send_nums: usize,
+        ) -> WriteChunkFuture {
+            let client = self.client.clone();
             let table = self.table.clone();
-            let chunks = request_items
-                .into_iter()
-                .map(|r| r.inner)
-                .chunks(self.max_batch_item_nums);
-            let futures = chunks.into_iter().map(|chunk| {
-                let req_items = chunk.collect();
-                let reqs = hashmap! {
-                    table.clone() => req_items,
-                };
-                self.client
-                    .batch_write_item()
-                    .set_request_items(Some(reqs))
-                    .return_consumed_capacity(ReturnConsumedCapacity::None)
-                    .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
-                    .send()
-                    .map(|result| {
-                        result
-                            .map_err(|e| {
-                                SinkError::DynamoDb(
-                                    anyhow!(e).context("failed to delete item from DynamoDB sink"),
-                                )
-                            })
-                            .map(|_| ())
-                    })
-            });
-            try_join_all(futures)
+            let max_batch_item_nums = self.max_batch_item_nums;
+            let batch_write_retry_times = self.batch_write_retry_times;
+            let batch_write_retry_backoff_ms = self.batch_write_retry_backoff_ms;
+            async move {
+                let chunks = request_items
+                    .into_iter()
+                    .map(|r| r.inner)
+                    .chunks(max_batch_item_nums)
+                    .into_iter()
+                    .map(|chunk| chunk.collect::<Vec<_>>())
+                    .collect_vec();
+                let max_future_send_nums =
+                    max_future_send_nums.clamp(1, MAX_BATCH_WRITE_CONCURRENCY);
+                stream::iter(chunks.into_iter().map(|req_items| {
+                    let client = client.clone();
+                    let table = table.clone();
+                    async move {
+                        let mut req_items = req_items;
+                        let mut retry_count = 0;
+                        let mut retry_backoff = ExponentialBackoff::from_millis(
+                            batch_write_retry_backoff_ms,
+                        )
+                        .factor(2)
+                        .max_delay(Duration::from_millis(MAX_BATCH_WRITE_RETRY_DELAY_MS))
+                        .map(jitter)
+                        .take(batch_write_retry_times);
+
+                        loop {
+                            let return_consumed_capacity = if retry_count == 0 {
+                                ReturnConsumedCapacity::None
+                            } else {
+                                ReturnConsumedCapacity::Total
+                            };
+                            let reqs = hashmap! {
+                                table.clone() => req_items.clone(),
+                            };
+                            let result = client
+                                .batch_write_item()
+                                .set_request_items(Some(reqs))
+                                .return_consumed_capacity(return_consumed_capacity)
+                                .return_item_collection_metrics(ReturnItemCollectionMetrics::None)
+                                .send()
+                                .await;
+
+                            match result {
+                                Ok(output) => {
+                                    let unprocessed_items =
+                                        output.unprocessed_items().cloned().unwrap_or_default();
+                                    if unprocessed_items.is_empty() {
+                                        if retry_count > 0 {
+                                            tracing::warn!(
+                                                retry_count,
+                                                consumed_capacity = ?output.consumed_capacity(),
+                                                "DynamoDB batch write retry succeeded"
+                                            );
+                                        }
+                                        return Ok(());
+                                    }
+
+                                    req_items = unprocessed_items.into_values().flatten().collect();
+                                    if retry_count >= batch_write_retry_times {
+                                        return Err(SinkError::DynamoDb(anyhow!(
+                                            "failed to write {} unprocessed items to DynamoDB sink after {} retries",
+                                            req_items.len(),
+                                            batch_write_retry_times,
+                                        )));
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(SinkError::DynamoDb(
+                                        anyhow!(e).context("failed to write items to DynamoDB sink"),
+                                    ));
+                                }
+                            }
+
+                            retry_count += 1;
+                            let Some(delay) = retry_backoff.next() else {
+                                return Err(SinkError::DynamoDb(anyhow!(
+                                    "failed to write {} unprocessed items to DynamoDB sink after {} retries",
+                                    req_items.len(),
+                                    batch_write_retry_times,
+                                )));
+                            };
+                            tracing::warn!(
+                                retry_count,
+                                delay_ms = delay.as_millis(),
+                                unprocessed_items_count = req_items.len(),
+                                "retrying DynamoDB batch write"
+                            );
+                            sleep(delay).await;
+                        }
+                    }
+                }))
+                .buffer_unordered(max_future_send_nums)
+                .try_collect::<Vec<_>>()
+                .await?;
+                Ok(())
+            }
+            .boxed()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aws_sdk_dynamodb::types::{DeleteRequest, KeyType, PutRequest};
+
+    use super::*;
+
+    fn dynamodb_put_request(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> DynamoDbRequest {
+        let item = dynamodb_items(items);
+        let put_req = PutRequest::builder().set_item(Some(item)).build().unwrap();
+        DynamoDbRequest {
+            inner: WriteRequest::builder().put_request(put_req).build(),
+            key_items: vec!["pk".to_owned(), "sk".to_owned()],
+        }
+    }
+
+    fn dynamodb_delete_request(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> DynamoDbRequest {
+        let key = dynamodb_items(items);
+        let delete_req = DeleteRequest::builder().set_key(Some(key)).build().unwrap();
+        DynamoDbRequest {
+            inner: WriteRequest::builder().delete_request(delete_req).build(),
+            key_items: vec!["pk".to_owned(), "sk".to_owned()],
+        }
+    }
+
+    fn dynamodb_items(
+        items: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> HashMap<String, AttributeValue> {
+        items
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), AttributeValue::S(v.to_owned())))
+            .collect()
+    }
+
+    #[test]
+    fn dynamodb_request_compares_pk_by_key_attribute() {
+        let req = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        let swapped_values = dynamodb_put_request([("pk", "b"), ("sk", "a")]);
+        let same_pk = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+
+        assert!(!req.has_same_pk(&swapped_values));
+        assert!(req.has_same_pk(&same_pk));
+    }
+
+    #[test]
+    fn dynamodb_request_empty_key_items_never_match() {
+        let mut req = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        let same_pk = dynamodb_put_request([("pk", "a"), ("sk", "b")]);
+        req.key_items.clear();
+
+        assert!(!req.has_same_pk(&same_pk));
+    }
+
+    #[test]
+    fn dynamodb_request_compares_put_and_delete_by_composite_pk() {
+        let put = dynamodb_put_request([("pk", "a"), ("sk", "b"), ("value", "1")]);
+        let same_pk_delete = dynamodb_delete_request([("pk", "a"), ("sk", "b")]);
+        let different_hash_key_delete = dynamodb_delete_request([("pk", "x"), ("sk", "b")]);
+        let different_range_key_delete = dynamodb_delete_request([("pk", "a"), ("sk", "x")]);
+
+        assert!(put.has_same_pk(&same_pk_delete));
+        assert!(same_pk_delete.has_same_pk(&put));
+        assert!(!put.has_same_pk(&different_hash_key_delete));
+        assert!(!put.has_same_pk(&different_range_key_delete));
+    }
+
+    #[test]
+    fn dynamodb_key_schema_empty_errors() {
+        let err = dynamodb_key_schema_names("test_table", &[]).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("table test_table key schema is empty")
+        );
+    }
+
+    #[test]
+    fn dynamodb_key_schema_must_match_rw_pk() {
+        let dynamodb_keys = ["pk".to_owned(), "sk".to_owned()];
+        let same_rw_pk = ["sk".to_owned(), "pk".to_owned()];
+        let extra_rw_pk = ["pk".to_owned(), "sk".to_owned(), "extra".to_owned()];
+        let different_rw_pk = ["pk".to_owned(), "other".to_owned()];
+
+        validate_pk_matches_dynamodb_key_schema("test_table", &same_rw_pk, &dynamodb_keys).unwrap();
+
+        assert!(
+            validate_pk_matches_dynamodb_key_schema("test_table", &extra_rw_pk, &dynamodb_keys)
+                .unwrap_err()
+                .to_string()
+                .contains("must match RisingWave primary key")
+        );
+        assert!(
+            validate_pk_matches_dynamodb_key_schema("test_table", &different_rw_pk, &dynamodb_keys)
+                .unwrap_err()
+                .to_string()
+                .contains("must match RisingWave primary key")
+        );
+    }
+
+    #[test]
+    fn dynamodb_key_schema_names_uses_explicit_schema() {
+        let key_schema = vec![
+            KeySchemaElement::builder()
+                .attribute_name("pk")
+                .key_type(KeyType::Hash)
+                .build()
+                .unwrap(),
+            KeySchemaElement::builder()
+                .attribute_name("sk")
+                .key_type(KeyType::Range)
+                .build()
+                .unwrap(),
+        ];
+
+        assert_eq!(
+            dynamodb_key_schema_names("test_table", &key_schema).unwrap(),
+            vec!["pk".to_owned(), "sk".to_owned()]
+        );
     }
 }
