@@ -24,7 +24,6 @@ use risingwave_common::id::JobId;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::PbTableCacheRefillPolicies;
 use risingwave_pb::stream_service::barrier_complete_response::{
     IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
     PbLoadFinishedSource,
@@ -103,11 +102,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         since_epoch: u64,
     ) -> impl Future<Output = MetaResult<SinceTimestampResolvedEpoch>> + Send + 'a;
 
-    async fn table_cache_refill_policies_snapshot(&self) -> MetaResult<PbTableCacheRefillPolicies> {
-        Ok(PbTableCacheRefillPolicies::default())
-    }
-
-    async fn sync_serving_table_vnode_mappings_to_hummock(&self) -> MetaResult<()> {
+    async fn refresh_table_refill_runtime_state_after_recovery(&self) -> MetaResult<()> {
         Ok(())
     }
 

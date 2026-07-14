@@ -29,8 +29,8 @@ use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{PbTableRefillRuntimeConfig, Recovery};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -682,13 +682,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     }
                                     Ok(None) => {
                                         info!(%database_id, "database removed after reloading empty runtime info");
-                                        // mark ready to unblock subsequent request
-                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
-                                        Self::refresh_table_refill_runtime_state_after_recovery(
-                                            self.context.clone(),
-                                            self.env.clone(),
-                                        ).await;
+                                        self.context
+                                            .refresh_table_refill_runtime_state_after_recovery()
+                                            .await?;
+                                        // Mark ready only after the refill runtime state is refreshed.
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     }
                                     Err(e) => {
                                         entering_initializing.fail_reload_runtime_info(e);
@@ -696,12 +695,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
-                                self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
+                                let database_id = entering_running.database_id();
                                 entering_running.enter();
-                                Self::refresh_table_refill_runtime_state_after_recovery(
-                                    self.context.clone(),
-                                    self.env.clone(),
-                                ).await;
+                                self.context
+                                    .refresh_table_refill_runtime_state_after_recovery()
+                                    .await?;
+                                self.context
+                                    .mark_ready(MarkReadyOptions::Database(database_id));
                             }
                             CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
                                 self.handle_batch_refresh_trigger(database_id, job_id).await?;
@@ -1077,46 +1077,6 @@ use crate::barrier::partial_graph::{
 };
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
-    async fn refresh_table_refill_runtime_state_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
-        // Table refill is a best-effort runtime optimization. Recovery uses an
-        // eventually consistent refresh for meta-owned state: policy is global and
-        // broadcast, while serving vnode mapping is worker-specific and delivered
-        // through targeted updates.
-        Self::refresh_table_cache_refill_policies_after_recovery(context.clone(), env).await;
-        Self::refresh_serving_table_vnode_mappings_after_recovery(context).await;
-    }
-
-    async fn refresh_table_cache_refill_policies_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
-        match context.table_cache_refill_policies_snapshot().await {
-            Ok(policies) => {
-                env.notification_manager()
-                    .notify_hummock(
-                        Operation::Update,
-                        Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
-                            table_cache_refill_policies: Some(policies),
-                            ..Default::default()
-                        }),
-                    )
-                    .await;
-            }
-            Err(err) => {
-                warn!(
-                    error = %err.as_report(),
-                    "failed to refresh table cache refill policies after recovery"
-                );
-            }
-        }
-    }
-
-    async fn refresh_serving_table_vnode_mappings_after_recovery(context: Arc<C>) {
-        if let Err(err) = context.sync_serving_table_vnode_mappings_to_hummock().await {
-            warn!(
-                error = %err.as_report(),
-                "failed to refresh serving table vnode mappings after recovery"
-            );
-        }
-    }
-
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -1369,6 +1329,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     database_infos,
                 );
 
+                self.context
+                    .refresh_table_refill_runtime_state_after_recovery()
+                    .await?;
+
                 Ok((
                     active_streaming_nodes,
                     partial_graph_manager,
@@ -1475,12 +1439,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 recovering_databases,
             ),
         )]);
-
-        Self::refresh_table_refill_runtime_state_after_recovery(
-            self.context.clone(),
-            self.env.clone(),
-        )
-        .await;
 
         self.env
             .notification_manager()
