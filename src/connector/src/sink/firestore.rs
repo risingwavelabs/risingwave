@@ -346,7 +346,7 @@ impl FirestoreSinkWriter {
                         match op {
                             FirestoreOperation::Upsert { doc_id, data } => {
                                 batch
-                                    .update_object(&collection, &doc_id, &data, None, None, vec![])
+                                    .update_object(&collection, doc_id, &data, None, None, vec![])
                                     .map_err(|e| {
                                         SinkError::Firestore(
                                             anyhow!(e)
@@ -356,14 +356,12 @@ impl FirestoreSinkWriter {
                                 write_contexts.push(format!("upsert document '{}'", doc_id));
                             }
                             FirestoreOperation::Delete { doc_id } => {
-                                batch
-                                    .delete_by_id(&collection, &doc_id, None)
-                                    .map_err(|e| {
-                                        SinkError::Firestore(
-                                            anyhow!(e)
-                                                .context("failed to add delete document to batch"),
-                                        )
-                                    })?;
+                                batch.delete_by_id(&collection, doc_id, None).map_err(|e| {
+                                    SinkError::Firestore(
+                                        anyhow!(e)
+                                            .context("failed to add delete document to batch"),
+                                    )
+                                })?;
                                 write_contexts.push(format!("delete document '{}'", doc_id));
                             }
                         }
@@ -515,6 +513,22 @@ fn validate_firestore_document_id(doc_id: &str) -> Result<()> {
     Ok(())
 }
 
+pub type FirestoreSinkDeliveryFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<(), SinkError>> + Send>>;
+
+impl AsyncTruncateSinkWriter for FirestoreSinkWriter {
+    type DeliveryFuture = FirestoreSinkDeliveryFuture;
+
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
+        self.write_chunk_inner(chunk)?.await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,22 +572,6 @@ mod tests {
             format_datum(Some(ScalarRefImpl::Int64(i64::MAX)), &DataType::Int64)?,
             JsonValue::Number(i64::MAX.into())
         );
-        Ok(())
-    }
-}
-
-pub type FirestoreSinkDeliveryFuture =
-    std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<(), SinkError>> + Send>>;
-
-impl AsyncTruncateSinkWriter for FirestoreSinkWriter {
-    type DeliveryFuture = FirestoreSinkDeliveryFuture;
-
-    async fn write_chunk<'a>(
-        &'a mut self,
-        chunk: StreamChunk,
-        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> Result<()> {
-        self.write_chunk_inner(chunk)?.await?;
         Ok(())
     }
 }
