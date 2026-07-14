@@ -39,6 +39,7 @@ use crate::barrier::{
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
@@ -141,9 +142,12 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     pub(super) refresh_manager: GlobalRefreshManagerRef,
 
     sink_manager: SinkCoordinatorManager,
+
+    pub(super) iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         scheduled_barriers: ScheduledBarriers,
         status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -155,6 +159,7 @@ impl GlobalBarrierWorkerContextImpl {
         barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -167,6 +172,7 @@ impl GlobalBarrierWorkerContextImpl {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_compaction_manager,
         }
     }
 

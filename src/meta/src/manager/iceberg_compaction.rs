@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,9 +25,10 @@ use risingwave_common::id::WorkerId;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
-    CompactionType, IcebergConfig, commit_branch, should_enable_iceberg_cow,
+    CompactionType, ICEBERG_SINK, IcebergConfig, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_connector::sink::{SinkError, SinkParam};
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
@@ -40,6 +41,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::{
     IcebergCompactionEventDispatcher, IcebergCompactionEventHandler, IcebergCompactionEventLoop,
     IcebergCompactor, IcebergCompactorManagerRef,
@@ -550,6 +552,14 @@ impl IcebergCompactionManager {
         guard.snapshot_expiration_sink_ids.remove(&sink_id);
     }
 
+    /// Clear the iceberg maintenance state of the sink aborted by
+    /// `try_abort_creating_streaming_job`, if any.
+    pub fn clear_maintenance_for_aborted_job(&self, abort_result: &AbortCreatingJobResult) {
+        if let Some(sink_id) = abort_result.aborted_sink_id {
+            self.clear_iceberg_maintenance_by_sink_id(sink_id);
+        }
+    }
+
     pub async fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
         let now = Instant::now();
         let schedules = {
@@ -995,4 +1005,12 @@ impl IcebergCompactionManager {
 
         Ok(())
     }
+}
+
+/// User-created iceberg sinks have arbitrary names, so identify them by the
+/// connector property instead of the `__iceberg_sink_` name prefix.
+pub fn is_iceberg_sink(properties: &BTreeMap<String, String>) -> bool {
+    properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
 }
