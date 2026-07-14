@@ -323,12 +323,19 @@ impl std::fmt::Display for TrackingJob {
 impl TrackingJob {
     /// Create a new tracking job.
     pub(crate) fn new(stream_job_fragments: &StreamJobFragments) -> Self {
+        let finished_backfill_fragments = stream_job_fragments.source_backfill_fragments();
+        // `None` when empty, consistent with the recovered-job constructor.
+        let source_change = if finished_backfill_fragments.is_empty() {
+            None
+        } else {
+            Some(SourceChange::CreateJobFinished {
+                finished_backfill_fragments,
+            })
+        };
         Self {
             job_id: stream_job_fragments.stream_job_id,
             is_recovered: false,
-            source_change: Some(SourceChange::CreateJobFinished {
-                finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-            }),
+            source_change,
         }
     }
 
