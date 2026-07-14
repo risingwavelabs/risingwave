@@ -26,10 +26,11 @@ use risingwave_pb::catalog::{
 use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats, PbHummockVersion};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
-use tokio::io::AsyncRead;
 
 use crate::error::{BackupError, BackupResult};
-use crate::meta_snapshot::{MetaSnapshot, Metadata, SnapshotPayloadReader, SnapshotPayloadWriter};
+use crate::meta_snapshot::{
+    MetaSnapshot, Metadata, SnapshotPayloadReader, SnapshotPayloadWriter, read_u32_le,
+};
 
 // TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
@@ -82,17 +83,15 @@ impl Display for ClusterMetadata {
 }
 
 impl Metadata for ClusterMetadata {
-    async fn encode_to_writer(&self, writer: &mut SnapshotPayloadWriter) -> BackupResult<()> {
+    async fn encode_to_writer(&self, mut writer: SnapshotPayloadWriter) -> BackupResult<()> {
         let mut buf = BytesMut::new();
         self.encode_to(&mut buf)?;
-        writer.write_snapshot_bytes(buf.freeze()).await
+        writer.write_snapshot_bytes(buf.freeze()).await?;
+        writer.finish().await?;
+        Ok(())
     }
 
-    async fn decode_from_reader<R>(reader: SnapshotPayloadReader<R>) -> BackupResult<Self>
-    where
-        Self: Sized,
-        R: AsyncRead + Send,
-    {
+    async fn decode_from_reader(reader: SnapshotPayloadReader) -> BackupResult<Self> {
         let data = reader.read_to_end().await?;
         ClusterMetadata::decode(&data)
     }
@@ -234,7 +233,14 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let len = buf.get_u32_le() as usize;
+        let len = read_u32_le(buf)? as usize;
+        if buf.remaining() < len {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "prost payload length {} exceeds remaining buffer {}",
+                len,
+                buf.remaining()
+            )));
+        }
         let v = buf[..len].to_vec();
         buf.advance(len);
         T::decode(v.as_slice()).map_err(|e| BackupError::Decoding(e.into()))
@@ -251,7 +257,7 @@ impl ClusterMetadata {
     where
         T: prost::Message + Default,
     {
-        let vec_len = buf.get_u32_le() as usize;
+        let vec_len = read_u32_le(buf)? as usize;
         let mut result = vec![];
         for _ in 0..vec_len {
             let v: T = Self::decode_prost_message(buf)?;

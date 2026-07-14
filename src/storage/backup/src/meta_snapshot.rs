@@ -18,30 +18,30 @@ use std::future::Future;
 use std::hash::Hasher;
 use std::mem::size_of;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures::StreamExt;
 use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::{
-    MonitoredStreamingReader, ObjectDataStreamReader, ObjectStreamingUploader,
+    MonitoredStreamingReader, ObjectDataStream, ObjectDataStreamReader, ObjectStreamingUploader,
 };
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::AsyncReadExt;
 use twox_hash::XxHash64;
 
 use crate::MetaSnapshotId;
 use crate::error::{BackupError, BackupResult};
 
 pub trait Metadata: Display + Send + Sync {
-    fn encode_to_writer<'a>(
-        &'a self,
-        writer: &'a mut SnapshotPayloadWriter,
-    ) -> impl Future<Output = BackupResult<()>> + Send + 'a;
+    fn encode_to_writer(
+        &self,
+        writer: SnapshotPayloadWriter,
+    ) -> impl Future<Output = BackupResult<()>> + Send;
 
-    fn decode_from_reader<R>(
-        reader: SnapshotPayloadReader<R>,
+    fn decode_from_reader(
+        reader: SnapshotPayloadReader,
     ) -> impl Future<Output = BackupResult<Self>> + Send
     where
-        Self: Sized,
-        R: AsyncRead + Send;
+        Self: Sized;
 
     fn hummock_version_ref(&self) -> &HummockVersion;
 
@@ -71,8 +71,7 @@ impl<T: Metadata> MetaSnapshot<T> {
         header.put_u64_le(self.id);
         writer.write_snapshot_bytes(header.freeze()).await?;
 
-        self.metadata.encode_to_writer(&mut writer).await?;
-        writer.finish().await
+        self.metadata.encode_to_writer(writer).await
     }
 
     pub async fn decode_from_stream(reader: MonitoredStreamingReader) -> BackupResult<Self> {
@@ -110,30 +109,28 @@ impl SnapshotPayloadWriter {
         Ok(())
     }
 
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    pub async fn finish(mut self) -> BackupResult<()> {
+    pub async fn finish(mut self) -> BackupResult<usize> {
         let mut checksum = BytesMut::with_capacity(size_of::<u64>());
         checksum.put_u64_le(self.hasher.finish());
         let checksum = checksum.freeze();
         self.size += checksum.len();
         self.uploader.write_bytes(checksum).await?;
         self.uploader.finish().await?;
-        Ok(())
+        Ok(self.size)
     }
 }
 
-pub struct SnapshotPayloadReader<R> {
-    reader: std::pin::Pin<Box<R>>,
+type SnapshotPayloadStreamReader = ObjectDataStreamReader<ObjectDataStream>;
+
+pub struct SnapshotPayloadReader {
+    reader: SnapshotPayloadStreamReader,
     hasher: XxHash64,
 }
 
-impl<R: AsyncRead> SnapshotPayloadReader<R> {
-    pub fn new(reader: R) -> Self {
+impl SnapshotPayloadReader {
+    pub fn new(reader: SnapshotPayloadStreamReader) -> Self {
         Self {
-            reader: Box::pin(reader),
+            reader,
             hasher: XxHash64::with_seed(0),
         }
     }
@@ -161,20 +158,17 @@ impl<R: AsyncRead> SnapshotPayloadReader<R> {
     pub async fn read_exact(&mut self, len: usize) -> BackupResult<BytesMut> {
         let mut bytes = BytesMut::with_capacity(len);
         bytes.resize(len, 0);
-        self.reader.as_mut().read_exact(&mut bytes).await?;
+        self.reader.read_exact(&mut bytes).await?;
         self.hasher.write(&bytes);
         Ok(bytes)
     }
 
     pub async fn skip_exact(&mut self, mut len: usize) -> BackupResult<()> {
-        const BUFFER_SIZE: usize = 8 * 1024;
+        const BUFFER_SIZE: usize = 1024;
         let mut buf = [0; BUFFER_SIZE];
         while len > 0 {
             let read_len = len.min(BUFFER_SIZE);
-            self.reader
-                .as_mut()
-                .read_exact(&mut buf[..read_len])
-                .await?;
+            self.reader.read_exact(&mut buf[..read_len]).await?;
             self.hasher.write(&buf[..read_len]);
             len -= read_len;
         }
@@ -183,7 +177,7 @@ impl<R: AsyncRead> SnapshotPayloadReader<R> {
 
     pub async fn read_to_end(mut self) -> BackupResult<Vec<u8>> {
         let mut data = vec![];
-        self.reader.as_mut().read_to_end(&mut data).await?;
+        self.reader.read_to_end(&mut data).await?;
         if data.len() < size_of::<u64>() {
             return Err(BackupError::Decoding(
                 anyhow::anyhow!("meta snapshot is missing checksum").into(),
@@ -196,22 +190,29 @@ impl<R: AsyncRead> SnapshotPayloadReader<R> {
         Ok(data)
     }
 
-    pub async fn finish_after_skipping_to_end(mut self) -> BackupResult<()> {
-        const BUFFER_SIZE: usize = 8 * 1024;
-        let mut tail = Vec::with_capacity(size_of::<u64>());
-        let mut buf = [0; BUFFER_SIZE];
+    pub async fn finish_after_skipping_to_end(self) -> BackupResult<()> {
+        let Self { reader, mut hasher } = self;
+        let mut bytes_stream = reader.into_bytes_stream();
+        let mut tail = BytesMut::with_capacity(size_of::<u64>());
 
-        loop {
-            let n = self.reader.as_mut().read(&mut buf).await?;
-            if n == 0 {
-                break;
+        while let Some(bytes) = bytes_stream.next().await.transpose()? {
+            let payload_len = tail.len() + bytes.len();
+            if payload_len <= size_of::<u64>() {
+                tail.extend_from_slice(&bytes);
+                continue;
             }
 
-            tail.extend_from_slice(&buf[..n]);
-            if tail.len() > size_of::<u64>() {
-                let payload_len = tail.len() - size_of::<u64>();
-                self.hasher.write(&tail[..payload_len]);
-                tail.drain(..payload_len);
+            let payload_len = payload_len - size_of::<u64>();
+            if payload_len <= tail.len() {
+                hasher.write(&tail[..payload_len]);
+                tail.advance(payload_len);
+                tail.extend_from_slice(&bytes);
+            } else {
+                let bytes_payload_len = payload_len - tail.len();
+                hasher.write(&tail);
+                hasher.write(&bytes[..bytes_payload_len]);
+                tail.clear();
+                tail.extend_from_slice(&bytes[bytes_payload_len..]);
             }
         }
 
@@ -220,16 +221,16 @@ impl<R: AsyncRead> SnapshotPayloadReader<R> {
                 anyhow::anyhow!("meta snapshot is missing checksum").into(),
             ));
         }
-        self.verify_checksum(&tail)
+        Self::verify_checksum_with_hasher(&hasher, &tail)
     }
 
     pub async fn finish(mut self) -> BackupResult<()> {
         let mut checksum = [0; size_of::<u64>()];
-        self.reader.as_mut().read_exact(&mut checksum).await?;
+        self.reader.read_exact(&mut checksum).await?;
         self.verify_checksum(&checksum)?;
 
         let mut trailing = [0; 1];
-        let n = self.reader.as_mut().read(&mut trailing).await?;
+        let n = self.reader.read(&mut trailing).await?;
         if n != 0 {
             return Err(BackupError::Decoding(
                 anyhow::anyhow!("unexpected bytes after meta snapshot checksum").into(),
@@ -239,13 +240,26 @@ impl<R: AsyncRead> SnapshotPayloadReader<R> {
     }
 
     fn verify_checksum(&self, checksum: &[u8]) -> BackupResult<()> {
+        Self::verify_checksum_with_hasher(&self.hasher, checksum)
+    }
+
+    fn verify_checksum_with_hasher(hasher: &XxHash64, checksum: &[u8]) -> BackupResult<()> {
         let expected = u64::from_le_bytes(checksum.try_into().expect("u64 length"));
-        let found = self.hasher.finish();
+        let found = hasher.finish();
         if expected != found {
             return Err(BackupError::ChecksumMismatch { expected, found });
         }
         Ok(())
     }
+}
+
+pub(crate) fn read_u32_le(buf: &mut &[u8]) -> BackupResult<u32> {
+    if buf.remaining() < 4 {
+        return Err(BackupError::Other(anyhow::anyhow!(
+            "metadata snapshot is truncated while reading u32"
+        )));
+    }
+    Ok(buf.get_u32_le())
 }
 
 impl<T: Metadata> Display for MetaSnapshot<T> {

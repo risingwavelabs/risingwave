@@ -25,7 +25,6 @@ use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectDataStreamReader};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tokio::io::AsyncRead;
 use tracing::info;
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata, SnapshotPayloadReader, SnapshotPayloadWriter};
@@ -121,13 +120,10 @@ for_all_metadata_models_v2!(define_encode_metadata_to_writer);
 
 macro_rules! define_decode_metadata {
     ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
-        async fn decode_metadata_from_reader<R>(
+        async fn decode_metadata_from_reader(
             metadata: &mut MetadataV2,
-            reader: &mut SnapshotPayloadReader<R>,
-        ) -> BackupResult<()>
-        where
-            R: AsyncRead + Send,
-        {
+            reader: &mut SnapshotPayloadReader,
+        ) -> BackupResult<()> {
             let mut _idx = 0;
             $(
                 if _idx == 1 {
@@ -147,8 +143,7 @@ for_all_metadata_models_v2!(define_decode_metadata);
 // `hummock_version` before `version_stats`, so `hummock_sequences` is section 26:
 // 0 seaql_migrations, 1 hummock_version, 2 version_stats, ..., 26 hummock_sequences.
 //
-// Keep this as a fixed index so partial decoding can remain compatible with future formats that
-// only append sections after `hummock_sequences`.
+// Keep this as a fixed index so partial decoding can skip directly to `hummock_sequences`.
 const HUMMOCK_SEQUENCES_METADATA_SECTION_INDEX: usize = 26;
 
 pub async fn decode_hummock_sequences_from_stream(
@@ -185,18 +180,14 @@ impl Display for MetadataV2 {
 }
 
 impl Metadata for MetadataV2 {
-    async fn encode_to_writer(&self, writer: &mut SnapshotPayloadWriter) -> BackupResult<()> {
-        encode_metadata_to_writer(self, writer).await?;
-        let snapshot_size_bytes = writer.size() + size_of::<u64>();
+    async fn encode_to_writer(&self, mut writer: SnapshotPayloadWriter) -> BackupResult<()> {
+        encode_metadata_to_writer(self, &mut writer).await?;
+        let snapshot_size_bytes = writer.finish().await?;
         info!(snapshot_size_bytes, "encoded v2 meta snapshot backup file");
         Ok(())
     }
 
-    async fn decode_from_reader<R>(mut reader: SnapshotPayloadReader<R>) -> BackupResult<Self>
-    where
-        Self: Sized,
-        R: AsyncRead + Send,
-    {
+    async fn decode_from_reader(mut reader: SnapshotPayloadReader) -> BackupResult<Self> {
         let mut metadata = Self::default();
         decode_metadata_from_reader(&mut metadata, &mut reader).await?;
         reader.finish().await?;
@@ -307,9 +298,8 @@ async fn write_1<T: Serialize>(writer: &mut SnapshotPayloadWriter, data: &T) -> 
     write_n(writer, &[data]).await
 }
 
-async fn read_n<R, T>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<Vec<T>>
+async fn read_n<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<Vec<T>>
 where
-    R: AsyncRead + Send,
     T: DeserializeOwned,
 {
     let n = reader.read_u32_le().await? as usize;
@@ -320,14 +310,37 @@ where
     Ok(elements)
 }
 
-async fn read_1<R, T>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<T>
+async fn read_1<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<T>
 where
-    R: AsyncRead + Send,
     T: DeserializeOwned,
 {
     let elements = read_n(reader).await?;
     assert_eq!(elements.len(), 1);
     Ok(elements.into_iter().next().unwrap())
+}
+
+async fn skip_metadata_list(reader: &mut SnapshotPayloadReader) -> BackupResult<()> {
+    let n = reader.read_u32_le().await? as usize;
+    for _ in 0..n {
+        skip_with_len_prefix(reader).await?;
+    }
+    Ok(())
+}
+
+async fn skip_with_len_prefix(reader: &mut SnapshotPayloadReader) -> BackupResult<()> {
+    let len = read_len_prefix(reader).await?;
+    reader.skip_exact(len).await
+}
+
+async fn read_len_prefix(reader: &mut SnapshotPayloadReader) -> BackupResult<usize> {
+    match reader.read_u32_le().await? {
+        0 => {
+            reader.read_u64_le().await?.try_into().map_err(|_| {
+                BackupError::Other(anyhow!("metadata JSON payload length exceeds usize"))
+            })
+        }
+        len => Ok(len as usize),
+    }
 }
 
 async fn write_with_len_prefix<T: Serialize>(
@@ -357,9 +370,8 @@ async fn write_with_len_prefix<T: Serialize>(
     writer.write_snapshot_bytes(buf.freeze()).await
 }
 
-async fn read_with_len_prefix<R, T>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<T>
+async fn read_with_len_prefix<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<T>
 where
-    R: AsyncRead + Send,
     T: DeserializeOwned,
 {
     let len = read_len_prefix(reader).await?;
@@ -367,35 +379,318 @@ where
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-async fn skip_metadata_list<R>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<()>
-where
-    R: AsyncRead + Send,
-{
-    let n = reader.read_u32_le().await? as usize;
-    for _ in 0..n {
-        skip_with_len_prefix(reader).await?;
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bytes::{Buf, BufMut, Bytes};
+    use risingwave_common::config::ObjectStoreConfig;
+    use risingwave_hummock_sdk::HummockVersionId;
+    use risingwave_meta_model::hummock_sequence;
+    use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+    use risingwave_object_store::object::{
+        InMemObjectStore, MonitoredObjectStore, ObjectStoreImpl,
+    };
+
+    use super::*;
+    use crate::meta_snapshot::read_u32_le;
+
+    fn test_store() -> ObjectStoreImpl {
+        ObjectStoreImpl::InMem(MonitoredObjectStore::new(
+            InMemObjectStore::for_test(),
+            Arc::new(ObjectStoreMetrics::unused()),
+            Arc::new(ObjectStoreConfig::default()),
+        ))
     }
-    Ok(())
-}
 
-async fn skip_with_len_prefix<R>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<()>
-where
-    R: AsyncRead + Send,
-{
-    let len = read_len_prefix(reader).await?;
-    reader.skip_exact(len).await
-}
+    async fn upload_bytes(store: &ObjectStoreImpl, path: &str, bytes: Vec<u8>) {
+        let mut uploader = store.streaming_upload(path).await.unwrap();
+        uploader.write_bytes(Bytes::from(bytes)).await.unwrap();
+        uploader.finish().await.unwrap();
+    }
 
-async fn read_len_prefix<R>(reader: &mut SnapshotPayloadReader<R>) -> BackupResult<usize>
-where
-    R: AsyncRead + Send,
-{
-    match reader.read_u32_le().await? {
-        0 => {
-            reader.read_u64_le().await?.try_into().map_err(|_| {
-                BackupError::Other(anyhow!("metadata JSON payload length exceeds usize"))
-            })
+    async fn read_bytes(store: &ObjectStoreImpl, path: &str) -> Vec<u8> {
+        store.read(path, ..).await.unwrap().to_vec()
+    }
+
+    async fn upload_snapshot(store: &ObjectStoreImpl, path: &str, snapshot: &MetaSnapshotV2) {
+        let uploader = store.streaming_upload(path).await.unwrap();
+        snapshot.encode_to_uploader(uploader).await.unwrap();
+    }
+
+    async fn snapshot_reader(store: &ObjectStoreImpl, path: &str) -> SnapshotPayloadReader {
+        SnapshotPayloadReader::new(ObjectDataStreamReader::new(
+            store.streaming_read(path, ..).await.unwrap().into_stream(),
+        ))
+    }
+
+    fn append_checksum(mut payload: Vec<u8>) -> Vec<u8> {
+        let checksum = crate::xxhash64_checksum(&payload);
+        payload.put_u64_le(checksum);
+        payload
+    }
+
+    fn read_u64_le(buf: &mut &[u8]) -> BackupResult<u64> {
+        if buf.remaining() < size_of::<u64>() {
+            return Err(BackupError::Other(anyhow!(
+                "metadata snapshot is truncated while reading u64"
+            )));
         }
-        len => Ok(len as usize),
+        Ok(buf.get_u64_le())
+    }
+
+    fn read_len_prefix_from_slice(buf: &mut &[u8]) -> BackupResult<usize> {
+        match read_u32_le(buf)? {
+            0 => read_u64_le(buf)?.try_into().map_err(|_| {
+                BackupError::Other(anyhow!("metadata JSON payload length exceeds usize"))
+            }),
+            len => Ok(len as usize),
+        }
+    }
+
+    fn skip_with_len_prefix_from_slice(buf: &mut &[u8]) -> BackupResult<()> {
+        let len = read_len_prefix_from_slice(buf)?;
+        if buf.remaining() < len {
+            return Err(BackupError::Other(anyhow!(
+                "metadata JSON payload length {} exceeds remaining buffer {}",
+                len,
+                buf.remaining()
+            )));
+        }
+        buf.advance(len);
+        Ok(())
+    }
+
+    fn skip_metadata_list_from_slice(buf: &mut &[u8]) -> BackupResult<()> {
+        let n = read_u32_le(buf)? as usize;
+        for _ in 0..n {
+            skip_with_len_prefix_from_slice(buf)?;
+        }
+        Ok(())
+    }
+
+    fn put_with_len_prefix(buf: &mut Vec<u8>, data: &impl Serialize) {
+        let payload = serde_json::to_vec(data).unwrap();
+        if let Ok(len) = u32::try_from(payload.len()) {
+            buf.put_u32_le(len);
+        } else {
+            buf.put_u32_le(0);
+            buf.put_u64_le(payload.len() as u64);
+        }
+        buf.put_slice(&payload);
+    }
+
+    fn put_n(buf: &mut Vec<u8>, data: &[impl Serialize]) {
+        buf.put_u32_le(data.len() as u32);
+        for item in data {
+            put_with_len_prefix(buf, item);
+        }
+    }
+
+    async fn encoded_snapshot_with_invalid_trailing_metadata_after_hummock_sequences(
+        metadata: &MetadataV2,
+    ) -> Vec<u8> {
+        let store = test_store();
+        let snapshot = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: metadata.hummock_sequences.clone(),
+                ..Default::default()
+            },
+        };
+        upload_snapshot(&store, "snapshot", &snapshot).await;
+        let encoded = read_bytes(&store, "snapshot").await;
+        let payload = &encoded[..encoded.len() - size_of::<u64>()];
+        let mut metadata_buf = &payload[size_of::<u32>() + size_of::<u64>()..];
+
+        for _ in 0..=HUMMOCK_SEQUENCES_METADATA_SECTION_INDEX {
+            skip_metadata_list_from_slice(&mut metadata_buf).unwrap();
+        }
+
+        let mut partial_payload = payload[..payload.len() - metadata_buf.len()].to_vec();
+        partial_payload.put_u32_le(1);
+        partial_payload.put_u32_le(100);
+        partial_payload.put_slice(br#""short""#);
+        append_checksum(partial_payload)
+    }
+
+    async fn append_future_metadata_section(store: &ObjectStoreImpl, path: &str) -> Vec<u8> {
+        let mut encoded = read_bytes(store, path).await;
+        encoded.truncate(encoded.len() - size_of::<u64>());
+        put_n(&mut encoded, &["future section"]);
+        append_checksum(encoded)
+    }
+
+    #[tokio::test]
+    async fn test_len_prefix_legacy_u32_round_trip() {
+        let store = test_store();
+        let uploader = store.streaming_upload("len-prefix").await.unwrap();
+        let mut writer = SnapshotPayloadWriter::new(uploader);
+        write_with_len_prefix(&mut writer, &"hello").await.unwrap();
+        writer.finish().await.unwrap();
+
+        let encoded = read_bytes(&store, "len-prefix").await;
+        assert_ne!(u32::from_le_bytes(encoded[..4].try_into().unwrap()), 0);
+
+        let mut reader = snapshot_reader(&store, "len-prefix").await;
+        let decoded: String = read_with_len_prefix(&mut reader).await.unwrap();
+        reader.finish().await.unwrap();
+        assert_eq!(decoded, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_len_prefix_extended_u64_decoding() {
+        let payload = serde_json::to_vec("hello").unwrap();
+        let mut bytes = vec![];
+        bytes.put_u32_le(0);
+        bytes.put_u64_le(payload.len() as u64);
+        bytes.put_slice(&payload);
+
+        let store = test_store();
+        upload_bytes(&store, "extended-len-prefix", append_checksum(bytes)).await;
+
+        let mut reader = snapshot_reader(&store, "extended-len-prefix").await;
+        let decoded: String = read_with_len_prefix(&mut reader).await.unwrap();
+        reader.finish().await.unwrap();
+        assert_eq!(decoded, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_len_prefix_errors_on_missing_extended_u64() {
+        let store = test_store();
+        let mut bytes = vec![];
+        bytes.put_u32_le(0);
+        upload_bytes(&store, "missing-extended-len", bytes).await;
+
+        let mut reader = snapshot_reader(&store, "missing-extended-len").await;
+        assert!(read_with_len_prefix::<String>(&mut reader).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_len_prefix_errors_on_payload_shorter_than_declared_len() {
+        let store = test_store();
+        let mut bytes = vec![];
+        bytes.put_u32_le(100);
+        bytes.put_slice(br#""hello""#);
+        upload_bytes(&store, "short-payload", bytes).await;
+
+        let mut reader = snapshot_reader(&store, "short-payload").await;
+        assert!(read_with_len_prefix::<String>(&mut reader).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_v2_encoding_decoding() {
+        let store = test_store();
+        let mut metadata = MetadataV2::default();
+        metadata.hummock_version.id = HummockVersionId::new(123);
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata,
+        };
+
+        upload_snapshot(&store, "snapshot-v2", &raw).await;
+        let decoded = MetaSnapshotV2::decode_from_stream(
+            store.streaming_read("snapshot-v2", ..).await.unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(decoded.format_version, raw.format_version);
+        assert_eq!(decoded.id, raw.id);
+        assert_eq!(
+            decoded.metadata.hummock_version.id,
+            raw.metadata.hummock_version.id
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partial_decode_hummock_sequences() {
+        let store = test_store();
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: vec![
+                    hummock_sequence::Model {
+                        name: "meta_backup".to_owned(),
+                        seq: 42,
+                    },
+                    hummock_sequence::Model {
+                        name: "sstable_object".to_owned(),
+                        seq: 100,
+                    },
+                ],
+                ..Default::default()
+            },
+        };
+
+        upload_snapshot(&store, "partial-decode", &raw).await;
+        let decoded = decode_hummock_sequences_from_stream(
+            store.streaming_read("partial-decode", ..).await.unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decoded, raw.metadata.hummock_sequences);
+    }
+
+    #[tokio::test]
+    async fn test_partial_decode_hummock_sequences_ignores_trailing_metadata() {
+        let metadata = MetadataV2 {
+            hummock_sequences: vec![hummock_sequence::Model {
+                name: "meta_backup".to_owned(),
+                seq: 42,
+            }],
+            ..Default::default()
+        };
+        let encoded =
+            encoded_snapshot_with_invalid_trailing_metadata_after_hummock_sequences(&metadata)
+                .await;
+        let store = test_store();
+        upload_bytes(&store, "invalid-trailing", encoded).await;
+
+        let decoded = decode_hummock_sequences_from_stream(
+            store.streaming_read("invalid-trailing", ..).await.unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decoded, metadata.hummock_sequences);
+
+        let full_decode_result = MetaSnapshotV2::decode_from_stream(
+            store.streaming_read("invalid-trailing", ..).await.unwrap(),
+        )
+        .await;
+        assert!(
+            full_decode_result.is_err(),
+            "full metadata decoding should not accept the intentionally invalid trailing section"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partial_decode_hummock_sequences_ignores_appended_future_sections() {
+        let store = test_store();
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata: MetadataV2 {
+                hummock_sequences: vec![hummock_sequence::Model {
+                    name: "meta_backup".to_owned(),
+                    seq: 42,
+                }],
+                ..Default::default()
+            },
+        };
+
+        upload_snapshot(&store, "future-section-source", &raw).await;
+        let encoded = append_future_metadata_section(&store, "future-section-source").await;
+        upload_bytes(&store, "future-section", encoded).await;
+
+        let decoded = decode_hummock_sequences_from_stream(
+            store.streaming_read("future-section", ..).await.unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decoded, raw.metadata.hummock_sequences);
     }
 }

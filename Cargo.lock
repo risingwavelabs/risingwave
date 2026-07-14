@@ -11378,6 +11378,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "futures",
  "itertools 0.14.0",
  "madsim-tokio",
  "prost 0.14.3",

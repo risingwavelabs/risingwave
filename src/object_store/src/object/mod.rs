@@ -523,8 +523,12 @@ impl MonitoredStreamingReader {
         res
     }
 
+    pub fn into_stream(self) -> ObjectDataStream {
+        Self::into_stream_inner(self).boxed()
+    }
+
     #[try_stream(ok = Bytes, error = ObjectError)]
-    pub async fn into_stream(mut self) {
+    async fn into_stream_inner(mut self) {
         while let Some(bytes) = self.read_bytes().await.transpose()? {
             yield bytes;
         }
@@ -1094,6 +1098,22 @@ where
         Self {
             stream,
             pending: Bytes::new(),
+        }
+    }
+}
+
+impl ObjectDataStreamReader<ObjectDataStream> {
+    pub fn into_bytes_stream(self) -> ObjectDataStream {
+        Self::into_bytes_stream_inner(self).boxed()
+    }
+
+    #[try_stream(ok = Bytes, error = ObjectError)]
+    async fn into_bytes_stream_inner(mut self) {
+        if self.pending.has_remaining() {
+            yield std::mem::take(&mut self.pending);
+        }
+        while let Some(bytes) = self.stream.next().await.transpose()? {
+            yield bytes;
         }
     }
 }
