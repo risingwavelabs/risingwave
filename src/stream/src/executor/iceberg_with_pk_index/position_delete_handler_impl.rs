@@ -49,13 +49,12 @@ use risingwave_connector::sink::iceberg::{
 use risingwave_connector::sink::{Result as SinkResult, SinkError};
 use risingwave_connector::source::iceberg::parquet_file_handler::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::id::{ActorId, SinkId};
+use risingwave_pb::id::ActorId;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::position_delete_merger::PositionDeleteHandler;
 use super::position_delete_staging::StagingVersion;
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// Puffin blob property for deletion vector cardinality.
 const DELETION_VECTOR_PROPERTY_CARDINALITY: &str = "cardinality";
@@ -82,22 +81,16 @@ pub struct PositionDeleteHandlerImpl {
     staging: StagingState,
     /// New positions accumulated since the last flush, keyed by data file path.
     pending: HashMap<String, DeleteVector>,
-    sink_id: SinkId,
 }
 
 impl PositionDeleteHandlerImpl {
     pub async fn new(
         config: IcebergConfig,
         actor_id: ActorId,
-        sink_id: SinkId,
         vnode_bitmap: Option<Bitmap>,
-    ) -> StreamExecutorResult<Self> {
-        let table = config
-            .load_table()
-            .await
-            .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
-        let location_generator = DefaultLocationGenerator::new(table.metadata().clone())
-            .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
+    ) -> SinkResult<Self> {
+        let table = config.load_table().await?;
+        let location_generator = DefaultLocationGenerator::new(table.metadata().clone())?;
         let uuid_suffix = Uuid::now_v7();
         let file_name_generator = DefaultFileNameGenerator::new(
             actor_id.to_string(),
@@ -132,7 +125,6 @@ impl PositionDeleteHandlerImpl {
             format_version,
             staging,
             pending: HashMap::new(),
-            sink_id,
         })
     }
 
@@ -380,16 +372,25 @@ async fn write_position_delete_chunk(
 
 #[async_trait::async_trait]
 impl PositionDeleteHandler for PositionDeleteHandlerImpl {
-    fn write(&mut self, path: &str, pos: i64) -> StreamExecutorResult<()> {
+    fn write(&mut self, path: &str, pos: i64) -> SinkResult<()> {
         let pos: u64 = pos.try_into().context("position should be non-negative")?;
         self.pending.entry_ref(path).or_default().insert(pos);
         Ok(())
     }
 
-    async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>> {
-        self.flush_inner()
-            .await
-            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))
+    async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>> {
+        self.flush_inner().await
+    }
+
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> SinkResult<()> {
+        self.table = self.config.load_table().await?;
+        let table = self.table.clone();
+        self.staging = StagingState::Loading(tokio::spawn(async move {
+            let mut res = StagingVersion::new(Some(vnode_bitmap));
+            seed_from_delete_manifests(&table, &mut res).await?;
+            Ok(res)
+        }));
+        Ok(())
     }
 }
 

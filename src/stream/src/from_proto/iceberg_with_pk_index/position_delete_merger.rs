@@ -47,14 +47,14 @@ impl ExecutorBuilder for IcebergWithPkIndexPositionDeleteMergerExecutorBuilder {
             sink_desc.get_secret_refs().clone(),
         )?;
         let config = IcebergConfig::from_btreemap(properties_with_secret.clone())
-            .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
+            .map_err(|err| StreamExecutorError::sink_error(err, sink_id))?;
         let handler = PositionDeleteHandlerImpl::new(
             config,
             params.actor_context.id,
-            sink_id,
             params.vnode_bitmap.clone(),
         )
-        .await?;
+        .await
+        .map_err(|err| StreamExecutorError::sink_error(err, sink_id))?;
 
         let exec = PositionDeleteMergerExecutor::new(
             params.actor_context.id,
