@@ -14,6 +14,7 @@
 
 use const_currying::const_currying;
 use itertools::Itertools;
+use risingwave_common::util::recursive::{self, Recurse};
 use risingwave_expr::function;
 
 use crate::{ExprError, Result};
@@ -75,6 +76,11 @@ pub enum MatchResult {
     Abort,
 }
 
+// PostgreSQL checks the remaining native stack space with `check_stack_depth`.
+// Use a conservative recursion limit because Rust does not expose an equivalent
+// portable stack-depth check.
+const MAX_RECURSION_DEPTH: usize = 4096;
+
 impl MatchResult {
     #[inline]
     fn into_bool(self) -> bool {
@@ -97,6 +103,22 @@ fn byte_eq<const CASE_INSENSITIVE: bool>(a: u8, b: u8) -> bool {
 }
 
 pub fn match_text<const CASE_INSENSITIVE: bool>(
+    text: &[u8],
+    pattern: &[u8],
+) -> Result<MatchResult, ExprError> {
+    recursive::tracker!().recurse(|tracker| {
+        if tracker.depth() > MAX_RECURSION_DEPTH {
+            return Err(ExprError::InvalidParam {
+                name: "pattern",
+                reason: "stack depth limit exceeded".into(),
+            });
+        }
+
+        match_text_inner::<CASE_INSENSITIVE>(text, pattern)
+    })
+}
+
+fn match_text_inner<const CASE_INSENSITIVE: bool>(
     mut text: &[u8],
     mut pattern: &[u8],
 ) -> Result<MatchResult, ExprError> {
@@ -260,7 +282,7 @@ impl EscapeChar {
 mod tests {
     use risingwave_expr::scalar::like::EscapeChar;
 
-    use super::{i_like_default, like, like_default, normalize_pattern};
+    use super::{MAX_RECURSION_DEPTH, i_like_default, like, like_default, normalize_pattern};
 
     static CASES: &[(&str, &str, bool, bool)] = &[
         (r#"ABCDE"#, r#"%abcde%"#, false, false),
@@ -413,5 +435,17 @@ mod tests {
     #[test]
     fn test_like_pattern_ends_with_escape() {
         assert!(like("____", "_____", &EscapeChar::from_str("_").unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_like_recursion_depth_limit() {
+        let text = "a".repeat(MAX_RECURSION_DEPTH - 1);
+        let pattern = "%a".repeat(MAX_RECURSION_DEPTH - 1);
+        assert!(like_default(&text, &pattern).unwrap());
+
+        let text = "a".repeat(MAX_RECURSION_DEPTH);
+        let pattern = "%a".repeat(MAX_RECURSION_DEPTH);
+
+        assert!(like_default(&text, &pattern).is_err());
     }
 }
