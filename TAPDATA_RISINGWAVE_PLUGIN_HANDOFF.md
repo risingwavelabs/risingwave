@@ -1,8 +1,8 @@
 # Tapdata RisingWave Plugin Handoff
 
-Status date: 2026-07-10 (updated)
+Status date: 2026-07-15 (updated)
 Original date: 2026-06-17
-Workspace used for validation: `/Users/william/conductor/workspaces/risingwave/milan`
+Workspace used for final validation: `/Users/adbean/work/risingwave`
 Branch: `wenym1/tapdata-plugin`
 
 This document is intended to be self-contained enough to continue the Tapdata RisingWave plugin work in a new workspace.
@@ -33,7 +33,9 @@ Validated path:
 - **`doc` field fixed**: Changed from inline text to markdown file path (matching official connector convention).
 - **SSL mode field**: Added `sslmode` config field (default `prefer`). Cloud needs `require` for TLS SNI tenant routing.
 - **Extra parameters + timezone fields** added to spec.
-- **`ssl` tag** added to connector tags.
+- **TLS UX corrected**: the generic `ssl` tag was removed because it exposed custom-CA and mTLS
+  file controls that this connector does not consume. JDBC `sslmode` and publicly trusted `wss://`
+  endpoints remain supported.
 
 ### DDL generation
 - **VALIDATE clause**: `createTable` now adds `VALIDATE AS secure_compare(...)` when `webhookSecret` is configured. Previously no signature verification.
@@ -42,18 +44,29 @@ Validated path:
 - Changed JDBC `sslmode` from hardcoded `disable` to configurable (default `prefer`). Fixes "failed to get tenant identifier" on RisingWave Cloud.
 
 ### Version requirements
-- WebSocket streaming mode requires RisingWave **3.0.0+** (PR #25444).
+- WebSocket streaming mode requires RisingWave **3.0.0+**.
 - JDBC mode works with any RisingWave version.
 
-Current touched files:
+Current connector change set:
 
 ```text
 tapdata-plugin/setup_pipeline.py
+tapdata-plugin/pom.xml
+tapdata-plugin/README.md
 tapdata-plugin/src/main/java/io/tapdata/risingwave/RisingWaveConnector.java
 tapdata-plugin/src/main/java/io/tapdata/risingwave/streaming/WsIngestClient.java
+tapdata-plugin/src/main/resources/spec_risingwave.json
+tapdata-plugin/src/main/resources/docs/risingwave_en_US.md
+tapdata-plugin/src/main/resources/docs/risingwave_zh_CN.md
+tapdata-plugin/src/test/
+tapdata-plugin/scripts/
+TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md
+TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md
 ```
 
-Important: the current workspace also contains unrelated/untracked PoC report files. They are not part of the Tapdata plugin work.
+Generated and unrelated workspace files must not be included in connector commits.
+The complete test commands, exact artifact hash, Cloud results, and publication caveat are recorded
+in `TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md`.
 
 ## Protocol Design
 
@@ -117,7 +130,7 @@ jdbc       standard JDBC insert/update/delete path
 streaming  websocket ingest path, using RisingWave webhook-backed target tables
 ```
 
-`ingest_mode=streaming` enables websocket ingest. If unset, the connector defaults to JDBC mode.
+`ingest_mode=streaming` enables websocket ingest and is the default. JDBC mode remains available as a compatible fallback.
 
 ### Streaming Connection Fields
 
@@ -149,18 +162,19 @@ ws://host.docker.internal:4560/ingest/dev/public/tapdata_ws_smoke_v14
 
 ### Connection Test Design
 
-Connection test still checks JDBC connectivity and `SELECT version()`.
+Connection test always checks JDBC connectivity, `SELECT version()`, and the configured schema.
 
-For streaming mode, connection test only checks TCP reachability of `ingestEndpoint`. It intentionally does not open an ingest websocket against an arbitrary existing table.
+In JDBC mode, it creates a temporary normal table and verifies SQL insert, update, delete, and drop.
 
-Reason: existing tables may not be webhook-backed or may require a different secret. Earlier tests failed with errors such as:
+In streaming mode, it performs a full isolated ingest probe:
 
-```text
-`SECURE_COMPARE()` failed
-table lookup failed: Table `...` is not with webhook source
-```
+1. Create a uniquely named temporary webhook-backed table in the configured schema.
+2. Include the same `VALIDATE` clause used for production tables when `webhookSecret` is configured.
+3. Open the configured WebSocket ingest route and send the signed init frame.
+4. Send one DML batch and wait for the RisingWave ACK.
+5. Drop the temporary table in cleanup, including failure paths.
 
-This was not a useful connection-test signal.
+This avoids probing arbitrary existing tables while validating the actual endpoint, route, signature, webhook DDL, and ACK path rather than only TCP reachability.
 
 ## DDL Design
 
@@ -340,7 +354,7 @@ Useful environment variables:
 
 ```text
 TAPDATA_SERVER=127.0.0.1:3031
-TAPDATA_ACCESS_CODE=3324cfdf-7d3e-4792-bd32-571638d4562f
+TAPDATA_ACCESS_CODE=<your-access-code>
 TAPDATA_JOB_NAME=pg_to_rw_ws_smoke_v14
 TAPDATA_PG_CONNECTION=PG_Source_ws_smoke_v14
 TAPDATA_RW_CONNECTION=RW_Native_ws_smoke_v14
@@ -371,8 +385,9 @@ Tapdata:
 ```text
 Container: tapdata-clean
 Host UI/API port: 3031 mapped to container 3030
-Access code: 3324cfdf-7d3e-4792-bd32-571638d4562f
-Connector log inside container: /tmp/rw_connector.log
+Access code: `<your-access-code>`
+Connector diagnostics use the Tapdata runtime logger. The connector no longer writes payloads or
+secrets to `/tmp/rw_connector.log`; any file at that path is from an older deployment.
 TapFlow Python package: tapflow 0.2.81
 ```
 
@@ -380,10 +395,10 @@ Plugin deploy command used:
 
 ```bash
 mvn -f tapdata-plugin/pom.xml -DskipTests package
-docker cp tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar tapdata-clean:/tmp/risingwave-connector-new.jar
+docker cp tapdata-plugin/target/risingwave-connector-1.0.0.jar tapdata-clean:/tmp/risingwave-connector-new.jar
 docker exec tapdata-clean java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
-  -a 3324cfdf-7d3e-4792-bd32-571638d4562f \
+  -a <your-access-code> \
   /tmp/risingwave-connector-new.jar
 docker restart tapdata-clean
 ```
@@ -394,7 +409,7 @@ Wait for Tapdata after restart:
 curl -fsS http://127.0.0.1:3031/api/users/generatetoken \
   -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"accesscode":"3324cfdf-7d3e-4792-bd32-571638d4562f"}'
+  -d '{"accesscode":"<your-access-code>"}'
 ```
 
 ## Validation Commands
@@ -511,7 +526,7 @@ Expected final output:
 
 ## Observed Successful Connector Log
 
-From `/tmp/rw_connector.log` in container `tapdata-clean`:
+Historical evidence from the legacy `/tmp/rw_connector.log` (the current connector no longer writes this file):
 
 ```text
 createTable() sql=CREATE TABLE IF NOT EXISTS "public"."tapdata_ws_smoke_v14"
@@ -640,19 +655,25 @@ Reason: the changes are in the Java Tapdata plugin and Python helper script, not
 
 ## Known Limitations and Follow-Ups
 
-1. `WsIngestClient` uses hand-written JSON serialization. It passed the smoke path, but a future cleanup should consider a real JSON library if allowed by plugin packaging constraints.
+1. `WsIngestClient` uses a shaded Jackson serializer and parser. Java time values are serialized
+   as ISO strings, and malformed or unexpected server responses fail pending ACKs immediately.
 
 2. `sendBatch(empty)` sends nothing. The RisingWave protocol supports empty `items` batches with ACK, but Tapdata currently does not need this path. If a future caller needs empty-batch offset barriers, implement explicit empty-envelope send.
 
-3. Error handling is coarse. Fatal errors fail all pending futures and the connector reconnects on the next batch. This is acceptable for the smoke path but should be reviewed for production retry semantics.
+3. Fatal errors fail all pending futures and the connector reconnects on the next batch. Restart,
+   frontend disconnect, and deterministic persisted-but-lost-ACK behavior are production-qualified;
+   keyed retries remain idempotent while keyless JSONB remains explicitly at-least-once.
 
-4. `findAnyTableName(Connection conn, String schemaName)` remains present but is no longer used by connection test. It can be removed in cleanup if no other call sites need it.
+4. WebSocket streaming rejects models without a primary key before creating or writing a target
+   table. JDBC mode remains available for keyless loads.
 
-5. `setup_pipeline.py` contains local defaults such as user `william`, access code, and host ports. It is a smoke helper, not production configuration.
+5. `setup_pipeline.py` requires `TAPDATA_ACCESS_CODE`; no credential is embedded in the helper.
 
 6. Existing normal tables cannot be upgraded in-place to webhook tables with `CREATE TABLE IF NOT EXISTS`. Always drop the target table or use a fresh table name when switching to streaming mode.
 
-7. The current validation covered simple scalar columns and update/insert/delete CDC. Earlier type-heavy logs existed from previous attempts, but the final successful Tapdata run was the scalar smoke table.
+7. Existing target tables are checked for required column types, primary keys, and webhook mode.
+   The scalar type matrix, exact NUMERIC/BYTEA handling, local TLS, and RisingWave Cloud TLS/WSS
+   paths are covered by the production-readiness record.
 
 ## Recommended Next Workspace Steps
 
@@ -682,14 +703,14 @@ mvn -f tapdata-plugin/pom.xml -DskipTests package
 docker cp tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar tapdata-clean:/tmp/risingwave-connector-new.jar
 docker exec tapdata-clean java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
-  -a 3324cfdf-7d3e-4792-bd32-571638d4562f \
+  -a <your-access-code> \
   /tmp/risingwave-connector-new.jar
 docker restart tapdata-clean
 ```
 
 6. Repeat the `tapdata_ws_smoke_v14` validation with a fresh suffix, for example `tapdata_ws_smoke_v15`.
 
-7. If validation passes, consider adding an automated test around `WsIngestClient.sendBatch(...)` to prove concurrent callers cannot produce out-of-order `dml_batch_id` sends.
+7. Run the committed unit and live integration suites before preparing the immutable release version.
 
 ## Final Known Good Smoke Result
 
