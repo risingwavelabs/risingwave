@@ -45,6 +45,7 @@ use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
@@ -302,6 +303,8 @@ pub struct GlobalStreamManager {
 
     pub refresh_manager: GlobalRefreshManagerRef,
 
+    pub iceberg_compaction_manager: IcebergCompactionManagerRef,
+
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
@@ -316,6 +319,7 @@ impl GlobalStreamManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         refresh_manager: GlobalRefreshManagerRef,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
@@ -325,6 +329,7 @@ impl GlobalStreamManager {
             hummock_manager,
             source_manager,
             refresh_manager,
+            iceberg_compaction_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
         })
@@ -433,9 +438,11 @@ impl GlobalStreamManager {
                                     .await?;
                                 let cleanup_state_table_ids =
                                     job_fragments.all_table_ids().collect_vec();
-                                self.metadata_manager.catalog_controller
+                                let abort_result = self.metadata_manager.catalog_controller
                                     .try_abort_creating_streaming_job(job_id, true)
                                     .await?;
+                                self.iceberg_compaction_manager
+                                    .clear_maintenance_for_aborted_job(&abort_result);
 
                                 self.barrier_scheduler
                                     .run_command(database_id, cancel_command)
@@ -757,13 +764,15 @@ impl GlobalStreamManager {
                 .await?;
             let cleanup_state_table_ids = fragment.all_table_ids().collect_vec();
 
-            let (_, database_id) = self
+            let abort_result = self
                 .metadata_manager
                 .catalog_controller
                 .try_abort_creating_streaming_job(id, true)
                 .await?;
+            self.iceberg_compaction_manager
+                .clear_maintenance_for_aborted_job(&abort_result);
 
-            if let Some(database_id) = database_id {
+            if let Some(database_id) = abort_result.database_id {
                 self.barrier_scheduler
                     .run_command(database_id, cancel_command)
                     .await?;
