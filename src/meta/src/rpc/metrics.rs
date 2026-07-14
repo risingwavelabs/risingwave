@@ -208,6 +208,10 @@ pub struct MetaMetrics {
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: LabelGuardedIntGaugeVec,
+    /// Duration of a source worker `tick` execution (`list_splits` + `on_tick`), in seconds.
+    pub source_worker_tick_duration_seconds: LabelGuardedHistogramVec,
+    /// Number of source enumerator `on_tick` monitor round-trip failures.
+    pub source_enumerator_monitor_error_count: LabelGuardedIntCounterVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
@@ -712,6 +716,25 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let opts = histogram_opts!(
+            "source_worker_tick_duration_seconds",
+            "Duration of a source worker tick (list_splits + on_tick) in seconds",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max ~221s
+        );
+        let source_worker_tick_duration_seconds = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+        let source_enumerator_monitor_error_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "source_enumerator_monitor_error_count",
+                "Number of source enumerator on_tick monitor round-trip failures",
+                &["source_id", "source_name"],
+                registry
+            )
+            .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
@@ -1018,6 +1041,8 @@ impl MetaMetrics {
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_worker_tick_duration_seconds,
+            source_enumerator_monitor_error_count,
             source_enumerator_metrics,
             actor_info,
             table_info,

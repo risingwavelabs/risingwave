@@ -30,7 +30,6 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
-use thiserror_ext::AsReport;
 use tiberius::Config;
 use tokio_postgres::types::PgLsn;
 
@@ -164,8 +163,14 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
 
     async fn monitor_postgres_confirmed_flush_lsn(&mut self) -> ConnectorResult<()> {
         // Query upstream LSNs and update metrics.
-        match self.query_postgres_lsns().await {
-            Ok(Some((confirmed_flush_lsn, upstream_max_lsn, slot_name))) => {
+        let lsns = self.query_postgres_lsns().await.with_context(|| {
+            format!(
+                "failed to query PostgreSQL LSNs for source {}",
+                self.source_id
+            )
+        })?;
+        match lsns {
+            Some((confirmed_flush_lsn, upstream_max_lsn, slot_name)) => {
                 let labels = [&self.source_id.to_string(), &slot_name.to_owned()];
 
                 self.metrics
@@ -192,17 +197,10 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
                     );
                 }
             }
-            Ok(None) => {
+            None => {
                 tracing::warn!(
                     "No replication slot found when querying LSNs for source {}",
                     self.source_id
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to query PostgreSQL LSNs for source {}: {}",
-                    self.source_id,
-                    e.as_report()
                 );
             }
         };
@@ -330,31 +328,27 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
     }
 
     async fn monitor_sql_server_lsns(&mut self) -> ConnectorResult<()> {
-        match self.query_sql_server_lsns().await {
-            Ok(Some((min_lsn, max_lsn))) => {
-                let source_id = self.source_id.to_string();
+        let lsns = self.query_sql_server_lsns().await.with_context(|| {
+            format!(
+                "failed to query SQL Server LSNs for source {}",
+                self.source_id
+            )
+        })?;
+        if let Some((min_lsn, max_lsn)) = lsns {
+            let source_id = self.source_id.to_string();
 
-                if let Some(value) = Self::sql_server_lsn_to_i64(&min_lsn) {
-                    self.metrics
-                        .sqlserver_cdc_upstream_min_lsn
-                        .with_guarded_label_values(&[&source_id])
-                        .set(value);
-                }
-
-                if let Some(value) = Self::sql_server_lsn_to_i64(&max_lsn) {
-                    self.metrics
-                        .sqlserver_cdc_upstream_max_lsn
-                        .with_guarded_label_values(&[&source_id])
-                        .set(value);
-                }
+            if let Some(value) = Self::sql_server_lsn_to_i64(&min_lsn) {
+                self.metrics
+                    .sqlserver_cdc_upstream_min_lsn
+                    .with_guarded_label_values(&[&source_id])
+                    .set(value);
             }
-            Ok(None) => {}
-            Err(e) => {
-                tracing::error!(
-                    "Failed to query SQL Server LSNs for source {}: {}",
-                    self.source_id,
-                    e.as_report()
-                );
+
+            if let Some(value) = Self::sql_server_lsn_to_i64(&max_lsn) {
+                self.metrics
+                    .sqlserver_cdc_upstream_max_lsn
+                    .with_guarded_label_values(&[&source_id])
+                    .set(value);
             }
         }
 
@@ -400,60 +394,53 @@ impl DebeziumSplitEnumerator<Mysql> {
             })?;
 
         // Query binlog files and update metrics
-        match self.query_binlog_files().await {
-            Ok(binlog_files) => {
-                if let Some((oldest_file, oldest_size)) = binlog_files.first()
-                    && let Some(seq) = extract_binlog_file_seq(oldest_file)
-                {
-                    self.metrics
-                        .mysql_cdc_binlog_file_seq_min
-                        .with_guarded_label_values(&[hostname, port])
-                        .set(seq as i64);
-                    tracing::debug!(
-                        "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
-                        self.source_id,
-                        hostname,
-                        port,
-                        oldest_file,
-                        seq,
-                        oldest_size
-                    );
-                }
-                if let Some((newest_file, newest_size)) = binlog_files.last()
-                    && let Some(seq) = extract_binlog_file_seq(newest_file)
-                {
-                    self.metrics
-                        .mysql_cdc_binlog_file_seq_max
-                        .with_guarded_label_values(&[hostname, port])
-                        .set(seq as i64);
-                    tracing::debug!(
-                        "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
-                        self.source_id,
-                        hostname,
-                        port,
-                        newest_file,
-                        seq,
-                        newest_size
-                    );
-                }
-                tracing::debug!(
-                    "MySQL CDC source {} ({}:{}): total {} binlog files",
-                    self.source_id,
-                    hostname,
-                    port,
-                    binlog_files.len()
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to query binlog files for MySQL CDC source {} ({}:{}): {}",
-                    self.source_id,
-                    hostname,
-                    port,
-                    e.as_report()
-                );
-            }
+        let binlog_files = self.query_binlog_files().await.with_context(|| {
+            format!(
+                "failed to query binlog files for MySQL CDC source {} ({}:{})",
+                self.source_id, hostname, port
+            )
+        })?;
+        if let Some((oldest_file, oldest_size)) = binlog_files.first()
+            && let Some(seq) = extract_binlog_file_seq(oldest_file)
+        {
+            self.metrics
+                .mysql_cdc_binlog_file_seq_min
+                .with_guarded_label_values(&[hostname, port])
+                .set(seq as i64);
+            tracing::debug!(
+                "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
+                self.source_id,
+                hostname,
+                port,
+                oldest_file,
+                seq,
+                oldest_size
+            );
         }
+        if let Some((newest_file, newest_size)) = binlog_files.last()
+            && let Some(seq) = extract_binlog_file_seq(newest_file)
+        {
+            self.metrics
+                .mysql_cdc_binlog_file_seq_max
+                .with_guarded_label_values(&[hostname, port])
+                .set(seq as i64);
+            tracing::debug!(
+                "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
+                self.source_id,
+                hostname,
+                port,
+                newest_file,
+                seq,
+                newest_size
+            );
+        }
+        tracing::debug!(
+            "MySQL CDC source {} ({}:{}): total {} binlog files",
+            self.source_id,
+            hostname,
+            port,
+            binlog_files.len()
+        );
         Ok(())
     }
 
