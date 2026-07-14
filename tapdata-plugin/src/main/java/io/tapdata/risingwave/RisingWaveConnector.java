@@ -1,5 +1,6 @@
 package io.tapdata.risingwave;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -15,7 +16,17 @@ import io.tapdata.entity.schema.type.TapMap;
 import io.tapdata.entity.schema.type.TapTime;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapArrayValue;
+import io.tapdata.entity.schema.value.TapBinaryValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapJsonValue;
+import io.tapdata.entity.schema.value.TapMapValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.TapConnector;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -26,34 +37,49 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.risingwave.streaming.WsIngestClient;
 
-import java.net.URI;
 import java.sql.*;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
  * Tapdata PDK connector for RisingWave streaming database.
  *
- * Supports two write modes:
+ * Supports three write modes:
  * <ul>
- *   <li><b>jdbc</b> (default) — Standard PostgreSQL JDBC inserts/updates/deletes.
+ *   <li><b>jdbc</b> — Standard PostgreSQL JDBC inserts/updates/deletes.
  *       Compatible with all RisingWave deployments.</li>
- *   <li><b>streaming</b> — High-throughput WebSocket streaming DML over the
+ *   <li><b>streaming</b> (default) — High-throughput WebSocket streaming DML over the
  *       RisingWave ingest endpoint.  Sends DML messages asynchronously and
  *       waits for per-epoch acks before advancing the offset.  Requires the
  *       RisingWave webhook/ingest service to be reachable on {@code ingestEndpoint}.</li>
+ *   <li><b>streaming_jsonb</b> — Append-only WebSocket ingest into a single JSONB column.
+ *       This mode accepts keyless models but rejects updates and deletes.</li>
  * </ul>
  */
 @TapConnectorClass("spec_risingwave.json")
 public class RisingWaveConnector implements TapConnector {
+    private static final String TAG = TapLogger.getClassTag(RisingWaveConnector.class);
+
+    static final String SCHEMA_TEST_ITEM = "schema";
+    static final String INGEST_ENDPOINT_TEST_ITEM = "ingest_endpoint";
+    static final String MINIMUM_WEBSOCKET_VERSION = "3.0.0";
+    static final String MODE_JDBC = "jdbc";
+    static final String MODE_STREAMING = "streaming";
+    static final String MODE_STREAMING_JSONB = "streaming_jsonb";
+    static final String JSONB_PAYLOAD_COLUMN = "data";
+    private static final java.util.regex.Pattern RISINGWAVE_VERSION_PATTERN =
+            java.util.regex.Pattern.compile("(?i)RisingWave[-/\\s]+v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private Connection connection;
     private String schema;
 
-    /** "jdbc" or "streaming" */
+    /** "jdbc", "streaming", or "streaming_jsonb" */
     private String ingestMode;
 
     /** Only used in streaming mode. Per-table WsIngestClient cache. */
@@ -61,19 +87,17 @@ public class RisingWaveConnector implements TapConnector {
     private String wsIngestEndpoint;
     private String wsDatabase;
     private String wsWebhookSecret;
+    private final AtomicBoolean alive = new AtomicBoolean(false);
 
     // ---- TapNode lifecycle ----
 
     public static void debugLog(String msg) {
-        try {
-            java.io.FileWriter fw = new java.io.FileWriter("/tmp/rw_connector.log", true);
-            fw.write(new java.util.Date() + " " + msg + "\n");
-            fw.close();
-        } catch (Exception ignore) {}
+        TapLogger.debug(TAG, "{}", msg);
     }
 
     @Override
     public void init(TapConnectionContext context) throws Throwable {
+        closeResources();
         debugLog("init() called");
         DataMap cfg = context.getConnectionConfig();
         this.schema = cfg.getString("schema");
@@ -82,34 +106,43 @@ public class RisingWaveConnector implements TapConnector {
         }
         this.ingestMode = cfg.getString("ingest_mode");
         if (ingestMode == null || ingestMode.isEmpty()) {
-            ingestMode = "jdbc";
+            ingestMode = MODE_STREAMING;
         }
 
-        // Always open a JDBC connection for schema discovery and DDL operations.
-        this.connection = openConnection(context);
-
-        if ("streaming".equals(ingestMode)) {
-            this.wsIngestEndpoint = cfg.getString("ingestEndpoint");
+        if (isWebSocketMode(ingestMode)) {
+            this.wsIngestEndpoint = resolveIngestEndpoint(
+                    cfg.getString("ingestEndpoint"), cfg.getString("host"));
             this.wsDatabase = cfg.getString("database");
             this.wsWebhookSecret = cfg.getString("webhookSecret");
-            if (wsIngestEndpoint == null || wsIngestEndpoint.isEmpty()) {
-                wsIngestEndpoint = "ws://" + cfg.getString("host") + ":4560";
-            }
             if (wsDatabase == null || wsDatabase.isEmpty()) wsDatabase = "dev";
             debugLog("init() streaming mode, ingestEndpoint=" + wsIngestEndpoint + " db=" + wsDatabase);
         }
 
+        // Always open a JDBC connection for schema discovery and DDL operations. Resolve all
+        // WebSocket configuration first so a configuration failure cannot leak this connection.
+        this.connection = openConnection(context);
+        alive.set(true);
         debugLog("init() done, schema=" + schema + " ingestMode=" + ingestMode);
     }
 
     @Override
     public void stop(TapConnectionContext context) throws Throwable {
-        for (WsIngestClient client : wsClients.values()) {
+        closeResources();
+    }
+
+    private synchronized void closeResources() {
+        alive.set(false);
+        List<WsIngestClient> clients = new ArrayList<>(wsClients.values());
+        wsClients.clear();
+        for (WsIngestClient client : clients) {
             try { client.close(); } catch (Exception ignored) {}
         }
-        wsClients.clear();
         closeQuietly(connection);
         connection = null;
+    }
+
+    private void releaseExternal(TapConnectorContext context) {
+        closeResources();
     }
 
     // ---- TapConnectorNode ----
@@ -119,58 +152,233 @@ public class RisingWaveConnector implements TapConnector {
                                             Consumer<TestItem> consumer) throws Throwable {
         ConnectionOptions options = ConnectionOptions.create();
         DataMap cfg = context.getConnectionConfig();
+        String mode = cfg.getString("ingest_mode");
+        if (mode == null || mode.isEmpty()) {
+            mode = MODE_STREAMING;
+        }
+        String schemaName = configuredSchema(cfg);
+        options.setNamespaces(Collections.singletonList(schemaName));
         debugLog("connectionTest() start host=" + cfg.getString("host")
                 + " port=" + cfg.getObject("port")
                 + " database=" + cfg.getString("database")
-                + " schema=" + cfg.getString("schema")
-                + " ingestMode=" + cfg.getString("ingest_mode"));
+                + " schema=" + schemaName
+                + " ingestMode=" + mode);
         // Always test JDBC connectivity for schema discovery and DDL operations.
         try (Connection conn = openConnection(context)) {
             consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY,
                     "Connected to RisingWave"));
-            try (Statement st = conn.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT version()")) {
-                String version = rs.next() ? rs.getString(1) : "unknown";
-                debugLog("connectionTest() version=" + version);
-                consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, version));
+            testVersion(conn, mode, consumer);
+            if (testSchema(conn, schemaName, consumer)) {
+                if (isWebSocketMode(mode)) {
+                    testStreamingWrite(conn, cfg, schemaName, consumer,
+                            MODE_STREAMING_JSONB.equals(mode));
+                } else {
+                    testJdbcWritePrivilege(conn, schemaName, consumer);
+                }
+            } else {
+                consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
+                        "Write access cannot be verified because schema \"" + schemaName + "\" is unavailable"));
+                if (isWebSocketMode(mode)) {
+                    consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
+                            "WebSocket ingest cannot be verified because schema \""
+                                    + schemaName + "\" is unavailable"));
+                }
             }
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY,
-                    "Write access verified"));
         } catch (Exception e) {
             debugLog("connectionTest() JDBC ERROR: " + e.getClass().getName() + ": " + e.getMessage());
             consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED,
                     "Connection failed: " + e.getMessage()));
         }
 
-        // In streaming mode, also verify that the WebSocket ingest endpoint is reachable.
-        String mode = cfg.getString("ingest_mode");
-        if ("streaming".equals(mode)) {
-            String ingestEndpoint = cfg.getString("ingestEndpoint");
-            if (ingestEndpoint == null || ingestEndpoint.isEmpty()) {
-                ingestEndpoint = "ws://" + cfg.getString("host") + ":4560";
+        return options;
+    }
+
+    private void testVersion(Connection conn, String mode, Consumer<TestItem> consumer) {
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT version()")) {
+            String version = rs.next() ? rs.getString(1) : "unknown";
+            debugLog("connectionTest() version=" + version);
+            if (isWebSocketMode(mode) && !supportsWebSocketIngest(version)) {
+                consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED,
+                        "WebSocket streaming requires RisingWave " + MINIMUM_WEBSOCKET_VERSION
+                                + " or later; server reported: " + version));
+            } else {
+                consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, version));
             }
-            String database = cfg.getString("database");
-            if (database == null || database.isEmpty()) database = "dev";
-            String schemaName = getSchema(context);
-            try {
-                URI uri = URI.create(ingestEndpoint);
-                int port = uri.getPort() >= 0 ? uri.getPort() : ("wss".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
-                java.net.Socket socket = new java.net.Socket();
-                socket.connect(new java.net.InetSocketAddress(uri.getHost(), port), 5000);
-                socket.close();
-                debugLog("connectionTest() ingest endpoint reachable endpoint=" + ingestEndpoint
-                        + " database=" + database + " schema=" + schemaName);
-                consumer.accept(new TestItem("ingest_endpoint", TestItem.RESULT_SUCCESSFULLY,
-                        "WebSocket ingest endpoint reachable"));
+        } catch (Exception e) {
+            debugLog("connectionTest() version ERROR: " + e.getClass().getName() + ": " + e.getMessage());
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED,
+                    "Version check failed: " + e.getMessage()));
+        }
+    }
+
+    private boolean testSchema(Connection conn, String schemaName, Consumer<TestItem> consumer) {
+        String sql = "SELECT count(*) FROM rw_catalog.rw_schemas WHERE name = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, schemaName);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean exists = rs.next() && rs.getInt(1) > 0;
+                if (exists) {
+                    consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_SUCCESSFULLY,
+                            "Schema \"" + schemaName + "\" exists"));
+                    return true;
+                }
+            }
+            consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_FAILED,
+                    "Schema \"" + schemaName + "\" does not exist"));
+        } catch (Exception e) {
+            debugLog("connectionTest() schema ERROR: " + e.getClass().getName() + ": " + e.getMessage());
+            consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_FAILED,
+                    "Schema check failed: " + e.getMessage()));
+        }
+        return false;
+    }
+
+    private void testJdbcWritePrivilege(Connection conn, String schemaName, Consumer<TestItem> consumer) {
+        String probeTable = "tap___test_" + UUID.randomUUID().toString().replace("-", "");
+        String qualifiedTable = quoteIdentifier(schemaName) + "." + quoteIdentifier(probeTable);
+        boolean created = false;
+        try (Statement st = conn.createStatement()) {
+            st.execute("CREATE TABLE " + qualifiedTable
+                    + " (id BIGINT PRIMARY KEY, probe_value VARCHAR)");
+            created = true;
+            st.executeUpdate("INSERT INTO " + qualifiedTable + " VALUES (1, 'initial')");
+            st.execute("FLUSH");
+            st.executeUpdate("UPDATE " + qualifiedTable + " SET probe_value = 'updated' WHERE id = 1");
+            st.execute("FLUSH");
+            try (ResultSet resultSet = st.executeQuery(
+                    "SELECT probe_value FROM " + qualifiedTable + " WHERE id = 1")) {
+                if (!resultSet.next() || !"updated".equals(resultSet.getString(1))) {
+                    throw new SQLException("Updated probe row was not query-visible after FLUSH");
+                }
+            }
+            st.executeUpdate("DELETE FROM " + qualifiedTable + " WHERE id = 1");
+            st.execute("FLUSH");
+            try (ResultSet resultSet = st.executeQuery(
+                    "SELECT count(*) FROM " + qualifiedTable)) {
+                if (!resultSet.next() || resultSet.getLong(1) != 0) {
+                    throw new SQLException("Deleted probe row remained query-visible after FLUSH");
+                }
+            }
+            st.execute("DROP TABLE " + qualifiedTable);
+            created = false;
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY,
+                    "Create, insert, update, delete, and drop succeeded in schema \"" + schemaName + "\""));
+        } catch (Exception e) {
+            debugLog("connectionTest() write privilege ERROR: " + e.getClass().getName() + ": " + e.getMessage());
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
+                    "Write privilege check failed in schema \"" + schemaName + "\": " + e.getMessage()));
+        } finally {
+            if (created) {
+                try (Statement cleanup = conn.createStatement()) {
+                    cleanup.execute("DROP TABLE IF EXISTS " + qualifiedTable);
+                } catch (Exception cleanupError) {
+                    debugLog("connectionTest() write probe cleanup ERROR table=" + qualifiedTable
+                            + ": " + cleanupError.getMessage());
+                }
+            }
+        }
+    }
+
+    private void testStreamingWrite(Connection conn, DataMap cfg, String schemaName,
+                                    Consumer<TestItem> consumer, boolean jsonbMode) {
+        String probeTable = "tap___test_" + UUID.randomUUID().toString().replace("-", "");
+        String qualifiedTable = quoteIdentifier(schemaName) + "." + quoteIdentifier(probeTable);
+        String ingestEndpoint = resolveIngestEndpoint(
+                cfg.getString("ingestEndpoint"), cfg.getString("host"));
+        String database = cfg.getString("database");
+        if (database == null || database.isEmpty()) {
+            database = "dev";
+        }
+        String webhookSecret = cfg.getString("webhookSecret");
+
+        boolean created = false;
+        Exception ddlError = null;
+        Exception ingestError = null;
+        try (Statement st = conn.createStatement()) {
+            String columns = jsonbMode
+                    ? "(" + quoteIdentifier(JSONB_PAYLOAD_COLUMN) + " JSONB)"
+                    : "(id BIGINT, probe_value VARCHAR, PRIMARY KEY (id))";
+            st.execute("CREATE TABLE " + qualifiedTable + " " + columns
+                    + " WITH (connector = 'webhook')"
+                    + webhookValidationClause(webhookSecret, jsonbMode));
+            created = true;
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", 1L);
+            row.put("probe_value", "websocket_precheck");
+            try (WsIngestClient client = new WsIngestClient(
+                    ingestEndpoint, database, schemaName, probeTable, webhookSecret)) {
+                client.connect();
+                List<CompletableFuture<Void>> futures = client.sendBatch(Collections.singletonList(
+                        new WsIngestClient.DmlOperation("insert", null, row)));
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(30, TimeUnit.SECONDS);
             } catch (Exception e) {
-                debugLog("connectionTest() ingest endpoint ERROR endpoint=" + ingestEndpoint
+                ingestError = e;
+                debugLog("connectionTest() websocket ingest ERROR endpoint=" + ingestEndpoint
                         + ": " + e.getClass().getName() + ": " + e.getMessage());
-                consumer.accept(new TestItem("ingest_endpoint", TestItem.RESULT_FAILED,
-                        "WebSocket ingest endpoint check failed: " + e.getMessage()));
+            }
+        } catch (Exception e) {
+            ddlError = e;
+            debugLog("connectionTest() streaming DDL ERROR table=" + qualifiedTable
+                    + ": " + e.getClass().getName() + ": " + e.getMessage());
+        } finally {
+            if (created) {
+                try (Statement cleanup = conn.createStatement()) {
+                    cleanup.execute("DROP TABLE " + qualifiedTable);
+                } catch (Exception cleanupError) {
+                    ddlError = cleanupError;
+                    debugLog("connectionTest() streaming probe cleanup ERROR table=" + qualifiedTable
+                            + ": " + cleanupError.getMessage());
+                }
             }
         }
 
-        return options;
+        if (ddlError == null) {
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY,
+                    "Create and drop of a webhook-backed table succeeded in schema \""
+                            + schemaName + "\""));
+        } else {
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
+                    "Webhook table create/drop check failed in schema \"" + schemaName
+                            + "\": " + ddlError.getMessage()));
+        }
+
+        if (!created) {
+            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
+                    "WebSocket ingest cannot be verified because the temporary webhook table could not be created"));
+        } else if (ingestError == null) {
+            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_SUCCESSFULLY,
+                    "WebSocket connection, signed init, DML write, and RisingWave ACK succeeded"));
+        } else {
+            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
+                    "WebSocket ingest check failed: " + ingestError.getMessage()));
+        }
+    }
+
+    static boolean supportsWebSocketIngest(String versionOutput) {
+        int[] version = parseRisingWaveVersion(versionOutput);
+        if (version == null) {
+            return false;
+        }
+        return version[0] > 3 || (version[0] == 3 && version[1] >= 0);
+    }
+
+    static int[] parseRisingWaveVersion(String versionOutput) {
+        if (versionOutput == null) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = RISINGWAVE_VERSION_PATTERN.matcher(versionOutput);
+        if (!matcher.find()) {
+            return null;
+        }
+        int patch = matcher.group(3) == null ? 0 : Integer.parseInt(matcher.group(3));
+        return new int[]{
+                Integer.parseInt(matcher.group(1)),
+                Integer.parseInt(matcher.group(2)),
+                patch
+        };
     }
 
     @Override
@@ -298,6 +506,24 @@ public class RisingWaveConnector implements TapConnector {
         functions.supportCreateTableV2(this::createTable);
         functions.supportClearTable(this::clearTable);
         functions.supportDropTable(this::dropTable);
+        functions.supportReleaseExternalFunction(this::releaseExternal);
+
+        registry.registerFromTapValue(TapRawValue.class, "text", value ->
+                value == null || value.getValue() == null ? null : TapSimplify.toJson(value.getValue()));
+        registry.registerFromTapValue(TapMapValue.class, "jsonb", value ->
+                value == null || value.getValue() == null ? null : TapSimplify.toJson(value.getValue()));
+        registry.registerFromTapValue(TapArrayValue.class, "jsonb", value ->
+                value == null || value.getValue() == null ? null : TapSimplify.toJson(value.getValue()));
+        registry.registerFromTapValue(TapJsonValue.class, "jsonb", value ->
+                value == null ? null : value.getValue());
+        registry.registerFromTapValue(TapBinaryValue.class, "bytea", value ->
+                value == null || value.getValue() == null ? null : value.getValue().getValue());
+        registry.registerFromTapValue(TapTimeValue.class, value ->
+                value == null || value.getValue() == null ? null : value.getValue().toTime());
+        registry.registerFromTapValue(TapDateTimeValue.class, value ->
+                value == null || value.getValue() == null ? null : value.getValue().toTimestamp());
+        registry.registerFromTapValue(TapDateValue.class, value ->
+                value == null || value.getValue() == null ? null : value.getValue().toSqlDate());
     }
 
     // ---- Write Record ----
@@ -308,8 +534,10 @@ public class RisingWaveConnector implements TapConnector {
                              Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
         debugLog("writeRecord() mode=" + ingestMode + " tableId="
                 + (table == null ? "null" : table.getId()) + " events=" + events.size());
-        if ("streaming".equals(ingestMode)) {
+        if (MODE_STREAMING.equals(ingestMode)) {
             writeRecordStreaming(events, table, resultConsumer);
+        } else if (MODE_STREAMING_JSONB.equals(ingestMode)) {
+            writeRecordStreamingJsonb(events, table, resultConsumer);
         } else {
             writeRecordJdbc(events, table, resultConsumer);
         }
@@ -320,35 +548,38 @@ public class RisingWaveConnector implements TapConnector {
     private void writeRecordStreaming(List<TapRecordEvent> events,
                                        TapTable table,
                                        Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
+        validateStreamingPrimaryKey(table);
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         long inserted = 0, updated = 0, deleted = 0;
 
         debugLog("writeRecordStreaming start table=" + table.getId()
                 + " events=" + events.size()
-                + " pk=" + table.primaryKeys());
+                + " pk=" + primaryKeysOf(table));
         WsIngestClient client = getOrCreateWsClient(table.getId());
         List<WsIngestClient.DmlOperation> operations = new ArrayList<>(events.size());
 
         for (TapRecordEvent event : events) {
+            if (!alive.get()) {
+                throw new java.util.concurrent.CancellationException("Connector is stopping");
+            }
             try {
                 if (event instanceof TapInsertRecordEvent) {
                     TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
-                    Map<String, Object> after = normalizeRecordForStreaming(insert.getAfter(), table);
-                    debugLog("writeRecordStreaming insert after=" + after);
+                    Map<String, Object> after = normalizeRecordForStreaming(insert.getAfter(), table, true);
                     operations.add(new WsIngestClient.DmlOperation("insert", null, after));
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
                     TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                    Map<String, Object> before = normalizeRecordForStreaming(update.getBefore(), table);
-                    Map<String, Object> after = normalizeRecordForStreaming(update.getAfter(), table);
-                    debugLog("writeRecordStreaming update before=" + before
-                            + " after=" + after);
+                    Map<String, Object> before = normalizeRecordForStreaming(update.getBefore(), table, true);
+                    Map<String, Object> after = normalizeRecordForStreaming(update.getAfter(), table, true);
+                    if (requiresDeleteBeforeUpsert(table, before, after)) {
+                        operations.add(new WsIngestClient.DmlOperation("delete", before, null));
+                    }
                     operations.add(new WsIngestClient.DmlOperation("update", before, after));
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
-                    Map<String, Object> before = normalizeRecordForStreaming(delete.getBefore(), table);
-                    debugLog("writeRecordStreaming delete before=" + before);
+                    Map<String, Object> before = normalizeRecordForStreaming(delete.getBefore(), table, true);
                     operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     deleted++;
                 } else {
@@ -379,6 +610,68 @@ public class RisingWaveConnector implements TapConnector {
                 .removedCount(deleted));
     }
 
+    private void writeRecordStreamingJsonb(List<TapRecordEvent> events,
+                                            TapTable table,
+                                            Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
+        validateJsonbAppendOnlyEvents(events, table);
+        if (events.isEmpty()) {
+            resultConsumer.accept(new WriteListResult<TapRecordEvent>().insertedCount(0));
+            return;
+        }
+
+        WsIngestClient client = getOrCreateWsClient(table.getId());
+        List<WsIngestClient.DmlOperation> operations = new ArrayList<>(events.size());
+        for (TapRecordEvent event : events) {
+            if (!alive.get()) {
+                throw new java.util.concurrent.CancellationException("Connector is stopping");
+            }
+            TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
+            Map<String, Object> document = normalizeRecordForStreaming(insert.getAfter(), table, false);
+            operations.add(new WsIngestClient.DmlOperation("insert", null, document));
+        }
+
+        try {
+            List<CompletableFuture<Void>> futures = client.sendBatch(operations);
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(120, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            removeWsClient(table.getId());
+            throw new RuntimeException("JSONB append-only ingest ack failed: " + e.getMessage(), e);
+        }
+
+        resultConsumer.accept(new WriteListResult<TapRecordEvent>().insertedCount(events.size()));
+    }
+
+    static void validateJsonbAppendOnlyEvents(List<TapRecordEvent> events, TapTable table) {
+        String tableName = table == null ? "<unknown>" : table.getId();
+        for (TapRecordEvent event : events) {
+            if (!(event instanceof TapInsertRecordEvent)) {
+                throw new IllegalArgumentException("WebSocket JSONB append-only mode accepts only inserts for table "
+                        + tableName + "; received " + event.getClass().getSimpleName());
+            }
+        }
+    }
+
+    static boolean requiresDeleteBeforeUpsert(TapTable table,
+                                              Map<String, Object> before,
+                                              Map<String, Object> after) {
+        if (before == null || after == null) {
+            return false;
+        }
+        Collection<String> primaryKeys = primaryKeysOf(table);
+        if (primaryKeys == null || primaryKeys.isEmpty()) {
+            // Follow the database connector fallback: without a declared key, use the full
+            // before image to retract the old row before inserting the new image.
+            return !before.equals(after);
+        }
+        for (String primaryKey : primaryKeys) {
+            if (!Objects.equals(before.get(primaryKey), after.get(primaryKey))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Get or create (and connect) a WsIngestClient for the given table. */
     private synchronized WsIngestClient getOrCreateWsClient(String tableId) throws Exception {
         WsIngestClient client = wsClients.get(tableId);
@@ -401,21 +694,6 @@ public class RisingWaveConnector implements TapConnector {
         }
     }
 
-    private String findAnyTableName(Connection conn, String schemaName) {
-        String sql = "SELECT table_name FROM information_schema.tables "
-                + "WHERE table_schema = ? AND table_type = 'BASE TABLE' "
-                + "ORDER BY table_name LIMIT 1";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, schemaName);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? rs.getString(1) : null;
-            }
-        } catch (Exception e) {
-            debugLog("findAnyTableName() ERROR schema=" + schemaName + ": " + e.getMessage());
-            return null;
-        }
-    }
-
     // ---- JDBC write path (original) ----
 
     private void writeRecordJdbc(List<TapRecordEvent> events,
@@ -423,26 +701,61 @@ public class RisingWaveConnector implements TapConnector {
                                    Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         long inserted = 0, updated = 0, deleted = 0;
+        boolean dirty = false;
+        Set<List<Object>> pendingInsertIdentities = new HashSet<>();
 
         debugLog("writeRecord called: " + events.size() + " events for table " + table.getId());
+        // RisingWave SQL DML can become visible asynchronously. Establish a visibility boundary
+        // before applying this batch so retries and update/delete lookups observe prior writes.
+        flushJdbcWrites();
 
         for (TapRecordEvent event : events) {
             try {
                 if (event instanceof TapInsertRecordEvent) {
                     TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
-                    doInsert(table, insert.getAfter());
+                    List<Object> identity = keyedIdentityOf(table, insert.getAfter());
+                    if (dirty && identity != null && pendingInsertIdentities.contains(identity)) {
+                        // RisingWave SQL DML is not guaranteed to be query-visible until FLUSH.
+                        // Make an earlier insert with the same key visible before manual upsert.
+                        flushJdbcWrites();
+                        dirty = false;
+                        pendingInsertIdentities.clear();
+                    }
+                    // Keyed inserts use upsert so replay after a transport/FLUSH failure is idempotent.
+                    doInsertOrUpdate(table, insert.getAfter());
+                    dirty = true;
+                    if (identity != null) {
+                        pendingInsertIdentities.add(identity);
+                    }
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                    int rows = doUpdate(table, update.getBefore(), update.getAfter());
-                    if (rows == 0) {
-                        // Fall back to upsert
-                        doInsertOrUpdate(table, update.getAfter());
+                    if (dirty) {
+                        flushJdbcWrites();
+                        dirty = false;
+                        pendingInsertIdentities.clear();
                     }
+                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
+                    if (requiresDeleteBeforeUpsert(table, update.getBefore(), update.getAfter())) {
+                        doDelete(table, update.getBefore());
+                        doInsertOrUpdate(table, update.getAfter());
+                    } else {
+                        int rows = doUpdate(table, update.getBefore(), update.getAfter());
+                        if (rows == 0) {
+                            // The before image no longer exists; apply the configured upsert fallback.
+                            doInsertOrUpdate(table, update.getAfter());
+                        }
+                    }
+                    dirty = true;
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
+                    if (dirty) {
+                        flushJdbcWrites();
+                        dirty = false;
+                        pendingInsertIdentities.clear();
+                    }
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
                     doDelete(table, delete.getBefore());
+                    dirty = true;
                     deleted++;
                 }
             } catch (Exception e) {
@@ -451,10 +764,27 @@ public class RisingWaveConnector implements TapConnector {
             }
         }
 
+        if (dirty) {
+            flushJdbcWrites();
+        }
+
         debugLog("writeRecord done: inserted=" + inserted + " updated=" + updated + " deleted=" + deleted);
         resultConsumer.accept(result.insertedCount(inserted)
                 .modifiedCount(updated)
                 .removedCount(deleted));
+    }
+
+    private static List<Object> keyedIdentityOf(TapTable table, Map<String, Object> record) {
+        Collection<String> primaryKeys = primaryKeysOf(table);
+        if (record == null || primaryKeys == null || primaryKeys.isEmpty()
+                || !record.keySet().containsAll(primaryKeys)) {
+            return null;
+        }
+        List<Object> identity = new ArrayList<>(primaryKeys.size());
+        for (String primaryKey : primaryKeys) {
+            identity.add(record.get(primaryKey));
+        }
+        return identity;
     }
 
     private void doInsert(TapTable table, Map<String, Object> record) throws SQLException {
@@ -473,86 +803,107 @@ public class RisingWaveConnector implements TapConnector {
     }
 
     private int doUpdate(TapTable table, Map<String, Object> before, Map<String, Object> after) throws SQLException {
-        Collection<String> pks = table.primaryKeys();
-        if (pks == null || pks.isEmpty() || before == null) {
+        Collection<String> pks = primaryKeysOf(table);
+        if (before == null || before.isEmpty() || after == null || after.isEmpty()) {
             return 0;
         }
-        Map<String, Object> record = after != null ? after : before;
         List<String> setCols = new ArrayList<>();
-        for (String col : record.keySet()) {
-            if (!pks.contains(col)) {
-                setCols.add(col);
+        for (String column : after.keySet()) {
+            if (pks == null || !pks.contains(column)) {
+                setCols.add(column);
             }
         }
-        if (setCols.isEmpty()) return 0;
+        if (setCols.isEmpty()) return 1;
+        List<String> filterCols = pks != null && !pks.isEmpty()
+                ? new ArrayList<>(pks) : new ArrayList<>(before.keySet());
+        if (filterCols.isEmpty()) return 0;
 
         String tableName = fullTableName(table.getId());
         StringBuilder sql = new StringBuilder("UPDATE ").append(tableName).append(" SET ");
         for (int i = 0; i < setCols.size(); i++) {
             if (i > 0) sql.append(", ");
-            sql.append('"').append(setCols.get(i)).append('"').append(" = ?");
+            sql.append(quoteIdentifier(setCols.get(i))).append(" = ?");
         }
         sql.append(" WHERE ");
-        List<String> pkList = new ArrayList<>(pks);
-        for (int i = 0; i < pkList.size(); i++) {
+        for (int i = 0; i < filterCols.size(); i++) {
             if (i > 0) sql.append(" AND ");
-            sql.append('"').append(pkList.get(i)).append('"').append(" = ?");
+            String column = filterCols.get(i);
+            sql.append(quoteIdentifier(column));
+            if (before.get(column) == null) {
+                sql.append(" IS NULL");
+            } else {
+                sql.append(" = ?");
+            }
         }
 
         try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
             int idx = 1;
             for (String col : setCols) {
-                setParam(ps, idx++, record.get(col));
+                setParam(ps, idx++, after.get(col));
             }
-            // Use before values for PK lookup, fallback to after
-            Map<String, Object> pkSource = before != null ? before : after;
-            for (String pk : pkList) {
-                setParam(ps, idx++, pkSource != null ? pkSource.get(pk) : null);
+            for (String column : filterCols) {
+                Object value = before.get(column);
+                if (value != null) {
+                    setParam(ps, idx++, value);
+                }
             }
             return ps.executeUpdate();
         }
     }
 
     private void doInsertOrUpdate(TapTable table, Map<String, Object> record) throws SQLException {
-        Collection<String> pks = table.primaryKeys();
+        Collection<String> pks = primaryKeysOf(table);
         if (pks == null || pks.isEmpty() || record == null) {
             doInsert(table, record);
             return;
         }
-        List<String> cols = new ArrayList<>(record.keySet());
-        String tableName = fullTableName(table.getId());
-
-        // Try INSERT ON CONFLICT DO UPDATE (works if table has PK)
-        StringBuilder sql = new StringBuilder("INSERT INTO ").append(tableName)
-                .append(" (").append(quoteCols(cols)).append(") VALUES (")
-                .append(placeholders(cols.size())).append(")");
-
-        List<String> nonPkCols = new ArrayList<>();
-        for (String col : cols) {
-            if (!pks.contains(col)) nonPkCols.add(col);
-        }
-
-        if (!nonPkCols.isEmpty()) {
-            sql.append(" ON CONFLICT (").append(quoteCols(new ArrayList<>(pks))).append(") DO UPDATE SET ");
-            for (int i = 0; i < nonPkCols.size(); i++) {
-                if (i > 0) sql.append(", ");
-                sql.append('"').append(nonPkCols.get(i)).append('"')
-                        .append(" = EXCLUDED.\"").append(nonPkCols.get(i)).append('"');
+        if (hasOnlyPrimaryKeyColumns(record, pks)) {
+            if (!rowExistsByPrimaryKey(table, record, pks)) {
+                doInsert(table, record);
             }
-        } else {
-            sql.append(" ON CONFLICT DO NOTHING");
+            return;
         }
+        if (doUpdate(table, record, record) == 0) {
+            doInsert(table, record);
+        }
+    }
 
-        try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
-            for (int i = 0; i < cols.size(); i++) {
-                setParam(ps, i + 1, record.get(cols.get(i)));
+    private static boolean hasOnlyPrimaryKeyColumns(
+            Map<String, Object> record, Collection<String> primaryKeys) {
+        return primaryKeys.containsAll(record.keySet());
+    }
+
+    private boolean rowExistsByPrimaryKey(
+            TapTable table, Map<String, Object> record, Collection<String> primaryKeys) throws SQLException {
+        List<String> columns = new ArrayList<>(primaryKeys);
+        StringBuilder sql = new StringBuilder("SELECT 1 FROM ")
+                .append(fullTableName(table.getId())).append(" WHERE ");
+        for (int i = 0; i < columns.size(); i++) {
+            if (i > 0) sql.append(" AND ");
+            String column = columns.get(i);
+            sql.append(quoteIdentifier(column));
+            if (record.get(column) == null) {
+                sql.append(" IS NULL");
+            } else {
+                sql.append(" = ?");
             }
-            ps.executeUpdate();
+        }
+        try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            int index = 1;
+            for (String column : columns) {
+                Object value = record.get(column);
+                if (value != null) {
+                    setParam(statement, index++, value);
+                }
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
         }
     }
 
     private void doDelete(TapTable table, Map<String, Object> record) throws SQLException {
-        Collection<String> pks = table.primaryKeys();
+        Collection<String> pks = primaryKeysOf(table);
         if (record == null) return;
 
         String tableName = fullTableName(table.getId());
@@ -563,7 +914,7 @@ public class RisingWaveConnector implements TapConnector {
         StringBuilder sql = new StringBuilder("DELETE FROM ").append(tableName).append(" WHERE ");
         for (int i = 0; i < filterCols.size(); i++) {
             if (i > 0) sql.append(" AND ");
-            sql.append('"').append(filterCols.get(i)).append('"');
+            sql.append(quoteIdentifier(filterCols.get(i)));
             if (record.get(filterCols.get(i)) == null) {
                 sql.append(" IS NULL");
             } else {
@@ -581,9 +932,15 @@ public class RisingWaveConnector implements TapConnector {
         }
     }
 
+    private void flushJdbcWrites() throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("FLUSH");
+        }
+    }
+
     // ---- DDL ----
 
-    private io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions createTable(
+    io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions createTable(
             TapConnectorContext context,
             io.tapdata.entity.event.ddl.table.TapCreateTableEvent event) throws Throwable {
         io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions opts =
@@ -591,8 +948,9 @@ public class RisingWaveConnector implements TapConnector {
         TapTable table = event.getTable();
         if (table == null) return opts;
 
-        String tableName = fullTableName(table.getId());
-        StringBuilder sql = new StringBuilder("CREATE TABLE IF NOT EXISTS ").append(tableName).append(" (");
+        if (MODE_STREAMING.equals(ingestMode)) {
+            validateStreamingPrimaryKey(table);
+        }
 
         LinkedHashMap<String, TapField> fields = table.getNameFieldMap();
         if (fields == null || fields.isEmpty()) {
@@ -600,12 +958,33 @@ public class RisingWaveConnector implements TapConnector {
             return opts;
         }
 
-        Collection<String> pks = table.primaryKeys();
+        TableReference tableReference = tableReference(table.getId());
+        String tableName = tableReference.qualifiedName();
+        if (tableExists(connection, tableReference)) {
+            if (MODE_STREAMING_JSONB.equals(ingestMode)) {
+                validateExistingJsonbTable(connection, tableReference);
+            } else {
+                validateExistingTable(connection, tableReference, table);
+            }
+            opts.tableExists(true);
+            return opts;
+        }
+        StringBuilder sql = new StringBuilder("CREATE TABLE ").append(tableName).append(" (");
+
+        if (MODE_STREAMING_JSONB.equals(ingestMode)) {
+            sql.append(quoteIdentifier(JSONB_PAYLOAD_COLUMN)).append(" JSONB)")
+                    .append(" WITH (connector = 'webhook')")
+                    .append(webhookValidationClause(wsWebhookSecret, true));
+            executeCreateTable(sql.toString(), table.getId(), opts);
+            return opts;
+        }
+
+        Collection<String> pks = primaryKeysOf(table);
         List<String> colDefs = new ArrayList<>();
         for (Map.Entry<String, TapField> entry : fields.entrySet()) {
             TapField f = entry.getValue();
-            String colDef = '"' + f.getName() + "\" " + toRisingWaveType(f);
-            if (!"streaming".equals(ingestMode) && Boolean.FALSE.equals(f.getNullable())) {
+            String colDef = quoteIdentifier(f.getName()) + " " + toRisingWaveType(f);
+            if (!MODE_STREAMING.equals(ingestMode) && Boolean.FALSE.equals(f.getNullable())) {
                 colDef += " NOT NULL";
             }
             colDefs.add(colDef);
@@ -616,31 +995,31 @@ public class RisingWaveConnector implements TapConnector {
             sql.append(", PRIMARY KEY (").append(quoteCols(new ArrayList<>(pks))).append(")");
         }
         sql.append(")");
-        if ("streaming".equals(ingestMode)) {
+        if (MODE_STREAMING.equals(ingestMode)) {
             sql.append(" WITH (connector = 'webhook')");
-            // If a webhook secret is configured, add VALIDATE clause so the table
-            // requires HMAC-SHA256 signature verification on the WebSocket init frame.
-            // This matches the WsIngestClient signing logic.
-            if (wsWebhookSecret != null && !wsWebhookSecret.isEmpty()) {
-                String escapedSecret = wsWebhookSecret.replace("'", "''");
-                sql.append(" VALIDATE AS secure_compare(")
-                   .append("headers->>'x-rw-signature', ")
-                   .append("'sha256=' || encode(hmac('").append(escapedSecret)
-                   .append("', payload, 'sha256'), 'hex'))");
-            }
+            sql.append(webhookValidationClause(wsWebhookSecret, false));
         }
 
-        debugLog("createTable() sql=" + sql);
+        executeCreateTable(sql.toString(), table.getId(), opts);
+        return opts;
+    }
+
+    private void executeCreateTable(String sql, String tableId,
+                                    io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions opts)
+            throws SQLException {
+        debugLog("createTable() table=" + tableId + " mode=" + ingestMode);
         try (Statement st = connection.createStatement()) {
-            st.execute(sql.toString());
-            debugLog("createTable() success table=" + table.getId());
+            st.execute(sql);
+            debugLog("createTable() success table=" + tableId);
         } catch (Exception e) {
-            debugLog("createTable() ERROR table=" + table.getId() + ": "
+            debugLog("createTable() ERROR table=" + tableId + ": "
                     + e.getClass().getName() + ": " + e.getMessage());
-            throw e;
+            if (e instanceof SQLException) {
+                throw (SQLException) e;
+            }
+            throw new SQLException("Failed to create target table " + tableId, e);
         }
         opts.tableExists(false);
-        return opts;
     }
 
     private void clearTable(TapConnectorContext context,
@@ -653,6 +1032,7 @@ public class RisingWaveConnector implements TapConnector {
 
     private void dropTable(TapConnectorContext context,
                            io.tapdata.entity.event.ddl.table.TapDropTableEvent event) throws Throwable {
+        removeWsClient(event.getTableId());
         String tableName = fullTableName(event.getTableId());
         try (Statement st = connection.createStatement()) {
             st.execute("DROP TABLE IF EXISTS " + tableName);
@@ -682,14 +1062,14 @@ public class RisingWaveConnector implements TapConnector {
 
         String url = "jdbc:postgresql://" + host + ":" + port + "/" + database +
                 "?socketTimeout=30&loginTimeout=30&tcpKeepAlive=true";
-        // Timezone: if configured, pass as JDBC session timezone via options
-        String timezone = cfg.getString("timezone");
-        if (timezone != null && !timezone.isEmpty()) {
-            url += "&options=-c%20timezone%3D" + timezone;
-        }
         Properties props = new Properties();
         props.setProperty("user", user);
         props.setProperty("password", password);
+        // Use a driver property so offsets such as +08:00 are not corrupted by URL decoding.
+        String timezone = cfg.getString("timezone");
+        if (timezone != null && !timezone.isEmpty()) {
+            props.setProperty("options", "-c timezone=" + timezone);
+        }
         // SSL mode: prefer by default (works for both local non-TLS and cloud TLS deployments).
         // Cloud deployments require TLS for SNI-based tenant routing.
         String sslmode = cfg.getString("sslmode");
@@ -705,18 +1085,264 @@ public class RisingWaveConnector implements TapConnector {
 
     private String getSchema(TapConnectionContext context) {
         if (schema != null && !schema.isEmpty()) return schema;
-        DataMap cfg = context.getConnectionConfig();
-        String s = cfg.getString("schema");
-        return (s != null && !s.isEmpty()) ? s : "public";
+        return configuredSchema(context.getConnectionConfig());
+    }
+
+    private static String configuredSchema(DataMap cfg) {
+        String configuredSchema = cfg.getString("schema");
+        return (configuredSchema != null && !configuredSchema.isEmpty()) ? configuredSchema : "public";
+    }
+
+    static String resolveIngestEndpoint(String configuredEndpoint, String host) {
+        String endpoint = configuredEndpoint;
+        if (endpoint == null || endpoint.trim().isEmpty()) {
+            endpoint = "ws://{Host}:4560";
+        }
+        if (endpoint.contains("{Host}")) {
+            if (host == null || host.trim().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Host is required to resolve the default WebSocket ingest endpoint");
+            }
+            endpoint = endpoint.replace("{Host}", host.trim());
+        }
+        return endpoint;
+    }
+
+    static String quoteIdentifier(String identifier) {
+        Objects.requireNonNull(identifier, "identifier");
+        return '"' + identifier.replace("\"", "\"\"") + '"';
+    }
+
+    private static String webhookValidationClause(String webhookSecret, boolean jsonbMode) {
+        if (webhookSecret == null || webhookSecret.isEmpty()) {
+            return "";
+        }
+        String escapedSecret = webhookSecret.replace("'", "''");
+        String signedPayload = jsonbMode ? quoteIdentifier(JSONB_PAYLOAD_COLUMN) : "payload";
+        return " VALIDATE AS secure_compare("
+                + "headers->>'x-rw-signature', "
+                + "'sha256=' || encode(hmac('" + escapedSecret
+                + "', " + signedPayload + ", 'sha256'), 'hex'))";
+    }
+
+    static boolean isWebSocketMode(String mode) {
+        return MODE_STREAMING.equals(mode) || MODE_STREAMING_JSONB.equals(mode);
     }
 
     private String fullTableName(String tableId) {
-        // tableId may already include schema, or may not
-        if (tableId != null && tableId.contains(".")) {
-            String[] parts = tableId.split("\\.", 2);
-            return '"' + parts[0] + "\".\"" + parts[1] + '"';
+        return tableReference(tableId).qualifiedName();
+    }
+
+    private TableReference tableReference(String tableId) {
+        Objects.requireNonNull(tableId, "tableId");
+        int separator = tableId.indexOf('.');
+        if (separator > 0 && separator < tableId.length() - 1) {
+            return new TableReference(tableId.substring(0, separator), tableId.substring(separator + 1));
         }
-        return '"' + schema + "\".\"" + tableId + '"';
+        return new TableReference(schema, tableId);
+    }
+
+    private boolean tableExists(Connection conn, TableReference table) throws SQLException {
+        String sql = "SELECT 1 FROM information_schema.tables WHERE table_schema = ? AND table_name = ?";
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, table.schema);
+            statement.setString(2, table.table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next();
+            }
+        }
+    }
+
+    private void validateExistingTable(Connection conn, TableReference table,
+                                       TapTable expectedTable) throws SQLException {
+        Map<String, String> existingColumns = new LinkedHashMap<>();
+        String columnsSql = "SELECT column_name, data_type FROM information_schema.columns "
+                + "WHERE table_schema = ? AND table_name = ?";
+        try (PreparedStatement statement = conn.prepareStatement(columnsSql)) {
+            statement.setString(1, table.schema);
+            statement.setString(2, table.table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    existingColumns.put(resultSet.getString(1), resultSet.getString(2));
+                }
+            }
+        }
+        List<String> missingColumns = new ArrayList<>();
+        List<String> incompatibleColumns = new ArrayList<>();
+        for (Map.Entry<String, TapField> expected : expectedTable.getNameFieldMap().entrySet()) {
+            String requiredColumn = expected.getKey();
+            if (!existingColumns.containsKey(requiredColumn)) {
+                missingColumns.add(requiredColumn);
+                continue;
+            }
+            String expectedType = canonicalRisingWaveType(toRisingWaveType(expected.getValue()));
+            String actualType = canonicalRisingWaveType(existingColumns.get(requiredColumn));
+            if (!expectedType.equals(actualType)) {
+                incompatibleColumns.add(requiredColumn + " (expected " + expectedType
+                        + ", found " + actualType + ")");
+            }
+        }
+        if (!missingColumns.isEmpty()) {
+            throw new SQLException("Existing target table " + table.qualifiedName()
+                    + " is missing columns required by the Tapdata model: " + missingColumns);
+        }
+        if (!incompatibleColumns.isEmpty()) {
+            throw new SQLException("Existing target table " + table.qualifiedName()
+                    + " has incompatible column types: " + incompatibleColumns);
+        }
+
+        Set<String> expectedPrimaryKeys = new LinkedHashSet<>();
+        expectedPrimaryKeys.addAll(primaryKeysOf(expectedTable));
+        Set<String> existingPrimaryKeys = loadPrimaryKeys(conn, table);
+        if (!expectedPrimaryKeys.equals(existingPrimaryKeys)) {
+            throw new SQLException("Existing target table " + table.qualifiedName()
+                    + " has primary key " + existingPrimaryKeys
+                    + " but the Tapdata model requires " + expectedPrimaryKeys);
+        }
+
+        if (isWebSocketMode(ingestMode)) {
+            try (Statement statement = conn.createStatement();
+                 ResultSet resultSet = statement.executeQuery("SHOW CREATE TABLE " + table.qualifiedName())) {
+                String ddl = resultSet.next() ? resultSet.getString(2) : "";
+                String normalizedDdl = ddl == null ? "" : ddl.toLowerCase(Locale.ROOT);
+                if (!normalizedDdl.contains("connector = 'webhook'")
+                        && !normalizedDdl.contains("connector='webhook'")) {
+                    throw new SQLException("Existing target table " + table.qualifiedName()
+                            + " is not webhook-backed and cannot receive WebSocket streaming writes");
+                }
+            }
+        }
+    }
+
+    private void validateExistingJsonbTable(Connection conn, TableReference table) throws SQLException {
+        Map<String, String> columns = new LinkedHashMap<>();
+        String sql = "SELECT column_name, data_type FROM information_schema.columns "
+                + "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position";
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, table.schema);
+            statement.setString(2, table.table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    columns.put(resultSet.getString(1), resultSet.getString(2));
+                }
+            }
+        }
+        if (columns.size() != 1
+                || !"jsonb".equals(canonicalRisingWaveType(columns.get(JSONB_PAYLOAD_COLUMN)))) {
+            throw new SQLException("Existing target table " + table.qualifiedName()
+                    + " must contain exactly one JSONB column named \"" + JSONB_PAYLOAD_COLUMN
+                    + "\" for WebSocket JSONB append-only mode; found " + columns);
+        }
+        if (!loadPrimaryKeys(conn, table).isEmpty()) {
+            throw new SQLException("Existing target table " + table.qualifiedName()
+                    + " must not have a primary key in WebSocket JSONB append-only mode");
+        }
+        validateWebhookBackedTable(conn, table);
+    }
+
+    private void validateWebhookBackedTable(Connection conn, TableReference table) throws SQLException {
+        try (Statement statement = conn.createStatement();
+             ResultSet resultSet = statement.executeQuery("SHOW CREATE TABLE " + table.qualifiedName())) {
+            String ddl = resultSet.next() ? resultSet.getString(2) : "";
+            String normalizedDdl = ddl == null ? "" : ddl.toLowerCase(Locale.ROOT);
+            if (!normalizedDdl.contains("connector = 'webhook'")
+                    && !normalizedDdl.contains("connector='webhook'")) {
+                throw new SQLException("Existing target table " + table.qualifiedName()
+                        + " is not webhook-backed and cannot receive WebSocket streaming writes");
+            }
+        }
+    }
+
+    private Set<String> loadPrimaryKeys(Connection conn, TableReference table) throws SQLException {
+        Set<String> primaryKeys = new LinkedHashSet<>();
+        String sql = "SELECT kcu.column_name FROM information_schema.table_constraints tc "
+                + "JOIN information_schema.key_column_usage kcu "
+                + "ON tc.constraint_catalog = kcu.constraint_catalog "
+                + "AND tc.constraint_schema = kcu.constraint_schema "
+                + "AND tc.constraint_name = kcu.constraint_name "
+                + "WHERE tc.constraint_type = 'PRIMARY KEY' "
+                + "AND tc.table_schema = ? AND tc.table_name = ? "
+                + "ORDER BY kcu.ordinal_position";
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, table.schema);
+            statement.setString(2, table.table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    primaryKeys.add(resultSet.getString(1));
+                }
+            }
+        }
+        return primaryKeys;
+    }
+
+    static void validateStreamingPrimaryKey(TapTable table) {
+        Collection<String> primaryKeys = primaryKeysOf(table);
+        if (primaryKeys.isEmpty()) {
+            String tableName = table == null ? "<unknown>" : table.getId();
+            throw new IllegalArgumentException("WebSocket streaming requires a primary key for table "
+                    + tableName + " so updates, deletes, and retries preserve row identity");
+        }
+    }
+
+    private static List<String> primaryKeysOf(TapTable table) {
+        if (table == null || table.getNameFieldMap() == null) {
+            return Collections.emptyList();
+        }
+        List<TapField> fields = new ArrayList<>();
+        for (TapField field : table.getNameFieldMap().values()) {
+            if (Boolean.TRUE.equals(field.getPrimaryKey())) {
+                fields.add(field);
+            }
+        }
+        fields.sort(Comparator.comparing(
+                TapField::getPrimaryKeyPos,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        List<String> primaryKeys = new ArrayList<>(fields.size());
+        for (TapField field : fields) {
+            primaryKeys.add(field.getName());
+        }
+        return primaryKeys;
+    }
+
+    static String canonicalRisingWaveType(String dataType) {
+        if (dataType == null) {
+            return "text";
+        }
+        String type = dataType.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        int parameters = type.indexOf('(');
+        if (parameters >= 0) {
+            type = type.substring(0, parameters).trim();
+        }
+        switch (type) {
+            case "int": case "int4": case "integer": return "integer";
+            case "int8": case "bigint": case "bigserial": case "serial": return "bigint";
+            case "int2": case "smallint": return "smallint";
+            case "float4": case "real": return "real";
+            case "float8": case "double precision": return "double precision";
+            case "decimal": case "numeric": return "numeric";
+            case "bool": case "boolean": return "boolean";
+            case "char": case "character": case "character varying": case "text":
+            case "varchar": case "uuid": return "varchar";
+            case "time without time zone": case "time": return "time";
+            case "timestamp without time zone": case "timestamp": return "timestamp";
+            case "timestamptz": case "timestamp with time zone": return "timestamp with time zone";
+            case "json": case "jsonb": return "jsonb";
+            default: return type;
+        }
+    }
+
+    private static final class TableReference {
+        private final String schema;
+        private final String table;
+
+        private TableReference(String schema, String table) {
+            this.schema = Objects.requireNonNull(schema, "schema");
+            this.table = Objects.requireNonNull(table, "table");
+        }
+
+        private String qualifiedName() {
+            return quoteIdentifier(schema) + "." + quoteIdentifier(table);
+        }
     }
 
     private static String buildTableFilter(List<String> tables) {
@@ -733,7 +1359,7 @@ public class RisingWaveConnector implements TapConnector {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append('"').append(cols.get(i)).append('"');
+            sb.append(quoteIdentifier(cols.get(i)));
         }
         return sb.toString();
     }
@@ -830,7 +1456,8 @@ public class RisingWaveConnector implements TapConnector {
         ps.setObject(idx, converted);
     }
 
-    private static Map<String, Object> normalizeRecordForStreaming(Map<String, Object> record, TapTable table) {
+    private static Map<String, Object> normalizeRecordForStreaming(
+            Map<String, Object> record, TapTable table, boolean typedColumns) {
         if (record == null) {
             return null;
         }
@@ -839,12 +1466,15 @@ public class RisingWaveConnector implements TapConnector {
         Map<String, TapField> fields = table == null ? null : table.getNameFieldMap();
         for (Map.Entry<String, Object> entry : record.entrySet()) {
             TapField field = fields == null ? null : fields.get(entry.getKey());
-            normalized.put(entry.getKey(), normalizeValueForStreaming(entry.getValue(), field));
+            normalized.put(entry.getKey(), normalizeValueForStreaming(
+                    entry.getValue(), field, typedColumns, false));
         }
         return normalized;
     }
 
-    private static Object normalizeValueForStreaming(Object value, TapField field) {
+    private static Object normalizeValueForStreaming(
+            Object value, TapField field, boolean typedColumns,
+            boolean stringifyExactNumbers) {
         if (value == null) {
             return null;
         }
@@ -869,23 +1499,50 @@ public class RisingWaveConnector implements TapConnector {
             Timestamp timestamp = dateTime.toTimestamp();
             return timestamp == null ? null : timestamp.toString();
         }
+        boolean stringifyNumbers = stringifyExactNumbers
+                || !typedColumns
+                || isDecimalField(field)
+                || isJsonLikeField(field, tapType);
+        if (stringifyNumbers && value instanceof java.math.BigDecimal) {
+            // Webhook JSON-number decoding can round through floating point. Typed NUMERIC columns
+            // parse an exact decimal string, while JSONB keeps the exact value as a JSON string.
+            return ((java.math.BigDecimal) value).toPlainString();
+        }
+        if (stringifyNumbers && value instanceof java.math.BigInteger) {
+            return value.toString();
+        }
+        if (typedColumns && value instanceof byte[] && isBinaryField(field)) {
+            // The webhook decoder uses PostgreSQL's standard bytea text format by default.
+            // Jackson's normal byte[] representation is Base64 and would be stored incorrectly.
+            return toPostgresByteaHex((byte[]) value);
+        }
         if (isJsonLikeField(field, tapType) && value instanceof CharSequence) {
             String json = value.toString().trim();
-            return json.isEmpty() ? value.toString() : WsIngestClient.rawJson(json);
+            if (json.isEmpty()) {
+                return value.toString();
+            }
+            try {
+                return JSON_MAPPER.readValue(json, Object.class);
+            } catch (java.io.IOException e) {
+                throw new IllegalArgumentException("Invalid JSON value for field "
+                        + (field == null ? "<unknown>" : field.getName()), e);
+            }
         }
 
         if (value instanceof Map<?, ?>) {
             LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = entry.getKey() == null ? "null" : entry.getKey().toString();
-                normalized.put(key, normalizeValueForStreaming(entry.getValue(), null));
+                normalized.put(key, normalizeValueForStreaming(
+                        entry.getValue(), null, typedColumns, stringifyNumbers));
             }
             return normalized;
         }
         if (value instanceof Collection<?>) {
             List<Object> normalized = new ArrayList<>();
             for (Object element : (Collection<?>) value) {
-                normalized.add(normalizeValueForStreaming(element, null));
+                normalized.add(normalizeValueForStreaming(
+                        element, null, typedColumns, stringifyNumbers));
             }
             return normalized;
         }
@@ -893,7 +1550,8 @@ public class RisingWaveConnector implements TapConnector {
             int length = java.lang.reflect.Array.getLength(value);
             List<Object> normalized = new ArrayList<>(length);
             for (int i = 0; i < length; i++) {
-                normalized.add(normalizeValueForStreaming(java.lang.reflect.Array.get(value, i), null));
+                normalized.add(normalizeValueForStreaming(
+                        java.lang.reflect.Array.get(value, i), null, typedColumns, stringifyNumbers));
             }
             return normalized;
         }
@@ -914,6 +1572,32 @@ public class RisingWaveConnector implements TapConnector {
         }
         String dataType = field.getDataType().toLowerCase(Locale.ROOT);
         return dataType.contains("json");
+    }
+
+    private static boolean isDecimalField(TapField field) {
+        if (field == null || field.getDataType() == null) {
+            return false;
+        }
+        String dataType = field.getDataType().toLowerCase(Locale.ROOT);
+        return dataType.startsWith("numeric") || dataType.startsWith("decimal");
+    }
+
+    private static boolean isBinaryField(TapField field) {
+        return field != null && field.getDataType() != null
+                && "bytea".equalsIgnoreCase(field.getDataType().trim());
+    }
+
+    private static String toPostgresByteaHex(byte[] bytes) {
+        char[] hex = new char[2 + bytes.length * 2];
+        hex[0] = '\\';
+        hex[1] = 'x';
+        final char[] digits = "0123456789abcdef".toCharArray();
+        for (int i = 0; i < bytes.length; i++) {
+            int value = bytes[i] & 0xff;
+            hex[2 + i * 2] = digits[value >>> 4];
+            hex[3 + i * 2] = digits[value & 0x0f];
+        }
+        return new String(hex);
     }
 
     private static void closeQuietly(AutoCloseable c) {

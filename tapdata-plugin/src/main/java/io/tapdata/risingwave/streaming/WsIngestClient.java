@@ -1,17 +1,17 @@
 package io.tapdata.risingwave.streaming;
 
-import io.tapdata.entity.schema.value.DateTime;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.tapdata.risingwave.RisingWaveConnector;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
-import java.lang.reflect.Array;
-import java.math.BigDecimal;
-import java.sql.Timestamp;
-import java.time.*;
-import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAccessor;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,6 +40,9 @@ import javax.crypto.spec.SecretKeySpec;
 public class WsIngestClient implements AutoCloseable {
 
     private static final String SIGNATURE_HEADER = "x-rw-signature";
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private final String wsUri;
     private final String webhookSecret;
@@ -52,6 +55,7 @@ public class WsIngestClient implements AutoCloseable {
 
     private volatile WebSocket webSocket;
     private volatile boolean closed = false;
+    private volatile RuntimeException terminalFailure;
 
     /** Guard concurrent sendText calls — Java WebSocket prohibits concurrent sends. */
     private final Object sendLock = new Object();
@@ -95,11 +99,21 @@ public class WsIngestClient implements AutoCloseable {
         ackFutures.add(ackFuture);
         try {
             synchronized (sendLock) {
+                if (closed) {
+                    throw new CancellationException("WebSocket ingest client closed");
+                }
+                if (terminalFailure != null) {
+                    throw terminalFailure;
+                }
+                if (webSocket == null) {
+                    throw new IllegalStateException("WebSocket ingest client is not connected");
+                }
                 dmlBatchId = dmlBatchIdGen.getAndIncrement();
                 String payloadJson = buildBatchPayloadJson(dmlBatchId, operations);
                 pending.put(dmlBatchId, ackFuture);
 
-                RisingWaveConnector.debugLog("WsIngestClient.sendBatch dmlBatchId=" + dmlBatchId + " json=" + payloadJson);
+                RisingWaveConnector.debugLog("WsIngestClient.sendBatch dmlBatchId=" + dmlBatchId
+                        + " items=" + operations.size());
                 webSocket.sendText(payloadJson, true).get(10, TimeUnit.SECONDS);
             }
         } catch (Exception e) {
@@ -118,10 +132,19 @@ public class WsIngestClient implements AutoCloseable {
 
     @Override
     public void close() {
-        closed = true;
-        WebSocket ws = this.webSocket;
+        WebSocket ws;
+        synchronized (sendLock) {
+            closed = true;
+            failAllLocked(new CancellationException("WebSocket ingest client closed"));
+            ws = this.webSocket;
+            this.webSocket = null;
+        }
         if (ws != null && !ws.isOutputClosed()) {
-            ws.sendClose(WebSocket.NORMAL_CLOSURE, "done");
+            try {
+                ws.sendClose(WebSocket.NORMAL_CLOSURE, "done");
+            } catch (Exception ignored) {
+                ws.abort();
+            }
         }
     }
 
@@ -158,27 +181,71 @@ public class WsIngestClient implements AutoCloseable {
     }
 
     private void handleMessage(String json) {
-        RisingWaveConnector.debugLog("WsIngestClient.recv json=" + json);
-        if (json.contains("\"ack\"")) {
-            List<Long> ids = parseAckIds(json);
-            for (Long id : ids) {
-                CompletableFuture<Void> f = pending.remove(id);
-                if (f != null) f.complete(null);
-            }
-        } else if (json.contains("\"error\"")) {
-            long dmlId = parseErrorDmlBatchId(json);
-            String msg = parseErrorMessage(json);
-            CompletableFuture<Void> f = pending.remove(dmlId);
-            if (f != null) {
-                f.completeExceptionally(new RuntimeException("DML error (dml_batch_id=" + dmlId + "): " + msg));
-            }
-        } else if (json.contains("\"fatal\"")) {
-            String msg = parseFatal(json);
-            failAll(new RuntimeException("Fatal ingest error: " + msg));
+        final JsonNode response;
+        try {
+            response = JSON_MAPPER.readTree(json);
+        } catch (JsonProcessingException e) {
+            failAll(new RuntimeException("Invalid WebSocket ingest response", e));
+            return;
         }
+
+        JsonNode ack = response.get("ack");
+        if (ack != null) {
+            if (!ack.isIntegralNumber() || !ack.canConvertToLong()) {
+                failAll(new RuntimeException("Invalid WebSocket ingest ACK"));
+                return;
+            }
+            long id = ack.longValue();
+            CompletableFuture<Void> future = pending.remove(id);
+            if (future == null) {
+                failAll(new RuntimeException("Unexpected WebSocket ingest ACK for dml_batch_id=" + id));
+            } else {
+                future.complete(null);
+            }
+            return;
+        }
+
+        JsonNode fatal = response.get("fatal");
+        if (fatal != null && fatal.isTextual()) {
+            failAll(new RuntimeException("Fatal ingest error: " + fatal.textValue()));
+            return;
+        }
+
+        // Older gateways may return a per-batch error object. RisingWave itself currently
+        // sends only ack or fatal, but retaining this branch gives a useful targeted failure.
+        JsonNode error = response.get("error");
+        if (error != null) {
+            JsonNode idNode = response.has("dml_batch_id")
+                    ? response.get("dml_batch_id") : response.get("dml_id");
+            JsonNode messageNode = response.get("message");
+            if (idNode == null || !idNode.isIntegralNumber() || !idNode.canConvertToLong()) {
+                failAll(new RuntimeException("Invalid WebSocket ingest error response"));
+                return;
+            }
+            long id = idNode.longValue();
+            String message = messageNode != null && messageNode.isTextual()
+                    ? messageNode.textValue() : error.toString();
+            CompletableFuture<Void> future = pending.remove(id);
+            if (future == null) {
+                failAll(new RuntimeException("Unexpected WebSocket ingest error for dml_batch_id=" + id));
+            } else {
+                future.completeExceptionally(
+                        new RuntimeException("DML error (dml_batch_id=" + id + "): " + message));
+            }
+            return;
+        }
+
+        failAll(new RuntimeException("Unknown WebSocket ingest response"));
     }
 
     private void failAll(RuntimeException ex) {
+        synchronized (sendLock) {
+            failAllLocked(ex);
+        }
+    }
+
+    private void failAllLocked(RuntimeException ex) {
+        terminalFailure = ex;
         for (CompletableFuture<Void> f : pending.values()) {
             f.completeExceptionally(ex);
         }
@@ -189,34 +256,34 @@ public class WsIngestClient implements AutoCloseable {
         return "{\"type\":\"init\",\"timestamp\":" + timestampMs + "}";
     }
 
-    private String buildDmlJson(String op,
-                                Map<String, Object> before,
-                                Map<String, Object> after) {
+    private static Map<String, Object> buildDml(String op,
+                                                Map<String, Object> before,
+                                                Map<String, Object> after) {
         String normalizedOp = "delete".equalsIgnoreCase(op) ? "delete" : "upsert";
         Map<String, Object> data = "delete".equals(normalizedOp)
                 ? (before != null ? before : after)
                 : (after != null ? after : before);
-
-        StringBuilder sb = new StringBuilder(256);
-        sb.append("{\"op\":\"").append(normalizedOp).append("\"");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("op", normalizedOp);
         if (data != null) {
-            sb.append(",\"data\":").append(mapToJson(data));
+            item.put("data", normalizeJsonValues(data));
         }
-        sb.append("}");
-        return sb.toString();
+        return item;
     }
 
-    private String buildBatchPayloadJson(long dmlBatchId, List<DmlOperation> operations) {
-        StringBuilder sb = new StringBuilder(operations.size() * 128);
-        sb.append("{\"dml_batch_id\":").append(dmlBatchId).append(",\"items\":[");
-        boolean first = true;
+    static String buildBatchPayloadJson(long dmlBatchId, List<DmlOperation> operations) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("dml_batch_id", dmlBatchId);
+        List<Map<String, Object>> items = new ArrayList<>(operations.size());
         for (DmlOperation operation : operations) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append(buildDmlJson(operation.op, operation.before, operation.after));
+            items.add(buildDml(operation.op, operation.before, operation.after));
         }
-        sb.append("]}");
-        return sb.toString();
+        payload.put("items", items);
+        try {
+            return JSON_MAPPER.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Unable to serialize WebSocket ingest batch", e);
+        }
     }
 
     private String signPayload(String payloadJson) throws Exception {
@@ -238,123 +305,35 @@ public class WsIngestClient implements AutoCloseable {
         return sb.toString();
     }
 
-    private static String mapToJson(Map<String, Object> map) {
-        return mapToJsonObject(map);
-    }
-
-    private static String mapToJsonObject(Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            String key = entry.getKey() == null ? "null" : entry.getKey().toString();
-            sb.append("\"").append(escapeJson(key)).append("\":");
-            sb.append(valueToJson(entry.getValue()));
+    private static Object normalizeJsonValues(Object value) {
+        if (value instanceof byte[]) {
+            return toByteaHex((byte[]) value);
         }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private static String valueToJson(Object value) {
-        if (value == null) return "null";
-        if (value instanceof RawJson) {
-            return ((RawJson) value).json;
-        }
-        if (value instanceof Boolean) return value.toString();
-        if (value instanceof Number) {
-            if (value instanceof Double && !Double.isFinite((Double) value)) {
-                return "\"" + value + "\"";
-            }
-            if (value instanceof Float && !Float.isFinite((Float) value)) {
-                return "\"" + value + "\"";
-            }
-            if (value instanceof BigDecimal) {
-                return ((BigDecimal) value).toPlainString();
-            }
+        if (value instanceof TemporalAccessor) {
             return value.toString();
         }
-        if (value instanceof byte[]) {
-            return "\"" + toByteaHex((byte[]) value) + "\"";
-        }
-        if (value instanceof DateTime) {
-            Timestamp ts = ((DateTime) value).toTimestamp();
-            if (ts == null) return "null";
-            return "\"" + ts.toString() + "\"";
-        }
-        if (value instanceof OffsetDateTime) {
-            return "\"" + DateTimeFormatter.ISO_OFFSET_DATE_TIME.format((OffsetDateTime) value) + "\"";
-        }
-        if (value instanceof ZonedDateTime) {
-            return "\"" + DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(((ZonedDateTime) value).toOffsetDateTime()) + "\"";
-        }
-        if (value instanceof Instant) {
-            return "\"" + DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(((Instant) value).atOffset(ZoneOffset.UTC)) + "\"";
-        }
-        if (value instanceof LocalDateTime) {
-            return "\"" + value + "\"";
-        }
-        if (value instanceof LocalDate) {
-            return "\"" + value + "\"";
-        }
-        if (value instanceof LocalTime) {
-            return "\"" + value + "\"";
-        }
-        if (value instanceof java.sql.Date) {
-            return "\"" + value.toString() + "\"";
-        }
-        if (value instanceof java.sql.Time) {
-            return "\"" + value + "\"";
+        if (value instanceof java.sql.Date || value instanceof java.sql.Time
+                || value instanceof java.sql.Timestamp) {
+            return value.toString();
         }
         if (value instanceof java.util.Date) {
-            java.sql.Timestamp ts = (value instanceof java.sql.Timestamp)
-                    ? (java.sql.Timestamp) value
-                    : new java.sql.Timestamp(((java.util.Date) value).getTime());
-            return "\"" + ts.toString() + "\"";
-        }
-        if (value instanceof UUID) {
-            return "\"" + value + "\"";
-        }
-        if (value instanceof CharSequence || value instanceof Character) {
-            return "\"" + escapeJson(value.toString()) + "\"";
+            return ((java.util.Date) value).toInstant().toString();
         }
         if (value instanceof Map<?, ?>) {
-            return mapToJsonObject((Map<?, ?>) value);
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                normalized.put(String.valueOf(entry.getKey()), normalizeJsonValues(entry.getValue()));
+            }
+            return normalized;
         }
         if (value instanceof Collection<?>) {
-            return collectionToJson((Collection<?>) value);
+            List<Object> normalized = new ArrayList<>();
+            for (Object element : (Collection<?>) value) {
+                normalized.add(normalizeJsonValues(element));
+            }
+            return normalized;
         }
-        if (value.getClass().isArray()) {
-            return arrayToJson(value);
-        }
-        return "\"" + escapeJson(value.toString()) + "\"";
-    }
-
-    public static RawJson rawJson(String json) {
-        return new RawJson(json);
-    }
-
-    private static String collectionToJson(Collection<?> values) {
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
-        for (Object value : values) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append(valueToJson(value));
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    private static String arrayToJson(Object array) {
-        StringBuilder sb = new StringBuilder("[");
-        int length = Array.getLength(array);
-        for (int i = 0; i < length; i++) {
-            if (i > 0) sb.append(",");
-            sb.append(valueToJson(Array.get(array, i)));
-        }
-        sb.append("]");
-        return sb.toString();
+        return value;
     }
 
     private static String toByteaHex(byte[] bytes) {
@@ -367,31 +346,6 @@ public class WsIngestClient implements AutoCloseable {
         return sb.toString();
     }
 
-    private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
-
-    static List<Long> parseAckIds(String json) {
-        List<Long> ids = new ArrayList<>();
-        int ackIdx = json.indexOf("\"ack\"");
-        if (ackIdx < 0) return ids;
-        int colon = json.indexOf(":", ackIdx);
-        if (colon < 0) return ids;
-        int numStart = colon + 1;
-        while (numStart < json.length() && json.charAt(numStart) == ' ') numStart++;
-        int numEnd = numStart;
-        while (numEnd < json.length() && (Character.isDigit(json.charAt(numEnd)) || json.charAt(numEnd) == '-')) numEnd++;
-        try {
-            ids.add(Long.parseLong(json.substring(numStart, numEnd)));
-        } catch (NumberFormatException ignored) {
-        }
-        return ids;
-    }
-
     public static class DmlOperation {
         private final String op;
         private final Map<String, Object> before;
@@ -402,61 +356,6 @@ public class WsIngestClient implements AutoCloseable {
             this.before = before;
             this.after = after;
         }
-    }
-
-    public static final class RawJson {
-        private final String json;
-
-        private RawJson(String json) {
-            this.json = json;
-        }
-    }
-
-    static long parseErrorDmlBatchId(String json) {
-        int idx = json.indexOf("\"dml_batch_id\"");
-        if (idx < 0) idx = json.indexOf("\"dml_id\"");
-        if (idx < 0) return -1;
-        int colon = json.indexOf(":", idx);
-        if (colon < 0) return -1;
-        int numStart = colon + 1;
-        while (numStart < json.length() && json.charAt(numStart) == ' ') numStart++;
-        int numEnd = numStart;
-        while (numEnd < json.length() && (Character.isDigit(json.charAt(numEnd)) || json.charAt(numEnd) == '-')) numEnd++;
-        try {
-            return Long.parseLong(json.substring(numStart, numEnd));
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
-
-    static String parseErrorMessage(String json) {
-        return parseStringField(json, "message");
-    }
-
-    static String parseFatal(String json) {
-        return parseStringField(json, "fatal");
-    }
-
-    private static String parseStringField(String json, String field) {
-        int idx = json.indexOf("\"" + field + "\"");
-        if (idx < 0) return "";
-        int colon = json.indexOf(":", idx);
-        if (colon < 0) return "";
-        int quoteStart = json.indexOf("\"", colon + 1);
-        if (quoteStart < 0) return "";
-        int quoteEnd = quoteStart + 1;
-        while (quoteEnd < json.length()) {
-            char c = json.charAt(quoteEnd);
-            if (c == '\\') { quoteEnd += 2; continue; }
-            if (c == '"') break;
-            quoteEnd++;
-        }
-        return json.substring(quoteStart + 1, quoteEnd)
-                .replace("\\\"", "\"")
-                .replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace("\\\\", "\\");
     }
 
     private static String trimTrailingSlash(String s) {
