@@ -1237,7 +1237,13 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            let res = Object::delete_by_id(old_sink_id).exec(&txn).await?;
+            // Deleting only the sink object cascades the internal `table` rows through
+            // `belongs_to_job_id`, but leaves their corresponding `object` rows behind.
+            // Delete the complete object set to keep the catalog hierarchy consistent.
+            let res = Object::delete_many()
+                .filter(object::Column::Oid.is_in(old_object_ids))
+                .exec(&txn)
+                .await?;
             if res.rows_affected == 0 {
                 return Err(MetaError::catalog_id_not_found("sink", old_sink_id));
             }
