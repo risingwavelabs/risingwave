@@ -129,10 +129,6 @@ pub trait ObjectStore: Send + Sync {
     ) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
-
-    fn support_streaming_upload(&self) -> bool {
-        true
-    }
 }
 
 #[cfg(not(madsim))]
@@ -344,10 +340,6 @@ impl ObjectStoreImpl {
         dispatch_object_store_enum!(self, |store| store
             .inner
             .get_object_prefix(obj_id, use_new_object_prefix_strategy))
-    }
-
-    pub fn support_streaming_upload(&self) -> bool {
-        dispatch_object_store_enum!(self, |store| store.inner.support_streaming_upload())
     }
 
     pub fn media_type(&self) -> &'static str {
