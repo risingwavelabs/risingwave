@@ -1150,7 +1150,7 @@ exchange, compute → compactor):
 | Metric                      | Type             | Labels                      | Meaning |
 |-----------------------------|------------------|-----------------------------|---------|
 | `connection_count`          | gauge      | `connection_type`, `uri`    | Current open connections. |
-| `connection_create_rate`    | counter    | `connection_type`, `uri`    | New connection openings. Churn here → upstream flapping or idle-timeout mis-tune. |
+| `connection_create_rate`    | counter    | `connection_type`, `uri`    | New connection openings. Churn here → upstream flapping or idle-timeout mistuning. |
 | `connection_err_rate`       | counter    | `connection_type`, `uri`    | Connection-open errors. |
 | `connection_read_rate`      | counter    | `connection_type`, `uri`    | Bytes read. |
 | `connection_write_rate`     | counter    | `connection_type`, `uri`    | Bytes written. |
