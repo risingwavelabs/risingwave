@@ -95,7 +95,7 @@ pub struct MetaMetrics {
     /// The number of in-flight barriers
     pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
-    pub last_committed_barrier_time: IntGaugeVec,
+    pub last_committed_barrier_time: LabelGuardedIntGaugeVec,
     /// The barrier interval of each database
     pub barrier_interval_by_database: GaugeVec,
 
@@ -314,7 +314,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let last_committed_barrier_time = register_int_gauge_vec_with_registry!(
+        let last_committed_barrier_time = register_guarded_int_gauge_vec_with_registry!(
             "last_committed_barrier_time",
             "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
             &["database_id"],
