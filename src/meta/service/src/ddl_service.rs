@@ -1707,7 +1707,11 @@ impl DdlService for DdlServiceImpl {
             .check_and_rewrite_manifests(sink_id)
             .await
             .map_err(|e| {
-                Status::internal(format!("Failed to rewrite manifests: {}", e.as_report()))
+                Status::internal(format!(
+                    "Failed to rewrite manifests for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
             })?;
 
         Ok(Response::new(RewriteIcebergTableManifestsResponse {

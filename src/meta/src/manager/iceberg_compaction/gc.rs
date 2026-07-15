@@ -72,11 +72,11 @@ fn plan_manifest_rewrite(
         // the newest under-filled bin can accumulate across maintenance runs.
         // A stable sort preserves manifest-list order for V1 manifests and
         // manifests written by the same snapshot.
-        candidates.sort_by_key(|manifest| std::cmp::Reverse(manifest.sequence_number));
+        candidates.sort_by_key(|manifest| manifest.sequence_number);
         let mut current_bin = Vec::new();
         let mut current_bin_size_bytes = 0_u64;
         let mut completed_bin = None;
-        for candidate in candidates.into_iter().rev() {
+        for candidate in candidates {
             let candidate_size_bytes = candidate.manifest_length as u64;
             let next_size_bytes = current_bin_size_bytes.saturating_add(candidate_size_bytes);
             if !current_bin.is_empty() && next_size_bytes > target_size_bytes {
@@ -184,12 +184,8 @@ impl IcebergCompactionManager {
             "Starting Iceberg metadata maintenance operations",
         );
 
-        for sink_id in snapshot_expiration_sink_ids {
-            if let Err(e) = self.check_and_expire_snapshots(sink_id).await {
-                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id);
-            }
-        }
-
+        // Rewrite first so snapshot expiration in the same tick can clean up
+        // manifests replaced by the new snapshot.
         for sink_id in manifest_rewrite_sink_ids {
             if let Err(e) = self.check_and_rewrite_manifests(sink_id).await {
                 tracing::error!(
@@ -197,6 +193,12 @@ impl IcebergCompactionManager {
                     %sink_id,
                     "Failed to rewrite Iceberg manifests",
                 );
+            }
+        }
+
+        for sink_id in snapshot_expiration_sink_ids {
+            if let Err(e) = self.check_and_expire_snapshots(sink_id).await {
+                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id);
             }
         }
 
@@ -341,6 +343,12 @@ impl IcebergCompactionManager {
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
         if table.metadata().format_version() >= FormatVersion::V3 {
+            // Iceberg format upgrades cannot be downgraded, so stop retrying
+            // periodic rewrites for this sink.
+            self.inner
+                .write()
+                .manifest_rewrite_sink_ids
+                .remove(&sink_id);
             tracing::warn!(
                 iceberg_component = "manifest_maintenance",
                 iceberg_operation = "rewrite_manifests",
@@ -553,7 +561,29 @@ mod tests {
         assert_eq!(plan.estimated_output_manifest_count, 1);
         assert_eq!(
             plan.rewrite_paths,
-            ["small-b".to_owned(), "small-c".to_owned()]
+            ["small-a".to_owned(), "small-b".to_owned()]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
+    fn test_plan_manifest_rewrite_selects_oldest_sequence_first() {
+        let mut newest = manifest("newest", 40, 0, ManifestContentType::Data);
+        newest.sequence_number = 3;
+        let mut oldest_a = manifest("oldest-a", 40, 0, ManifestContentType::Data);
+        oldest_a.sequence_number = 1;
+        let mut middle = manifest("middle", 40, 0, ManifestContentType::Data);
+        middle.sequence_number = 2;
+        let mut oldest_b = manifest("oldest-b", 40, 0, ManifestContentType::Data);
+        oldest_b.sequence_number = 1;
+
+        let plan = plan_manifest_rewrite(&[newest, oldest_a, middle, oldest_b], 100, 2);
+
+        assert_eq!(plan.selected_manifest_count, 2);
+        assert_eq!(
+            plan.rewrite_paths,
+            ["oldest-a".to_owned(), "oldest-b".to_owned()]
                 .into_iter()
                 .collect()
         );
@@ -577,7 +607,7 @@ mod tests {
         assert_eq!(plan.data_manifest_count, 17);
         assert_eq!(plan.selected_manifest_count, 16);
         assert_eq!(plan.estimated_output_manifest_count, 1);
-        assert!(!plan.rewrite_paths.contains("small-000"));
+        assert!(!plan.rewrite_paths.contains("small-016"));
     }
 
     #[test]
