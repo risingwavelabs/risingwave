@@ -604,6 +604,57 @@ Status: Completed through documentation commit preparation.
 - Verified the spec/documentation commit with clean unit tests, packaging, source spec parsing, and
   parsing of the spec embedded in the shaded JAR.
 
+### 2026-07-15 - P1 PDK Alignment and Maintainability Pass
+
+Status: Connector changes passed local unit, live integration, and packaging verification; visual
+TapData form inspection remains manual because no browser-control runtime was available.
+
+Implementation:
+
+- Aligned `ConnectionOptions` with the official TapData PostgreSQL connector pattern. Connection
+  tests now return a password-free connection string, stable SHA-256 instance identity, schema
+  namespace, and the actual RisingWave server version. The identity excludes the password,
+  webhook secret, write mode, and schema so changing transport or namespace does not create a
+  second physical database identity.
+- Replaced repeated form parsing with immutable `RisingWaveConfig`, shared by connection tests and
+  task initialization, so defaults, JDBC properties, and WebSocket settings cannot drift.
+- Extracted connection qualification, JDBC classloader setup, SQL/type helpers, and value
+  conversion into focused classes. `RisingWaveConnector` decreased from 1,608 to 1,026 lines while
+  retaining task lifecycle, schema discovery, DDL, and write orchestration.
+- Added focused unit coverage for identity stability, password exclusion, JDBC property handling,
+  exact JSONB number serialization, nested values, and BYTEA encoding.
+- Follow-up review moved configuration parsing inside the connection-test error boundary. Invalid or
+  out-of-range ports now produce one clear failed Connection test item instead of escaping from the
+  PDK call. The returned `dbVersion` is normalized to the RisingWave semantic version while the
+  Version test item retains the complete server banner.
+- Removed the hard-coded JSONB payload column from webhook validation SQL and expanded the identity
+  contract tests: password, webhook secret, schema, and write mode do not change the instance ID;
+  host, port, database, and user do.
+- Removed unrelocated Jackson multi-release optimization classes from the shaded JAR. Maven Shade
+  relocates the base classes but not classes beneath `META-INF/versions`; the connector supports
+  Java 11 and uses the relocated base implementation on all supported runtimes.
+
+Verification:
+
+- `mvn test`: 25 passed, 0 failures/errors.
+- `mvn -Drisingwave.it=true -Dtest=RisingWaveConnectionTestIT test`: 21 passed against the real
+  local RisingWave service, including the new `ConnectionOptions` identity and version assertion.
+- `mvn clean package` followed by a second `mvn -DskipTests package`: both passed; only the expected
+  manifest/license/notice resource overlap warnings remained.
+- Final snapshot JAR SHA-256:
+  `071ee87424474288461c4286bf3957d95da89799e67dcfd5f7dd220a1f8143ee`.
+- JAR audit: PostgreSQL driver present, 1,129 relocated Jackson classes, zero original Jackson
+  classes, and zero bundled TapData PDK/entity API classes.
+- `git diff --check` passed.
+
+Deferred or external:
+
+- TapData Create Connection visual inspection is still required after installing this snapshot;
+  the current session could inspect the form schema but could not control a browser.
+- `LIFECYCLE-001` remains a TapData runtime observation and was not masked by connector retry code.
+- CI integration remains deferred pending Wenym's confirmation.
+- No commit, push, PR, version bump, or connector publication was performed in this pass.
+
 ## Release Decision
 
 Connector-controlled production qualification passed. The `1.0.0` artifact is ready for a
@@ -620,3 +671,68 @@ The qualification pass itself preceded the conventional commits. No CI submissio
 publication has been performed.
 The local `latest=true` activation was acceptance-test setup only and must not be used as the
 production publication procedure.
+
+### 2026-07-15 - Local TapData Metadata Reset
+
+Status: Completed; the environment is ready for a fresh Data Replication task.
+
+- Removed the stopped `Task 1`, its TaskRecord, two monitoring log entries, and 16 metadata records
+  associated with the old Mock Source/RisingWave connections.
+- Removed the `rwrwmock` and `rwrw` connections. The old target was pinned to connector `1.0.0`
+  while its metadata used the `1.0-SNAPSHOT` qualified name, which caused
+  `metadataInstances is null` before connector write execution.
+- Dropped only the 11 `ws_*` tables created by `e2e_test/webhook/websocket_ingest.slt`; the
+  `public` schema itself was preserved.
+- Removed both stale RisingWave `DatabaseTypes` records and registered the current
+  `risingwave-connector-1.0-SNAPSHOT.jar` again.
+- TapData stores snapshot versions as `latest=false` even when `pdk-deploy register -l` is used.
+  For this local acceptance environment only, marked the sole RisingWave snapshot definition as
+  `latest=true` and restarted TapData. A production package must use a normal release version and
+  publication flow instead of this database override.
+- Final verification: 0 connections, 0 tasks, 0 stale metadata records, no tables in local
+  RisingWave `public`, exactly one RisingWave connector definition (`1.0-SNAPSHOT`, `latest=true`),
+  and the `tapdata-clean` container healthy.
+
+### 2026-07-15 - Fresh-User Manual Installation Baseline
+
+Status: Ready for the user to install the connector manually.
+
+- Removed the remaining RisingWave `DatabaseTypes` definition, 16 uploaded GridFS files and their
+  72 chunks, the copied `/tmp` connector, and old connector JARs cached under TapData `dist` and
+  `tap-running` directories.
+- Restarted TapData without registering a replacement connector. Final baseline: 0 RisingWave
+  plugin definitions, 0 RisingWave GridFS files, 0 connections, 0 tasks, no RisingWave connector
+  JAR inside the container, and no tables in local RisingWave `public`.
+- Rebuilt the distribution artifact from the current working tree with `mvn clean package`, then
+  reran `mvn package`: 25 unit tests passed and both builds completed successfully.
+- Manual-install artifact: `tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar`.
+- Final JAR SHA-256: `8480b6aa0c8fd9496ae93789d1ed905d9d0ad67d6a260943d304fd59cac8ca4b`.
+- The environment intentionally stops before `pdk-deploy register`, so the next action exercises
+  the same explicit plugin-install step expected of a test user.
+- The subsequent manual-user install uploaded the JAR and created the expected RisingWave
+  `DatabaseTypes` record, but TapData stored `1.0-SNAPSHOT` as `latest=false` despite the deploy
+  command using `-l`; the connector was therefore absent from Create Connection after restart.
+  Marking the sole local snapshot record `latest=true` made it eligible for UI discovery. This is
+  a snapshot-only local test workaround and further confirms that the distributable production
+  artifact must use a non-SNAPSHOT release version.
+- A fresh connection against an intentionally empty `public` schema passed all six connector-owned
+  checks: PDK version, JDBC connection, RisingWave version, schema existence, webhook-table
+  create/drop permission, and WebSocket init/DML/ACK. TapData appended a non-required
+  `LOAD_SCHEMA` item with `Not found any schema`; the overall result remained `SUCCESS`, and the
+  saved connection was `ready` with `everLoadSchema=true`, `loadFieldsStatus=finished`, and
+  `tableCount=0`. This is expected for an empty target and must not be worked around by leaving a
+  synthetic table behind.
+- The first fresh-user Mock Source to RisingWave Data Replication task started successfully and
+  created `public.mock_source_test`. The UI displayed `The requested resource does not exist`
+  because it requested the absent Community endpoint `/api/task-inspect/<task-id>`; this request
+  occurred before the successful task start and was unrelated to connector execution.
+- The same `ghcr.io/tapdata/tapdata:latest` environment rejected Agent metric submissions to
+  `/api/measurement/points/v2` with `TapOssNonSupportFunctionException`. The Agent applied its
+  120-second retry window, so initial batch read appeared stuck for exactly two minutes before it
+  completed and incremental sync started.
+- Final live verification: task status `running`, zero task monitoring errors, RisingWave row count
+  increased from 156 to 161 in five seconds. This proves automatic target-table creation and
+  WebSocket incremental replication from an initially empty RisingWave schema. The missing
+  task-inspect/measurement APIs are a TapData Community image/UI/Agent compatibility issue, not a
+  RisingWave connector failure; production qualification should use a pinned, internally matched
+  TapData release rather than the mutable `latest` tag.
