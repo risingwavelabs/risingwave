@@ -12,8 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod dv_merger;
+mod position_delete_merger;
 mod writer;
-
-pub use dv_merger::IcebergWithPkIndexDvMergerExecutorBuilder;
-pub use writer::IcebergWithPkIndexWriterExecutorBuilder;

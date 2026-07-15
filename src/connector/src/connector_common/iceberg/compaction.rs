@@ -14,12 +14,17 @@
 
 use crate::sink::catalog::SinkId;
 
+#[derive(Debug, Clone)]
+pub struct IcebergCommittedSnapshot {
+    pub branch: String,
+    pub snapshot_id: i64,
+    pub timestamp_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct IcebergSinkCompactionUpdate {
-    // statistics and information
+    // runtime event information
     pub sink_id: SinkId,
-
-    // configuration
-    pub compaction_interval: u64,
-
     pub force_compaction: bool,
+    pub observed_snapshot: IcebergCommittedSnapshot,
 }

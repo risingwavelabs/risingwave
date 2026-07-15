@@ -107,7 +107,7 @@ pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     use super::*;
 

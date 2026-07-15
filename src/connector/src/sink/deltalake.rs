@@ -19,7 +19,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use deltalake::DeltaTable;
-use deltalake::aws::storage::s3_constants::{
+use deltalake::aws::constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
@@ -568,7 +568,7 @@ impl DeltaLakeSinkCommitter {
             .snapshot()?
             .metadata()
             .partition_columns()
-            .clone();
+            .to_vec();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {

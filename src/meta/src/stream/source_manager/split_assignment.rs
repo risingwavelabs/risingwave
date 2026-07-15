@@ -71,9 +71,13 @@ impl SourceManager {
         &self,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<SourceSplitAssignment> {
-        let core = self.core.lock().await;
-
         let source_fragments = table_fragments.stream_source_fragments();
+        // Avoid touching the contended `core` lock for jobs with no source fragments.
+        if source_fragments.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let core = self.core.lock().await;
 
         let mut assigned = HashMap::new();
 
@@ -254,7 +258,7 @@ impl SourceManager {
             .map(|(upstream_actor_id, actor_id)| (*upstream_actor_id, *actor_id))
             .collect();
         let assignment = align_splits(
-            aligned_actors.into_iter(),
+            aligned_actors,
             |actor_id| get_upstream_actor_splits(prev_fragment_id, actor_id),
             fragment_id,
             prev_fragment_id,
@@ -671,7 +675,7 @@ pub struct SplitDiffOptions {
     pub enable_adaptive: bool,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for SplitDiffOptions {
     fn default() -> Self {
         SplitDiffOptions {

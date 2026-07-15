@@ -135,7 +135,7 @@ impl StreamNode for StreamOverWindow {
             state_table: Some(state_table),
 
             // Cache policy should now be read from per-job config override.
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             cache_policy: PbOverWindowCachePolicy::Unspecified as _,
         }))
     }

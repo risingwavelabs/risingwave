@@ -9,7 +9,7 @@ control substitution on
 
 # Step 1: Create table with TOAST-able columns in PostgreSQL
 system ok
-psql -c "DROP TABLE IF EXISTS test CASCADE; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE TABLE test (id int PRIMARY KEY, v1 int, v2 jsonb, v3 varchar, v4 text, v5 bytea, v6 jsonb[], v7 varchar[], v8 text[], v9 bytea[], v100 int);"
+psql -c "DROP TABLE IF EXISTS test CASCADE; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS vector; CREATE TABLE test (id int PRIMARY KEY, v1 int, v2 jsonb, v3 varchar, v4 text, v5 bytea, v6 jsonb[], v7 varchar[], v8 text[], v9 bytea[], v10 vector(2000), v100 int);"
 
 # Step 2: Create RisingWave source from PostgreSQL CDC
 statement ok
@@ -37,12 +37,12 @@ sleep 5s
 
 # Step 5: Insert large TOAST data (id=2) - all columns trigger TOAST
 system ok
-psql -c "INSERT INTO test (id, v1, v2, v3, v4, v5, v6, v7, v8, v9, v100) SELECT 2, 22, jsonb_build_object('large_data', (SELECT jsonb_agg(jsonb_build_object('id', i, 'random_string', encode(gen_random_bytes(20), 'hex'), 'timestamp', now() + (i || ' seconds')::interval)) FROM generate_series(1, 500) i), 'nested_object', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('data', encode(gen_random_bytes(100), 'hex'))))), (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(15), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(200), 'hex'), '')::bytea FROM generate_series(1, 5000)), (SELECT array_agg(jsonb_build_object('array_id', gs.i, 'nested_data', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('random_values', (SELECT jsonb_agg(encode(gen_random_bytes(10), 'hex')) FROM generate_series(1, 50))))), 'metadata', jsonb_build_object('timestamp', now() + (gs.i || ' seconds')::interval, 'random_string', encode(gen_random_bytes(20), 'hex')))) FROM generate_series(1, 300) gs(i)), ARRAY['small_string', (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 2000))], (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(8), 'hex'), '') FROM generate_series(1, 150))) FROM generate_series(1, 400)), (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(50), 'hex'), '')::bytea FROM generate_series(1, 100))) FROM generate_series(1, 200)), 100;"
+psql -c "INSERT INTO test (id, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v100) SELECT 2, 22, jsonb_build_object('large_data', (SELECT jsonb_agg(jsonb_build_object('id', i, 'random_string', encode(gen_random_bytes(20), 'hex'), 'timestamp', now() + (i || ' seconds')::interval)) FROM generate_series(1, 500) i), 'nested_object', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('data', encode(gen_random_bytes(100), 'hex'))))), (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(15), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(200), 'hex'), '')::bytea FROM generate_series(1, 5000)), (SELECT array_agg(jsonb_build_object('array_id', gs.i, 'nested_data', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('random_values', (SELECT jsonb_agg(encode(gen_random_bytes(10), 'hex')) FROM generate_series(1, 50))))), 'metadata', jsonb_build_object('timestamp', now() + (gs.i || ' seconds')::interval, 'random_string', encode(gen_random_bytes(20), 'hex')))) FROM generate_series(1, 300) gs(i)), ARRAY['small_string', (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 2000))], (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(8), 'hex'), '') FROM generate_series(1, 150))) FROM generate_series(1, 400)), (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(50), 'hex'), '')::bytea FROM generate_series(1, 100))) FROM generate_series(1, 200)), array_fill(0.5::real, ARRAY[2000])::vector(2000), 100;"
 
 # Wait for data synchronization
 
 # Step 6: Verify initial TOAST data synchronization
-query TTTTTTTTTTTT retry 6 backoff 1s
+query TTTTTTTTTTTTT retry 6 backoff 1s
 select
     id,
     v1,
@@ -54,11 +54,12 @@ select
     case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
     case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
     case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
+    case when octet_length(v10::text) > 7000 then 'toast-triggered' else 'small' end as v10_size_check,
     v100
 from test
 where id = 2;
 ----
-2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered 100
+2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered 100
 
 # Step 7: Insert small data (id=3) - no TOAST triggered
 system ok
@@ -83,7 +84,7 @@ VALUES (
 # Wait for small data synchronization
 
 # Step 8: Verify small data synchronization
-query TTTTTTTTTTTT retry 4 backoff 1s
+query TTTTTTTTTTTTT retry 4 backoff 1s
 select
     id,
     v1,
@@ -95,11 +96,12 @@ select
     case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
     case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
     case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
+    case when v10 is null then 'null' else 'present' end as v10_check,
     v100
 from test
 where id = 3;
 ----
-3 33 small small small small small small small small 300
+3 33 small small small small small small small small null 300
 
 # Step 9: Update non-TOAST column v100 for both rows
 system ok
@@ -113,8 +115,11 @@ psql -c "UPDATE test SET v100 = 999 WHERE id = 3;"
 # Step 10: Verify TOAST columns are preserved after UPDATE (id=2)
 # After updating non-TOAST columns, the original TOAST columns should remain unchanged
 # instead of being replaced by placeholders. Check that TOAST column lengths are preserved.
-# Verify TOAST columns have reasonable sizes (not placeholder values)
-query TTTTTTTTTTTT retry 4 backoff 1s
+# Verify TOAST columns have reasonable sizes (not placeholder values).
+# For the vector column, also check that the first element is still `0.5` (the
+# original value), not the sentinel `f32::MAX` that the JSON parser materialises
+# for the Debezium unchanged-TOAST placeholder.
+query TTTTTTTTTTTTTT retry 4 backoff 1s
 select
     id,
     v1,
@@ -126,11 +131,13 @@ select
     case when octet_length(v7::text) > 30000 then 'toast-triggered' else 'small' end as v7_size_check,
     case when octet_length(v8::text) > 900000 then 'toast-triggered' else 'small' end as v8_size_check,
     case when octet_length(v9::text) > 3000000 then 'toast-triggered' else 'small' end as v9_size_check,
+    case when octet_length(v10::text) > 7000 then 'toast-triggered' else 'small' end as v10_size_check,
+    case when left(v10::text, 5) = '[0.5,' then 'preserved' else 'sentinel-leaked' end as v10_content_check,
     v100
 from test
 where id = 2;
 ----
-2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered 999
+2 22 toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered toast-triggered preserved 999
 
 # Step 11: Test DELETE with TOAST columns (id=2)
 system ok

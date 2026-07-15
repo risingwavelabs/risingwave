@@ -93,7 +93,7 @@ fn build_jvm_with_native_registration() -> anyhow::Result<JavaVM> {
 
     // FIXME: passing custom arguments to the embedded jvm when compute node start
     // Build the VM properties
-    let args_builder = InitArgsBuilder::new()
+    let mut args_builder = InitArgsBuilder::new()
         // Pass the JNI API version (default is 8)
         .version(JNIVersion::V8)
         .option("-Dis_embedded_connector=true")
@@ -101,6 +101,17 @@ fn build_jvm_with_native_registration() -> anyhow::Result<JavaVM> {
         .option("--add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED")
         .option("-Xms16m")
         .option(format!("-Xmx{}", jvm_heap_size));
+
+    // Exit the embedded JVM on uncaught `OutOfMemoryError` so that the host
+    // compute node process terminates and the cluster recovers via the standard
+    // recovery loop, matching native OOM behavior. Set `JVM_EXIT_ON_OOM=false`
+    // (or `0`) to opt out.
+    let exit_on_oom = std::env::var("JVM_EXIT_ON_OOM")
+        .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "false" | "0" | ""))
+        .unwrap_or(true);
+    if exit_on_oom {
+        args_builder = args_builder.option("-XX:+ExitOnOutOfMemoryError");
+    }
 
     tracing::info!("JVM args: {:?}", args_builder);
     let jvm_args = args_builder.build().context("invalid jvm args")?;

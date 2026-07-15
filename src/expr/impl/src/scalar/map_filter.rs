@@ -14,35 +14,38 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListValue, MapArrayBuilder, MapValue,
     StructValue,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, StructType, ToOwnedDatum};
-use risingwave_expr::expr::{BoxedExpression, ExprError, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExprError, ExpressionInfo,
+    SyncExpression, SyncExpressionBoxExt,
+};
 use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
-struct MapFilterExpression {
-    map: BoxedExpression,
-    lambda: BoxedExpression,
+struct MapFilterExpression<E> {
+    map: E,
+    lambda: E,
     key_type: DataType,
     value_type: DataType,
 }
 
-#[async_trait]
-impl Expression for MapFilterExpression {
+impl<E: ExpressionInfo> ExpressionInfo for MapFilterExpression<E> {
     fn return_type(&self) -> DataType {
         self.map.return_type()
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let map_input = self.map.eval(input).await?;
+macro_rules! eval_map_filter {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let map_input = risingwave_expr::forward!($mode, $this.map, eval($input))?;
         let map_array = map_input.as_map();
 
-        let mut builder = MapArrayBuilder::with_type(map_array.len(), self.return_type());
+        let mut builder = MapArrayBuilder::with_type(map_array.len(), $this.return_type());
 
         for idx in 0..map_array.len() {
             if map_array.is_null(idx) {
@@ -53,8 +56,8 @@ impl Expression for MapFilterExpression {
             let map_ref = unsafe { map_array.raw_value_at_unchecked(idx) };
             let kv_count = map_ref.len();
 
-            let mut key_builder = self.key_type.create_array_builder(kv_count);
-            let mut value_builder = self.value_type.create_array_builder(kv_count);
+            let mut key_builder = $this.key_type.create_array_builder(kv_count);
+            let mut value_builder = $this.value_type.create_array_builder(kv_count);
 
             let mut kv_pairs = Vec::with_capacity(kv_count);
 
@@ -68,7 +71,7 @@ impl Expression for MapFilterExpression {
             let value_array = value_builder.finish().into_ref();
             let chunk = DataChunk::new(vec![key_array.clone(), value_array.clone()], kv_count);
 
-            let conditions = self.lambda.eval(&chunk).await?;
+            let conditions = risingwave_expr::forward!($mode, $this.lambda, eval(&chunk))?;
             let bool_array = conditions.as_bool();
 
             let mut filtered_entries = Vec::new();
@@ -82,8 +85,8 @@ impl Expression for MapFilterExpression {
                 }
             }
             let elem_type = DataType::Struct(StructType::new(vec![
-                ("key", self.key_type.clone()),
-                ("value", self.value_type.clone()),
+                ("key", $this.key_type.clone()),
+                ("value", $this.value_type.clone()),
             ]));
 
             let map_value = if !filtered_entries.is_empty() {
@@ -104,10 +107,12 @@ impl Expression for MapFilterExpression {
         }
 
         Ok(Arc::new(ArrayImpl::Map(builder.finish())))
-    }
+    }};
+}
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let map_datum = self.map.eval_row(input).await?;
+macro_rules! eval_row_map_filter {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let map_datum = risingwave_expr::forward!($mode, $this.map, eval_row($input))?;
         let map_value = match map_datum {
             Some(scalar) => scalar.into_map(),
             None => return Ok(None),
@@ -119,8 +124,8 @@ impl Expression for MapFilterExpression {
             ArrayImpl::Struct(arr) => arr,
             _ => return Err(ExprError::InvalidState("Expected StructArray".to_owned())),
         };
-        let mut key_builder = self.key_type.create_array_builder(struct_array.len());
-        let mut value_builder = self.value_type.create_array_builder(struct_array.len());
+        let mut key_builder = $this.key_type.create_array_builder(struct_array.len());
+        let mut value_builder = $this.value_type.create_array_builder(struct_array.len());
         for idx in 0..struct_array.len() {
             let struct_ref = unsafe { struct_array.raw_value_at_unchecked(idx) };
 
@@ -135,7 +140,7 @@ impl Expression for MapFilterExpression {
         let value_array = value_builder.finish().into_ref();
         let chunk = DataChunk::new(vec![key_array, value_array], struct_array.len());
 
-        let condition = self.lambda.eval(&chunk).await?;
+        let condition = risingwave_expr::forward!($mode, $this.lambda, eval(&chunk))?;
         let condition = condition.as_bool();
 
         let mut filtered_entries = Vec::new();
@@ -165,25 +170,54 @@ impl Expression for MapFilterExpression {
         );
         let new_map_value = MapValue::from_entries(new_list_value);
         Ok(Some(new_map_value.into()))
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for MapFilterExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_map_filter!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_map_filter!(sync, self, input)
+    }
+}
+
+impl<E: AsyncExpression> AsyncExpression for MapFilterExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_map_filter!(async, self, input)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_map_filter!(async, self, input)
     }
 }
 
 #[build_function("map_filter(anymap, any) -> anymap")]
 fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let [map, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
-
     let DataType::Map(map_type) = return_type else {
         panic!("Expected map type");
     };
     let key_type = map_type.key().clone();
     let value_type = map_type.value().clone();
 
-    Ok(Box::new(MapFilterExpression {
-        map,
-        lambda,
-        key_type,
-        value_type,
-    }))
+    Ok(match (map, lambda) {
+        (BoxedExpression::Sync(map), BoxedExpression::Sync(lambda)) => MapFilterExpression {
+            map,
+            lambda,
+            key_type,
+            value_type,
+        }
+        .boxed(),
+        (map, lambda) => MapFilterExpression {
+            map,
+            lambda,
+            key_type,
+            value_type,
+        }
+        .boxed(),
+    })
 }
 
 #[cfg(test)]

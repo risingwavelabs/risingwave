@@ -133,8 +133,7 @@ impl MySqlCdcSplit {
         let file = source_offset.get("file")?.as_str()?;
         let pos = source_offset.get("pos")?.as_u64()?;
 
-        // Extract numeric sequence from "binlog.NNNNNN"
-        let file_seq = file.strip_prefix("binlog.")?.parse::<u64>().ok()?;
+        let file_seq = extract_binlog_file_seq(file)?;
 
         Some((file_seq, pos))
     }
@@ -527,6 +526,14 @@ impl DebeziumCdcSplit<SqlServer> {
     }
 }
 
+/// Extract the numeric sequence from a MySQL binlog file name `<basename>.<sequence>`.
+///
+/// The basename is configurable (`binlog`, `mysql-bin`, `mysql-bin-changelog` on RDS/Aurora, ...),
+/// so we take the number after the last `.` rather than assuming a fixed prefix.
+pub fn extract_binlog_file_seq(file_name: &str) -> Option<u64> {
+    file_name.rsplit('.').next()?.parse::<u64>().ok()
+}
+
 /// Extract PostgreSQL LSN value from a CDC offset JSON string.
 ///
 /// This is a standalone helper function that can be used when you only have the offset string
@@ -743,6 +750,38 @@ mod tests {
 
         assert_eq!(split.pg_lsn_commit(), Some(33_969_832));
         assert_eq!(split.pg_lsn_proc(), Some(33_918_336));
+    }
+
+    #[test]
+    fn test_extract_binlog_file_seq() {
+        // default MySQL 8.0 basename
+        assert_eq!(extract_binlog_file_seq("binlog.000123"), Some(123));
+        // `--log-bin=mysql-bin`
+        assert_eq!(extract_binlog_file_seq("mysql-bin.000123"), Some(123));
+        // `<hostname>-bin` on older versions
+        assert_eq!(extract_binlog_file_seq("my-host-bin.000001"), Some(1));
+        // RDS / Aurora MySQL
+        assert_eq!(
+            extract_binlog_file_seq("mysql-bin-changelog.037568"),
+            Some(37568)
+        );
+        // invalid suffix
+        assert_eq!(extract_binlog_file_seq("binlog.index"), None);
+        assert_eq!(extract_binlog_file_seq("no-extension"), None);
+    }
+
+    #[test]
+    fn test_mysql_binlog_offset() {
+        let offset = r#"{
+            "sourcePartition": {"server": "test"},
+            "sourceOffset": {
+                "file": "mysql-bin-changelog.037568",
+                "pos": 12345
+            },
+            "isHeartbeat": false
+        }"#;
+        let split = MySqlCdcSplit::new(1, Some(offset.to_owned()));
+        assert_eq!(split.mysql_binlog_offset(), Some((37568, 12345)));
     }
 
     #[test]

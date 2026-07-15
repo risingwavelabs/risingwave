@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use arrow_udf_runtime::javascript::{AggregateOptions, FunctionOptions, Runtime};
-use futures_util::{FutureExt, StreamExt};
 use risingwave_common::array::arrow::arrow_schema_udf::{DataType, Field};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
 

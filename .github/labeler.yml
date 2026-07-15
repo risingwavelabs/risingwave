@@ -47,10 +47,6 @@ labels:
   files:
   - "src\\/meta\\/model\\/migration\\/.*.rs"
 
-- label: "ci/run-e2e-test-other-backends"
-  files:
-  - "src\\/meta\\/.*.rs"
-
 - label: "ci/run-e2e-iceberg-tests"
   files:
   - ".*iceberg.*"
@@ -176,6 +172,14 @@ labels:
 - label: "ci/run-e2e-elasticsearch-sink-tests"
   files:
   - "ci\\/scripts\\/e2e-elasticsearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-elasticsearch-sink-test\\.sh"
+  - "e2e_test\\/sink\\/elasticsearch\\/.*"
+  - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
+
+- label: "ci/run-e2e-opensearch-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-opensearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-opensearch-sink-test\\.sh"
   - "e2e_test\\/sink\\/elasticsearch\\/.*"
   - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
 

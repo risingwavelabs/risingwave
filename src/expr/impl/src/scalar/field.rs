@@ -16,41 +16,67 @@ use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt,
+};
 use risingwave_expr::{Result, build_function};
 
 /// `FieldExpression` access a field from a struct.
 #[derive(Debug)]
-pub struct FieldExpression {
+pub struct FieldExpression<E> {
     return_type: DataType,
-    input: BoxedExpression,
+    input: E,
     index: usize,
 }
 
-#[async_trait::async_trait]
-impl Expression for FieldExpression {
+impl<E: ExpressionInfo> ExpressionInfo for FieldExpression<E> {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.input.eval(input).await?;
+macro_rules! eval_field {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let array = risingwave_expr::forward!($mode, $this.input, eval($input))?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
-            Ok(struct_array.field_at(self.index).clone())
+            Ok(struct_array.field_at($this.index).clone())
         } else {
             Err(anyhow!("expects a struct array ref").into())
         }
-    }
+    }};
+}
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let struct_datum = self.input.eval_row(input).await?;
+macro_rules! eval_row_field {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let struct_datum = risingwave_expr::forward!($mode, $this.input, eval_row($input))?;
         struct_datum
             .map(|s| match s {
-                ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
+                ScalarImpl::Struct(v) => Ok(v.fields()[$this.index].clone()),
                 _ => Err(anyhow!("expects a struct array ref").into()),
             })
             .transpose()
             .map(|x| x.flatten())
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for FieldExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_field!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_field!(sync, self, input)
+    }
+}
+
+impl<E: AsyncExpression> AsyncExpression for FieldExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_field!(async, self, input)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_field!(async, self, input)
     }
 }
 
@@ -60,11 +86,20 @@ fn build(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedE
     // `InputRef`, the second is i32 `Literal`.
     let [input, index]: [_; 2] = children.try_into().unwrap();
     let index = index.eval_const()?.unwrap().into_int32() as usize;
-    Ok(Box::new(FieldExpression {
-        return_type,
-        input,
-        index,
-    }))
+    Ok(match input {
+        BoxedExpression::Sync(input) => FieldExpression {
+            return_type,
+            input,
+            index,
+        }
+        .boxed(),
+        input @ BoxedExpression::Async(_) => FieldExpression {
+            return_type,
+            input,
+            index,
+        }
+        .boxed(),
+    })
 }
 
 #[cfg(test)]

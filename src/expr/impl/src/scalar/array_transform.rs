@@ -14,25 +14,55 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ListValue, ScalarImpl};
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt,
+};
 use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
-struct ArrayTransformExpression {
-    array: BoxedExpression,
-    lambda: BoxedExpression,
+struct ArrayTransformExpression<E> {
+    array: E,
+    lambda: E,
 }
 
-#[async_trait]
-impl Expression for ArrayTransformExpression {
+impl<E: ExpressionInfo> ExpressionInfo for ArrayTransformExpression<E> {
     fn return_type(&self) -> DataType {
         DataType::list(self.lambda.return_type())
     }
+}
 
+impl<E: SyncExpression> SyncExpression for ArrayTransformExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let lambda_input = self.array.eval(input)?;
+        let lambda_input = Arc::unwrap_or_clone(lambda_input).into_list();
+        let new_list = lambda_input.map_inner_sync(|flatten_input| {
+            let flatten_len = flatten_input.len();
+            let chunk = DataChunk::new(vec![Arc::new(flatten_input)], flatten_len);
+            self.lambda.eval(&chunk).map(Arc::unwrap_or_clone)
+        })?;
+        Ok(Arc::new(new_list.into()))
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let lambda_input = self.array.eval_row(input)?;
+        let lambda_input = lambda_input.map(ScalarImpl::into_list);
+        if let Some(lambda_input) = lambda_input {
+            let len = lambda_input.len();
+            let chunk = DataChunk::new(vec![Arc::new(lambda_input.into_array())], len);
+            let new_vals = self.lambda.eval(&chunk)?;
+            let new_list = ListValue::new(Arc::unwrap_or_clone(new_vals));
+            Ok(Some(new_list.into()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<E: AsyncExpression> AsyncExpression for ArrayTransformExpression<E> {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let lambda_input = self.array.eval(input).await?;
         let lambda_input = Arc::unwrap_or_clone(lambda_input).into_list();
@@ -64,7 +94,12 @@ impl Expression for ArrayTransformExpression {
 #[build_function("array_transform(anyarray, any) -> anyarray")]
 fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
-    Ok(Box::new(ArrayTransformExpression { array, lambda }))
+    Ok(match (array, lambda) {
+        (BoxedExpression::Sync(array), BoxedExpression::Sync(lambda)) => {
+            ArrayTransformExpression { array, lambda }.boxed()
+        }
+        (array, lambda) => ArrayTransformExpression { array, lambda }.boxed(),
+    })
 }
 
 #[cfg(test)]

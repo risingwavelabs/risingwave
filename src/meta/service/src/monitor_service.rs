@@ -74,14 +74,14 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<monitor_service::HeapProfilingRequest>,
     ) -> Result<Response<monitor_service::HeapProfilingResponse>, Status> {
-        self.profile_service.heap_profiling(request).await
+        self.profile_service.heap_profiling(request)
     }
 
     async fn list_heap_profiling(
         &self,
         request: Request<monitor_service::ListHeapProfilingRequest>,
     ) -> Result<Response<monitor_service::ListHeapProfilingResponse>, Status> {
-        self.profile_service.list_heap_profiling(request).await
+        self.profile_service.list_heap_profiling(request)
     }
 
     async fn analyze_heap(

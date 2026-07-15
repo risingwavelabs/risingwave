@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
 use base64::Engine as _;
 use base64::engine::general_purpose;
 use chrono::{DateTime, Datelike, Timelike};
+use chrono_tz::Tz;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
@@ -30,8 +32,9 @@ use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
 
 use super::{
-    CustomJsonType, DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, KafkaConnectParamsRef,
-    Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    CustomJsonType, DateHandlingMode, DorisJsonConfig, JsonbHandlingMode, KafkaConnectParams,
+    KafkaConnectParamsRef, Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
 
@@ -97,14 +100,14 @@ impl JsonEncoder {
     pub fn new_with_doris(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        map: HashMap<String, u8>,
+        doris_config: DorisJsonConfig,
     ) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
-            custom_json_type: CustomJsonType::Doris(map),
+            custom_json_type: CustomJsonType::Doris(doris_config),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         Self {
@@ -115,13 +118,36 @@ impl JsonEncoder {
         }
     }
 
-    pub fn new_with_starrocks(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+    pub fn new_with_starrocks(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        time_zone: Tz,
+    ) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            timestamptz_handling_mode: TimestamptzHandlingMode::SpecifiedTimezoneWithoutSuffix(
+                time_zone,
+            ),
             custom_json_type: CustomJsonType::StarRocks,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
+        };
+        Self {
+            schema,
+            col_indices,
+            kafka_connect: None,
+            config,
+        }
+    }
+
+    pub fn new_with_turbopuffer(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::Iso8601String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Turbopuffer,
             jsonb_handling_mode: JsonbHandlingMode::Dynamic,
         };
         Self {
@@ -136,6 +162,17 @@ impl JsonEncoder {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
             ..self
+        }
+    }
+}
+
+impl JsonEncoderConfig {
+    fn jsonb_handling_mode_for_field(&self, field_name: &str) -> JsonbHandlingMode {
+        match &self.custom_json_type {
+            CustomJsonType::Doris(config) if config.variant_columns.contains(field_name) => {
+                JsonbHandlingMode::Dynamic
+            }
+            _ => self.jsonb_handling_mode,
         }
     }
 }
@@ -220,8 +257,12 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Serial, ScalarRefImpl::Serial(v)) => {
-            // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
-            json!(format!("{:#018x}", v.into_inner()))
+            if matches!(&config.custom_json_type, CustomJsonType::Turbopuffer) {
+                json!(v.into_inner())
+            } else {
+                // The serial type needs to be handled as a string to prevent primary key conflicts caused by the precision issues of JSON numbers.
+                json!(format!("{:#018x}", v.into_inner()))
+            }
         }
         (DataType::Float32, ScalarRefImpl::Float32(v)) => {
             json!(f32::from(v))
@@ -234,10 +275,25 @@ fn datum_to_json_object(
         }
         // Doris/Starrocks will convert out-of-bounds decimal and -INF, INF, NAN to NULL
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match &config.custom_json_type {
-            CustomJsonType::Doris(map) => {
-                let s = map.get(&field.name).unwrap();
+            CustomJsonType::Doris(config) => {
+                let s = config.decimal_scale.get(&field.name).unwrap();
                 v.rescale(*s as u32);
                 json!(v.to_text())
+            }
+            CustomJsonType::Turbopuffer => {
+                let value = f64::try_from(v).map_err(|err| {
+                    ArrayError::internal(format!(
+                        "failed to convert decimal to f64: {}",
+                        err.as_report()
+                    ))
+                })?;
+                serde_json::Number::from_f64(value)
+                    .map(Value::Number)
+                    .ok_or_else(|| {
+                        ArrayError::internal(
+                            "failed to encode non-finite decimal as JSON number".to_owned(),
+                        )
+                    })?
             }
             CustomJsonType::Es | CustomJsonType::None | CustomJsonType::StarRocks => {
                 json!(v.to_text())
@@ -252,6 +308,11 @@ fn datum_to_json_object(
                 }
                 TimestamptzHandlingMode::UtcWithoutSuffix => {
                     let parsed = v.to_datetime_utc().naive_utc();
+                    let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+                    json!(v)
+                }
+                TimestamptzHandlingMode::SpecifiedTimezoneWithoutSuffix(time_zone) => {
+                    let parsed = v.to_datetime_in_zone(time_zone).naive_local();
                     let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
                     json!(v)
                 }
@@ -286,6 +347,9 @@ fn datum_to_json_object(
                 TimestampHandlingMode::String => {
                     json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
                 }
+                TimestampHandlingMode::Iso8601String => {
+                    json!(v.0.format("%Y-%m-%dT%H:%M:%S%.6f").to_string())
+                }
             }
         }
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
@@ -296,12 +360,14 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
 
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match config.jsonb_handling_mode {
-            JsonbHandlingMode::String => {
-                json!(jsonb_ref.to_string())
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            match config.jsonb_handling_mode_for_field(&field.name) {
+                JsonbHandlingMode::String => {
+                    json!(jsonb_ref.to_string())
+                }
+                JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
             }
-            JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
-        },
+        }
         (DataType::List(lt), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
@@ -344,7 +410,7 @@ fn datum_to_json_object(
                         "starrocks can't support struct".to_owned(),
                     ));
                 }
-                CustomJsonType::Es | CustomJsonType::None => {
+                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::Turbopuffer => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -449,12 +515,28 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
         Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
         Timestamp,
     };
 
     use super::*;
+
+    #[test]
+    fn test_starrocks_timestamptz_encoding() {
+        let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "ts")]);
+        let encoder = JsonEncoder::new_with_starrocks(schema, None, chrono_tz::Asia::Shanghai);
+        let tstz = "2018-01-26T18:30:09.453Z".parse().unwrap();
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Timestamptz(tstz))]);
+
+        let encoded = encoder.encode(row).unwrap();
+
+        assert_eq!(
+            encoded.get("ts"),
+            Some(&json!("2018-01-27 02:30:09.453000"))
+        );
+    }
 
     #[test]
     fn test_to_json_basic_type() {
@@ -520,6 +602,48 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&serial_value).unwrap(),
             format!("\"{:#018x}\"", i64::MAX)
+        );
+
+        let turbopuffer_config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::String,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Turbopuffer,
+            jsonb_handling_mode: JsonbHandlingMode::Dynamic,
+        };
+        let turbopuffer_serial_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Serial,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Serial(i64::MAX.into()).as_scalar_ref_impl()),
+            &turbopuffer_config,
+        )
+        .unwrap();
+        assert_eq!(turbopuffer_serial_value, json!(i64::MAX));
+        let turbopuffer_decimal_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Decimal,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Decimal(Decimal::try_from(1.25).unwrap()).as_scalar_ref_impl()),
+            &turbopuffer_config,
+        )
+        .unwrap();
+        assert_eq!(turbopuffer_decimal_value, json!(1.25));
+        assert!(
+            datum_to_json_object(
+                &Field {
+                    data_type: DataType::Decimal,
+                    ..mock_field.clone()
+                },
+                Some(ScalarImpl::Decimal(Decimal::NaN).as_scalar_ref_impl()),
+                &turbopuffer_config,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("non-finite decimal")
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
@@ -621,14 +745,17 @@ mod tests {
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
 
-        let mut map = HashMap::default();
-        map.insert("aaa".to_owned(), 5_u8);
+        let mut decimal_scale = HashMap::default();
+        decimal_scale.insert("aaa".to_owned(), 5_u8);
         let doris_config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Doris(map),
+            custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                decimal_scale,
+                variant_columns: HashSet::default(),
+            }),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let decimal = datum_to_json_object(
@@ -677,7 +804,10 @@ mod tests {
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Doris(HashMap::default()),
+            custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                decimal_scale: HashMap::default(),
+                variant_columns: HashSet::default(),
+            }),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let date_value = datum_to_json_object(
@@ -730,6 +860,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(json_value, json!([1, 2, 3]));
+
+        let variant_json_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Jsonb,
+                name: "variant_col".into(),
+            },
+            Some(
+                ScalarImpl::Jsonb(JsonbVal::from(json!({"nested": [1, 2, 3]})))
+                    .as_scalar_ref_impl(),
+            ),
+            &JsonEncoderConfig {
+                time_handling_mode: TimeHandlingMode::String,
+                date_handling_mode: DateHandlingMode::String,
+                timestamp_handling_mode: TimestampHandlingMode::String,
+                timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+                custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                    decimal_scale: HashMap::default(),
+                    variant_columns: HashSet::from(["variant_col".to_owned()]),
+                }),
+                jsonb_handling_mode: JsonbHandlingMode::String,
+            },
+        )
+        .unwrap();
+        assert_eq!(variant_json_value, json!({"nested": [1, 2, 3]}));
     }
 
     #[test]

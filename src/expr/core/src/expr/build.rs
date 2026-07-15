@@ -28,7 +28,8 @@ use super::wrapper::EvalErrorReport;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
 use crate::expr::{
-    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    AsyncExpressionBoxExt, BoxedExpression, InputRefExpression, LiteralExpression, SyncExpression,
+    SyncExpressionBoxExt,
 };
 use crate::expr_context::strict_mode;
 use crate::sig::FUNCTION_REGISTRY;
@@ -37,7 +38,10 @@ use crate::{Result, bail};
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let expr = ExprBuilder::new_strict().build(prost)?;
-    Ok(Strict::new(expr).boxed())
+    Ok(match expr {
+        BoxedExpression::Sync(expr) => Strict::new(expr).boxed(),
+        BoxedExpression::Async(expr) => Strict::new(expr).boxed(),
+    })
 }
 
 /// Build an expression from protobuf in non-strict mode.
@@ -45,9 +49,11 @@ pub fn build_non_strict_from_prost(
     prost: &ExprNode,
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<NonStrictExpression> {
-    ExprBuilder::new_non_strict(error_report)
-        .build(prost)
-        .map(NonStrictExpression)
+    let expr = ExprBuilder::new_non_strict(error_report).build(prost)?;
+    Ok(match expr {
+        BoxedExpression::Sync(expr) => NonStrictExpression::Sync(expr),
+        BoxedExpression::Async(expr) => NonStrictExpression::Async(expr),
+    })
 }
 
 /// Build a strict or non-strict expression according to expr context.
@@ -61,7 +67,7 @@ pub fn build_batch_expr_from_prost(prost: &ExprNode) -> Result<BoxedExpression> 
         build_from_prost(prost)
     } else {
         // TODO(eric): report errors to users via psql notice
-        Ok(ExprBuilder::new_non_strict(LogReport).build(prost)?.boxed())
+        Ok(ExprBuilder::new_non_strict(LogReport).build(prost)?)
     }
 }
 
@@ -93,17 +99,25 @@ where
     }
 
     /// Attach wrappers to an expression.
-    #[expect(clippy::let_and_return)]
-    fn wrap(&self, expr: impl Expression + 'static) -> BoxedExpression {
-        let checked = Checked(expr);
-
-        let may_non_strict = if let Some(error_report) = &self.error_report {
-            NonStrict::new(checked, error_report.clone()).boxed()
-        } else {
-            checked.boxed()
-        };
-
-        may_non_strict
+    fn wrap(&self, expr: BoxedExpression) -> BoxedExpression {
+        match expr {
+            BoxedExpression::Sync(expr) => {
+                let checked = Checked(expr);
+                if let Some(error_report) = &self.error_report {
+                    NonStrict::new(checked, error_report.clone()).boxed()
+                } else {
+                    checked.boxed()
+                }
+            }
+            BoxedExpression::Async(expr) => {
+                let checked = Checked(expr);
+                if let Some(error_report) = &self.error_report {
+                    NonStrict::new(checked, error_report.clone()).boxed()
+                } else {
+                    checked.boxed()
+                }
+            }
+        }
     }
 
     /// Build an expression with `build_inner` and attach some wrappers.
@@ -154,7 +168,7 @@ where
 }
 
 /// Manually build the expression `Self` from protobuf.
-pub(crate) trait Build: Expression + Sized {
+pub(crate) trait Build: SyncExpression + Sized {
     /// Build the expression `Self` from protobuf.
     ///
     /// To build children, call `build_child` on each child instead of [`build_from_prost`].
@@ -186,7 +200,7 @@ impl<E: Build + 'static> BuildBoxed for E {
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<BoxedExpression> {
-        Self::build(prost, build_child).map(ExpressionBoxExt::boxed)
+        Self::build(prost, build_child).map(SyncExpressionBoxExt::boxed)
     }
 }
 
@@ -237,9 +251,11 @@ pub fn build_func_non_strict(
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<NonStrictExpression> {
     let expr = build_func(func, ret_type, children)?;
-    let wrapped = NonStrictExpression(ExprBuilder::new_non_strict(error_report).wrap(expr));
-
-    Ok(wrapped)
+    let wrapped = ExprBuilder::new_non_strict(error_report).wrap(expr);
+    Ok(match wrapped {
+        BoxedExpression::Sync(expr) => NonStrictExpression::Sync(expr),
+        BoxedExpression::Async(expr) => NonStrictExpression::Async(expr),
+    })
 }
 
 pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {

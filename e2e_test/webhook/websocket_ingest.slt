@@ -1,0 +1,255 @@
+# Simulation test for websocket ingest endpoint
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table ws_orders (
+  id int,
+  customer_name varchar,
+  product varchar,
+  quantity int,
+  price decimal,
+  status varchar,
+  created_at timestamp,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_missing_pk (
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_multi_column_no_pk (
+  id int,
+  customer_name varchar,
+  amount double precision
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_single_jsonb_no_pk (
+  data jsonb
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', data, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_delete_only_pk (
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_composite_insert_pk (
+  tenant_id int,
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (tenant_id, id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_composite_delete_pk (
+  tenant_id int,
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (tenant_id, id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_type_error (
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_timestamp_option (
+  id int,
+  event_time timestamp,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_time_option (
+  id int,
+  event_time time,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_bigint_precise_option (
+  id int,
+  amount decimal,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario success
+
+query TTTTTTT
+select id::varchar, customer_name, product, quantity::varchar, price::varchar, status, created_at::varchar from ws_orders order by id;
+----
+401 TestUser Widget 5 19.99 delivered 2026-04-15 10:00:00
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario empty_payload
+
+query
+select count(*) from ws_orders;
+----
+1
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_multi_column_no_pk --scenario multi_column_no_pk
+
+query TTT
+select id::varchar, customer_name, amount::varchar from ws_multi_column_no_pk order by id;
+----
+601 NoPkAlice 61.5
+602 NoPkBob 62.5
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_single_jsonb_no_pk --scenario single_jsonb_no_pk
+
+query TT
+select data ->> 'id', data ->> 'status' from ws_single_jsonb_no_pk order by data ->> 'id';
+----
+701 created
+702 updated
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_missing_pk --scenario error_missing_pk
+
+query
+select count(*) from ws_missing_pk;
+----
+0
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_delete_only_pk --scenario delete_only_pk
+
+query
+select count(*) from ws_delete_only_pk;
+----
+0
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_composite_insert_pk --scenario error_incomplete_composite_pk_insert
+
+query
+select count(*) from ws_composite_insert_pk;
+----
+0
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_composite_delete_pk --scenario error_incomplete_composite_pk_delete
+
+query TTTT
+select tenant_id::varchar, id::varchar, customer_name, amount::varchar from ws_composite_delete_pk order by tenant_id, id;
+----
+11 2002 CompositeDelete 88.88
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_type_error --scenario error_type
+
+query
+select count(*) from ws_type_error;
+----
+0
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_timestamp_option --scenario timestamp_milli
+
+query TT
+select id::varchar, event_time::varchar from ws_timestamp_option order by id;
+----
+1 2024-04-11 02:00:00.123
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_time_option --scenario time_milli
+
+query TT
+select id::varchar, event_time::varchar from ws_time_option order by id;
+----
+1 01:02:03.123
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_bigint_precise_option --scenario bigint_precise
+
+query TT
+select id::varchar, amount::varchar from ws_bigint_precise_option order by id;
+----
+1 123456
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario invalid_signature
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario invalid_timestamp
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario invalid_decoder_header --header 'x-rw-webhook-json-timestamp-handling-mode: invalid' --expected-fatal-substring 'unrecognized `x-rw-webhook-json-timestamp-handling-mode` value'

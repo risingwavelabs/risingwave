@@ -34,11 +34,11 @@ use thiserror_ext::AsReport;
 use tiberius::Config;
 use tokio_postgres::types::PgLsn;
 
-use crate::connector_common::{SslMode, create_pg_client};
+use crate::connector_common::{SslMode, create_pg_client, pg_connection_config_from_properties};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
-use crate::source::cdc::split::parse_sql_server_lsn_str;
+use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
@@ -211,54 +211,17 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
 
     /// Query LSNs from PostgreSQL, return (`confirmed_flush_lsn`, `upstream_max_lsn`, `slot_name`).
     async fn query_postgres_lsns(&self) -> ConnectorResult<Option<(Option<u64>, u64, &str)>> {
-        // Extract connection parameters from CDC properties
-        let hostname = self
-            .properties
-            .get("hostname")
-            .ok_or_else(|| anyhow::anyhow!("hostname not found in CDC properties"))?;
-        let port = self
-            .properties
-            .get("port")
-            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?;
-        let user = self
-            .properties
-            .get("username")
-            .ok_or_else(|| anyhow::anyhow!("username not found in CDC properties"))?;
-        let password = self
-            .properties
-            .get("password")
-            .ok_or_else(|| anyhow::anyhow!("password not found in CDC properties"))?;
-        let database = self
-            .properties
-            .get("database.name")
-            .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
-
-        // Get SSL mode from properties, default to Preferred if not specified
-        let ssl_mode = self
-            .properties
-            .get("ssl.mode")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(SslMode::Preferred);
-        let ssl_root_cert = self.properties.get("database.ssl.root.cert").cloned();
+        let pg_conn = pg_connection_config_from_properties(&self.properties)?;
 
         let slot_name = self
             .properties
             .get("slot.name")
             .ok_or_else(|| anyhow::anyhow!("slot.name not found in CDC properties"))?;
 
-        // Create PostgreSQL client
-        let client = create_pg_client(
-            user,
-            password,
-            hostname,
-            port,
-            database,
-            &ssl_mode,
-            &ssl_root_cert,
-            None, // No TCP keepalive for CDC enumerator
-        )
-        .await
-        .context("Failed to create PostgreSQL client")?;
+        // No TCP keepalive for CDC enumerator
+        let client = create_pg_client(&pg_conn, None)
+            .await
+            .context("Failed to create PostgreSQL client")?;
 
         let query = "SELECT confirmed_flush_lsn, pg_current_wal_lsn() \
             FROM pg_replication_slots WHERE slot_name = $1";
@@ -439,41 +402,39 @@ impl DebeziumSplitEnumerator<Mysql> {
         // Query binlog files and update metrics
         match self.query_binlog_files().await {
             Ok(binlog_files) => {
-                if let Some((oldest_file, oldest_size)) = binlog_files.first() {
-                    // Extract sequence number from filename (e.g., "binlog.000001" -> 1)
-                    if let Some(seq) = Self::extract_binlog_seq(oldest_file) {
-                        self.metrics
-                            .mysql_cdc_binlog_file_seq_min
-                            .with_guarded_label_values(&[hostname, port])
-                            .set(seq as i64);
-                        tracing::debug!(
-                            "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
-                            self.source_id,
-                            hostname,
-                            port,
-                            oldest_file,
-                            seq,
-                            oldest_size
-                        );
-                    }
+                if let Some((oldest_file, oldest_size)) = binlog_files.first()
+                    && let Some(seq) = extract_binlog_file_seq(oldest_file)
+                {
+                    self.metrics
+                        .mysql_cdc_binlog_file_seq_min
+                        .with_guarded_label_values(&[hostname, port])
+                        .set(seq as i64);
+                    tracing::debug!(
+                        "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
+                        self.source_id,
+                        hostname,
+                        port,
+                        oldest_file,
+                        seq,
+                        oldest_size
+                    );
                 }
-                if let Some((newest_file, newest_size)) = binlog_files.last() {
-                    // Extract sequence number from filename
-                    if let Some(seq) = Self::extract_binlog_seq(newest_file) {
-                        self.metrics
-                            .mysql_cdc_binlog_file_seq_max
-                            .with_guarded_label_values(&[hostname, port])
-                            .set(seq as i64);
-                        tracing::debug!(
-                            "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
-                            self.source_id,
-                            hostname,
-                            port,
-                            newest_file,
-                            seq,
-                            newest_size
-                        );
-                    }
+                if let Some((newest_file, newest_size)) = binlog_files.last()
+                    && let Some(seq) = extract_binlog_file_seq(newest_file)
+                {
+                    self.metrics
+                        .mysql_cdc_binlog_file_seq_max
+                        .with_guarded_label_values(&[hostname, port])
+                        .set(seq as i64);
+                    tracing::debug!(
+                        "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
+                        self.source_id,
+                        hostname,
+                        port,
+                        newest_file,
+                        seq,
+                        newest_size
+                    );
                 }
                 tracing::debug!(
                     "MySQL CDC source {} ({}:{}): total {} binlog files",
@@ -494,12 +455,6 @@ impl DebeziumSplitEnumerator<Mysql> {
             }
         }
         Ok(())
-    }
-
-    /// Extract sequence number from binlog filename
-    /// e.g., "binlog.000001" -> Some(1), "mysql-bin.000123" -> Some(123)
-    fn extract_binlog_seq(filename: &str) -> Option<u64> {
-        filename.rsplit('.').next()?.parse::<u64>().ok()
     }
 
     /// Query binlog files from MySQL, returns Vec<(filename, size)>

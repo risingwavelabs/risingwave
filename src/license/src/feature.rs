@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::doc_markdown)]
-
 use strum::{EnumMessage, VariantArray};
 use thiserror::Error;
 

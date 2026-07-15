@@ -9,6 +9,9 @@ in_flight_barrier_nums = 10
 imm_merge_threshold = 2
 share_buffers_sync_parallelism = 4
 
+[frontend]
+unsafe_enable_local_fs_connector = true
+
 [system]
 barrier_interval_ms = 250
 # If this is changed, remember to also change e2e_test/source_inline/pubsub/pubsub.slt

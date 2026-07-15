@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -164,12 +164,6 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).can_backfill()
     }
 
-    /// Tables with MySQL and PostgreSQL connectors are maintained for backward compatibility.
-    /// The newly added SQL Server CDC connector is only supported when created as shared.
-    fn is_shareable_only_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).shareable_only()
-    }
-
     fn enable_transaction_metadata(&self) -> bool {
         ExternalCdcTableType::from_properties(self).enable_transaction_metadata()
     }
@@ -216,6 +210,18 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         self.get(UPSTREAM_SOURCE_KEY)
             .map(|s| {
                 s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR)
+            })
+            .unwrap_or(false)
+    }
+
+    fn supports_full_reload_refresh(&self) -> bool {
+        self.get(UPSTREAM_SOURCE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(ICEBERG_CONNECTOR)
                     || s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR)
             })
             .unwrap_or(false)
@@ -268,8 +274,11 @@ impl WithOptionsSecResolved {
         update_alter_props: BTreeMap<String, String>,
         update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<(Vec<SecretId>, Vec<SecretId>)> {
-        let mut to_add_secret_dep: Vec<SecretId> = vec![];
-        let mut to_remove_secret_dep: Vec<SecretId> = vec![];
+        let old_secret_ids = self
+            .secret_ref
+            .values()
+            .map(|secret_ref| secret_ref.secret_id)
+            .collect::<BTreeSet<_>>();
 
         // make sure the key in update_alter_props and update_alter_secret_refs not collide
         for key in update_alter_props.keys() {
@@ -283,31 +292,31 @@ impl WithOptionsSecResolved {
         // remove legacy key if it's set in both plaintext and secret
         // When a property changes from secret to plaintext, remove the old secret dependency
         for k in update_alter_props.keys() {
-            if let Some(removed_secret) = self.secret_ref.remove(k) {
-                to_remove_secret_dep.push(removed_secret.secret_id);
-            }
+            self.secret_ref.remove(k);
         }
 
         // Handle secret ref updates
-        for (k, v) in &update_alter_secret_refs {
+        for k in update_alter_secret_refs.keys() {
             // Remove any plaintext value for this key
             self.inner.remove(k);
-
-            if let Some(old_secret_ref) = self.secret_ref.get(k) {
-                if old_secret_ref.secret_id != v.secret_id {
-                    // Secret is being changed to a different secret
-                    to_remove_secret_dep.push(old_secret_ref.secret_id);
-                    to_add_secret_dep.push(v.secret_id);
-                }
-                // If the secret ref is the same, we don't need to update dependencies
-            } else {
-                // New secret dependency being added
-                to_add_secret_dep.push(v.secret_id);
-            }
         }
 
         self.inner.extend(update_alter_props);
         self.secret_ref.extend(update_alter_secret_refs);
+
+        let new_secret_ids = self
+            .secret_ref
+            .values()
+            .map(|secret_ref| secret_ref.secret_id)
+            .collect::<BTreeSet<_>>();
+        let to_add_secret_dep = new_secret_ids
+            .difference(&old_secret_ids)
+            .copied()
+            .collect();
+        let to_remove_secret_dep = old_secret_ids
+            .difference(&new_secret_ids)
+            .copied()
+            .collect();
 
         Ok((to_add_secret_dep, to_remove_secret_dep))
     }
@@ -358,5 +367,40 @@ impl Get for WithOptionsSecResolved {
 impl GetKeyIter for WithOptionsSecResolved {
     fn key_iter(&self) -> impl Iterator<Item = &str> {
         self.inner.keys().map(|s| s.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source_options(connector: &str) -> WithOptionsSecResolved {
+        WithOptionsSecResolved::without_secrets(BTreeMap::from([(
+            UPSTREAM_SOURCE_KEY.to_owned(),
+            connector.to_owned(),
+        )]))
+    }
+
+    #[test]
+    fn test_full_reload_refresh_connector_whitelist() {
+        for connector in [
+            OPENDAL_S3_CONNECTOR,
+            GCS_CONNECTOR,
+            BATCH_POSIX_FS_CONNECTOR,
+            ICEBERG_CONNECTOR,
+            ADBC_SNOWFLAKE_CONNECTOR,
+        ] {
+            assert!(
+                source_options(connector).supports_full_reload_refresh(),
+                "{connector} should support FULL_RELOAD refresh"
+            );
+        }
+
+        for connector in [KAFKA_CONNECTOR, POSIX_FS_CONNECTOR, AZBLOB_CONNECTOR] {
+            assert!(
+                !source_options(connector).supports_full_reload_refresh(),
+                "{connector} should not support FULL_RELOAD refresh"
+            );
+        }
     }
 }

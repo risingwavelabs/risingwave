@@ -325,6 +325,13 @@ impl Block {
             + std::mem::size_of::<u32>()
     }
 
+    pub fn estimated_memory_weight(&self) -> usize {
+        size_of::<Self>()
+            + self.data.len()
+            + self.restart_points.capacity() * size_of::<RestartPoint>()
+            + Hitmap::<{ Self::HITMAP_ELEMS }>::bytes()
+    }
+
     pub fn table_id(&self) -> TableId {
         self.table_id
     }

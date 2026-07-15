@@ -3,12 +3,19 @@ syntax = "proto3";
 package stream_service;
 
 import "common.proto";
+import "connector_service.proto";
 import "hummock.proto";
 import "plan_common.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
+
+enum PbIcebergPkIndexSinkRole {
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_UNSPECIFIED = 0;
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_WRITER = 1;
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_POSITION_DELETE_MERGER = 2;
+}
 
 message InjectBarrierRequest {
   string request_id = 1;
@@ -127,6 +134,14 @@ message BarrierCompleteResponse {
     uint32 source_id = 2;
   }
   repeated CdcSourceOffsetUpdated cdc_source_offset_updated = 17;
+  message IcebergPkIndexSinkMetadata {
+    uint32 reporter_actor_id = 1;
+    uint32 sink_id = 2;
+    uint64 prev_epoch = 3;
+    PbIcebergPkIndexSinkRole role = 4;
+    connector_service.SinkMetadata metadata = 5;
+  }
+  repeated IcebergPkIndexSinkMetadata iceberg_pk_index_sink_metadata = 18;
 }
 
 message StreamingControlStreamRequest {
