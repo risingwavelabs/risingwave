@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
 use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use itertools::Itertools;
+use prost::Message;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectDataStreamReader};
+use risingwave_pb::hummock::{PbHummockVersion, PbTableChangeLog};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tracing::info;
@@ -93,19 +98,26 @@ macro_rules! define_metadata_v2 {
 
 for_all_metadata_models_v2!(define_metadata_v2);
 
+macro_rules! encode_metadata_model {
+    (seaql_migrations, $metadata:ident, $writer:ident) => {
+        write_n($writer, &$metadata.seaql_migrations).await?;
+        // `hummock_version` is implicitly the second section, after the first
+        // section `seaql_migrations`.
+        write_hummock_version($writer, &$metadata.hummock_version).await?;
+    };
+    ($name:ident, $metadata:ident, $writer:ident) => {
+        write_n($writer, &$metadata.$name).await?;
+    };
+}
+
 macro_rules! define_encode_metadata_to_writer {
     ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
         async fn encode_metadata_to_writer(
             metadata: &MetadataV2,
             writer: &mut SnapshotPayloadWriter,
         ) -> BackupResult<()> {
-            let mut _idx = 0;
             $(
-                if _idx == 1 {
-                    write_1(writer, &metadata.hummock_version.to_protobuf()).await?;
-                }
-                write_n(writer, &metadata.$name).await?;
-                _idx += 1;
+                encode_metadata_model!($name, metadata, writer);
             )*
             Ok(())
         }
@@ -114,20 +126,24 @@ macro_rules! define_encode_metadata_to_writer {
 
 for_all_metadata_models_v2!(define_encode_metadata_to_writer);
 
+macro_rules! decode_metadata_model {
+    (seaql_migrations, $metadata:ident, $reader:ident) => {
+        $metadata.seaql_migrations = read_n($reader).await?;
+        $metadata.hummock_version = read_hummock_version($reader).await?;
+    };
+    ($name:ident, $metadata:ident, $reader:ident) => {
+        $metadata.$name = read_n($reader).await?;
+    };
+}
+
 macro_rules! define_decode_metadata {
     ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
         async fn decode_metadata_from_reader(
             metadata: &mut MetadataV2,
             reader: &mut SnapshotPayloadReader,
         ) -> BackupResult<()> {
-            let mut _idx = 0;
             $(
-                if _idx == 1 {
-                    let pb_version = read_1(reader).await?;
-                    metadata.hummock_version = HummockVersion::from_persisted_protobuf(&pb_version);
-                }
-                metadata.$name = read_n(reader).await?;
-                _idx += 1;
+                decode_metadata_model!($name, metadata, reader);
             )*
             Ok(())
         }
@@ -253,10 +269,6 @@ async fn write_n<T: Serialize>(writer: &mut SnapshotPayloadWriter, data: &[T]) -
     Ok(())
 }
 
-async fn write_1<T: Serialize>(writer: &mut SnapshotPayloadWriter, data: &T) -> BackupResult<()> {
-    write_n(writer, &[data]).await
-}
-
 async fn read_n<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<Vec<T>>
 where
     T: DeserializeOwned,
@@ -267,15 +279,6 @@ where
         elements.push(read_with_len_prefix(reader).await?);
     }
     Ok(elements)
-}
-
-async fn read_1<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<T>
-where
-    T: DeserializeOwned,
-{
-    let elements = read_n(reader).await?;
-    assert_eq!(elements.len(), 1);
-    Ok(elements.into_iter().next().unwrap())
 }
 
 async fn skip_metadata_list(reader: &mut SnapshotPayloadReader) -> BackupResult<()> {
@@ -302,6 +305,28 @@ async fn read_len_prefix(reader: &mut SnapshotPayloadReader) -> BackupResult<usi
     }
 }
 
+fn len_prefix_len(len: usize) -> usize {
+    if u32::try_from(len).is_ok() && len != 0 {
+        size_of::<u32>()
+    } else {
+        size_of::<u32>() + size_of::<u64>()
+    }
+}
+
+fn put_len_prefix(buf: &mut BytesMut, len: usize) {
+    if let Ok(len) = u32::try_from(len)
+        && len != 0
+    {
+        buf.put_u32_le(len);
+    } else {
+        buf.put_u32_le(0);
+        buf.put_u64_le(
+            len.try_into()
+                .unwrap_or_else(|_| panic!("cannot convert {} into u64", len)),
+        );
+    }
+}
+
 async fn write_with_len_prefix<T: Serialize>(
     writer: &mut SnapshotPayloadWriter,
     data: &T,
@@ -309,33 +334,93 @@ async fn write_with_len_prefix<T: Serialize>(
     let b = serde_json::to_vec(data)?;
     // Any valid JSON value serialized by serde_json is non-empty, such as `null`, `{}`, or `[]`.
     assert!(!b.is_empty());
-    let len_prefix_len = if u32::try_from(b.len()).is_ok() {
-        size_of::<u32>()
-    } else {
-        size_of::<u32>() + size_of::<u64>()
-    };
-    let mut buf = BytesMut::with_capacity(len_prefix_len + b.len());
-    if let Ok(len) = u32::try_from(b.len()) {
-        buf.put_u32_le(len);
-    } else {
-        buf.put_u32_le(0);
-        buf.put_u64_le(
-            b.len()
-                .try_into()
-                .unwrap_or_else(|_| panic!("cannot convert {} into u64", b.len())),
-        );
-    }
+    let mut buf = BytesMut::with_capacity(len_prefix_len(b.len()) + b.len());
+    put_len_prefix(&mut buf, b.len());
     buf.put_slice(&b);
     writer.write_snapshot_bytes(buf.freeze()).await
+}
+
+async fn write_protobuf_message(
+    writer: &mut SnapshotPayloadWriter,
+    message: &impl Message,
+) -> BackupResult<()> {
+    let len = message.encoded_len();
+    let mut buf = BytesMut::with_capacity(len_prefix_len(len) + len);
+    put_len_prefix(&mut buf, len);
+    message
+        .encode(&mut buf)
+        .map_err(|e| BackupError::Encoding(e.into()))?;
+    writer.write_snapshot_bytes(buf.freeze()).await
+}
+
+async fn write_hummock_version(
+    writer: &mut SnapshotPayloadWriter,
+    hummock_version: &HummockVersion,
+) -> BackupResult<()> {
+    let mut pb_version = hummock_version.to_protobuf();
+    pb_version.table_change_logs.clear();
+    write_len(writer, 1 + hummock_version.table_change_log.len()).await?;
+    write_protobuf_message(writer, &pb_version).await?;
+    for (table_id, change_log) in hummock_version
+        .table_change_log
+        .iter()
+        .sorted_by_key(|(table_id, _)| table_id.as_raw_id())
+    {
+        let pb_change_log = change_log.to_protobuf();
+        let len = size_of::<u32>() + pb_change_log.encoded_len();
+        let mut buf = BytesMut::with_capacity(len_prefix_len(len) + len);
+        put_len_prefix(&mut buf, len);
+        buf.put_u32_le(table_id.as_raw_id());
+        pb_change_log
+            .encode(&mut buf)
+            .map_err(|e| BackupError::Encoding(e.into()))?;
+        writer.write_snapshot_bytes(buf.freeze()).await?;
+    }
+    Ok(())
 }
 
 async fn read_with_len_prefix<T>(reader: &mut SnapshotPayloadReader) -> BackupResult<T>
 where
     T: DeserializeOwned,
 {
-    let len = read_len_prefix(reader).await?;
-    let bytes = reader.read_exact(len).await?;
+    let bytes = read_payload_with_len_prefix(reader).await?;
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+async fn read_payload_with_len_prefix(
+    reader: &mut SnapshotPayloadReader,
+) -> BackupResult<BytesMut> {
+    let len = read_len_prefix(reader).await?;
+    reader.read_exact(len).await
+}
+
+fn decode_protobuf_message<T>(payload: BytesMut) -> BackupResult<T>
+where
+    T: Message + Default,
+{
+    T::decode(payload).map_err(|e| BackupError::Decoding(e.into()))
+}
+
+async fn read_hummock_version(reader: &mut SnapshotPayloadReader) -> BackupResult<HummockVersion> {
+    let n = reader.read_u32_le().await?;
+    assert!(n >= 1);
+    let pb_version: PbHummockVersion =
+        decode_protobuf_message(read_payload_with_len_prefix(reader).await?)?;
+    let mut hummock_version = HummockVersion::from_persisted_protobuf(&pb_version);
+    let mut table_change_log = HashMap::with_capacity(n as usize - 1);
+    for _ in 1..n {
+        let mut payload = read_payload_with_len_prefix(reader).await?;
+        if payload.remaining() < size_of::<u32>() {
+            return Err(BackupError::Other(anyhow!(
+                "table change log item shorter than table id"
+            )));
+        }
+        let table_id = TableId::new(payload.get_u32_le());
+        let pb_change_log: PbTableChangeLog = decode_protobuf_message(payload)?;
+        table_change_log.insert(table_id, TableChangeLog::from_protobuf(&pb_change_log));
+    }
+    hummock_version.table_change_log = table_change_log;
+    Ok(hummock_version)
 }
 
 #[cfg(test)]
@@ -543,6 +628,11 @@ mod tests {
         let store = test_store();
         let mut metadata = MetadataV2::default();
         metadata.hummock_version.id = HummockVersionId::new(123);
+        let table_id = TableId::new(42);
+        metadata
+            .hummock_version
+            .table_change_log
+            .insert(table_id, TableChangeLog::new([]));
         let raw = MetaSnapshotV2 {
             format_version: 2,
             id: 123,
@@ -562,6 +652,41 @@ mod tests {
             decoded.metadata.hummock_version.id,
             raw.metadata.hummock_version.id
         );
+        assert_eq!(
+            decoded
+                .metadata
+                .hummock_version
+                .table_change_log
+                .get(&table_id),
+            raw.metadata.hummock_version.table_change_log.get(&table_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_v2_hummock_version_excludes_table_change_log() {
+        let store = test_store();
+        let mut metadata = MetadataV2::default();
+        metadata
+            .hummock_version
+            .table_change_log
+            .insert(TableId::new(42), TableChangeLog::new([]));
+        let raw = MetaSnapshotV2 {
+            format_version: 2,
+            id: 123,
+            metadata,
+        };
+
+        upload_snapshot(&store, "snapshot-v2-hummock-version", &raw).await;
+        let encoded = read_bytes(&store, "snapshot-v2-hummock-version").await;
+        let payload = &encoded[..encoded.len() - size_of::<u64>()];
+        let mut metadata_buf = &payload[size_of::<u32>() + size_of::<u64>()..];
+        skip_metadata_list_from_slice(&mut metadata_buf).unwrap();
+        let section_item_count = read_u32_le(&mut metadata_buf).unwrap();
+        let pb_version_len = read_len_prefix_from_slice(&mut metadata_buf).unwrap();
+        let pb_version = PbHummockVersion::decode(&metadata_buf[..pb_version_len]).unwrap();
+
+        assert_eq!(section_item_count, 2);
+        assert!(pb_version.table_change_logs.is_empty());
     }
 
     #[tokio::test]
