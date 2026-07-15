@@ -112,3 +112,6 @@ ingest route, signature configuration, and required target-table DDL privileges 
    row. When a source emits a partial update image, the connector reconstructs the complete row
    from its `before` and `after` images. If neither image contains all target columns, the update
    fails rather than silently converting absent columns to `NULL`.
+8. **Large records have a frame limit**: The connector splits batches into ordered WebSocket
+   payloads below 8 MiB. A single source record larger than that cannot be split safely and fails
+   with an explicit error.

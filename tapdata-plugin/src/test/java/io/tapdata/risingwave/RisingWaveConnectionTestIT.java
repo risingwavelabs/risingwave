@@ -467,6 +467,32 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void websocketStreamingSplitsBatchesLargerThanTheServerFrameLimit() throws Exception {
+        String tableName = "tapdata_ws_split_" + shortSuffix();
+        String payload = "x".repeat(3 * 1024 * 1024);
+        try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE public.\"" + tableName
+                    + "\" (id integer, payload varchar, PRIMARY KEY (id)) WITH (connector = 'webhook')");
+        }
+
+        try (WsIngestClient client = new WsIngestClient(
+                "ws://127.0.0.1:4560", "dev", "public", tableName, "")) {
+            client.connect();
+            List<WsIngestClient.DmlOperation> operations = new ArrayList<>();
+            for (int id = 1; id <= 6; id++) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", id);
+                row.put("payload", payload);
+                operations.add(new WsIngestClient.DmlOperation("insert", null, row));
+            }
+            await(client.sendBatch(operations));
+            awaitCount(tableName, 6);
+        } finally {
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void websocketStreamingCompletesPartialUpdatesAndPreservesExplicitNulls() throws Throwable {
         String tableName = "tapdata_ws_partial_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();

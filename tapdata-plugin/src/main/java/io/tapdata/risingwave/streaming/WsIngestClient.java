@@ -40,6 +40,11 @@ import javax.crypto.spec.SecretKeySpec;
 public class WsIngestClient implements AutoCloseable {
 
     private static final String SIGNATURE_HEADER = "x-rw-signature";
+    /**
+     * Keep a margin below RisingWave/Axum's default 16 MiB single-frame limit. A batch may be
+     * split into multiple ordered DML frames, each with its own durable ACK.
+     */
+    static final int MAX_BATCH_PAYLOAD_BYTES = 8 * 1024 * 1024;
     /** Shares the selector, executor, and connection pool across all table clients. */
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper()
@@ -96,8 +101,7 @@ public class WsIngestClient implements AutoCloseable {
         }
 
         long dmlBatchId = -1;
-        CompletableFuture<Void> ackFuture = new CompletableFuture<>();
-        ackFutures.add(ackFuture);
+        CompletableFuture<Void> ackFuture = null;
         try {
             synchronized (sendLock) {
                 if (closed) {
@@ -109,13 +113,18 @@ public class WsIngestClient implements AutoCloseable {
                 if (webSocket == null) {
                     throw new IllegalStateException("WebSocket ingest client is not connected");
                 }
-                dmlBatchId = dmlBatchIdGen.getAndIncrement();
-                String payloadJson = buildBatchPayloadJson(dmlBatchId, operations);
-                pending.put(dmlBatchId, ackFuture);
+                for (List<DmlOperation> batch : splitBatches(operations, MAX_BATCH_PAYLOAD_BYTES)) {
+                    dmlBatchId = dmlBatchIdGen.getAndIncrement();
+                    String payloadJson = buildBatchPayloadJson(dmlBatchId, batch);
+                    ackFuture = new CompletableFuture<>();
+                    ackFutures.add(ackFuture);
+                    pending.put(dmlBatchId, ackFuture);
 
-                RisingWaveConnector.debugLog("WsIngestClient.sendBatch dmlBatchId=" + dmlBatchId
-                        + " items=" + operations.size());
-                webSocket.sendText(payloadJson, true).get(10, TimeUnit.SECONDS);
+                    RisingWaveConnector.debugLog("WsIngestClient.sendBatch dmlBatchId=" + dmlBatchId
+                            + " items=" + batch.size() + " bytes="
+                            + payloadJson.getBytes(StandardCharsets.UTF_8).length);
+                    webSocket.sendText(payloadJson, true).get(10, TimeUnit.SECONDS);
+                }
             }
         } catch (Exception e) {
             RisingWaveConnector.debugLog("WsIngestClient.sendBatch ERROR dmlBatchId=" + dmlBatchId + ": "
@@ -123,8 +132,12 @@ public class WsIngestClient implements AutoCloseable {
             CompletableFuture<Void> future = pending.remove(dmlBatchId);
             if (future != null) {
                 future.completeExceptionally(e);
-            } else {
+            } else if (ackFuture != null) {
                 ackFuture.completeExceptionally(e);
+            } else {
+                CompletableFuture<Void> failed = new CompletableFuture<>();
+                failed.completeExceptionally(e);
+                ackFutures.add(failed);
             }
         }
 
@@ -285,6 +298,47 @@ public class WsIngestClient implements AutoCloseable {
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Unable to serialize WebSocket ingest batch", e);
         }
+    }
+
+    /** Split ordered operations into payloads that remain below a single WebSocket frame limit. */
+    static List<List<DmlOperation>> splitBatches(List<DmlOperation> operations, int maxPayloadBytes) {
+        if (maxPayloadBytes <= 0) {
+            throw new IllegalArgumentException("WebSocket batch payload limit must be positive");
+        }
+        List<List<DmlOperation>> batches = new ArrayList<>();
+        List<DmlOperation> current = new ArrayList<>();
+        for (DmlOperation operation : operations) {
+            current.add(operation);
+            int bytes = payloadByteLength(current);
+            if (bytes <= maxPayloadBytes) {
+                continue;
+            }
+            current.remove(current.size() - 1);
+            if (current.isEmpty()) {
+                throw new IllegalArgumentException("A single WebSocket DML operation is " + bytes
+                        + " bytes, exceeding the " + maxPayloadBytes
+                        + " byte frame safety limit; split the source record before replication");
+            }
+            batches.add(current);
+            current = new ArrayList<>();
+            current.add(operation);
+            int singleOperationBytes = payloadByteLength(current);
+            if (singleOperationBytes > maxPayloadBytes) {
+                throw new IllegalArgumentException("A single WebSocket DML operation is "
+                        + singleOperationBytes + " bytes, exceeding the " + maxPayloadBytes
+                        + " byte frame safety limit; split the source record before replication");
+            }
+        }
+        if (!current.isEmpty()) {
+            batches.add(current);
+        }
+        return batches;
+    }
+
+    private static int payloadByteLength(List<DmlOperation> operations) {
+        // Size with the longest possible batch ID so every generated payload remains
+        // within the safety limit, even after the sequence grows.
+        return buildBatchPayloadJson(Long.MAX_VALUE, operations).getBytes(StandardCharsets.UTF_8).length;
     }
 
     private String signPayload(String payloadJson) throws Exception {

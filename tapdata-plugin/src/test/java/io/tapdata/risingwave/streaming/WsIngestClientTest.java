@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WsIngestClientTest {
@@ -122,5 +123,35 @@ class WsIngestClientTest {
 
         assertTrue(acknowledgement.isCompletedExceptionally());
         assertTrue(pending.isEmpty());
+    }
+
+    @Test
+    void splitsOrderedOperationsToStayWithinPayloadLimit() {
+        List<WsIngestClient.DmlOperation> operations = Arrays.asList(
+                largeInsert(1, 64), largeInsert(2, 64), largeInsert(3, 64));
+        int oneOperationLimit = WsIngestClient.buildBatchPayloadJson(Long.MAX_VALUE,
+                Collections.singletonList(operations.get(0))).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+
+        List<List<WsIngestClient.DmlOperation>> batches = WsIngestClient.splitBatches(
+                operations, oneOperationLimit + 1);
+
+        assertEquals(3, batches.size());
+        assertTrue(WsIngestClient.buildBatchPayloadJson(1, batches.get(0)).contains("\"id\":1"));
+        assertTrue(WsIngestClient.buildBatchPayloadJson(1, batches.get(1)).contains("\"id\":2"));
+        assertTrue(WsIngestClient.buildBatchPayloadJson(1, batches.get(2)).contains("\"id\":3"));
+    }
+
+    @Test
+    void rejectsOperationLargerThanPayloadLimit() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> WsIngestClient.splitBatches(Collections.singletonList(largeInsert(1, 128)), 32));
+        assertTrue(error.getMessage().contains("single WebSocket DML operation"));
+    }
+
+    private static WsIngestClient.DmlOperation largeInsert(int id, int payloadLength) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", id);
+        record.put("payload", "x".repeat(payloadLength));
+        return new WsIngestClient.DmlOperation("insert", null, record);
     }
 }
