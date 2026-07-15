@@ -116,6 +116,10 @@
                                         <exclude>META-INF/*.RSA</exclude>
                                         <exclude>module-info.class</exclude>
                                         <exclude>META-INF/versions/*/module-info.class</exclude>
+                                        <!-- Shade does not relocate multi-release class paths. The
+                                             base Jackson classes are already relocated and work on
+                                             every supported Java runtime. -->
+                                        <exclude>META-INF/versions/**/com/fasterxml/jackson/**</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
