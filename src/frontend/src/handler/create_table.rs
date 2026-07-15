@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use clap::ValueEnum;
 use either::Either;
+use fancy_regex::Regex;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use percent_encoding::percent_decode_str;
@@ -1193,48 +1194,116 @@ fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(
     }
 }
 
-/// Reject `CREATE TABLE` when a primary-key column is excluded from Debezium change-event
-/// values via `debezium.column.exclude.list`.
+/// Reject `CREATE TABLE` when a primary-key column is filtered out of Debezium change-event
+/// values via `debezium.column.exclude.list` or `debezium.column.include.list`.
 ///
-/// Debezium's `column.exclude.list` only filters the change-event **value** payload.
-/// Message keys are always built from the upstream PRIMARY KEY and are not affected.
-/// If a PK column is dropped from the value, RisingWave reads NULL for that PK column
-/// from the payload, causing silent data corruption: UPDATE turns into a fresh INSERT
-/// (PK mismatch with the original row) and DELETE silently no-ops.
+/// Debezium's column filters only apply to the change-event **value** payload. Message keys are
+/// always built from the upstream PRIMARY KEY and are not affected. If a PK column is filtered out
+/// of the value, RisingWave reads NULL for that PK column from the payload, causing silent data
+/// corruption: UPDATE turns into a fresh INSERT (PK mismatch with the original row) and DELETE
+/// silently no-ops.
 ///
-/// Debezium pattern format is `<namespace>.<table>.<column>`, where namespace is
-/// `schema` for Postgres / SQL Server and `database` for MySQL. We strip the current
-/// table's `<namespace>.<table>.` prefix to recover the column name; entries that
-/// target other tables are skipped.
-fn reject_pk_excluded_by_debezium_filter(
+/// Debezium entries are regex patterns matched against the fully qualified column name
+/// `<namespace>.<table>.<column>`, where namespace is `schema` for Postgres / SQL Server and
+/// `database` for MySQL.
+fn reject_pk_filtered_by_debezium_column_filter(
     pk_names: &[String],
     cdc_with_options: &WithOptionsSecResolved,
 ) -> Result<()> {
     const EXCLUDE_KEY: &str = "debezium.column.exclude.list";
-
-    let Some(exclude_list) = cdc_with_options.get(EXCLUDE_KEY) else {
-        return Ok(());
-    };
+    const INCLUDE_KEY: &str = "debezium.column.include.list";
 
     let st = SchemaTableName::from_properties(cdc_with_options.as_plaintext());
-    let prefix = format!("{}.{}.", st.schema_name, st.table_name);
+    reject_pk_filtered_by_debezium_column_filter_inner(
+        pk_names,
+        &st,
+        cdc_with_options.get(EXCLUDE_KEY).map(String::as_str),
+        cdc_with_options.get(INCLUDE_KEY).map(String::as_str),
+    )
+}
 
-    for entry in exclude_list.split(',') {
-        let Some(col) = entry.trim().strip_prefix(prefix.as_str()) else {
-            continue;
-        };
-        if pk_names.iter().any(|pk| pk == col) {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "primary key column `{col}` is excluded by `{EXCLUDE_KEY}`. \
-                 Excluding a PK column causes silent data corruption: Debezium keeps \
-                 the PK in the message key but drops it from the payload, so RisingWave \
-                 cannot match UPDATE/DELETE events against the original row."
-            ))
-            .into());
+fn reject_pk_filtered_by_debezium_column_filter_inner(
+    pk_names: &[String],
+    st: &SchemaTableName,
+    exclude_list: Option<&str>,
+    include_list: Option<&str>,
+) -> Result<()> {
+    const EXCLUDE_KEY: &str = "debezium.column.exclude.list";
+    const INCLUDE_KEY: &str = "debezium.column.include.list";
+
+    let pk_full_names = pk_names
+        .iter()
+        .map(|pk| (pk, format!("{}.{}.{}", st.schema_name, st.table_name, pk)))
+        .collect_vec();
+
+    if let Some(exclude_list) = exclude_list {
+        let patterns = compile_debezium_column_filter_patterns(EXCLUDE_KEY, exclude_list)?;
+        for (pk, pk_full_name) in &pk_full_names {
+            for (pattern, regex) in &patterns {
+                if regex.is_match(pk_full_name).map_err(|err| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "failed to evaluate Debezium column filter pattern `{pattern}` in `{EXCLUDE_KEY}`: {err}"
+                    ))
+                })? {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "primary key column `{pk}` is excluded by `{EXCLUDE_KEY}` pattern \
+                         `{pattern}`. Excluding a PK column causes silent data corruption: \
+                         Debezium keeps the PK in the message key but drops it from the payload, \
+                         so RisingWave cannot match UPDATE/DELETE events against the original row."
+                    ))
+                    .into());
+                }
+            }
+        }
+    }
+
+    if let Some(include_list) = include_list {
+        let patterns = compile_debezium_column_filter_patterns(INCLUDE_KEY, include_list)?;
+        for (pk, pk_full_name) in &pk_full_names {
+            let mut included = false;
+            for (_, regex) in &patterns {
+                if regex.is_match(pk_full_name).map_err(|err| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "failed to evaluate Debezium column filter pattern in `{INCLUDE_KEY}`: {err}"
+                    ))
+                })? {
+                    included = true;
+                    break;
+                }
+            }
+            if !included {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "primary key column `{pk}` is not included by `{INCLUDE_KEY}`. Omitting a PK \
+                     column causes silent data corruption: Debezium keeps the PK in the message key \
+                     but drops it from the payload, so RisingWave cannot match UPDATE/DELETE events \
+                     against the original row."
+                ))
+                .into());
+            }
         }
     }
 
     Ok(())
+}
+
+fn compile_debezium_column_filter_patterns(
+    key: &str,
+    filter_list: &str,
+) -> Result<Vec<(String, Regex)>> {
+    filter_list
+        .split(',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(|pattern| {
+            let anchored_pattern = format!("(?i:^(?:{pattern})$)");
+            let regex = Regex::new(&anchored_pattern).map_err(|err| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid Debezium column filter pattern `{pattern}` in `{key}`: {err}"
+                ))
+            })?;
+            Ok((pattern.to_owned(), regex))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1391,12 +1460,11 @@ pub(super) async fn handle_create_table_plan(
                 }
             };
 
-            // CDC-table branch only: if `debezium.column.exclude.list` covers a PK
-            // column, Debezium drops it from the change-event value while keeping it
-            // in the message key. RisingWave would read NULL for that PK from the
-            // payload, silently corrupting downstream (UPDATE turns into a fresh
-            // INSERT, DELETE no-ops). Plain (non-CDC) tables don't hit this check.
-            reject_pk_excluded_by_debezium_filter(&pk_names, &cdc_with_options)?;
+            // CDC-table branch only: if Debezium column filters remove a PK column from the
+            // change-event value, RisingWave reads NULL for that PK from the payload and silently
+            // corrupts downstream (UPDATE turns into a fresh INSERT, DELETE no-ops). Plain
+            // (non-CDC) tables don't hit this check.
+            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
@@ -2775,7 +2843,7 @@ pub async fn generate_stream_graph_for_replace_table(
 
             // CDC-table branch only: see the comment at the symmetric call site in
             // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
-            reject_pk_excluded_by_debezium_filter(&pk_names, &cdc_with_options)?;
+            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -2978,6 +3046,104 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
+
+    fn test_schema_table_name() -> SchemaTableName {
+        SchemaTableName {
+            schema_name: "public".to_owned(),
+            table_name: "orders".to_owned(),
+        }
+    }
+
+    fn pk_names() -> Vec<String> {
+        vec!["plan_id".to_owned(), "site_id".to_owned()]
+    }
+
+    #[test]
+    fn test_debezium_filter_rejects_literal_excluded_pk() {
+        let err = reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            Some("public.orders.site_id"),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_report_string().contains("site_id"));
+        assert!(
+            err.to_report_string()
+                .contains("debezium.column.exclude.list")
+        );
+    }
+
+    #[test]
+    fn test_debezium_filter_rejects_include_list_missing_pk() {
+        let err = reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            None,
+            Some("public.orders.plan_id,public.orders.payload"),
+        )
+        .unwrap_err();
+
+        assert!(err.to_report_string().contains("site_id"));
+        assert!(
+            err.to_report_string()
+                .contains("debezium.column.include.list")
+        );
+    }
+
+    #[test]
+    fn test_debezium_filter_accepts_include_list_covering_all_pks() {
+        reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            None,
+            Some("public.orders.plan_id,public.orders.site_id,public.orders.payload"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_debezium_filter_matches_regex_patterns() {
+        reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            None,
+            Some(r"public[.]orders[.](plan_id|site_id),public[.]orders[.]payload"),
+        )
+        .unwrap();
+
+        let err = reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            Some(r".*[.]orders[.]site_id"),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_report_string().contains("site_id"));
+    }
+
+    #[test]
+    fn test_debezium_filter_matches_patterns_case_insensitively() {
+        let err = reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            Some("PUBLIC.ORDERS.SITE_ID"),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_report_string().contains("site_id"));
+
+        reject_pk_filtered_by_debezium_column_filter_inner(
+            &pk_names(),
+            &test_schema_table_name(),
+            None,
+            Some("Public.Orders.Plan_ID,Public.Orders.Site_ID"),
+        )
+        .unwrap();
+    }
 
     #[tokio::test]
     async fn test_create_table_handler() {
