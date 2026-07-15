@@ -19,7 +19,8 @@ RisingWave 是一个兼容 PostgreSQL 协议的流式数据库。此连接器通
 
 WebSocket 流式模式要求每个源模型都有主键。插入和主键不变的更新使用 upsert。
 更新改变主键值时，连接器会在同一个 WebSocket batch 中发送 `delete(before)` 和
-`upsert(after)`；删除使用 before image。无主键表请使用 JDBC 模式。
+`upsert(after)`；删除使用 before image。对于无主键表，如果源端只产生插入事件，可使用
+WebSocket JSONB 仅追加模式；需要支持更新或删除事件时，请使用 JDBC 模式。
 
 ### 前置条件
 

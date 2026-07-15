@@ -21,7 +21,8 @@ RisingWave is a Postgres-compatible streaming database. This connector writes da
 WebSocket streaming requires every source model to have a primary key. Streaming inserts and
 same-primary-key updates are sent as upserts. When an update changes a
 primary-key value, the connector sends `delete(before)` and `upsert(after)` in the same WebSocket
-batch. Deletes use the before image. Use JDBC mode for keyless tables.
+batch. Deletes use the before image. For keyless tables, use WebSocket JSONB append-only when the
+source produces insert events only; use JDBC when update or delete events must be supported.
 
 ### Prerequisites
 
