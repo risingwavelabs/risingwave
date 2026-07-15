@@ -1,13 +1,22 @@
-# TapData RisingWave Connector Production Readiness
+# TapData RisingWave Connector Historical Production Qualification
 
-Status date: 2026-07-15
+Status date: 2026-07-15 (historical record)
 Branch: `wenym1/tapdata-plugin`
 Baseline commit: `987970037a`
-Connector artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`
+Historical release artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`
 
-This document is the durable execution record for production qualification. It records commands,
-observations, failures, fixes, and remaining risks. Secrets and record payloads containing sensitive
-data must not be recorded here.
+This document is the durable chronological execution record for an earlier production
+qualification. It records commands, observations, failures, fixes, and remaining risks. It does
+not certify the current branch or an unreleased artifact. The current development artifact is
+`target/risingwave-connector-1.0-SNAPSHOT.jar`; before release, rerun Cloud and CI qualification
+against the exact immutable artifact. Secrets and record payloads containing sensitive data must
+not be recorded here.
+
+Later local hardening, not fully reflected in the historical entries below, includes named
+RisingWave Secret references, partial-update completion, qualified-schema WebSocket routing,
+8 MiB WebSocket batch splitting, repeated reconnect fault injection, reduced JDBC `FLUSH` usage,
+and JSONB binary normalization. See `README.md` and the localized connector docs for current
+behavior and limitations.
 
 ## Qualification Scope
 

@@ -1,15 +1,21 @@
 # Tapdata RisingWave Plugin Handoff
 
-Status date: 2026-07-15 (updated)
+Status date: 2026-07-15 (historical handoff, superseded where noted below)
 Original date: 2026-06-17
 Workspace used for final validation: `/Users/adbean/work/risingwave`
 Branch: `wenym1/tapdata-plugin`
 
-This document is intended to be self-contained enough to continue the Tapdata RisingWave plugin work in a new workspace.
+This document preserves the chronological handoff and historical qualification evidence. It is not
+the authoritative release-status document: use `README.md`, the localized connector docs, the
+current branch, and CI results for current behavior. In particular, later hardening added
+`streaming_jsonb`, `VALIDATE SECRET` references, partial-update completion, qualified-schema
+routing, WebSocket batch splitting, reconnect fault injection, and JSONB binary normalization.
 
 ## Current Status
 
-The Tapdata RisingWave plugin has been updated, smoke-tested, and verified end-to-end against RisingWave Cloud (v3.0.1) via WebSocket ingest.
+The Tapdata RisingWave plugin was smoke-tested and verified end-to-end against RisingWave Cloud
+(v3.0.1) via WebSocket ingest at the time of this handoff. That Cloud result is historical and
+must be rerun for the release artifact.
 
 Validated path:
 
@@ -38,7 +44,9 @@ Validated path:
   endpoints remain supported.
 
 ### DDL generation
-- **VALIDATE clause**: `createTable` now adds `VALIDATE AS secure_compare(...)` when `webhookSecret` is configured. Previously no signature verification.
+- **Webhook validation**: current code uses `VALIDATE SECRET <name> AS secure_compare(...)` when
+  a webhook secret is configured. The secret value is not embedded in table DDL; it can be
+  connector-managed or supplied as a user-managed RisingWave Secret.
 
 ### SSL fix
 - Changed JDBC `sslmode` from hardcoded `disable` to configurable (default `prefer`). Fixes "failed to get tenant identifier" on RisingWave Cloud.
@@ -123,11 +131,12 @@ sha256=<hex hmac>
 
 ### Write Modes
 
-`RisingWaveConnector` supports two write modes:
+`RisingWaveConnector` supports three write modes:
 
 ```text
 jdbc       standard JDBC insert/update/delete path
 streaming  websocket ingest path, using RisingWave webhook-backed target tables
+streaming_jsonb websocket append-only JSONB path for keyless insert-only models
 ```
 
 `ingest_mode=streaming` enables websocket ingest and is the default. JDBC mode remains available as a compatible fallback.
@@ -395,7 +404,7 @@ Plugin deploy command used:
 
 ```bash
 mvn -f tapdata-plugin/pom.xml -DskipTests package
-docker cp tapdata-plugin/target/risingwave-connector-1.0.0.jar tapdata-clean:/tmp/risingwave-connector-new.jar
+docker cp tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar tapdata-clean:/tmp/risingwave-connector-new.jar
 docker exec tapdata-clean java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
   -a <your-access-code> \

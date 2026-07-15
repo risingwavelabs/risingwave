@@ -10,6 +10,12 @@ RisingWave. Supports three write modes:
 - **JDBC mode**: compatible fallback using standard SQL `INSERT`/`UPDATE`/`DELETE` via the
   PostgreSQL wire protocol
 
+Historical handoff and qualification logs are kept in
+[`TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md`](TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md) and
+[`TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md`](TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md).
+They are not release certificates for the current snapshot; use this README, CI, and an exact
+release artifact for the final decision.
+
 ## What it does
 
 - Replicates tables from any Tapdata source (e.g. PostgreSQL, MySQL, Mock Source) into RisingWave
