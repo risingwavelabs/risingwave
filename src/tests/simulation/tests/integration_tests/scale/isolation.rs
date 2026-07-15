@@ -164,7 +164,22 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     let mut refill_table_ids = internal_table_ids.clone();
     refill_table_ids.push(result_table_id);
 
-    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &refill_table_ids, None).await?;
+    wait_refill_policy_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &internal_table_ids,
+        "internal_policies",
+        None,
+    )
+    .await?;
+    wait_refill_policy_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &[result_table_id],
+        "policies",
+        None,
+    )
+    .await?;
 
     session
         .run("insert into t2 select * from generate_series(1, 10);")
@@ -188,14 +203,16 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
         &cluster,
         COMPUTE_2_HOST,
         &internal_table_ids,
-        Some("streaming"),
+        "internal_policies",
+        Some("both"),
     )
     .await?;
     wait_refill_policy_on_compute(
         &cluster,
         COMPUTE_2_HOST,
         &[result_table_id],
-        Some("serving"),
+        "policies",
+        Some("both"),
     )
     .await?;
 
@@ -242,14 +259,16 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
         &cluster,
         COMPUTE_4_HOST,
         &internal_table_ids,
-        Some("streaming"),
+        "internal_policies",
+        Some("both"),
     )
     .await?;
     wait_refill_policy_on_compute(
         &cluster,
         COMPUTE_4_HOST,
         &[result_table_id],
-        Some("serving"),
+        "policies",
+        Some("both"),
     )
     .await?;
     let expected_serving_on_new_worker = expected_serving_refill_vnodes_on_compute(
@@ -749,17 +768,22 @@ async fn wait_refill_policy_on_compute(
     cluster: &Cluster,
     worker_host: &str,
     table_ids: &[u32],
+    policy_field: &str,
     expected_policy: Option<&str>,
 ) -> Result<()> {
+    let mut last_observed = None;
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
-            if let Ok(stats) = table_cache_refill_stats_on_compute(cluster, worker_host).await
-                && let Some(policies) = stats.get("policies").and_then(Value::as_object)
-                && table_ids.iter().all(|table_id| {
-                    policies.get(&table_id.to_string()).and_then(Value::as_str) == expected_policy
-                })
-            {
-                return Ok::<(), anyhow::Error>(());
+            if let Ok(stats) = table_cache_refill_stats_on_compute(cluster, worker_host).await {
+                if let Some(policies) = stats.get(policy_field).and_then(Value::as_object)
+                    && table_ids.iter().all(|table_id| {
+                        policies.get(&table_id.to_string()).and_then(Value::as_str)
+                            == expected_policy
+                    })
+                {
+                    return Ok::<(), anyhow::Error>(());
+                }
+                last_observed = stats.get(policy_field).cloned();
             }
             sleep(Duration::from_secs(1)).await;
         }
@@ -767,10 +791,8 @@ async fn wait_refill_policy_on_compute(
     .await
     .map_err(|_| {
         anyhow!(
-            "timed out waiting for table cache refill policy {:?} on {} for {:?}",
-            expected_policy,
-            worker_host,
-            table_ids
+            "timed out waiting for table cache refill policy {:?} in {} on {} for {:?}; last observed policies: {:?}",
+            expected_policy, policy_field, worker_host, table_ids, last_observed
         )
     })?
 }
