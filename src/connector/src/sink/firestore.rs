@@ -23,7 +23,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde::Deserialize;
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
@@ -345,6 +346,7 @@ impl FirestoreSinkWriter {
                     for op in &chunk {
                         match op {
                             FirestoreOperation::Upsert { doc_id, data } => {
+                                let data = FirestoreJsonObject(data);
                                 batch
                                     .update_object(&collection, doc_id, &data, None, None, vec![])
                                     .map_err(|e| {
@@ -410,6 +412,51 @@ enum FirestoreOperation {
     Delete {
         doc_id: String,
     },
+}
+
+struct FirestoreJsonObject<'a>(&'a HashMap<String, JsonValue>);
+
+impl Serialize for FirestoreJsonObject<'_> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in self.0 {
+            map.serialize_entry(key, &FirestoreJsonValue(value))?;
+        }
+        map.end()
+    }
+}
+
+struct FirestoreJsonValue<'a>(&'a JsonValue);
+
+impl Serialize for FirestoreJsonValue<'_> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.0 {
+            JsonValue::Null => {
+                firestore::serialize_as_null::serialize(&Option::<()>::None, serializer)
+            }
+            JsonValue::Array(values) => {
+                let mut seq = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    seq.serialize_element(&FirestoreJsonValue(value))?;
+                }
+                seq.end()
+            }
+            JsonValue::Object(values) => {
+                let mut map = serializer.serialize_map(Some(values.len()))?;
+                for (key, value) in values {
+                    map.serialize_entry(key, &FirestoreJsonValue(value))?;
+                }
+                map.end()
+            }
+            value => value.serialize(serializer),
+        }
+    }
 }
 
 pub type WriteChunkFuture = std::pin::Pin<
@@ -531,6 +578,8 @@ impl AsyncTruncateSinkWriter for FirestoreSinkWriter {
 
 #[cfg(test)]
 mod tests {
+    use gcloud_sdk::google::firestore::v1::value::ValueType;
+
     use super::*;
 
     #[test]
@@ -573,5 +622,64 @@ mod tests {
             JsonValue::Number(i64::MAX.into())
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_firestore_json_object_serializes_null_as_null_value() {
+        let data = HashMap::from([("field".to_owned(), JsonValue::Null)]);
+        let doc = FirestoreDb::serialize_to_doc(
+            "projects/p/databases/d/documents/c/doc",
+            &FirestoreJsonObject(&data),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            doc.fields.get("field").unwrap().value_type,
+            Some(ValueType::NullValue(0))
+        ));
+    }
+
+    #[test]
+    fn test_firestore_json_object_preserves_nested_null_values() {
+        let data = HashMap::from([(
+            "field".to_owned(),
+            serde_json::json!({
+                "array": [1, null, "x"],
+                "object": {
+                    "null_field": null,
+                    "string_field": "value"
+                }
+            }),
+        )]);
+        let doc = FirestoreDb::serialize_to_doc(
+            "projects/p/databases/d/documents/c/doc",
+            &FirestoreJsonObject(&data),
+        )
+        .unwrap();
+
+        let Some(ValueType::MapValue(root)) = &doc.fields.get("field").unwrap().value_type else {
+            panic!("expected field to be a map");
+        };
+        let Some(ValueType::ArrayValue(array)) = &root.fields.get("array").unwrap().value_type
+        else {
+            panic!("expected array field to be an array");
+        };
+        assert!(matches!(
+            array.values[1].value_type,
+            Some(ValueType::NullValue(0))
+        ));
+
+        let Some(ValueType::MapValue(object)) = &root.fields.get("object").unwrap().value_type
+        else {
+            panic!("expected object field to be a map");
+        };
+        assert!(matches!(
+            object.fields.get("null_field").unwrap().value_type,
+            Some(ValueType::NullValue(0))
+        ));
+        assert!(matches!(
+            object.fields.get("string_field").unwrap().value_type,
+            Some(ValueType::StringValue(_))
+        ));
     }
 }
