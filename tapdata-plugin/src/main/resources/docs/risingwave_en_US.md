@@ -31,9 +31,9 @@ source produces insert events only; use JDBC when update or delete events must b
 In streaming mode, the connector **automatically creates** the target table with `WITH (connector = 'webhook')` when it does not exist. You do **not** need to create the table manually.
 
 If a **Webhook Secret** is configured, the connector references a RisingWave catalog Secret so
-the value is not exposed by `SHOW CREATE TABLE`. Leave **RisingWave Secret Name** blank to let the
-connector create and manage a per-table Secret, or provide the name of an existing Secret in the
-configured schema whose value matches **Webhook Secret**. Automatic management requires Secret
+the value is not exposed by `SHOW CREATE TABLE`. The connector creates and rotates that Secret
+from **Webhook Secret**. Leave **RisingWave Secret Name** blank to generate a per-table name, or
+set it to choose a stable name that may be shared by multiple target tables. This requires Secret
 Management and `CREATE SECRET` permission.
 
 ```sql
@@ -97,7 +97,7 @@ ingest route, signature configuration, and required target-table DDL privileges 
 | Write Mode | No | streaming | `streaming` (recommended), `streaming_jsonb` (append-only), or `jdbc` (compatible fallback) |
 | Ingest Endpoint | No | Blank | Leave blank to use `ws://<Host>:4560` automatically; set explicitly for TLS or a separate ingest host |
 | Webhook Secret | No | — | HMAC secret for signing the WebSocket init frame (streaming mode only) |
-| RisingWave Secret Name | No | Auto-managed | Existing Secret in the configured schema; when blank, the connector creates and manages a protected per-table Secret |
+| RisingWave Secret Name | No | Auto-generated | Optional stable name for the protected Secret created and rotated from Webhook Secret; blank generates a per-table name |
 
 ### Limitations
 

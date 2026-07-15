@@ -167,14 +167,9 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
-    void signedPrecheckCanUseAnExistingNamedSecretWithoutOwningItsLifecycle() throws Throwable {
+    void signedPrecheckCreatesAndRotatesConfiguredNamedSecret() throws Throwable {
         String secretName = "tapdata_existing_secret_" + shortSuffix();
         String secretValue = "existing-secret-" + shortSuffix();
-        try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE SECRET public.\"" + secretName
-                    + "\" WITH (backend = 'meta') AS "
-                    + RisingWaveSql.quoteStringLiteral(secretValue));
-        }
 
         try {
             TapConnectionContext context = connectionContext(

@@ -20,11 +20,8 @@ final class RisingWaveWebhookSecret {
         if (value == null || value.isEmpty()) {
             return Handle.disabled();
         }
-        if (configuredName != null && !configuredName.trim().isEmpty()) {
-            return new Handle(validateName(configuredName.trim()), false);
-        }
-
-        String name = automaticName(schema, tableId);
+        boolean automatic = configuredName == null || configuredName.trim().isEmpty();
+        String name = automatic ? automaticName(schema, tableId) : validateName(configuredName.trim());
         String qualifiedName = RisingWaveSql.quoteIdentifier(schema) + "."
                 + RisingWaveSql.quoteIdentifier(name);
         String literal = RisingWaveSql.quoteStringLiteral(value);
@@ -37,10 +34,12 @@ final class RisingWaveWebhookSecret {
         } catch (SQLException error) {
             throw new SQLException("Unable to create the protected RisingWave Secret used for "
                     + "webhook validation. Ensure Secret Management is available and the user "
-                    + "has CREATE SECRET permission, or configure an existing Webhook Secret Name: "
+                    + "has CREATE SECRET permission: "
                     + error.getMessage(), error.getSQLState(), error.getErrorCode(), error);
         }
-        return new Handle(name, true);
+        // A caller-supplied name is still created and rotated by this connector, but it is not
+        // dropped with a table because the name may be intentionally shared between tables.
+        return new Handle(name, automatic);
     }
 
     static void dropManaged(Connection connection, String schema, Handle handle) throws SQLException {
