@@ -304,10 +304,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
-        // Whether each pk column is an unsigned integer upstream. Used to compare buffered
-        // binlog rows against `current_pos` with unsigned semantics, so overflowing values
-        // stored as negative integers are ordered consistently with the upstream snapshot.
-        let pk_is_unsigned = {
+        // Whether each pk column needs unsigned `i64` comparison. Frontend up-casts narrower
+        // unsigned integers, while unsigned float/double/decimal keep their native comparison
+        // semantics; only `BIGINT UNSIGNED` can overflow into a negative `i64` in RisingWave.
+        let pk_needs_unsigned_i64_compare = {
             let schema = self.external_table.schema();
             let pk_names: Vec<String> = pk_indices
                 .iter()
@@ -315,7 +315,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .collect();
             upstream_table_reader
                 .reader
-                .pk_column_unsigned_flags(&pk_names)
+                .pk_column_unsigned_i64_compare_flags(&pk_names)
         };
 
         tracing::info!(
@@ -718,7 +718,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 current_pos,
                                 &pk_indices,
                                 &pk_order,
-                                &pk_is_unsigned,
+                                &pk_needs_unsigned_i64_compare,
                                 last_binlog_offset.clone(),
                             )?,
                             &self.output_indices,

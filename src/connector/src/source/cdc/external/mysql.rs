@@ -605,20 +605,28 @@ impl MySqlExternalTableReader {
         Ok(column_infos)
     }
 
-    /// Check if a column is unsigned type
-    fn is_unsigned_type(&self, column_name: &str) -> bool {
+    /// Check whether a column is `BIGINT UNSIGNED`.
+    ///
+    /// Frontend up-casts narrower unsigned integer types, and non-integer unsigned types
+    /// (`FLOAT`/`DOUBLE`/`DECIMAL UNSIGNED`) keep their own comparison semantics. Only
+    /// `BIGINT UNSIGNED` can be represented as a negative `i64` in RisingWave and needs
+    /// unsigned `u64` comparison/conversion.
+    fn needs_unsigned_i64_compare(&self, column_name: &str) -> bool {
         self.upstream_mysql_pk_infos
             .iter()
             .find(|(col_name, _)| col_name == column_name)
-            .map(|(_, col_type)| col_type.to_lowercase().contains("unsigned"))
+            .map(|(_, col_type)| {
+                let col_type = col_type.to_lowercase();
+                col_type.starts_with("bigint") && col_type.contains("unsigned")
+            })
             .unwrap_or(false)
     }
 
-    /// For each given primary key column (by name), whether the upstream column is unsigned.
-    pub(crate) fn pk_column_unsigned_flags(&self, pk_names: &[String]) -> Vec<bool> {
+    /// For each given primary key column (by name), whether it needs unsigned `i64` comparison.
+    pub(crate) fn pk_column_unsigned_i64_compare_flags(&self, pk_names: &[String]) -> Vec<bool> {
         pk_names
             .iter()
-            .map(|name| self.is_unsigned_type(name))
+            .map(|name| self.needs_unsigned_i64_compare(name))
             .collect()
     }
 
@@ -681,7 +689,7 @@ impl MySqlExternalTableReader {
                             DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
-                                if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                if int64_val < 0 && self.needs_unsigned_i64_compare(pk.as_str()) {
                                     Value::from(self.convert_negative_to_unsigned(int64_val))
                                 } else {
                                     Value::from(int64_val)
