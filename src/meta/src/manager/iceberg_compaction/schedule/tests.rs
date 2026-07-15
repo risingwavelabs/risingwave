@@ -1061,8 +1061,7 @@ async fn test_pre_dispatch_failure_notifies_manual_waiter_and_removes_temporary_
     drop(IcebergCompactionHandle::new(
         sink_id,
         TaskType::Full,
-        manager.inner.clone(),
-        manager.metadata_manager.clone(),
+        manager.clone(),
     ));
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1550,4 +1549,71 @@ async fn test_get_top_n_retries_timed_out_inflight_task() {
         track.state,
         CompactionTrackState::PendingDispatch { .. }
     ));
+}
+
+#[tokio::test]
+async fn test_send_compact_task_clears_orphan_maintenance() {
+    let manager = build_test_manager().await;
+    // Not present in the (empty) test catalog, simulating a leaked entry of a
+    // dropped sink.
+    let sink_id = SinkId::new(470);
+    let compactor_context_id = 1001.into();
+    let mut receiver = manager
+        .iceberg_compactor_manager
+        .add_compactor(compactor_context_id);
+    let now = Instant::now();
+    let track = new_track(now, 120, 2, 2);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    {
+        let mut guard = manager.inner.write();
+        guard.sink_schedules.insert(sink_id, track);
+        guard.snapshot_expiration_sink_ids.insert(sink_id);
+        guard.manual_compaction_waiters.insert(sink_id, tx);
+    }
+
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+    assert_eq!(handles.len(), 1);
+    let compactor = manager
+        .iceberg_compactor_manager
+        .get_compactor(compactor_context_id)
+        .unwrap();
+    handles
+        .into_iter()
+        .next()
+        .unwrap()
+        .send_compact_task(compactor, 42)
+        .await
+        .unwrap();
+
+    {
+        let guard = manager.inner.read();
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+        assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
+        assert!(!guard.manual_compaction_waiters.contains_key(&sink_id));
+    }
+    rx.await.unwrap().unwrap_err();
+    // No task reached the compactor.
+    assert!(receiver.try_recv().is_err());
+    // The orphan is not re-selected on the next pull.
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
+}
+
+#[tokio::test]
+async fn test_gc_clears_orphan_maintenance() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(471);
+    let now = Instant::now();
+    {
+        let mut guard = manager.inner.write();
+        guard
+            .sink_schedules
+            .insert(sink_id, new_track(now, 120, 10, 0));
+        guard.snapshot_expiration_sink_ids.insert(sink_id);
+    }
+
+    manager.check_and_expire_snapshots(sink_id).await.unwrap();
+
+    let guard = manager.inner.read();
+    assert!(!guard.sink_schedules.contains_key(&sink_id));
+    assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
 }
