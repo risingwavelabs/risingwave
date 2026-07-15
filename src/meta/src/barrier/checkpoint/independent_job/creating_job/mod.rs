@@ -83,6 +83,7 @@ pub(crate) struct CreatingStreamingJobControl {
 
     max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
+    max_lagged_barrier_num: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -208,6 +209,11 @@ impl CreatingStreamingJobControl {
             InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
 
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let max_lagged_barrier_num = partial_graph_manager
+            .control_stream_manager()
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
 
         let IndependentCheckpointJobControl::CreatingStreamingJob(job) = entry.insert(
             IndependentCheckpointJobControl::CreatingStreamingJob(Self {
@@ -217,6 +223,7 @@ impl CreatingStreamingJobControl {
                 max_committed_epoch: None,
                 snapshot_epoch,
                 status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
+                max_lagged_barrier_num,
                 upstream_lag: GLOBAL_META_METRICS
                     .snapshot_backfill_lag
                     .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -685,6 +692,11 @@ impl CreatingStreamingJobControl {
         };
 
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let max_lagged_barrier_num = partial_graph_recoverer
+            .control_stream_manager()
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -705,6 +717,7 @@ impl CreatingStreamingJobControl {
             state_table_ids,
             max_committed_epoch: Some(committed_epoch),
             status,
+            max_lagged_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -875,17 +888,19 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
+    /// Returns whether the next barrier should be forced to a checkpoint.
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
+        let pending_barrier_num = collected_barrier.pending_barrier_num;
         self.status.update_progress(
             collected_barrier
                 .resps
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.should_merge_to_upstream()
+        self.should_merge_to_upstream(pending_barrier_num)
     }
 
-    pub(crate) fn should_merge_to_upstream(&self) -> bool {
+    pub(crate) fn should_merge_to_upstream(&self, pending_barrier_num: usize) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
             barriers_to_inject,
@@ -894,10 +909,14 @@ impl CreatingStreamingJobControl {
             && barriers_to_inject.is_none()
             && log_store_progress_tracker.is_finished()
         {
-            true
+            pending_barrier_num <= self.max_lagged_barrier_num
         } else {
             false
         }
+    }
+
+    pub(crate) fn partial_graph_id(&self) -> PartialGraphId {
+        self.partial_graph_id
     }
 }
 
