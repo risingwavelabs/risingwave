@@ -897,10 +897,10 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.should_merge_to_upstream(pending_barrier_num)
+        self.is_ready_to_merge() && pending_barrier_num <= self.max_lagged_barrier_num
     }
 
-    pub(crate) fn should_merge_to_upstream(&self, pending_barrier_num: usize) -> bool {
+    fn is_ready_to_merge(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
             barriers_to_inject,
@@ -909,14 +909,24 @@ impl CreatingStreamingJobControl {
             && barriers_to_inject.is_none()
             && log_store_progress_tracker.is_finished()
         {
-            pending_barrier_num <= self.max_lagged_barrier_num
+            true
         } else {
             false
         }
     }
 
-    pub(crate) fn partial_graph_id(&self) -> PartialGraphId {
-        self.partial_graph_id
+    pub(crate) fn should_merge_to_upstream(
+        &self,
+        partial_graph_manager: &PartialGraphManager,
+    ) -> bool {
+        if !self.is_ready_to_merge() {
+            return false;
+        }
+
+        // A job that is ready to merge has finished initialization and is not resetting, so its
+        // partial graph must be running.
+        partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+            <= self.max_lagged_barrier_num
     }
 }
 
