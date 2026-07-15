@@ -25,7 +25,6 @@ use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
@@ -383,7 +382,7 @@ pub(crate) struct CacheRefiller {
     internal_table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
     streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
-    table_cache_refill_context_map: Arc<RwLock<TableCacheRefillContextMap>>,
+    table_cache_refill_context_map: TableCacheRefillContextMap,
 }
 
 impl CacheRefiller {
@@ -395,7 +394,7 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let table_cache_refill_context_map = Arc::new(RwLock::new(HashMap::new()));
+        let table_cache_refill_context_map = HashMap::new();
         let default_policy = config.table_cache_refill_default_policy;
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
@@ -513,18 +512,16 @@ impl CacheRefiller {
         self.rebuild_table_cache_refill_contexts([table_id]);
     }
 
-    fn rebuild_table_cache_refill_contexts(&self, table_ids: impl IntoIterator<Item = TableId>) {
-        let mut table_cache_refill_context_map = self.table_cache_refill_context_map.write();
+    fn rebuild_table_cache_refill_contexts(
+        &mut self,
+        table_ids: impl IntoIterator<Item = TableId>,
+    ) {
         for table_id in table_ids {
-            self.rebuild_table_cache_refill_context(&mut table_cache_refill_context_map, table_id);
+            self.rebuild_table_cache_refill_context(table_id);
         }
     }
 
-    fn rebuild_table_cache_refill_context(
-        &self,
-        table_cache_refill_context_map: &mut TableCacheRefillContextMap,
-        table_id: TableId,
-    ) {
+    fn rebuild_table_cache_refill_context(&mut self, table_id: TableId) {
         tracing::debug!(?table_id, "rebuild table cache refill context for table");
 
         let table_policy = self.table_cache_refill_policies.get(&table_id).copied();
@@ -538,7 +535,7 @@ impl CacheRefiller {
             .unwrap_or(self.default_policy);
 
         if is_internal_table && !self.role.for_streaming() {
-            table_cache_refill_context_map.remove(&table_id);
+            self.table_cache_refill_context_map.remove(&table_id);
             return;
         }
 
@@ -574,7 +571,7 @@ impl CacheRefiller {
             || streaming_vnode_bitmap.is_some()
             || serving_vnode_bitmap.is_some()
         {
-            table_cache_refill_context_map.insert(
+            self.table_cache_refill_context_map.insert(
                 table_id,
                 TableCacheRefillContext {
                     streaming_vnode_bitmap,
@@ -583,7 +580,7 @@ impl CacheRefiller {
                 },
             );
         } else {
-            table_cache_refill_context_map.remove(&table_id);
+            self.table_cache_refill_context_map.remove(&table_id);
         }
     }
 
@@ -603,11 +600,11 @@ impl CacheRefiller {
         &self,
         table_ids: &HashSet<TableId>,
     ) -> TableCacheRefillContextMap {
-        let table_cache_refill_context_map = self.table_cache_refill_context_map.read();
         table_ids
             .iter()
             .map(|table_id| {
-                let context = table_cache_refill_context_map
+                let context = self
+                    .table_cache_refill_context_map
                     .get(table_id)
                     .cloned()
                     .unwrap_or_else(|| {
@@ -632,15 +629,13 @@ impl CacheRefiller {
     }
 
     #[cfg(test)]
-    pub(crate) fn table_cache_refill_context_map(
-        &self,
-    ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
+    pub(crate) fn table_cache_refill_context_map(&self) -> &TableCacheRefillContextMap {
         &self.table_cache_refill_context_map
     }
 
     pub(crate) fn table_cache_refill_monitor_snapshot(&self) -> TableCacheRefillMonitorSnapshot {
         TableCacheRefillMonitorSnapshot {
-            contexts: self.table_cache_refill_context_map.read().clone(),
+            contexts: self.table_cache_refill_context_map.clone(),
             policies: self.table_cache_refill_policies.clone(),
             internal_policies: self.internal_table_cache_refill_policies.clone(),
             default_policy: self.default_policy,
@@ -1387,36 +1382,38 @@ mod tests {
             ]),
             HashMap::new(),
         );
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(
-            context_map
-                .get(&table_id)
-                .is_none_or(|context| context.serving_vnode_bitmap.is_none())
-        );
-        drop(context_map);
+        {
+            let context_map = refiller.table_cache_refill_context_map();
+            assert!(
+                context_map
+                    .get(&table_id)
+                    .is_none_or(|context| context.serving_vnode_bitmap.is_none())
+            );
+        }
 
         refiller.replace_serving_table_vnode_mapping(HashMap::from([
             (table_id, serving_vnodes.clone()),
             (removed_table_id, serving_vnodes.clone()),
         ]));
 
-        let context_map = refiller.table_cache_refill_context_map().read();
-        let context = context_map.get(&table_id).unwrap();
-        assert!(context.streaming_vnode_bitmap.is_none());
-        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
-        assert!(
-            context_map
-                .get(&removed_table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_some())
-        );
-        drop(context_map);
+        {
+            let context_map = refiller.table_cache_refill_context_map();
+            let context = context_map.get(&table_id).unwrap();
+            assert!(context.streaming_vnode_bitmap.is_none());
+            assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
+            assert!(
+                context_map
+                    .get(&removed_table_id)
+                    .is_some_and(|context| context.serving_vnode_bitmap.is_some())
+            );
+        }
 
         refiller.replace_serving_table_vnode_mapping(HashMap::from([(
             table_id,
             serving_vnodes.clone(),
         )]));
 
-        let context_map = refiller.table_cache_refill_context_map().read();
+        let context_map = refiller.table_cache_refill_context_map();
         assert_eq!(
             context_map
                 .get(&table_id)
@@ -1446,17 +1443,18 @@ mod tests {
             HashMap::from([(table_id, CacheRefillPolicy::Serving)]),
             HashMap::new(),
         );
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(
-            context_map
-                .get(&table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_some())
-        );
-        drop(context_map);
+        {
+            let context_map = refiller.table_cache_refill_context_map();
+            assert!(
+                context_map
+                    .get(&table_id)
+                    .is_some_and(|context| context.serving_vnode_bitmap.is_some())
+            );
+        }
 
         refiller.replace_table_cache_refill_policies(HashMap::new(), HashMap::new());
 
-        let context_map = refiller.table_cache_refill_context_map().read();
+        let context_map = refiller.table_cache_refill_context_map();
         assert!(context_map.is_empty());
     }
 
@@ -1477,7 +1475,6 @@ mod tests {
         assert!(
             !refiller
                 .table_cache_refill_context_map()
-                .read()
                 .contains_key(&internal_table_id)
         );
 

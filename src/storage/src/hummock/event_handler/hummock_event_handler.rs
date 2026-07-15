@@ -547,9 +547,7 @@ impl HummockEventHandler {
     }
 
     #[cfg(test)]
-    pub(crate) fn table_cache_refill_context_map(
-        &self,
-    ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
+    pub(crate) fn table_cache_refill_context_map(&self) -> &TableCacheRefillContextMap {
         self.refiller.table_cache_refill_context_map()
     }
 }
@@ -1303,7 +1301,6 @@ mod tests {
         assert!(
             event_handler
                 .table_cache_refill_context_map()
-                .read()
                 .get(&table_id)
                 .is_none()
         );
@@ -1315,7 +1312,7 @@ mod tests {
             ),
         ));
 
-        let context_map = event_handler.table_cache_refill_context_map().read();
+        let context_map = event_handler.table_cache_refill_context_map();
         let context = context_map.get(&table_id).unwrap();
         assert_eq!(context.policy, CacheRefillPolicy::Serving);
         assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
@@ -1359,7 +1356,7 @@ mod tests {
             },
         );
         {
-            let context_map = refiller.table_cache_refill_context_map().read();
+            let context_map = refiller.table_cache_refill_context_map();
             let old_context = context_map.get(&old_table_id).unwrap();
             assert_eq!(old_context.policy, CacheRefillPolicy::Serving);
             assert_eq!(
@@ -1380,7 +1377,7 @@ mod tests {
             },
         );
 
-        let context_map = refiller.table_cache_refill_context_map().read();
+        let context_map = refiller.table_cache_refill_context_map();
         assert!(
             context_map
                 .get(&old_table_id)
@@ -1416,7 +1413,6 @@ mod tests {
         assert!(
             !refiller
                 .table_cache_refill_context_map()
-                .read()
                 .contains_key(&internal_table_id)
         );
         assert_eq!(
