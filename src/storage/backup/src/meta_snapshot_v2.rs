@@ -99,6 +99,7 @@ for_all_metadata_models_v2!(define_metadata_v2);
 
 macro_rules! define_encode_metadata_to_writer {
     ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        #[expect(clippy::large_stack_frames)]
         async fn encode_metadata_to_writer(
             metadata: &MetadataV2,
             writer: &mut SnapshotPayloadWriter,

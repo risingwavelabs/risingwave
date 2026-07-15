@@ -49,7 +49,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
     CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    TableHolder, UnifiedSstableWriterFactory,
+    StreamingSstableWriterFactory, TableHolder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -355,7 +355,7 @@ pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
-        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
+        RemoteBuilderFactory<StreamingSstableWriterFactory, BlockedXor16FilterBuilder>,
         C,
     >,
     compression_algorithm: CompressionAlgorithm,
@@ -392,7 +392,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
-        let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
+        let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
 
         let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
             object_id_getter,
