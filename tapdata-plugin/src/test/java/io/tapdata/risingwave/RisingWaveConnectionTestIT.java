@@ -615,6 +615,34 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void jdbcFlushesBeforeAnUpdateThatDependsOnAnUnflushedInsert() throws Throwable {
+        String tableName = "tapdata_jdbc_flush_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "jdbc", "root", "", "ws://127.0.0.1:4560", "");
+        TapTable table = new TapTable(tableName)
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "varchar"));
+        try {
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+
+            Map<String, Object> inserted = record(1, "inserted");
+            Map<String, Object> updated = record(1, "updated");
+            functions.getWriteRecordFunction().writeRecord(null, java.util.Arrays.asList(
+                    TapInsertRecordEvent.create().table(tableName).after(inserted),
+                    TapUpdateRecordEvent.create().table(tableName).before(inserted).after(updated)),
+                    table, ignored -> { });
+            awaitName(tableName, 1, "updated");
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void jdbcUpsertsDuplicateKeysWithinOneBatch() throws Throwable {
         String tableName = "tapdata_jdbc_duplicate_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();

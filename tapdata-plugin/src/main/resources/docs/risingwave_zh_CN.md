@@ -109,3 +109,6 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
    更新会失败，而不会静默把缺失列写成 `NULL`。
 8. **大记录存在 frame 限制**：connector 会把 batch 拆成小于 8 MiB 的有序 WebSocket
    payload。单条 source record 本身超过该大小时无法安全拆分，会返回明确错误。
+9. **JDBC 可见性屏障**：RisingWave 的 JDBC insert 是异步可见的。connector 只会在后续
+   update/delete 依赖未刷新的 insert 时，以及一个写入 batch 结束时执行 `FLUSH`；相互独立的
+   update/delete 可以保留在同一个 batch 中。

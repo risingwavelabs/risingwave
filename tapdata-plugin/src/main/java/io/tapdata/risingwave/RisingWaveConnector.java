@@ -557,10 +557,6 @@ public class RisingWaveConnector implements TapConnector {
         Set<List<Object>> pendingInsertIdentities = new HashSet<>();
 
         debugLog("writeRecord called: " + events.size() + " events for table " + table.getId());
-        // RisingWave SQL DML can become visible asynchronously. Establish a visibility boundary
-        // before applying this batch so retries and update/delete lookups observe prior writes.
-        flushJdbcWrites();
-
         for (TapRecordEvent event : events) {
             try {
                 if (event instanceof TapInsertRecordEvent) {
@@ -581,12 +577,13 @@ public class RisingWaveConnector implements TapConnector {
                     }
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    if (dirty) {
+                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
+                    if (referencesPendingInsert(table, pendingInsertIdentities,
+                            update.getBefore(), update.getAfter())) {
                         flushJdbcWrites();
                         dirty = false;
                         pendingInsertIdentities.clear();
                     }
-                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
                     if (requiresDeleteBeforeUpsert(table, update.getBefore(), update.getAfter())) {
                         doDelete(table, update.getBefore());
                         doInsertOrUpdate(table, update.getAfter());
@@ -600,12 +597,12 @@ public class RisingWaveConnector implements TapConnector {
                     dirty = true;
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
-                    if (dirty) {
+                    TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
+                    if (referencesPendingInsert(table, pendingInsertIdentities, delete.getBefore())) {
                         flushJdbcWrites();
                         dirty = false;
                         pendingInsertIdentities.clear();
                     }
-                    TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
                     doDelete(table, delete.getBefore());
                     dirty = true;
                     deleted++;
@@ -637,6 +634,27 @@ public class RisingWaveConnector implements TapConnector {
             identity.add(record.get(primaryKey));
         }
         return identity;
+    }
+
+    /**
+     * RisingWave applies SQL inserts asynchronously. An update or delete that targets an inserted
+     * row cannot see it until a {@code FLUSH}; updates and deletes of rows that already existed do
+     * not require that barrier. Without a declared key we cannot establish that distinction, so
+     * retain the conservative behavior.
+     */
+    private static boolean referencesPendingInsert(TapTable table,
+                                                   Set<List<Object>> pendingInsertIdentities,
+                                                   Map<String, Object>... records) {
+        if (pendingInsertIdentities.isEmpty()) {
+            return false;
+        }
+        for (Map<String, Object> record : records) {
+            List<Object> identity = keyedIdentityOf(table, record);
+            if (identity == null || pendingInsertIdentities.contains(identity)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void doInsert(TapTable table, Map<String, Object> record) throws SQLException {

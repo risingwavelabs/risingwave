@@ -115,3 +115,6 @@ ingest route, signature configuration, and required target-table DDL privileges 
 8. **Large records have a frame limit**: The connector splits batches into ordered WebSocket
    payloads below 8 MiB. A single source record larger than that cannot be split safely and fails
    with an explicit error.
+9. **JDBC visibility barriers**: RisingWave applies JDBC inserts asynchronously. The connector
+   issues `FLUSH` only before an update or delete that depends on an unflushed insert, and at the
+   end of a write batch; independent updates and deletes can remain in the same batch.
