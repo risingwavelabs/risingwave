@@ -338,19 +338,20 @@ pub fn start_serving_vnode_mapping_worker(
 fn append_table_vnode_mapping_for_worker(
     table_vnode_mapping: &mut HashMap<TableId, Bitmap>,
     worker_id: WorkerId,
-    state_table_ids: &HashSet<TableId>,
+    result_table_id: Option<TableId>,
     worker_slot_vnode_mapping: &WorkerSlotMapping,
 ) {
+    let Some(result_table_id) = result_table_id else {
+        return;
+    };
     for (worker_slot_id, bitmap) in &worker_slot_vnode_mapping.to_bitmaps() {
         if worker_slot_id.worker_id() != worker_id {
             continue;
         }
-        for table_id in state_table_ids {
-            table_vnode_mapping
-                .entry(*table_id)
-                .and_modify(|b| *b |= bitmap.clone())
-                .or_insert_with(|| bitmap.clone());
-        }
+        table_vnode_mapping
+            .entry(result_table_id)
+            .and_modify(|b| *b |= bitmap.clone())
+            .or_insert_with(|| bitmap.clone());
     }
 }
 
@@ -368,7 +369,7 @@ pub fn build_table_vnode_mapping_for_worker(
         append_table_vnode_mapping_for_worker(
             &mut table_vnode_mapping,
             worker_id,
-            &info.state_table_ids,
+            info.result_table_id,
             mapping,
         );
     }
@@ -391,7 +392,8 @@ pub fn to_pb_serving_table_vnode_mappings(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::hash::{VirtualNode, WorkerSlotId};
+    use risingwave_meta_model::JobId;
     use risingwave_pb::common::{HostAddress, worker_node};
     use risingwave_pb::meta::subscribe_response::Info;
     use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
@@ -420,7 +422,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_serving_table_vnode_mappings_to_hummock_targets_each_worker() {
+    async fn test_sync_serving_table_vnode_mappings_to_hummock_targets_only_result_tables() {
         let notification_manager =
             Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
         let worker1 = serving_worker(1);
@@ -433,21 +435,48 @@ mod tests {
         notification_manager.insert_sender(SubscribeType::Hummock, worker_key1, tx1);
         notification_manager.insert_sender(SubscribeType::Hummock, worker_key2, tx2);
 
-        let table_id = TableId::from(233);
+        let job_id = JobId::new(233);
+        let table_id = job_id.as_mv_table_id();
         let fragment_id = FragmentId::new(234);
+        let private_fragment_id = FragmentId::new(235);
+        let sink_fragment_id = FragmentId::new(236);
         let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
-        let streaming_parallelisms = HashMap::from([(
-            fragment_id,
-            FragmentParallelismInfo {
-                distribution_type: FragmentDistributionType::Hash,
-                vnode_count: VirtualNode::COUNT_FOR_TEST,
-                state_table_ids: HashSet::from([table_id]),
-            },
-        )]);
+        let streaming_parallelisms = HashMap::from([
+            (
+                fragment_id,
+                FragmentParallelismInfo {
+                    result_table_id: Some(table_id),
+                    distribution_type: FragmentDistributionType::Hash,
+                    vnode_count: VirtualNode::COUNT_FOR_TEST,
+                },
+            ),
+            (
+                private_fragment_id,
+                FragmentParallelismInfo {
+                    result_table_id: None,
+                    distribution_type: FragmentDistributionType::Hash,
+                    vnode_count: VirtualNode::COUNT_FOR_TEST,
+                },
+            ),
+            (
+                sink_fragment_id,
+                FragmentParallelismInfo {
+                    result_table_id: None,
+                    distribution_type: FragmentDistributionType::Hash,
+                    vnode_count: VirtualNode::COUNT_FOR_TEST,
+                },
+            ),
+        ]);
         let (upserted, failed) =
             serving_vnode_mapping.upsert(&streaming_parallelisms, &workers, None);
-        assert_eq!(upserted.len(), 1);
+        assert_eq!(upserted.len(), 3);
         assert!(failed.is_empty());
+        // Give the non-result fragment a distinct mapping. If it were incorrectly
+        // associated with `table_id`, it would expand the table's ownership to all vnodes.
+        serving_vnode_mapping.serving_vnode_mappings.write().insert(
+            private_fragment_id,
+            WorkerSlotMapping::new_single(WorkerSlotId::new(worker1.id, 0)),
+        );
 
         sync_serving_table_vnode_mappings_to_hummock(
             &notification_manager,

@@ -17,6 +17,7 @@ mod tests {
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::oneshot;
 
     use crate::controller::catalog::*;
@@ -72,6 +73,255 @@ mod tests {
         }
         .insert(txn)
         .await?;
+        Ok(())
+    }
+
+    async fn insert_test_fragment(
+        txn: &DatabaseTransaction,
+        fragment_id: FragmentId,
+        job_id: JobId,
+        state_table_ids: TableIdArray,
+    ) -> MetaResult<()> {
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(state_table_ids),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fragment_parallelisms_classifies_only_query_visible_result_tables()
+    -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let table_job = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        insert_test_table(
+            &txn,
+            table_job.as_mv_table_id(),
+            "table_result",
+            TableType::Table,
+            None,
+            "CREATE TABLE table_result (v int)",
+        )
+        .await?;
+
+        let private_state = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_table_id();
+        insert_test_table(
+            &txn,
+            private_state,
+            "__internal_table_result",
+            TableType::Internal,
+            Some(table_job),
+            "",
+        )
+        .await?;
+
+        let sink_job = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        let sink_state = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_table_id();
+        insert_test_table(
+            &txn,
+            sink_state,
+            "__internal_sink",
+            TableType::Internal,
+            Some(sink_job),
+            "",
+        )
+        .await?;
+        let table_result_fragment = FragmentId::new(100);
+        let table_private_fragment = FragmentId::new(101);
+        let sink_fragment = FragmentId::new(102);
+        for (fragment_id, job_id, state_table_ids) in [
+            (
+                table_result_fragment,
+                table_job,
+                TableIdArray(vec![table_job.as_mv_table_id()]),
+            ),
+            (
+                table_private_fragment,
+                table_job,
+                TableIdArray(vec![private_state]),
+            ),
+            (sink_fragment, sink_job, TableIdArray(vec![sink_state])),
+        ] {
+            insert_test_fragment(&txn, fragment_id, job_id, state_table_ids).await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let parallelisms = mgr.fragment_parallelisms().await?;
+        assert_eq!(
+            parallelisms[&table_result_fragment].result_table_id,
+            Some(table_job.as_mv_table_id())
+        );
+        assert_eq!(parallelisms[&table_private_fragment].result_table_id, None);
+        assert_eq!(parallelisms[&sink_fragment].result_table_id, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_table_cache_refill_policies_snapshot_preserves_job_policy_for_all_owned_tables()
+    -> MetaResult<()> {
+        struct Case {
+            name: &'static str,
+            object_type: ObjectType,
+            result_table_type: Option<TableType>,
+            policy: CacheRefillPolicy,
+        }
+
+        let cases = [
+            Case {
+                name: "mv_both",
+                object_type: ObjectType::Table,
+                result_table_type: Some(TableType::MaterializedView),
+                policy: CacheRefillPolicy::Both,
+            },
+            Case {
+                name: "sink_both",
+                object_type: ObjectType::Sink,
+                result_table_type: None,
+                policy: CacheRefillPolicy::Both,
+            },
+        ];
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let mut expected_table_policies = HashMap::new();
+        let mut expected_internal_table_policies = HashMap::new();
+
+        for case in cases {
+            let job_object = CatalogController::create_object(
+                &txn,
+                case.object_type,
+                TEST_OWNER_ID,
+                Some(TEST_DATABASE_ID),
+                Some(TEST_SCHEMA_ID),
+            )
+            .await?;
+            let job_id = job_object.oid.as_job_id();
+
+            if let Some(table_type) = case.result_table_type {
+                let result_table_id = job_id.as_mv_table_id();
+                insert_test_table(&txn, result_table_id, case.name, table_type, None, "").await?;
+                expected_table_policies.insert(
+                    result_table_id.as_raw_id(),
+                    case.policy.to_protobuf() as i32,
+                );
+            }
+
+            let internal_object = CatalogController::create_object(
+                &txn,
+                ObjectType::Table,
+                TEST_OWNER_ID,
+                Some(TEST_DATABASE_ID),
+                Some(TEST_SCHEMA_ID),
+            )
+            .await?;
+            let internal_table_id = internal_object.oid.as_table_id();
+            insert_test_table(
+                &txn,
+                internal_table_id,
+                &format!("__internal_{}", case.name),
+                TableType::Internal,
+                Some(job_id),
+                "",
+            )
+            .await?;
+            expected_internal_table_policies.insert(
+                internal_table_id.as_raw_id(),
+                case.policy.to_protobuf() as i32,
+            );
+
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Created),
+                create_type: Set(CreateType::Foreground),
+                timezone: Set(None),
+                config_override: Set(Some(format!(
+                    "[streaming.developer]\ncache_refill_policy = \"{}\"\n",
+                    case.policy
+                ))),
+                adaptive_parallelism_strategy: Set(None),
+                parallelism: Set(StreamingParallelism::Adaptive),
+                backfill_parallelism: Set(None),
+                backfill_adaptive_parallelism_strategy: Set(None),
+                backfill_orders: Set(None),
+                max_parallelism: Set(1),
+                specific_resource_group: Set(None),
+                is_serverless_backfill: Set(false),
+                refresh_interval_sec: Set(None),
+            }
+            .insert(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let actual = mgr.table_cache_refill_policies_snapshot().await?;
+        let actual_table_policies = actual
+            .table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        let actual_internal_table_policies = actual
+            .internal_table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(actual_table_policies, expected_table_policies);
+        assert_eq!(
+            actual_internal_table_policies,
+            expected_internal_table_policies
+        );
+
         Ok(())
     }
 

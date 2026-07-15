@@ -1,45 +1,70 @@
+# Streaming-only sink case. Sink internal state follows the streaming scope and
+# must not appear in serving refill mappings.
 statement ok
-create table t1(v1 int, v2 int);
-
-statement ok
-create table t2(v1 int, v3 int);
-
-statement ok
-create table t3(v1 int primary key, v2 int, v3 int);
+create table sink_left(v1 int, v2 int);
 
 statement ok
-create sink s3 into t3 as select t1.v1, t1.v2, t2.v3 from t1 join t2 on t1.v1 = t2.v1;
-
-
-query TTT
-select name, key, value from rw_streaming_job_config;
----
-
+create table sink_right(v1 int, v3 int);
 
 statement ok
-alter sink s3 set config(streaming.developer.cache_refill_policy = 'both');
+create table sink_target(v1 int primary key, v2 int, v3 int);
 
-query TTT
-select name, key, value from rw_streaming_job_config;
-----
-s3  streaming.developer.cache_refill_policy "both"
+statement ok
+create sink refill_sink into sink_target as
+select sink_left.v1, sink_left.v2, sink_right.v3
+from sink_left join sink_right on sink_left.v1 = sink_right.v1;
+
+statement ok
+alter sink refill_sink set config(streaming.developer.cache_refill_policy = 'streaming');
 
 statement ok
 recover;
 
-# Policy stats are validated after recovery refresh.
 skipif parallel
 system ok
-psql_refill_validate.py --job-name s3 --job-type sink --mode both --expect-policy both
+psql_refill_validate.py --job-name refill_sink --job-type sink --mode streaming --expect-policy streaming
 
 statement ok
-drop sink s3;
+drop sink refill_sink;
 
 statement ok
-drop table t3;
+drop table sink_target;
 
 statement ok
-drop table t2;
+drop table sink_right;
 
 statement ok
-drop table t1;
+drop table sink_left;
+
+# Query-visible both-scope case. Job policy is copied to both the MV result
+# table and internal state; node role and vnode ownership scope actual refill.
+statement ok
+create table mv_left(v1 int, v2 int);
+
+statement ok
+create table mv_right(v1 int, v3 int);
+
+statement ok
+create materialized view refill_mv as
+select mv_left.v1, count(*) as cnt
+from mv_left join mv_right on mv_left.v1 = mv_right.v1
+group by mv_left.v1;
+
+statement ok
+alter materialized view refill_mv set config(streaming.developer.cache_refill_policy = 'both');
+
+statement ok
+recover;
+
+skipif parallel
+system ok
+psql_refill_validate.py --job-name refill_mv --job-type "materialized view" --mode both --expect-policy both
+
+statement ok
+drop materialized view refill_mv;
+
+statement ok
+drop table mv_right;
+
+statement ok
+drop table mv_left;

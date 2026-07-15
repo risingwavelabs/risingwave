@@ -489,6 +489,7 @@ struct TableCacheRefillStats {
     streaming: HashMap<u32, Vec<u16>>,
     serving: HashMap<u32, Vec<u16>>,
     policies: HashMap<u32, String>,
+    internal_policies: HashMap<u32, String>,
     default_policy: String,
     internal: TableCacheRefillInternalStats,
 }
@@ -541,6 +542,11 @@ impl From<&TableCacheRefillMonitorSnapshot> for TableCacheRefillStats {
             .iter()
             .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
             .collect();
+        let internal_policies = snapshot
+            .internal_policies
+            .iter()
+            .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
+            .collect();
         let internal_streaming = snapshot
             .streaming_table_vnode_mapping
             .iter()
@@ -559,6 +565,7 @@ impl From<&TableCacheRefillMonitorSnapshot> for TableCacheRefillStats {
             streaming,
             serving,
             policies,
+            internal_policies,
             default_policy: snapshot.default_policy.to_string(),
             internal: TableCacheRefillInternalStats {
                 streaming: internal_streaming,

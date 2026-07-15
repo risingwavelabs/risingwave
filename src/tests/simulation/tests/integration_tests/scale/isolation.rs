@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -127,22 +127,44 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     session.run("create table t1(v1 int, v2 int);").await?;
     session.run("create table t2(v1 int, v3 int);").await?;
     session
-        .run("create table t3(v1 int primary key, v2 int, v3 int);")
+        .run(
+            "create materialized view mv3 as \
+             select t1.v1, count(*) as cnt from t1 join t2 on t1.v1 = t2.v1 \
+             group by t1.v1;",
+        )
         .await?;
     session
-        .run("create sink s3 into t3 as select t1.v1, t1.v2, t2.v3 from t1 join t2 on t1.v1 = t2.v1;")
-        .await?;
-    session
-        .run("alter sink s3 set config(streaming.developer.cache_refill_policy = 'both');")
+        .run("alter materialized view mv3 set config(streaming.developer.cache_refill_policy = 'both');")
         .await?;
 
-    let internal_table_ids = internal_table_ids_for_job(&mut session, "s3").await?;
+    let result_table_id = session
+        .run("select id from rw_catalog.rw_materialized_views where name = 'mv3';")
+        .await?
+        .trim()
+        .parse::<u32>()
+        .context("failed to parse mv3 result table id")?;
+    let internal_table_ids = session
+        .run(format!(
+            "select id from rw_catalog.rw_internal_table_info \
+             where job_id = {result_table_id} \
+             order by id;"
+        ))
+        .await?
+        .lines()
+        .map(|line| {
+            line.trim()
+                .parse::<u32>()
+                .with_context(|| format!("failed to parse internal table id from {line:?}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
     assert!(
         !internal_table_ids.is_empty(),
-        "sink should have internal state tables"
+        "materialized view should have internal state tables"
     );
+    let mut refill_table_ids = internal_table_ids.clone();
+    refill_table_ids.push(result_table_id);
 
-    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, None).await?;
+    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &refill_table_ids, None).await?;
 
     session
         .run("insert into t2 select * from generate_series(1, 10);")
@@ -162,20 +184,36 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
     )
     .await?;
 
-    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, Some("both"))
-        .await?;
+    wait_refill_policy_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &internal_table_ids,
+        Some("streaming"),
+    )
+    .await?;
+    wait_refill_policy_on_compute(
+        &cluster,
+        COMPUTE_2_HOST,
+        &[result_table_id],
+        Some("serving"),
+    )
+    .await?;
 
     // Adding a serving compute node rebuilds serving vnode mappings and pushes the full
     // replacement to both existing and new serving nodes. The existing serving worker's
     // assignment may stay unchanged for some deterministic seeds, so only require it to
     // converge to the current meta-owned mapping.
-    let expected_serving_before_add_node =
-        expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
-            .await?;
+    let expected_serving_before_add_node = expected_serving_refill_vnodes_on_compute(
+        &cluster,
+        &mut session,
+        COMPUTE_2_HOST,
+        result_table_id,
+    )
+    .await?;
     wait_serving_refill_on_compute(
         &cluster,
         COMPUTE_2_HOST,
-        &internal_table_ids,
+        &refill_table_ids,
         &expected_serving_before_add_node,
     )
     .await?;
@@ -186,25 +224,45 @@ async fn test_table_cache_refill_runtime_state_after_database_recovery_and_servi
         "1",
     )
     .await?;
-    let expected_serving_on_old_worker =
-        expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_2_HOST, "s3")
-            .await?;
+    let expected_serving_on_old_worker = expected_serving_refill_vnodes_on_compute(
+        &cluster,
+        &mut session,
+        COMPUTE_2_HOST,
+        result_table_id,
+    )
+    .await?;
     wait_serving_refill_on_compute(
         &cluster,
         COMPUTE_2_HOST,
-        &internal_table_ids,
+        &refill_table_ids,
         &expected_serving_on_old_worker,
     )
     .await?;
-    wait_refill_policy_on_compute(&cluster, COMPUTE_4_HOST, &internal_table_ids, Some("both"))
-        .await?;
-    let expected_serving_on_new_worker =
-        expected_serving_refill_vnodes_on_compute(&cluster, &mut session, COMPUTE_4_HOST, "s3")
-            .await?;
-    wait_serving_refill_on_compute(
+    wait_refill_policy_on_compute(
         &cluster,
         COMPUTE_4_HOST,
         &internal_table_ids,
+        Some("streaming"),
+    )
+    .await?;
+    wait_refill_policy_on_compute(
+        &cluster,
+        COMPUTE_4_HOST,
+        &[result_table_id],
+        Some("serving"),
+    )
+    .await?;
+    let expected_serving_on_new_worker = expected_serving_refill_vnodes_on_compute(
+        &cluster,
+        &mut session,
+        COMPUTE_4_HOST,
+        result_table_id,
+    )
+    .await?;
+    wait_serving_refill_on_compute(
+        &cluster,
+        COMPUTE_4_HOST,
+        &refill_table_ids,
         &expected_serving_on_new_worker,
     )
     .await?;
@@ -542,77 +600,36 @@ async fn wait_until_run_ok(session: &mut Session, sql: &str) -> Result<()> {
     Ok(())
 }
 
-async fn internal_table_ids_for_job(session: &mut Session, job_name: &str) -> Result<Vec<u32>> {
-    let table_ids = session
+async fn expected_serving_refill_vnodes_on_compute(
+    cluster: &Cluster,
+    session: &mut Session,
+    worker_host: &str,
+    result_table_id: u32,
+) -> Result<HashMap<u32, Vec<u16>>> {
+    let fragment_ids = session
         .run(format!(
-            "select id from rw_catalog.rw_internal_table_info \
-             where job_id = (select id from rw_catalog.rw_sinks where name = '{job_name}') \
-             order by id;"
+            "select fragment_id from rw_catalog.rw_fragments \
+             where table_id = {result_table_id} \
+             and {result_table_id} = any(state_table_ids) \
+             order by fragment_id;"
         ))
-        .await?;
-
-    table_ids
+        .await?
         .lines()
         .map(|line| {
             line.trim()
                 .parse::<u32>()
-                .with_context(|| format!("failed to parse internal table id from {line:?}"))
+                .with_context(|| format!("failed to parse result fragment id from {line:?}"))
         })
-        .collect()
-}
-
-async fn sink_id_for_job(session: &mut Session, job_name: &str) -> Result<u32> {
-    let sink_id = session
-        .run(format!(
-            "select id from rw_catalog.rw_sinks where name = '{job_name}';"
-        ))
-        .await?;
-
-    sink_id
-        .trim()
-        .parse::<u32>()
-        .with_context(|| format!("failed to parse sink id from {sink_id:?}"))
-}
-
-async fn fragment_state_table_ids_for_job(
-    session: &mut Session,
-    job_name: &str,
-) -> Result<HashMap<u32, HashSet<u32>>> {
-    let rows = session
-        .run(format!(
-            "select fragment_id, unnest(state_table_ids) as state_table_id \
-             from rw_catalog.rw_fragments \
-             where table_id = (select id from rw_catalog.rw_sinks where name = '{job_name}') \
-             order by fragment_id, state_table_id;"
-        ))
-        .await?;
-
-    let mut fragment_state_table_ids = HashMap::new();
-    for line in rows.lines() {
-        let (fragment_id, state_table_id) = line
-            .trim()
-            .rsplit_once(' ')
-            .with_context(|| format!("failed to parse fragment/state table row from {line:?}"))?;
-        let fragment_id = fragment_id
-            .trim()
-            .parse::<u32>()
-            .with_context(|| format!("failed to parse fragment id from {line:?}"))?;
-        let state_table_id = state_table_id
-            .trim()
-            .parse::<u32>()
-            .with_context(|| format!("failed to parse state table id from {line:?}"))?;
-        fragment_state_table_ids
-            .entry(fragment_id)
-            .or_insert_with(HashSet::new)
-            .insert(state_table_id);
-    }
-
-    Ok(fragment_state_table_ids)
-}
-
-async fn worker_id_for_compute(cluster: &Cluster, worker_host: &str) -> Result<u32> {
-    let worker_nodes = cluster.get_cluster_info().await?.worker_nodes;
-    worker_nodes
+        .collect::<Result<Vec<_>>>()?;
+    let [result_fragment_id] = fragment_ids.as_slice() else {
+        return Err(anyhow!(
+            "result table {result_table_id} must have exactly one owning fragment, got {fragment_ids:?}"
+        ));
+    };
+    let worker_id = cluster
+        .get_cluster_info()
+        .await?
+        .worker_nodes
         .into_iter()
         .find(|worker| {
             worker.r#type() == WorkerType::ComputeNode
@@ -622,18 +639,7 @@ async fn worker_id_for_compute(cluster: &Cluster, worker_host: &str) -> Result<u
                     .is_some_and(|host| host.host == worker_host)
         })
         .map(|worker| worker.id.as_raw_id())
-        .with_context(|| format!("target compute node {worker_host} is missing"))
-}
-
-async fn expected_serving_refill_vnodes_on_compute(
-    cluster: &Cluster,
-    session: &mut Session,
-    worker_host: &str,
-    job_name: &str,
-) -> Result<HashMap<u32, Vec<u16>>> {
-    let sink_id = sink_id_for_job(session, job_name).await?;
-    let fragment_state_table_ids = fragment_state_table_ids_for_job(session, job_name).await?;
-    let worker_id = worker_id_for_compute(cluster, worker_host).await?;
+        .with_context(|| format!("target compute node {worker_host} is missing"))?;
 
     let serving_vnode_mappings = cluster
         .run_on_client(async move {
@@ -652,35 +658,28 @@ async fn expected_serving_refill_vnodes_on_compute(
         })
         .await?;
 
-    let mut table_vnodes: HashMap<u32, HashSet<u16>> = HashMap::new();
-    for (fragment_id, state_table_ids) in fragment_state_table_ids {
-        let (fragment_job_id, mapping) = serving_vnode_mappings
-            .get(&FragmentId::new(fragment_id))
-            .with_context(|| format!("serving vnode mapping missing fragment {fragment_id}"))?;
-        if fragment_job_id.as_raw_id() != sink_id {
-            return Err(anyhow!(
-                "serving vnode mapping fragment {fragment_id} belongs to job {}, expected sink {sink_id}",
-                fragment_job_id.as_raw_id()
-            ));
-        }
-
-        for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
-            if worker_slot_id.worker_id().as_raw_id() != worker_id {
-                continue;
-            }
-            for state_table_id in &state_table_ids {
-                table_vnodes
-                    .entry(*state_table_id)
-                    .or_default()
-                    .extend(bitmap.iter_ones().map(|vnode| vnode as u16));
-            }
-        }
+    let (fragment_job_id, mapping) = serving_vnode_mappings
+        .get(&FragmentId::new(*result_fragment_id))
+        .with_context(|| {
+            format!("serving vnode mapping missing result fragment {result_fragment_id}")
+        })?;
+    if fragment_job_id.as_raw_id() != result_table_id {
+        return Err(anyhow!(
+            "serving vnode mapping fragment {result_fragment_id} belongs to job {}, expected {result_table_id}",
+            fragment_job_id.as_raw_id()
+        ));
     }
 
-    Ok(table_vnodes
-        .into_iter()
-        .map(|(table_id, vnodes)| (table_id, vnodes.into_iter().sorted().collect()))
-        .collect())
+    let mut vnodes = Vec::new();
+    for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
+        if worker_slot_id.worker_id().as_raw_id() == worker_id {
+            vnodes.extend(bitmap.iter_ones().map(|vnode| vnode as u16));
+        }
+    }
+    vnodes.sort_unstable();
+    vnodes.dedup();
+
+    Ok(HashMap::from([(result_table_id, vnodes)]))
 }
 
 async fn table_cache_refill_stats_on_compute(
@@ -716,57 +715,6 @@ async fn table_cache_refill_stats_on_compute(
                 .context("failed to parse table cache refill stats")
         })
         .await
-}
-
-async fn table_cache_refill_policies_on_compute(
-    cluster: &Cluster,
-    worker_host: &str,
-) -> Result<serde_json::Map<String, Value>> {
-    table_cache_refill_stats_on_compute(cluster, worker_host)
-        .await?
-        .get("policies")
-        .and_then(Value::as_object)
-        .cloned()
-        .context("table cache refill stats missing policies")
-}
-
-async fn serving_refill_vnodes_on_compute(
-    cluster: &Cluster,
-    worker_host: &str,
-) -> Result<serde_json::Map<String, Value>> {
-    table_cache_refill_stats_on_compute(cluster, worker_host)
-        .await?
-        .get("serving")
-        .and_then(Value::as_object)
-        .cloned()
-        .context("table cache refill stats missing serving vnodes")
-}
-
-fn refill_policy_matches(
-    policies: &serde_json::Map<String, Value>,
-    table_ids: &[u32],
-    expected_policy: Option<&str>,
-) -> bool {
-    table_ids.iter().all(|table_id| {
-        let actual_policy = policies.get(&table_id.to_string()).and_then(Value::as_str);
-        actual_policy == expected_policy
-    })
-}
-
-fn target_serving_refill_vnodes(
-    serving_vnodes: &HashMap<u32, Vec<u16>>,
-    target_table_ids: &[u32],
-) -> HashMap<u32, Vec<u16>> {
-    // The monitor reports all serving mappings held by this worker. This test only cares
-    // about the target sink's internal tables, so filter unrelated table mappings out.
-    target_table_ids
-        .iter()
-        .filter_map(|table_id| {
-            serving_vnodes
-                .get(table_id)
-                .map(|vnodes| (*table_id, vnodes.clone()))
-        })
-        .collect()
 }
 
 fn normalize_serving_refill_vnodes(
@@ -805,8 +753,11 @@ async fn wait_refill_policy_on_compute(
 ) -> Result<()> {
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
-            if let Ok(policies) = table_cache_refill_policies_on_compute(cluster, worker_host).await
-                && refill_policy_matches(&policies, table_ids, expected_policy)
+            if let Ok(stats) = table_cache_refill_stats_on_compute(cluster, worker_host).await
+                && let Some(policies) = stats.get("policies").and_then(Value::as_object)
+                && table_ids.iter().all(|table_id| {
+                    policies.get(&table_id.to_string()).and_then(Value::as_str) == expected_policy
+                })
             {
                 return Ok::<(), anyhow::Error>(());
             }
@@ -833,11 +784,19 @@ async fn wait_serving_refill_on_compute(
     let mut last_observed = None;
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
-            if let Ok(serving_vnodes) = serving_refill_vnodes_on_compute(cluster, worker_host).await
+            if let Ok(stats) = table_cache_refill_stats_on_compute(cluster, worker_host).await
+                && let Some(serving_vnodes) =
+                    stats.get("serving").and_then(Value::as_object).cloned()
                 && let Ok(serving_vnodes) = normalize_serving_refill_vnodes(serving_vnodes)
             {
-                let target_serving_vnodes =
-                    target_serving_refill_vnodes(&serving_vnodes, target_table_ids);
+                let target_serving_vnodes = target_table_ids
+                    .iter()
+                    .filter_map(|table_id| {
+                        serving_vnodes
+                            .get(table_id)
+                            .map(|vnodes| (*table_id, vnodes.clone()))
+                    })
+                    .collect::<HashMap<_, _>>();
                 if &target_serving_vnodes == expected {
                     return Ok::<_, anyhow::Error>(serving_vnodes);
                 }

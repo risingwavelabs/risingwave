@@ -724,7 +724,8 @@ message ServingTableVnodeMappings {
 }
 
 message TableCacheRefillPolicies {
-  repeated TableCacheRefillPolicy policies = 1;
+  repeated TableCacheRefillPolicy table_policies = 1;
+  repeated TableCacheRefillPolicy internal_table_policies = 2;
 
   message TableCacheRefillPolicy {
     uint32 table_id = 1;

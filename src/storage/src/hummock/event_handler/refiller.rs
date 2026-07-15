@@ -283,6 +283,7 @@ pub struct TableCacheRefillContext {
 pub struct TableCacheRefillMonitorSnapshot {
     pub contexts: TableCacheRefillContextMap,
     pub policies: HashMap<TableId, CacheRefillPolicy>,
+    pub internal_policies: HashMap<TableId, CacheRefillPolicy>,
     pub default_policy: CacheRefillPolicy,
     pub streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
@@ -379,6 +380,7 @@ pub(crate) struct CacheRefiller {
     role: Role,
     default_policy: CacheRefillPolicy,
     table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
+    internal_table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
     streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
     table_cache_refill_context_map: Arc<RwLock<TableCacheRefillContextMap>>,
@@ -410,6 +412,7 @@ impl CacheRefiller {
             role,
             default_policy,
             table_cache_refill_policies: HashMap::new(),
+            internal_table_cache_refill_policies: HashMap::new(),
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
             table_cache_refill_context_map,
@@ -462,18 +465,22 @@ impl CacheRefiller {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    /// Replaces the complete explicit table refill policy map and rebuilds affected tables.
+    /// Replaces the complete explicit table refill policy maps and rebuilds affected tables.
     pub(crate) fn replace_table_cache_refill_policies(
         &mut self,
-        policies: HashMap<TableId, CacheRefillPolicy>,
+        table_policies: HashMap<TableId, CacheRefillPolicy>,
+        internal_table_policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
         let table_ids = self
             .table_cache_refill_policies
             .keys()
-            .chain(policies.keys())
+            .chain(self.internal_table_cache_refill_policies.keys())
+            .chain(table_policies.keys())
+            .chain(internal_table_policies.keys())
             .copied()
             .collect::<HashSet<_>>();
-        self.table_cache_refill_policies = policies;
+        self.table_cache_refill_policies = table_policies;
+        self.internal_table_cache_refill_policies = internal_table_policies;
         self.rebuild_table_cache_refill_contexts(table_ids);
     }
 
@@ -520,11 +527,20 @@ impl CacheRefiller {
     ) {
         tracing::debug!(?table_id, "rebuild table cache refill context for table");
 
-        let policy = self
-            .table_cache_refill_policies
+        let table_policy = self.table_cache_refill_policies.get(&table_id).copied();
+        let internal_table_policy = self
+            .internal_table_cache_refill_policies
             .get(&table_id)
-            .copied()
+            .copied();
+        let is_internal_table = internal_table_policy.is_some();
+        let policy = table_policy
+            .or(internal_table_policy)
             .unwrap_or(self.default_policy);
+
+        if is_internal_table && !self.role.for_streaming() {
+            table_cache_refill_context_map.remove(&table_id);
+            return;
+        }
 
         if policy.is_streaming_scoped() && !self.role.for_streaming() {
             tracing::warn!(
@@ -547,12 +563,14 @@ impl CacheRefiller {
         }
         // `Enabled` normally does not use bitmap filtering. The only exception is L0
         // insert-only refill, where serving workers still need serving-locality evidence.
-        let serving_vnode_bitmap = (self.role.for_serving()
+        let serving_vnode_bitmap = (!is_internal_table
+            && self.role.for_serving()
             && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
         .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
         .flatten();
 
-        if self.table_cache_refill_policies.contains_key(&table_id)
+        if table_policy.is_some()
+            || internal_table_policy.is_some()
             || streaming_vnode_bitmap.is_some()
             || serving_vnode_bitmap.is_some()
         {
@@ -592,10 +610,21 @@ impl CacheRefiller {
                 let context = table_cache_refill_context_map
                     .get(table_id)
                     .cloned()
-                    .unwrap_or(TableCacheRefillContext {
-                        streaming_vnode_bitmap: None,
-                        serving_vnode_bitmap: None,
-                        policy: self.default_policy,
+                    .unwrap_or_else(|| {
+                        let policy = if !self.role.for_streaming()
+                            && self
+                                .internal_table_cache_refill_policies
+                                .contains_key(table_id)
+                        {
+                            CacheRefillPolicy::Disabled
+                        } else {
+                            self.default_policy
+                        };
+                        TableCacheRefillContext {
+                            streaming_vnode_bitmap: None,
+                            serving_vnode_bitmap: None,
+                            policy,
+                        }
                     });
                 (*table_id, context)
             })
@@ -613,6 +642,7 @@ impl CacheRefiller {
         TableCacheRefillMonitorSnapshot {
             contexts: self.table_cache_refill_context_map.read().clone(),
             policies: self.table_cache_refill_policies.clone(),
+            internal_policies: self.internal_table_cache_refill_policies.clone(),
             default_policy: self.default_policy,
             streaming_table_vnode_mapping: self.streaming_table_vnode_mapping.clone(),
             serving_table_vnode_mapping: self.serving_table_vnode_mapping.clone(),
@@ -1350,10 +1380,13 @@ mod tests {
             CacheRefiller::default_spawn_refill_task(),
         );
 
-        refiller.replace_table_cache_refill_policies(HashMap::from([
-            (table_id, CacheRefillPolicy::Serving),
-            (removed_table_id, CacheRefillPolicy::Serving),
-        ]));
+        refiller.replace_table_cache_refill_policies(
+            HashMap::from([
+                (table_id, CacheRefillPolicy::Serving),
+                (removed_table_id, CacheRefillPolicy::Serving),
+            ]),
+            HashMap::new(),
+        );
         let context_map = refiller.table_cache_refill_context_map().read();
         assert!(
             context_map
@@ -1409,10 +1442,10 @@ mod tests {
         );
 
         refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, serving_vnodes)]));
-        refiller.replace_table_cache_refill_policies(HashMap::from([(
-            table_id,
-            CacheRefillPolicy::Serving,
-        )]));
+        refiller.replace_table_cache_refill_policies(
+            HashMap::from([(table_id, CacheRefillPolicy::Serving)]),
+            HashMap::new(),
+        );
         let context_map = refiller.table_cache_refill_context_map().read();
         assert!(
             context_map
@@ -1421,10 +1454,39 @@ mod tests {
         );
         drop(context_map);
 
-        refiller.replace_table_cache_refill_policies(HashMap::new());
+        refiller.replace_table_cache_refill_policies(HashMap::new(), HashMap::new());
 
         let context_map = refiller.table_cache_refill_context_map().read();
         assert!(context_map.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_serving_role_disables_skipped_internal_table_policy() {
+        let internal_table_id = TableId::from(233);
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            test_refill_config(CacheRefillPolicy::Enabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+        );
+
+        refiller.replace_table_cache_refill_policies(
+            HashMap::new(),
+            HashMap::from([(internal_table_id, CacheRefillPolicy::Both)]),
+        );
+        assert!(
+            !refiller
+                .table_cache_refill_context_map()
+                .read()
+                .contains_key(&internal_table_id)
+        );
+
+        let contexts =
+            refiller.get_table_cache_refill_context_map(&HashSet::from([internal_table_id]));
+        assert_eq!(
+            contexts[&internal_table_id].policy,
+            CacheRefillPolicy::Disabled
+        );
     }
 
     #[tokio::test]
@@ -1446,10 +1508,13 @@ mod tests {
             spawn_refill_task,
         );
 
-        refiller.replace_table_cache_refill_policies(HashMap::from([
-            (explicit_table_id, CacheRefillPolicy::Serving),
-            (excluded_table_id, CacheRefillPolicy::Serving),
-        ]));
+        refiller.replace_table_cache_refill_policies(
+            HashMap::from([
+                (explicit_table_id, CacheRefillPolicy::Serving),
+                (excluded_table_id, CacheRefillPolicy::Serving),
+            ]),
+            HashMap::new(),
+        );
         refiller.update_streaming_table_vnodes(
             default_table_id,
             Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),

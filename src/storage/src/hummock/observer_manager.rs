@@ -247,10 +247,11 @@ mod tests {
                 cluster_resource: Some(Default::default()),
                 table_refill_runtime_config: Some(PbTableRefillRuntimeConfig {
                     table_cache_refill_policies: Some(TableCacheRefillPolicies {
-                        policies: vec![PbTableCacheRefillPolicy {
+                        table_policies: vec![PbTableCacheRefillPolicy {
                             table_id,
                             policy: PbCacheRefillPolicy::Serving as i32,
                         }],
+                        ..Default::default()
                     }),
                     ..Default::default()
                 }),
@@ -282,7 +283,7 @@ mod tests {
         };
         assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
-            config.table_cache_refill_policies.unwrap().policies[0].table_id,
+            config.table_cache_refill_policies.unwrap().table_policies[0].table_id,
             233
         );
 
@@ -298,7 +299,7 @@ mod tests {
         };
         assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
-            config.table_cache_refill_policies.unwrap().policies[0].table_id,
+            config.table_cache_refill_policies.unwrap().table_policies[0].table_id,
             234
         );
     }

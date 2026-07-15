@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 
 """
-Validate the relationship between `risectl hummock refill stats` and vnode
-distribution of a streaming job's internal tables.
+Validate the relationship between `risectl hummock refill stats` and the
+streaming/serving vnode ownership of a streaming job.
 
 The script is intended to be used in sqllogictest `system` commands.
 
 What this script validates:
-1. The refill policy reported for the target job's internal tables matches
-   `--expect-policy`, if provided.
-2. For the target job's internal tables, `stats.streaming[table_id]` equals the
-   vnode ownership reported by the streaming actors in the catalog.
+1. Query-visible tables and internal tables are reported in their separate
+   policy maps, and each retains the job's configured policy. Node role and
+   vnode ownership determine effective refill scope.
+2. For job-owned tables (internal plus query-visible result),
+   `stats.streaming[table_id]` equals the refiller's internal streaming vnode
+   mapping.
+3. For table/MV/index jobs, `stats.serving[table_id]` equals the vnode ownership
+   of the unique fragment that materializes the query-visible result table.
+4. Operator-private internal tables, including sink state, never appear in
+   `stats.serving`.
 
 Important note:
-`stats.internal.streaming` is worker-global refiller vnode state, using the
-table-level vnode union maintained by the refiller. It is logged only as a
-supplementary diagnostic and is not the expected source of truth. The catalog
-actor mapping is scoped to the target job's internal tables.
+`stats.internal.streaming` is the table-level vnode union maintained by the
+refiller. This validates that the refiller materializes that mapping into the
+effective streaming contexts reported in `stats.streaming`.
 
 Examples:
     psql_refill_validate.py --job-name s3 --job-type sink --mode streaming
@@ -27,15 +32,14 @@ import argparse
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Optional, Union
 
 import psycopg2
-
 
 logging.basicConfig(format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,6 +52,8 @@ JOB_TYPE_CHOICES = [
     "index",
     "source",
 ]
+
+QUERY_VISIBLE_JOB_TYPES = {"table", "materialized view", "index"}
 
 
 def build_conn_string(dbname: str) -> str:
@@ -174,6 +180,14 @@ def fetch_internal_tables(conn, job_id: int) -> dict[int, str]:
     return {int(table_id): str(name) for table_id, name in rows}
 
 
+def resolve_result_table(
+    job_id: int, job_name: str, resolved_job_type: str
+) -> dict[int, str]:
+    if resolved_job_type not in QUERY_VISIBLE_JOB_TYPES:
+        return {}
+    return {job_id: job_name}
+
+
 def fetch_fragments(conn, job_id: int) -> dict[int, list[int]]:
     rows = run_sql(
         conn,
@@ -192,41 +206,6 @@ def fetch_fragments(conn, job_id: int) -> dict[int, list[int]]:
     for fragment_id, state_table_id in rows:
         fragments[int(fragment_id)].append(int(state_table_id))
     return dict(fragments)
-
-
-def fetch_streaming_worker_vnodes(
-    conn, job_id: int, internal_table_ids: list[int]
-) -> dict[int, dict[int, list[int]]]:
-    rows = run_sql(
-        conn,
-        """
-        SELECT
-            frag.state_table_id,
-            frag.fragment_id,
-            a.actor_id,
-            a.worker_id,
-            rw_actor_vnodes(a.actor_id)::varchar
-        FROM (
-            SELECT unnest(f.state_table_ids) AS state_table_id, f.fragment_id
-            FROM rw_catalog.rw_fragments f
-            WHERE f.table_id = %s
-        ) frag
-        JOIN rw_catalog.rw_actors a
-          ON a.fragment_id = frag.fragment_id
-        WHERE frag.state_table_id = ANY(%s)
-        ORDER BY frag.state_table_id, frag.fragment_id, a.actor_id, a.worker_id
-        """,
-        (job_id, internal_table_ids),
-    )
-
-    result: dict[int, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
-    for state_table_id, _fragment_id, _actor_id, worker_id, vnode_json in rows:
-        if vnode_json is None:
-            continue
-        for vnode in json.loads(vnode_json):
-            result[int(worker_id)][int(state_table_id)].add(int(vnode))
-
-    return normalize_nested_vnodes(result)
 
 
 def parse_refill_stats(output: str) -> dict[int, dict[str, Any]]:
@@ -272,20 +251,35 @@ def parse_serving_fragment_mapping(output: str) -> list[tuple[int, int, int, lis
     return rows
 
 
-def build_expected_serving_worker_vnodes(
+def resolve_result_fragment(
     job_id: int,
+    result_table_id: int,
     fragments: dict[int, list[int]],
+) -> int:
+    owning_fragments = [
+        fragment_id
+        for fragment_id, state_table_ids in fragments.items()
+        if result_table_id in state_table_ids
+    ]
+    if len(owning_fragments) != 1:
+        raise RuntimeError(
+            f"Job {job_id} result table {result_table_id} must have exactly one "
+            f"owning fragment, got {owning_fragments}"
+        )
+    return owning_fragments[0]
+
+
+def build_expected_serving_result_vnodes(
+    job_id: int,
+    result_table_id: int,
+    result_fragment_id: int,
     serving_rows: list[tuple[int, int, int, list[int]]],
-    internal_table_ids: set[int],
 ) -> dict[int, dict[int, list[int]]]:
     result: dict[int, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
     for row_job_id, fragment_id, worker_id, vnodes in serving_rows:
-        if row_job_id != job_id:
+        if row_job_id != job_id or fragment_id != result_fragment_id:
             continue
-        for table_id in fragments.get(fragment_id, []):
-            if table_id not in internal_table_ids:
-                continue
-            result[worker_id][table_id].update(vnodes)
+        result[worker_id][result_table_id].update(vnodes)
     return normalize_nested_vnodes(result)
 
 
@@ -340,18 +334,37 @@ def project_internal_streaming_stats(
 
 def check_policy(
     stats_by_worker: dict[int, dict[str, Any]],
-    internal_table_ids: dict[int, str],
+    table_ids: dict[int, str],
     expected_policy: str,
+    policy_map_name: str,
 ) -> list[str]:
     mismatches = []
     for worker_id, stats in stats_by_worker.items():
-        policies = stats.get("policies", {})
-        for table_id, table_name in internal_table_ids.items():
+        policies = stats.get(policy_map_name, {})
+        for table_id, table_name in table_ids.items():
             actual_policy = policies.get(str(table_id))
             if actual_policy != expected_policy:
                 mismatches.append(
                     f"worker {worker_id} table {table_id} ({table_name}) "
-                    f"policy mismatch: expected {expected_policy!r}, got {actual_policy!r}"
+                    f"{policy_map_name} mismatch: expected {expected_policy!r}, got {actual_policy!r}"
+                )
+    return mismatches
+
+
+def check_mode_absent(
+    mode: str,
+    stats_by_worker: dict[int, dict[str, Any]],
+    forbidden_tables: dict[int, str],
+) -> list[str]:
+    mismatches = []
+    forbidden_table_ids = set(forbidden_tables)
+    for worker_id, stats in stats_by_worker.items():
+        for table_id_str, vnodes in stats.get(mode, {}).items():
+            table_id = int(table_id_str)
+            if table_id in forbidden_table_ids:
+                mismatches.append(
+                    f"{mode} unexpectedly contains worker {worker_id} table {table_id} "
+                    f"({forbidden_tables[table_id]}): {vnodes}"
                 )
     return mismatches
 
@@ -419,6 +432,7 @@ def log_job_context(
     job_id: int,
     resolved_job_type: str,
     internal_tables: dict[int, str],
+    result_tables: dict[int, str],
     fragments: dict[int, list[int]],
 ) -> None:
     logger.info(
@@ -434,6 +448,14 @@ def log_job_context(
             f"{table_id}({table_name})"
             for table_id, table_name in sorted(internal_tables.items())
         ),
+    )
+    logger.info(
+        "Resolved query-visible result tables: %s",
+        ", ".join(
+            f"{table_id}({table_name})"
+            for table_id, table_name in sorted(result_tables.items())
+        )
+        or "(none)",
     )
     logger.info(
         "Found %s fragments referencing state tables: %s",
@@ -459,8 +481,8 @@ def log_mode_summary(
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate that `risectl hummock refill stats` matches vnode distribution "
-            "of a streaming job's internal tables."
+            "Validate that `risectl hummock refill stats` matches the scoped vnode "
+            "ownership of a streaming job."
         )
     )
     parser.add_argument("--job-name", required=True, help="Streaming job name.")
@@ -517,15 +539,27 @@ def main() -> int:
 
         job_id, resolved_job_type = resolve_job(conn, args.job_name, args.job_type)
         internal_tables = fetch_internal_tables(conn, job_id)
-        if not internal_tables:
+        result_tables = resolve_result_table(job_id, args.job_name, resolved_job_type)
+        if args.mode in ("streaming", "both") and not internal_tables:
             raise RuntimeError(
                 f"Job {args.job_name!r} ({resolved_job_type}) has no internal tables to validate"
             )
+        if args.mode in ("serving", "both") and not result_tables:
+            raise RuntimeError(
+                f"Job {args.job_name!r} ({resolved_job_type}) has no query-visible "
+                "result table to validate"
+            )
 
         fragments = fetch_fragments(conn, job_id)
-        log_job_context(args.job_name, job_id, resolved_job_type, internal_tables, fragments)
+        log_job_context(
+            args.job_name,
+            job_id,
+            resolved_job_type,
+            internal_tables,
+            result_tables,
+            fragments,
+        )
 
-        relevant_table_ids = set(internal_tables)
         refill_output = run_command([risectl, "hummock", "refill", "stats"])
         stats_by_worker = parse_refill_stats(refill_output)
         logger.info("Loaded refill stats from %s workers", len(stats_by_worker))
@@ -533,36 +567,54 @@ def main() -> int:
         mismatches: list[str] = []
 
         if args.expect_policy:
-            logger.info("Checking refill policy is %r for all matching internal tables", args.expect_policy)
-            mismatches.extend(
-                check_policy(stats_by_worker, internal_tables, args.expect_policy)
-            )
+            if internal_tables:
+                logger.info(
+                    "Checking internal-table policy is %r", args.expect_policy
+                )
+                mismatches.extend(
+                    check_policy(
+                        stats_by_worker,
+                        internal_tables,
+                        args.expect_policy,
+                        "internal_policies",
+                    )
+                )
+            if result_tables:
+                logger.info(
+                    "Checking result-table policy is %r", args.expect_policy
+                )
+                mismatches.extend(
+                    check_policy(
+                        stats_by_worker,
+                        result_tables,
+                        args.expect_policy,
+                        "policies",
+                    )
+                )
 
         if args.mode in ("streaming", "both"):
+            streaming_tables = {**internal_tables, **result_tables}
+            streaming_table_ids = set(streaming_tables)
             logger.info(
-                "Collecting expected streaming vnode distribution from catalog actor ownership"
+                "Collecting expected streaming vnode distribution from refiller internal state"
             )
-            expected_streaming = fetch_streaming_worker_vnodes(
-                conn, job_id, sorted(relevant_table_ids)
+            expected_streaming = project_internal_streaming_stats(
+                stats_by_worker, streaming_table_ids
             )
             actual_streaming = project_mode_stats(
-                stats_by_worker, "streaming", relevant_table_ids
+                stats_by_worker, "streaming", streaming_table_ids
             )
-            log_mode_summary("streaming", "Expected", expected_streaming, internal_tables)
-            log_mode_summary("streaming", "Actual", actual_streaming, internal_tables)
+            log_mode_summary("streaming", "Expected", expected_streaming, streaming_tables)
+            log_mode_summary("streaming", "Actual", actual_streaming, streaming_tables)
             mismatches.extend(
                 compare_mode(
-                    "streaming", expected_streaming, actual_streaming, internal_tables
+                    "streaming", expected_streaming, actual_streaming, streaming_tables
                 )
             )
-
-            internal_streaming = project_internal_streaming_stats(
-                stats_by_worker, relevant_table_ids
-            )
-            if internal_streaming != actual_streaming:
-                logger.warning(
-                    "stats.internal.streaming differs from stats.streaming; "
-                    "catalog actor ownership remains the validation oracle"
+            if resolved_job_type == "sink":
+                logger.info("Checking sink internal tables are absent from serving stats")
+                mismatches.extend(
+                    check_mode_absent("serving", stats_by_worker, internal_tables)
                 )
 
         if args.mode in ("serving", "both"):
@@ -572,16 +624,29 @@ def main() -> int:
             )
             serving_rows = parse_serving_fragment_mapping(serving_output)
             logger.info("Loaded %s serving mapping rows", len(serving_rows))
-            expected_serving = build_expected_serving_worker_vnodes(
-                job_id, fragments, serving_rows, relevant_table_ids
+            result_table_id = next(iter(result_tables))
+            result_fragment_id = resolve_result_fragment(
+                job_id, result_table_id, fragments
             )
-            log_mode_summary("serving", "Expected", expected_serving, internal_tables)
+            expected_serving = build_expected_serving_result_vnodes(
+                job_id,
+                result_table_id,
+                result_fragment_id,
+                serving_rows,
+            )
+            if not any(expected_serving.values()):
+                raise RuntimeError(
+                    f"No serving ownership found for job {job_id} result fragment "
+                    f"{result_fragment_id}"
+                )
+            serving_tables = {**internal_tables, **result_tables}
+            log_mode_summary("serving", "Expected", expected_serving, serving_tables)
             actual_serving = project_mode_stats(
-                stats_by_worker, "serving", relevant_table_ids
+                stats_by_worker, "serving", set(serving_tables)
             )
-            log_mode_summary("serving", "Actual", actual_serving, internal_tables)
+            log_mode_summary("serving", "Actual", actual_serving, serving_tables)
             mismatches.extend(
-                compare_mode("serving", expected_serving, actual_serving, internal_tables)
+                compare_mode("serving", expected_serving, actual_serving, serving_tables)
             )
 
         if mismatches:

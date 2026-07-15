@@ -207,27 +207,42 @@ impl CatalogControllerInner {
             return Ok(PbTableCacheRefillPolicies::default());
         }
 
-        let internal_tables: Vec<(TableId, Option<JobId>)> = Table::find()
+        let job_ids = policies_by_job.keys().copied().collect_vec();
+        let related_tables: Vec<(TableId, Option<JobId>)> = Table::find()
             .select_only()
             .column(table::Column::TableId)
             .column(table::Column::BelongsToJobId)
-            .filter(table::Column::BelongsToJobId.is_in(policies_by_job.keys().copied()))
+            .filter(
+                table::Column::BelongsToJobId
+                    .is_in(job_ids.iter().copied())
+                    .or(table::Column::TableId
+                        .is_in(job_ids.iter().map(|job_id| job_id.as_mv_table_id()))),
+            )
             .into_tuple()
             .all(&self.db)
             .await?;
 
-        let policies = internal_tables
-            .into_iter()
-            .filter_map(|(table_id, job_id)| {
-                let policy = policies_by_job.get(&job_id?)?;
-                Some(PbTableCacheRefillPolicy {
-                    table_id: table_id.as_raw_id(),
-                    policy: policy.to_protobuf() as i32,
-                })
-            })
-            .collect();
+        let mut table_policies = Vec::new();
+        let mut internal_table_policies = Vec::new();
+        for (table_id, belongs_to_job_id) in related_tables {
+            let job_id = belongs_to_job_id.unwrap_or_else(|| table_id.as_job_id());
+            let table_policy = PbTableCacheRefillPolicy {
+                table_id: table_id.as_raw_id(),
+                policy: policies_by_job[&job_id].to_protobuf() as i32,
+            };
+            if belongs_to_job_id.is_some() {
+                internal_table_policies.push(table_policy);
+            } else {
+                table_policies.push(table_policy);
+            }
+        }
+        table_policies.sort_unstable_by_key(|policy| policy.table_id);
+        internal_table_policies.sort_unstable_by_key(|policy| policy.table_id);
 
-        Ok(PbTableCacheRefillPolicies { policies })
+        Ok(PbTableCacheRefillPolicies {
+            table_policies,
+            internal_table_policies,
+        })
     }
 }
 
