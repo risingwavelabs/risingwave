@@ -106,6 +106,9 @@ development = ["expect-test", "pretty_assertions"]
 libraries = [{ path = "./lints" }]
 
 [workspace.dependencies]
+
+adbc_core = { version = "0.22" }
+adbc_snowflake = { version = "0.22", default-features = false }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -177,9 +180,6 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c
 ] }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c68b693e6f3f223eb05ae5090e24a39e8b89cea8" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c68b693e6f3f223eb05ae5090e24a39e8b89cea8" }
-
-adbc_core = { version = "0.22" }
-adbc_snowflake = { version = "0.22", default-features = false }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
