@@ -3711,8 +3711,7 @@ fn parse_offset() {
 fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
-
-        quantity: Some("2".to_owned()),
+        quantity: Some(Expr::Value(number("2"))),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3737,7 +3736,7 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            quantity: Some("2".to_owned()),
+            quantity: Some(Expr::Value(number("2"))),
         })
     );
     let ast = verified_query(
@@ -3773,6 +3772,28 @@ fn parse_fetch() {
         },
         _ => panic!("Test broke"),
     }
+
+    // FETCH accepts a general expression / bind parameter as the quantity, mirroring OFFSET.
+    let ast = verified_query("SELECT foo FROM bar FETCH FIRST $1 ROWS ONLY");
+    assert_eq!(
+        ast.fetch,
+        Some(Fetch {
+            with_ties: false,
+            quantity: Some(Expr::Parameter { index: 1 }),
+        })
+    );
+    let ast = verified_query("SELECT foo FROM bar FETCH FIRST 1 + 1 ROWS ONLY");
+    assert_eq!(
+        ast.fetch,
+        Some(Fetch {
+            with_ties: false,
+            quantity: Some(Expr::BinaryOp {
+                left: Box::new(Expr::Value(number("1"))),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expr::Value(number("1"))),
+            }),
+        })
+    );
 }
 
 #[test]

@@ -112,11 +112,11 @@ fn eval_limit_or_offset(
         }
         // If evaluated to NULL, follow PG and treat it as `null_value`.
         Some(Ok(None)) => null_value,
-        // not const error
+        // Still not a constant after parameter substitution (e.g. `$1 + random()`).
         None => {
             return Err(ErrorCode::ExprError(
                 format!(
-                    "expects an integer or expression that can be evaluated to an integer after {clause}, but found non-const expression"
+                    "{clause} must reduce to a constant after parameter binding, but found a non-constant expression"
                 )
                 .into(),
             )

@@ -6237,7 +6237,9 @@ impl Parser<'_> {
         {
             None
         } else {
-            let quantity = self.parse_number_value()?;
+            // Accept a general expression (a constant, `1 + 1`, or a bind parameter
+            // `$n`), not just a bare number; it is folded to a constant in the planner.
+            let quantity = self.parse_expr()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
             Some(quantity)
         };

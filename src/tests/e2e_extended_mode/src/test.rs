@@ -89,6 +89,7 @@ impl TestSuite {
         self.subscription_fetch_cancel(true).await?;
         self.subquery_with_param().await?;
         self.create_mview_with_parameter().await?;
+        self.limit_offset_with_param().await?;
         Ok(())
     }
 
@@ -646,6 +647,86 @@ impl TestSuite {
 
         assert_eq!(res[0].get::<usize, i16>(0), 1024_i16);
 
+        Ok(())
+    }
+
+    // Regression test for https://github.com/risingwavelabs/risingwave/issues/23345:
+    // `$n` parameters in LIMIT/OFFSET are only known at Bind, so they must be evaluated
+    // per-Bind rather than folded at Parse time.
+    async fn limit_offset_with_param(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
+        client.execute("set rw_implicit_flush = true", &[]).await?;
+        client.execute("create table t_lo (v int)", &[]).await?;
+        for i in 0..5_i32 {
+            client
+                .execute("insert into t_lo values ($1)", &[&i])
+                .await?;
+        }
+
+        // The same prepared OFFSET statement re-bound with different values must be
+        // evaluated per-Bind.
+        let stmt = client
+            .prepare("select v from t_lo order by v offset $1")
+            .await?;
+        assert_eq!(client.query(&stmt, &[&1_i64]).await?.len(), 4);
+        assert_eq!(client.query(&stmt, &[&3_i64]).await?.len(), 2);
+
+        // LIMIT $1 OFFSET $2.
+        let rows = client
+            .query(
+                "select v from t_lo order by v limit $1 offset $2",
+                &[&2_i64, &1_i64],
+            )
+            .await?;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get::<usize, i32>(0), 1);
+        assert_eq!(rows[1].get::<usize, i32>(0), 2);
+
+        // An expression over a parameter folds to a constant once bound.
+        let rows = client
+            .query("select v from t_lo order by v offset $1 + 1", &[&1_i32])
+            .await?;
+        assert_eq!(rows.len(), 3);
+
+        // LIMIT NULL means no limit (PG semantics); OFFSET NULL means zero.
+        assert_eq!(
+            client
+                .query("select v from t_lo order by v limit $1", &[&None::<i64>])
+                .await?
+                .len(),
+            5
+        );
+        assert_eq!(
+            client
+                .query("select v from t_lo order by v offset $1", &[&None::<i64>])
+                .await?
+                .len(),
+            5
+        );
+
+        // FETCH FIRST $1 ROWS ONLY accepts a parameter as the quantity.
+        assert_eq!(
+            client
+                .query(
+                    "select v from t_lo order by v fetch first $1 rows only",
+                    &[&2_i64],
+                )
+                .await?
+                .len(),
+            2
+        );
+
+        // A negative value bound to $1 is rejected at Bind/Execute, not at Parse.
+        let err = client
+            .query("select v from t_lo order by v offset $1", &[&-1_i64])
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("negative"),
+            "expected a negative-offset error, got: {err}"
+        );
+
+        client.execute("drop table t_lo", &[]).await?;
         Ok(())
     }
 }

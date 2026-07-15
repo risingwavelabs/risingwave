@@ -326,6 +326,40 @@ SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET generate_series(1
 statement error
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET -1;
 
+# NULL LIMIT means no limit and NULL OFFSET means zero, following PostgreSQL.
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v LIMIT NULL OFFSET NULL;
+----
+0
+1
+2
+3
+4
+
+# FETCH FIRST also accepts an expression as its quantity.
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1 FETCH FIRST 1+1 ROWS ONLY;
+----
+1
+2
+
+# A column reference in OFFSET is rejected (as in PostgreSQL).
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET v;
+
+# An aggregate in OFFSET is rejected (as in PostgreSQL).
+statement error
+SELECT count(*) FROM generate_series(0,3,1) as t(v) OFFSET count(*);
+
+# A window function in OFFSET is rejected (as in PostgreSQL).
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET row_number() OVER ();
+
+# A volatile function in OFFSET is rejected: RisingWave folds LIMIT/OFFSET to a
+# plan-time constant, unlike PostgreSQL which evaluates it once at executor start.
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET (random() * 10)::int8;
+
 
 # Subqueries that return negative values
 statement error

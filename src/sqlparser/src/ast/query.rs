@@ -673,7 +673,7 @@ impl fmt::Display for OrderByExpr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Fetch {
     pub with_ties: bool,
-    pub quantity: Option<String>,
+    pub quantity: Option<Expr>,
 }
 
 impl fmt::Display for Fetch {
