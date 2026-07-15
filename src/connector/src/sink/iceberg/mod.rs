@@ -16,8 +16,11 @@
 mod test;
 
 mod commit;
+pub mod commit_retry;
 mod config;
 mod create_table;
+#[cfg(any(test, madsim))]
+pub mod mock_v3_catalog_registry;
 mod prometheus;
 mod writer;
 
@@ -38,7 +41,7 @@ use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkError, SinkWriterParam,
 };
-use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::connector_common::{IcebergCatalogKind, IcebergSinkCompactionUpdate};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
@@ -144,11 +147,12 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
-        if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
+        let catalog_kind = self.config.catalog_kind()?;
+        if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
 
-        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+        if matches!(catalog_kind, IcebergCatalogKind::Glue(_)) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -252,7 +256,7 @@ impl Sink for IcebergSink {
             && max_snapshots < 1
         {
             bail!(
-                "`compaction.max-snapshots-num` must be greater than 0, got: {}",
+                "`compaction.max_snapshots_num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }

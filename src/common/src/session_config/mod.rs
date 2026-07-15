@@ -228,12 +228,12 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_force_filter_inside_join")]
     streaming_force_filter_inside_join: bool,
 
-    /// Enable arrangement backfill for streaming queries. Defaults to true.
-    /// When set to true, the parallelism of the upstream fragment will be
-    /// decoupled from the parallelism of the downstream scan fragment.
-    /// Or more generally, the parallelism of the upstream table / index / mv
-    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
-    #[parameter(default = true)]
+    /// Deprecated. Arrangement backfill is always used as the fallback backfill type for new
+    /// streaming jobs, and this setting is ignored.
+    #[parameter(
+        default = true,
+        deprecated = "The session variable STREAMING_USE_ARRANGEMENT_BACKFILL has been deprecated and is ignored. Arrangement backfill is always used as the fallback backfill type for new streaming jobs."
+    )]
     streaming_use_arrangement_backfill: bool,
 
     #[parameter(default = true)]
@@ -252,6 +252,14 @@ pub struct SessionConfig {
     /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
     #[parameter(default = false)]
     streaming_unsafe_allow_unmaterialized_impure_expr: bool,
+
+    /// Unsafe: allow an upsert sink to use downstream primary-key columns that are not part of
+    /// the upstream stream key.
+    ///
+    /// This may leave stale rows in the downstream system if a downstream primary-key column
+    /// changes without the upsert stream providing its old value.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_upsert_sink_pk_mismatch: bool,
 
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
@@ -680,6 +688,8 @@ mod test {
     struct TestConfig {
         #[parameter(default = 1, flags = "NO_ALTER_SYS", alias = "test_param_alias" | "alias_param_test")]
         test_param: i32,
+        #[parameter(default = false, deprecated = "deprecated test notice")]
+        deprecated_test_param: bool,
     }
 
     #[test]
@@ -692,6 +702,11 @@ mod test {
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
+        assert_eq!(
+            TestConfig::deprecated_notice("deprecated_test_param").unwrap(),
+            Some("deprecated test notice")
+        );
+        assert_eq!(TestConfig::deprecated_notice("test_param").unwrap(), None);
     }
 
     #[test]
@@ -752,6 +767,7 @@ mod test {
             config.streaming_parallelism_for_materialized_view(),
             ConfigParallelism::Default
         );
+        assert!(!config.streaming_unsafe_allow_upsert_sink_pk_mismatch());
     }
 
     #[test]

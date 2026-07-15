@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, anyhow};
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::spec::{
-    NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
+    FormatVersion, NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
@@ -37,6 +37,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
+use crate::connector_common::{IcebergCatalogKind, IcebergCatalogRuntime};
 use crate::sink::{Result, SinkParam};
 
 static ORDER_KEY_COLUMN_RE: LazyLock<Regex> =
@@ -70,6 +71,17 @@ pub async fn create_and_validate_table_impl(
         .load_table()
         .await
         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    if config.enable_pk_index {
+        let table_format_version = table.metadata().format_version();
+        if table_format_version < FormatVersion::V2 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` requires an Iceberg table with format version >= 2, \
+                 but the target table is format version {}",
+                table_format_version
+            )));
+        }
+    }
 
     let sink_schema = param.schema();
     let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
@@ -109,7 +121,7 @@ pub(super) async fn create_table_if_not_exists_impl(
                     .map_err(|e| SinkError::Iceberg(anyhow!(e)))
                     .context(format!(
                         "failed to convert {}: {} to arrow type",
-                        &column.name, &column.data_type
+                        column.name, column.data_type
                     ))?)
             })
             .collect::<Result<Vec<ArrowField>>>()?;
@@ -130,8 +142,10 @@ pub(super) async fn create_table_if_not_exists_impl(
                     if url.is_err() || is_s3_tables || is_bq_catalog_federation {
                         // For rest catalog, the warehouse_path could be a warehouse name.
                         // In this case, we should specify the location when creating a table.
-                        if config.common.catalog_type() == "rest"
-                            || config.common.catalog_type() == "rest_rust"
+                        if config
+                            .common
+                            .is_rest_catalog()
+                            .map_err(|err| SinkError::Config(anyhow!(err)))?
                         {
                             None
                         } else {
@@ -186,11 +200,19 @@ pub(super) async fn create_table_if_not_exists_impl(
             None => None,
         };
 
-        // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
-        let properties = HashMap::from([(
-            TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
-            (config.format_version as u8).to_string(),
-        )]);
+        // Some JNI catalogs extract `format-version` from table properties, while
+        // native Rust Glue rejects reserved properties before creating metadata.
+        let properties = if matches!(
+            config.catalog_kind()?,
+            IcebergCatalogKind::Glue(IcebergCatalogRuntime::NativeRust)
+        ) {
+            HashMap::new()
+        } else {
+            HashMap::from([(
+                TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
+                (config.format_version as u8).to_string(),
+            )])
+        };
 
         let table_creation_builder = TableCreation::builder()
             .name(table_name)

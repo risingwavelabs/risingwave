@@ -263,6 +263,10 @@ impl ClusterController {
                     .filter(|(_, info)| info.expire_at.unwrap() < now)
                     .map(|(id, _)| *id)
                     .collect_vec();
+                if worker_to_delete.is_empty() {
+                    drop(inner);
+                    continue;
+                }
 
                 // 3. Delete expired workers.
                 let worker_infos = match Worker::find()
@@ -632,6 +636,7 @@ impl ClusterControllerInner {
             .unwrap_or_default()
     }
 
+    #[await_tree::instrument]
     pub async fn add_worker(
         &mut self,
         r#type: PbWorkerType,

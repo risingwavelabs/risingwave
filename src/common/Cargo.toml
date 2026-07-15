@@ -42,7 +42,7 @@ fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hashbrown0_14 = { workspace = true }
-hashbrown0_15 = { workspace = true }
+hashbrown0_16 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.3"

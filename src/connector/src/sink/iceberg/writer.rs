@@ -21,7 +21,8 @@ use iceberg::arrow::{
     RecordBatchPartitionSplitter, arrow_schema_to_schema, schema_to_arrow_schema,
 };
 use iceberg::spec::{
-    DataFile, FormatVersion, PartitionSpecRef, SchemaRef as IcebergSchemaRef, SerializedDataFile,
+    DataFile, FormatVersion, PartitionSpecRef, Schema, SchemaRef as IcebergSchemaRef,
+    SerializedDataFile, StructType,
 };
 use iceberg::table::Table;
 use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
@@ -55,6 +56,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
+use thiserror_ext::AsReport;
 use uuid::Uuid;
 
 use super::prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
@@ -80,7 +82,9 @@ enum ProjectIdxVec {
 
 type DataFileWriterBuilderType =
     DataFileWriterBuilder<ParquetWriterBuilder, DefaultLocationGenerator, DefaultFileNameGenerator>;
-type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
+/// The concrete V2 position-delete Parquet writer builder type, shared by the
+/// iceberg sink writer and the pk-index position-delete merger.
+pub type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
     ParquetWriterBuilder,
     DefaultLocationGenerator,
     DefaultFileNameGenerator,
@@ -235,6 +239,11 @@ pub struct IcebergSinkWriterInner {
     metrics: IcebergWriterMetrics,
     // State of iceberg table for this writer
     table: Table,
+    actor_id: String,
+    sink_id: String,
+    sink_name: String,
+    table_name: String,
+    writer_mode: &'static str,
     // For chunk with extra partition column, we should remove this column before write.
     // This project index vec is used to avoid create project idx each time.
     project_idx_vec: ProjectIdxVec,
@@ -351,8 +360,25 @@ impl IcebergSinkWriterInner {
         let schema = table.metadata().current_schema();
         let partition_spec = table.metadata().default_partition_spec();
         let fanout_enabled = !partition_spec.fields().is_empty();
+        let table_name = table.identifier().to_string();
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
+        tracing::info!(
+            iceberg_component = "sink_writer",
+            iceberg_operation = "build_writer",
+            actor_id = %actor_id,
+            sink_id = %sink_id,
+            sink_name = %sink_name,
+            table = %table_name,
+            writer_mode = "append_only",
+            schema_id = table.metadata().current_schema_id(),
+            partition_spec_id = table.metadata().default_partition_spec_id(),
+            format_version = ?table.metadata().format_version(),
+            fanout_enabled,
+            target_file_size_mb = config.target_file_size_mb(),
+            parquet_compression = ?config.get_parquet_compression(),
+            "iceberg_sink_writer_initialized",
+        );
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
@@ -407,6 +433,11 @@ impl IcebergSinkWriterInner {
                 writer_builder,
             },
             table,
+            actor_id: actor_id.to_string(),
+            sink_id: sink_id.to_string(),
+            sink_name: sink_name.clone(),
+            table_name,
+            writer_mode: "append_only",
             project_idx_vec: {
                 if let Some(extra_partition_col_idx) = extra_partition_col_idx {
                     ProjectIdxVec::Prepare(*extra_partition_col_idx)
@@ -459,9 +490,29 @@ impl IcebergSinkWriterInner {
         let partition_spec = table.metadata().default_partition_spec();
         let fanout_enabled = !partition_spec.fields().is_empty();
         let use_deletion_vectors = table.metadata().format_version() >= FormatVersion::V3;
+        let table_name = table.identifier().to_string();
 
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
+        tracing::info!(
+            iceberg_component = "sink_writer",
+            iceberg_operation = "build_writer",
+            actor_id = %actor_id,
+            sink_id = %sink_id,
+            sink_name = %sink_name,
+            table = %table_name,
+            writer_mode = "upsert",
+            schema_id = table.metadata().current_schema_id(),
+            partition_spec_id = table.metadata().default_partition_spec_id(),
+            format_version = ?table.metadata().format_version(),
+            primary_key_columns = ?primary_key_column_names,
+            equality_delete_field_ids = ?unique_column_ids,
+            use_deletion_vectors,
+            fanout_enabled,
+            target_file_size_mb = config.target_file_size_mb(),
+            parquet_compression = ?config.get_parquet_compression(),
+            "iceberg_sink_writer_initialized",
+        );
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
@@ -603,6 +654,11 @@ impl IcebergSinkWriterInner {
                     ProjectIdxVec::None
                 }
             },
+            actor_id: actor_id.to_string(),
+            sink_id: sink_id.to_string(),
+            sink_name: sink_name.clone(),
+            table_name,
+            writer_mode: "upsert",
         })
     }
 
@@ -703,10 +759,28 @@ impl IcebergSinkWriterInner {
         };
 
         let writer = self.writer.get_writer().unwrap();
+        let batch_rows = batch.num_rows();
+        let batch_columns = batch.num_columns();
         writer
             .write(batch)
             .instrument_await("iceberg_write")
-            .await?;
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    iceberg_component = "sink_writer",
+                    iceberg_operation = "write_batch",
+                    actor_id = %self.actor_id,
+                    sink_id = %self.sink_id,
+                    sink_name = %self.sink_name,
+                    table = %self.table_name,
+                    writer_mode = self.writer_mode,
+                    batch_rows,
+                    batch_columns,
+                    write_bytes = write_batch_size,
+                    error = %err.as_report(),
+                    "iceberg_sink_writer_write_failed",
+                );
+            })?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
         Ok(())
     }
@@ -726,10 +800,28 @@ impl IcebergSinkWriterInner {
         };
 
         let writer = self.writer.get_writer().unwrap();
+        let batch_rows = batch.num_rows();
+        let batch_columns = batch.num_columns();
         let positions = writer
             .write_with_position(batch)
             .instrument_await("iceberg_write")
-            .await?;
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    iceberg_component = "sink_writer",
+                    iceberg_operation = "write_batch_with_position",
+                    actor_id = %self.actor_id,
+                    sink_id = %self.sink_id,
+                    sink_name = %self.sink_name,
+                    table = %self.table_name,
+                    writer_mode = self.writer_mode,
+                    batch_rows,
+                    batch_columns,
+                    write_bytes = write_batch_size,
+                    error = %err.as_report(),
+                    "iceberg_sink_writer_write_with_position_failed",
+                );
+            })?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
         Ok(positions)
     }
@@ -742,7 +834,8 @@ impl IcebergSinkWriterInner {
             } => {
                 let close_result = match writer.take() {
                     Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await?)
+                        let data_files = writer.close().instrument_await("iceberg_close").await?;
+                        Some(data_files)
                     }
                     _ => None,
                 };
@@ -750,10 +843,20 @@ impl IcebergSinkWriterInner {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
-                    _ => {
+                    Err(err) => {
                         // In this case, the writer is closed and we can't build a new writer. But we can't return the error
                         // here because current writer may close successfully. So we just log the error.
-                        tracing::warn!("Failed to build new writer after close");
+                        tracing::warn!(
+                            iceberg_component = "sink_writer",
+                            iceberg_operation = "rebuild_writer",
+                            actor_id = %self.actor_id,
+                            sink_id = %self.sink_id,
+                            sink_name = %self.sink_name,
+                            table = %self.table_name,
+                            writer_mode = self.writer_mode,
+                            error = %err.as_report(),
+                            "iceberg_sink_writer_rebuild_failed_after_close",
+                        );
                     }
                 }
                 close_result
@@ -765,7 +868,8 @@ impl IcebergSinkWriterInner {
             } => {
                 let close_result = match writer.take() {
                     Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await?)
+                        let data_files = writer.close().instrument_await("iceberg_close").await?;
+                        Some(data_files)
                     }
                     _ => None,
                 };
@@ -773,10 +877,20 @@ impl IcebergSinkWriterInner {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
-                    _ => {
+                    Err(err) => {
                         // In this case, the writer is closed and we can't build a new writer. But we can't return the error
                         // here because current writer may close successfully. So we just log the error.
-                        tracing::warn!("Failed to build new writer after close");
+                        tracing::warn!(
+                            iceberg_component = "sink_writer",
+                            iceberg_operation = "rebuild_writer",
+                            actor_id = %self.actor_id,
+                            sink_id = %self.sink_id,
+                            sink_name = %self.sink_name,
+                            table = %self.table_name,
+                            writer_mode = self.writer_mode,
+                            error = %err.as_report(),
+                            "iceberg_sink_writer_rebuild_failed_after_close",
+                        );
                     }
                 }
                 close_result
@@ -786,17 +900,7 @@ impl IcebergSinkWriterInner {
     }
 
     pub fn generate_commit_metadata(&self, data_files: Vec<DataFile>) -> Result<SinkMetadata> {
-        let format_version = self.table.metadata().format_version();
-        let partition_type = self.table.metadata().default_partition_type();
-        let serialized_data_files = data_files
-            .into_iter()
-            .map(|f| {
-                // Truncate large column statistics BEFORE serialization
-                let truncated = truncate_datafile(f);
-                let res = SerializedDataFile::try_from(truncated, partition_type, format_version)?;
-                Ok(res)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let serialized_data_files = serialize_data_files_default_spec(&self.table, data_files)?;
         SinkMetadata::try_from(&IcebergCommitResult {
             data_files: serialized_data_files,
             schema_id: self.table.metadata().current_schema_id(),
@@ -877,6 +981,54 @@ impl SinkWriter for IcebergSinkWriter {
 /// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
 /// that benefit from query optimization.
 const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
+
+/// Serializes `files` against the table's current default partition spec, after
+/// truncating oversized column statistics. Shared by the iceberg sink writer's
+/// commit-metadata generation and the pk-index merger's delete-file serialization.
+///
+/// Only the DEFAULT-spec path is shared here; callers that must serialize each
+/// file against its own (potentially older) partition spec keep their own logic.
+pub fn serialize_data_files_default_spec(
+    table: &Table,
+    files: Vec<DataFile>,
+) -> Result<Vec<SerializedDataFile>> {
+    let format_version = table.metadata().format_version();
+    let partition_type = table.metadata().default_partition_type();
+    files
+        .into_iter()
+        .map(|f| {
+            // Truncate large column statistics BEFORE serialization.
+            let truncated = truncate_datafile(f);
+            Ok(SerializedDataFile::try_from(
+                truncated,
+                partition_type,
+                format_version,
+            )?)
+        })
+        .collect()
+}
+
+/// Resolves a partition spec by id from the table metadata, with a consolidated
+/// error message. Shared spec-lookup mechanic for the pk-index merger, commit
+/// coordinator, and sink commit paths.
+pub fn resolve_partition_spec(table: &Table, spec_id: i32) -> Result<PartitionSpecRef> {
+    table
+        .metadata()
+        .partition_spec_by_id(spec_id)
+        .cloned()
+        .ok_or_else(|| SinkError::Iceberg(anyhow!("partition spec {} not found", spec_id)))
+}
+
+/// Resolves the partition [`StructType`] for the given `spec_id` against `schema`.
+///
+/// `schema` is passed explicitly (rather than read from the table) so callers can
+/// preserve their chosen schema, and `spec_id` is passed explicitly so callers can
+/// preserve their chosen spec (e.g. a file's own spec vs. the default spec).
+pub fn resolve_partition_type(table: &Table, spec_id: i32, schema: &Schema) -> Result<StructType> {
+    resolve_partition_spec(table, spec_id)?
+        .partition_type(schema)
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+}
 
 /// Truncate large column statistics from `DataFile` BEFORE serialization.
 ///

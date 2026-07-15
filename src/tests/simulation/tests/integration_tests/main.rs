@@ -18,7 +18,7 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
-#![feature(impl_trait_in_assoc_type)]
+#![cfg_attr(madsim, feature(impl_trait_in_assoc_type))]
 
 mod backfill_tests;
 mod batch;

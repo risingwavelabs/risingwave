@@ -374,7 +374,7 @@ fn regexp_replace(
                         ret = format!(
                             "{}{}{}",
                             &text[..search_start + match_start],
-                            &ctx.replacement,
+                            ctx.replacement,
                             &text[search_start + match_end..]
                         );
                         break;

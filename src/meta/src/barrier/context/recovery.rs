@@ -18,6 +18,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -430,6 +432,10 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        for sink_id in &cleaned_dirty_jobs.sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(*sink_id);
+        }
         if database_id.is_some() {
             // Per-database recovery does not run the global Hummock purge below. Unregister the
             // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
@@ -464,9 +470,53 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .list_sink_ids(Some(database_id))
                 .await?;
-            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+            self.sink_manager
+                .stop_sink_coordinator(sink_ids.clone())
+                .await;
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(sink_ids);
         } else {
             self.sink_manager.reset().await;
+            self.iceberg_pk_index_sink_manager.reset();
+        }
+        Ok(())
+    }
+
+    /// Re-register iceberg pk-index sink commit coordinators after recovery wipes them.
+    async fn reregister_iceberg_pk_index_sinks(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
+        let pb_sinks = self
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await?;
+        let mut futs = FuturesUnordered::new();
+        for pb_sink in pb_sinks {
+            if database_id.is_some_and(|db_id| pb_sink.database_id != db_id)
+                || !crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    &pb_sink.properties,
+                )
+            {
+                continue;
+            }
+            let config = crate::manager::iceberg_pk_index_sink::build_iceberg_config(&pb_sink)
+                .with_context(|| {
+                    format!(
+                        "build iceberg config while re-registering v3 sink {}",
+                        pb_sink.id
+                    )
+                })?;
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move { (pb_sink.id, manager.register_sink(pb_sink.id, config).await) });
+        }
+
+        while let Some((id, res)) = futs.next().await {
+            if let Err(e) = res {
+                let msg = format!("register iceberg v3 sink {} during recovery", id);
+                return Err(e.context(msg).into());
+            }
         }
         Ok(())
     }
@@ -781,6 +831,13 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("abort dirty pending sink state")?;
 
+                    // We must abort dirty pending sink state before registering iceberg pk-index sinks,
+                    // otherwise recover_pending will take speculative (epoch > committed epoch) pending sink state
+                    // as valid and cause duplicated iceberg commit.
+                    self.reregister_iceberg_pk_index_sinks(None)
+                        .await
+                        .context("re-register iceberg v3 sinks after recovery")?;
+
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
                     let mut initial_background_jobs = self
@@ -952,6 +1009,9 @@ impl GlobalBarrierWorkerContextImpl {
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
+        self.reregister_iceberg_pk_index_sinks(Some(database_id))
+            .await
+            .context("re-register iceberg v3 sinks after recovery")?;
 
         // Background job progress needs to be recovered.
         tracing::info!(

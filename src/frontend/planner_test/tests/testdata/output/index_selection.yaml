@@ -752,6 +752,16 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (test_table.name >= 'test_table':Varchar) AND (test_table.name < 'test_tablf':Varchar) AND Like(test_table.name, 'test\_table_2':Varchar) }
       └─BatchScan { table: test_table, columns: [test_table.name], distribution: SomeShard }
+- name: restrict rewrite LIKE with ESCAPE as a binary expression
+  sql: |
+    create table some_trades(id varchar);
+    select * from some_trades
+    where id like '%\_%' escape '\'
+      and id not like 'DROPFEED%';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: Like(some_trades.id, '%\_%':Varchar, '\':Varchar) AND (Not((some_trades.id >= 'DROPFEED':Varchar)) OR Not((some_trades.id < 'DROPFEEE':Varchar))) }
+      └─BatchScan { table: some_trades, columns: [some_trades.id], distribution: SomeShard }
 - sql: |
     create table t1 (k1 int primary key, v1 int);
     create table t2 (k2 int primary key, v2 int);

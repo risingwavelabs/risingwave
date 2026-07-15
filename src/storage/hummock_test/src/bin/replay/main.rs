@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(coroutines)]
-#![feature(stmt_expr_attributes)]
 #![feature(proc_macro_hygiene)]
 #![feature(register_tool)]
 #![register_tool(rw)]

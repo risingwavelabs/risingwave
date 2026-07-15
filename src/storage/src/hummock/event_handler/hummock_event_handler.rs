@@ -566,8 +566,7 @@ impl HummockEventHandler {
                         if let Some(sst_delta_infos) = &mut sst_delta_infos {
                             sst_delta_infos.extend(
                                 version_to_apply
-                                    .build_sst_delta_infos(&local_hummock_version_delta)
-                                    .into_iter(),
+                                    .build_sst_delta_infos(&local_hummock_version_delta),
                             );
                         }
 

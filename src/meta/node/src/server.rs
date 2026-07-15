@@ -24,7 +24,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_common_service::{AwaitTreeMiddlewareLayer, MetricsManager, TracingExtractLayer};
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -90,6 +90,7 @@ use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
 use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
@@ -464,6 +465,10 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    let iceberg_pk_index_sink_manager =
+        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+    tracing::info!("IcebergPkIndexSinkManager started");
+
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
@@ -507,6 +512,8 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
+        iceberg_pk_index_sink_manager.clone(),
+        iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
         refresh_manager.clone(),
@@ -530,6 +537,7 @@ pub async fn start_service_as_election_leader(
             hummock_manager.clone(),
             source_manager.clone(),
             refresh_manager.clone(),
+            iceberg_compaction_mgr.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -550,6 +558,7 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
         barrier_scheduler.clone(),
+        iceberg_pk_index_sink_manager.clone(),
     )
     .await;
 
@@ -764,6 +773,7 @@ pub async fn start_service_as_election_leader(
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
+        .layer(AwaitTreeMiddlewareLayer::new(env.await_tree_reg().clone()))
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))

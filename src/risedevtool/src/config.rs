@@ -205,6 +205,7 @@ impl ConfigExpander {
                     "tempo" => ServiceConfig::Tempo(serde_yaml::from_str(&out_str)?),
                     "opendal" => ServiceConfig::Opendal(serde_yaml::from_str(&out_str)?),
                     "aws-s3" => ServiceConfig::AwsS3(serde_yaml::from_str(&out_str)?),
+                    "moto" => ServiceConfig::Moto(serde_yaml::from_str(&out_str)?),
                     "kafka" => ServiceConfig::Kafka(serde_yaml::from_str(&out_str)?),
                     "lakekeeper" => ServiceConfig::Lakekeeper(serde_yaml::from_str(&out_str)?),
                     "pubsub" => ServiceConfig::Pubsub(serde_yaml::from_str(&out_str)?),
@@ -213,6 +214,11 @@ impl ConfigExpander {
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
+                    "mongodb" => ServiceConfig::MongoDb(serde_yaml::from_str(&out_str)?),
+                    "elasticsearch" => {
+                        ServiceConfig::ElasticSearch(serde_yaml::from_str(&out_str)?)
+                    }
+                    "opensearch" => ServiceConfig::OpenSearch(serde_yaml::from_str(&out_str)?),
                     "nats" => ServiceConfig::Nats(serde_yaml::from_str(&out_str)?),
                     "mqtt" => ServiceConfig::Mqtt(serde_yaml::from_str(&out_str)?),
                     "schema-registry" => {

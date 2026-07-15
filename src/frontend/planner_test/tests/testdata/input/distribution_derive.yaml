@@ -10,7 +10,9 @@
 - id: A_join_B_onk1
   before:
   - create_tables
-  sql: select A.v, B.v as Bv from A join B using(k1);
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select A.v, B.v as Bv from A join B using(k1);
   expected_outputs:
   - stream_plan
   - batch_plan
@@ -18,7 +20,9 @@
 - id: Ak1_join_B_onk1
   before:
   - create_tables
-  sql: select A.v, B.v as Bv from Ak1 as A join B using(k1)
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select A.v, B.v as Bv from Ak1 as A join B using(k1)
   expected_outputs:
   - stream_plan
   - stream_dist_plan
@@ -26,7 +30,9 @@
 - id: A_join_Bk1_onk1
   before:
   - create_tables
-  sql: select A.v, B.v as Bv from A join Bk1 as B using(k1)
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select A.v, B.v as Bv from A join Bk1 as B using(k1)
   expected_outputs:
   - batch_plan
   - stream_dist_plan
@@ -34,7 +40,9 @@
 - id: Ak1_join_Bk1_onk1
   before:
   - create_tables
-  sql: select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
+  sql: |
+    set streaming_use_snapshot_backfill = false;
+    select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
   expected_outputs:
   - stream_plan
   - batch_plan

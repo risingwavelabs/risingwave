@@ -310,6 +310,7 @@ pub struct MetaOpts {
 
     pub enable_legacy_table_migration: bool,
     pub pause_on_next_bootstrap_offline: bool,
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl MetaOpts {
@@ -416,6 +417,7 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
         }

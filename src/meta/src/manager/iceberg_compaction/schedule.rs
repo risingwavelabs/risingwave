@@ -436,7 +436,13 @@ impl IcebergCompactionHandle {
             .get_sink_by_id(self.sink_id)
             .await?
         else {
-            tracing::warn!("Sink not found: {}", self.sink_id);
+            tracing::warn!(
+                iceberg_component = "compaction_scheduler",
+                iceberg_operation = "dispatch_task",
+                sink_id = %self.sink_id,
+                task_id,
+                "iceberg_compaction_dispatch_sink_not_found",
+            );
             return Ok(());
         };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
@@ -464,9 +470,11 @@ impl IcebergCompactionHandle {
             if !dispatched {
                 should_cancel_sent_task = true;
                 tracing::warn!(
+                    iceberg_component = "compaction_scheduler",
+                    iceberg_operation = "dispatch_task",
                     sink_id = %self.sink_id,
                     task_id,
-                    "Iceberg compaction task send succeeded but track was no longer pending dispatch"
+                    "iceberg_compaction_dispatch_track_not_pending",
                 );
             }
             drop(guard);
@@ -482,10 +490,12 @@ impl IcebergCompactionHandle {
     fn cancel_sent_task(&self, compactor: &crate::hummock::IcebergCompactor, task_id: u64) {
         if let Err(e) = compactor.cancel_task(task_id) {
             tracing::warn!(
+                iceberg_component = "compaction_scheduler",
+                iceberg_operation = "cancel_task",
                 error = %e.as_report(),
                 sink_id = %self.sink_id,
                 task_id,
-                "Failed to cancel iceberg compaction task after schedule removal",
+                "iceberg_compaction_cancel_after_schedule_removal_failed",
             );
         }
     }
@@ -744,16 +754,20 @@ impl IcebergCompactionManager {
             Entry::Vacant(entry) => {
                 if !allow_track_initialization {
                     tracing::warn!(
+                        iceberg_component = "compaction_scheduler",
+                        iceberg_operation = "apply_sink_update",
                         sink_id = %sink_id,
-                        "Ignoring iceberg compaction update because track disappeared before apply"
+                        "iceberg_compaction_update_ignored_track_missing",
                     );
                     return false;
                 }
 
                 let Some(config) = loaded_config.as_ref() else {
                     tracing::warn!(
+                        iceberg_component = "compaction_scheduler",
+                        iceberg_operation = "apply_sink_update",
                         sink_id = %sink_id,
-                        "Ignoring iceberg compaction update because sink config is unavailable"
+                        "iceberg_compaction_update_ignored_config_unavailable",
                     );
                     return false;
                 };
@@ -893,7 +907,12 @@ impl IcebergCompactionManager {
         let mut timed_out_tasks = Vec::new();
         for (&sink_id, track) in &mut guard.sink_schedules {
             if track.is_report_timed_out(now) {
-                tracing::warn!(sink_id = %sink_id, "Iceberg compaction task report timed out");
+                tracing::warn!(
+                    iceberg_component = "compaction_scheduler",
+                    iceberg_operation = "report_timeout",
+                    sink_id = %sink_id,
+                    "iceberg_compaction_task_report_timed_out",
+                );
                 timed_out_tasks.push((sink_id, track.finish_failed(now)));
             }
         }
@@ -929,7 +948,7 @@ impl IcebergCompactionManager {
                 }
             }
 
-            candidates.sort_by(|a, b| a.1.cmp(&b.1));
+            candidates.sort_by_key(|c| c.1);
 
             let handles = candidates
                 .into_iter()
@@ -1096,10 +1115,13 @@ impl IcebergCompactionManager {
                         IcebergReportTaskStatus::Success => track.finish_success(now),
                         IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
+                                iceberg_component = "compaction_scheduler",
+                                iceberg_operation = "handle_report",
                                 sink_id = %sink_id,
                                 task_id,
-                                error_message = report.error_message.clone().unwrap_or_default(),
-                                "Iceberg compaction task reported failure"
+                                status = ?status,
+                                error_message = report.error_message.as_deref().unwrap_or_default(),
+                                "iceberg_compaction_task_reported_failure",
                             );
                             track.finish_failed(now)
                         }
@@ -1109,10 +1131,24 @@ impl IcebergCompactionManager {
                     waiter = guard.manual_compaction_waiters.remove(&sink_id);
                 }
                 Some(_) => {
-                    tracing::warn!(sink_id = %sink_id, task_id, "Ignoring stale iceberg compaction report");
+                    tracing::warn!(
+                        iceberg_component = "compaction_scheduler",
+                        iceberg_operation = "handle_report",
+                        sink_id = %sink_id,
+                        task_id,
+                        status = ?status,
+                        "iceberg_compaction_report_ignored_stale",
+                    );
                 }
                 None => {
-                    tracing::warn!(sink_id = %sink_id, task_id, "Received iceberg compaction report for unknown sink");
+                    tracing::warn!(
+                        iceberg_component = "compaction_scheduler",
+                        iceberg_operation = "handle_report",
+                        sink_id = %sink_id,
+                        task_id,
+                        status = ?status,
+                        "iceberg_compaction_report_unknown_sink",
+                    );
                 }
             }
 

@@ -503,6 +503,14 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             with_options.get_connector().unwrap(),
         ))));
     }
+    if is_full_reload && !with_options.supports_full_reload_refresh() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
+            with_options
+                .get_connector()
+                .unwrap_or_else(|| "<missing>".to_owned()),
+        ))));
+    }
     Ok(source_refresh_mode)
 }
 

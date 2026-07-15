@@ -52,6 +52,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
+        #[expect(deprecated)]
         let exec = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
                 let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
@@ -95,9 +96,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     state_table,
                     output_indices,
                     progress,
-                    params.executor_stats.clone(),
-                    params.config.developer.chunk_size,
-                    node.rate_limit.into(),
                     params.fragment_id,
                 )
                 .boxed()

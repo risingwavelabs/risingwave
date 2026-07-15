@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::BytesMut;
-use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -298,7 +297,7 @@ impl RedShiftSinkWriter {
         config: RedShiftConfig,
         is_append_only: bool,
         writer_param: super::SinkWriterParam,
-        param: SinkParam,
+        mut param: SinkParam,
     ) -> Result<Self> {
         let schema = param.schema();
         if config.with_s3 {
@@ -312,11 +311,28 @@ impl RedShiftSinkWriter {
             )?;
             Ok(Self::S3(s3_writer))
         } else {
+            let (writer_schema, writer_table) = if is_append_only {
+                (config.schema.clone(), config.table.clone())
+            } else {
+                (
+                    config.intermediate_schema.clone().or(config.schema.clone()),
+                    config.cdc_table.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "intermediate.table.name is required for non-append-only sink"
+                        ))
+                    })?,
+                )
+            };
+            param.properties.remove("schema");
+            param.properties.remove("schema.name");
+            if let Some(writer_schema) = writer_schema {
+                param.properties.insert("schema".to_owned(), writer_schema);
+            }
             let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
                 is_append_only,
                 writer_param,
                 param,
-                build_full_table_name(config.schema.as_deref(), &config.table),
+                writer_table,
             )
             .await?;
             Ok(Self::Jdbc(jdbc_writer))
@@ -697,12 +713,10 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 .fields
                 .iter()
                 .map(|f| {
-                    (
-                        f.name.clone(),
-                        DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                    )
+                    let dt = DataType::from(f.data_type.as_ref().unwrap());
+                    Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
                 })
-                .collect_vec(),
+                .collect::<Result<Vec<_>>>()?,
         );
         let check_column_exists = |e: anyhow::Error| {
             let err_str = e.to_report_string();
@@ -727,18 +741,19 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 ))
             })?;
             let sql = build_alter_add_column_sql(
-                self.config.schema.as_deref(),
+                self.config
+                    .intermediate_schema
+                    .as_deref()
+                    .or(self.config.schema.as_deref()),
                 cdc_table_name,
                 &add_columns
                     .fields
                     .iter()
                     .map(|f| {
-                        (
-                            f.name.clone(),
-                            DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                        )
+                        let dt = DataType::from(f.data_type.as_ref().unwrap());
+                        Ok((f.name.clone(), convert_redshift_data_type(&dt)?))
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>>>()?,
             );
             self.client
                 .execute_sql_sync(vec![sql.clone()])
@@ -844,7 +859,10 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMPTZ".to_owned(),
         DataType::Jsonb => "VARCHAR(MAX)".to_owned(),
-        DataType::Decimal => "DECIMAL".to_owned(),
+        // Redshift's DECIMAL without explicit precision defaults to (38,0), which drops all
+        // fractional digits. We use DECIMAL(38, 10) consistent with the Iceberg/Snowflake sink
+        // convention, though values with more than 10 fractional digits may still lose precision.
+        DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {
             return Err(SinkError::Config(anyhow!(
@@ -997,4 +1015,17 @@ fn build_copy_into_sql(
         manifest_dir = manifest_dir,
         credentials = credentials
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_redshift_decimal_data_type() {
+        assert_eq!(
+            convert_redshift_data_type(&DataType::Decimal).unwrap(),
+            "DECIMAL(38, 10)"
+        );
+    }
 }
