@@ -108,3 +108,7 @@ ingest route, signature configuration, and required target-table DDL privileges 
 5. **Target-only**: This connector can only be used as a target (sink), not as a source.
 6. **JSONB exact numbers use strings**: In JSONB append-only mode, arbitrary-precision decimal and
    integer values are stored as JSON strings because RisingWave JSON numbers can round them.
+7. **Streaming updates require a complete row**: RisingWave WebSocket upserts replace the full
+   row. When a source emits a partial update image, the connector reconstructs the complete row
+   from its `before` and `after` images. If neither image contains all target columns, the update
+   fails rather than silently converting absent columns to `NULL`.

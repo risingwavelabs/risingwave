@@ -168,6 +168,50 @@ class RisingWaveConnectorTest {
     }
 
     @Test
+    void completesPartialStreamingUpdatesWithoutLosingExplicitNulls() {
+        TapTable table = new TapTable("orders")
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "text"))
+                .add(new TapField("quantity", "integer"));
+        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
+        before.put("id", 1);
+        before.put("name", "before");
+        before.put("quantity", 42);
+        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
+        after.put("id", 1);
+        after.put("name", "after");
+
+        java.util.Map<String, Object> merged = RisingWaveConnector.completeStreamingUpdate(
+                table, before, after);
+
+        assertEquals(1, merged.get("id"));
+        assertEquals("after", merged.get("name"));
+        assertEquals(42, merged.get("quantity"));
+
+        after.put("quantity", null);
+        assertTrue(RisingWaveConnector.completeStreamingUpdate(table, before, after)
+                .containsKey("quantity"));
+        assertNull(RisingWaveConnector.completeStreamingUpdate(table, before, after)
+                .get("quantity"));
+    }
+
+    @Test
+    void rejectsPartialStreamingUpdatesThatCannotFormCompleteRows() {
+        TapTable table = new TapTable("orders")
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "text"))
+                .add(new TapField("quantity", "integer"));
+        java.util.Map<String, Object> before = java.util.Collections.singletonMap("id", 1);
+        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
+        after.put("id", 1);
+        after.put("name", "after");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after));
+        assertTrue(error.getMessage().contains("missing columns [quantity]"));
+    }
+
+    @Test
     void rejectsKeylessModelsForWebSocketStreaming() {
         TapTable keylessTable = new TapTable("keyless")
                 .add(new TapField("id", "integer"))

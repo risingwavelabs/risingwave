@@ -467,6 +467,54 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void websocketStreamingCompletesPartialUpdatesAndPreservesExplicitNulls() throws Throwable {
+        String tableName = "tapdata_ws_partial_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "streaming", "root", "", "ws://127.0.0.1:4560", "");
+        TapTable table = new TapTable(tableName)
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "varchar"))
+                .add(new TapField("quantity", "integer"));
+        try {
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+
+            Map<String, Object> first = new LinkedHashMap<>();
+            first.put("id", 1);
+            first.put("name", "before");
+            first.put("quantity", 42);
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(first)), table, ignored -> { });
+
+            Map<String, Object> partial = new LinkedHashMap<>();
+            partial.put("id", 1);
+            partial.put("name", "after");
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName).before(first).after(partial)),
+                    table, ignored -> { });
+            awaitQuantity(tableName, 1, 42);
+
+            Map<String, Object> explicitNull = new LinkedHashMap<>();
+            explicitNull.put("id", 1);
+            explicitNull.put("quantity", null);
+            Map<String, Object> afterPartial = new LinkedHashMap<>();
+            afterPartial.put("id", 1);
+            afterPartial.put("name", "after");
+            afterPartial.put("quantity", 42);
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(afterPartial).after(explicitNull)), table, ignored -> { });
+            awaitQuantity(tableName, 1, null);
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void jdbcSupportsSameKeyUpdatePrimaryKeyChangeAndDelete() throws Throwable {
         String tableName = "tapdata_jdbc_dml_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();
@@ -883,6 +931,30 @@ class RisingWaveConnectionTestIT {
             Thread.sleep(100L);
         } while (System.nanoTime() < deadline);
         assertEquals(expected, actual);
+    }
+
+    private static void awaitQuantity(String tableName, int id, Integer expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        Integer actual;
+        do {
+            actual = queryQuantityOrNull(tableName, id);
+            if (java.util.Objects.equals(expected, actual)) {
+                return;
+            }
+            Thread.sleep(100L);
+        } while (System.nanoTime() < deadline);
+        assertEquals(expected, actual);
+    }
+
+    private static Integer queryQuantityOrNull(String tableName, int id) throws Exception {
+        try (Connection connection = rootConnection();
+             java.sql.PreparedStatement statement = connection.prepareStatement(
+                     "SELECT quantity FROM public.\"" + tableName + "\" WHERE id = ?")) {
+            statement.setInt(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? (Integer) resultSet.getObject(1) : null;
+            }
+        }
     }
 
     private static int queryTableCount(String tableName) throws Exception {

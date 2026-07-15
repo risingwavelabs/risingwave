@@ -329,10 +329,11 @@ public class RisingWaveConnector implements TapConnector {
                             update.getBefore(), table, true);
                     Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
                             update.getAfter(), table, true);
-                    if (requiresDeleteBeforeUpsert(table, before, after)) {
+                    Map<String, Object> completeAfter = completeStreamingUpdate(table, before, after);
+                    if (requiresDeleteBeforeUpsert(table, before, completeAfter)) {
                         operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     }
-                    operations.add(new WsIngestClient.DmlOperation("update", before, after));
+                    operations.add(new WsIngestClient.DmlOperation("update", before, completeAfter));
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
@@ -428,6 +429,54 @@ public class RisingWaveConnector implements TapConnector {
             }
         }
         return false;
+    }
+
+    /**
+     * WebSocket ingest upserts replace the entire row. TapData sources may instead emit a partial
+     * after image, so reconstruct a complete row from the before image when possible. A present
+     * null in {@code after} intentionally overwrites the old value; only absent keys are filled
+     * from {@code before}.
+     */
+    static Map<String, Object> completeStreamingUpdate(TapTable table,
+                                                        Map<String, Object> before,
+                                                        Map<String, Object> after) {
+        if (after == null) {
+            throw new IllegalArgumentException("WebSocket streaming update for table "
+                    + tableName(table) + " is missing its after image");
+        }
+        if (table == null || table.getNameFieldMap() == null || table.getNameFieldMap().isEmpty()) {
+            throw new IllegalArgumentException("WebSocket streaming update for table "
+                    + tableName(table) + " requires a complete table schema");
+        }
+
+        LinkedHashMap<String, Object> combined = new LinkedHashMap<>();
+        if (before != null) {
+            combined.putAll(before);
+        }
+        // Map.putAll preserves the distinction between an absent key and an explicit null value.
+        combined.putAll(after);
+
+        List<String> missingColumns = new ArrayList<>();
+        for (String column : table.getNameFieldMap().keySet()) {
+            if (!combined.containsKey(column)) {
+                missingColumns.add(column);
+            }
+        }
+        if (!missingColumns.isEmpty()) {
+            throw new IllegalArgumentException("WebSocket streaming update for table "
+                    + tableName(table) + " cannot form a complete row; missing columns "
+                    + missingColumns + " from both before and after images");
+        }
+
+        LinkedHashMap<String, Object> complete = new LinkedHashMap<>();
+        for (String column : table.getNameFieldMap().keySet()) {
+            complete.put(column, combined.get(column));
+        }
+        return complete;
+    }
+
+    private static String tableName(TapTable table) {
+        return table == null || table.getId() == null ? "<unknown>" : table.getId();
     }
 
     /** Acquire a client until the caller has received the ACK for its batch. */

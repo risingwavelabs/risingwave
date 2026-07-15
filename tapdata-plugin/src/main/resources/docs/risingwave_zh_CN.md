@@ -93,7 +93,7 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
 | 写入模式 | 否 | streaming | `streaming`（推荐）、`streaming_jsonb`（仅追加）或 `jdbc`（兼容回退） |
 | Ingest 地址 | 否 | 留空 | 留空时自动使用 `ws://<主机>:4560`；TLS 或独立 ingest 主机时需显式填写 |
 | Webhook 密钥 | 否 | - | 用于签名 WebSocket 认证消息的 HMAC 密钥（仅流式模式） |
-| RisingWave Secret 名称 | 否 | 自动管理 | 配置 schema 中已有的 Secret；留空时 connector 会创建并管理受保护的每表 Secret |
+| RisingWave Secret 名称 | 否 | 自动生成 | 可选的稳定名称；connector 会根据 Webhook 密钥创建和轮换该受保护 Secret，留空时生成每表名称 |
 
 ### 限制
 
@@ -104,3 +104,6 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
 5. **仅作为目标**：此连接器只能作为目标（sink）使用，不能作为源。
 6. **JSONB 精确数值使用字符串**：JSONB 仅追加模式会把任意精度十进制和整数保存为
    JSON 字符串，因为 RisingWave JSON number 可能发生舍入。
+7. **流式更新需要完整行**：RisingWave WebSocket upsert 会替换整行。source 若发送部分
+   update image，connector 会用 `before` 和 `after` 还原完整行；两者仍无法补齐全部目标列时，
+   更新会失败，而不会静默把缺失列写成 `NULL`。
