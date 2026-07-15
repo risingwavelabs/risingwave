@@ -37,7 +37,7 @@ class WsIngestClientTest {
         List<Map<String, Object>> items = (List<Map<String, Object>>) payload.get("items");
         Map<String, Object> data = (Map<String, Object>) items.get(0).get("data");
         assertEquals("line1\nline2\u0001", data.get("message"));
-        assertEquals("\\\\x000fff", data.get("payload"));
+        assertEquals("\\x000fff", data.get("payload"));
         assertTrue((Boolean) ((Map<String, Object>) data.get("attributes")).get("enabled"));
     }
 

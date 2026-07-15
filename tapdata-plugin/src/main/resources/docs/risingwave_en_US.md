@@ -118,3 +118,6 @@ ingest route, signature configuration, and required target-table DDL privileges 
 9. **JDBC visibility barriers**: RisingWave applies JDBC inserts asynchronously. The connector
    issues `FLUSH` only before an update or delete that depends on an unflushed insert, and at the
    end of a write batch; independent updates and deletes can remain in the same batch.
+10. **Binary values in JSONB mode**: `byte[]` values are stored as JSON strings using PostgreSQL
+    bytea hex text (`\\x<hex>`). JSONB has no native binary scalar, so consumers should decode this
+    representation when they need the original bytes.

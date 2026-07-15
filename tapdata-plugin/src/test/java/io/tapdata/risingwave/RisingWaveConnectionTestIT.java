@@ -815,6 +815,39 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void jsonbAppendOnlyModeStoresBinaryAsPostgresByteaHexText() throws Throwable {
+        String tableName = "tapdata_jsonb_binary_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "streaming_jsonb", "root", "", "ws://127.0.0.1:4560", "");
+        TapTable sourceTable = new TapTable(tableName)
+                .add(new TapField("id", "integer"))
+                .add(new TapField("payload", "bytea"));
+        try {
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(sourceTable));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("id", 1);
+            record.put("payload", new byte[]{0x00, 0x0f, (byte) 0xff});
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(record)), sourceTable, ignored -> { });
+
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement();
+                 ResultSet resultSet = statement.executeQuery(
+                         "SELECT data->>'payload' FROM public.\"" + tableName + "\"")) {
+                assertTrue(resultSet.next());
+                assertEquals("\\x000fff", resultSet.getString(1));
+            }
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void websocketStreamingWritesSupportedScalarTypes() throws Throwable {
         String tableName = "tapdata_ws_types_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();

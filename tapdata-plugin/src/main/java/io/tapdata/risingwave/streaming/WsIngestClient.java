@@ -393,7 +393,9 @@ public class WsIngestClient implements AutoCloseable {
 
     private static String toByteaHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2 + 2);
-        sb.append("\\\\x");
+        // Keep untyped JSON/JSONB binary values consistent with typed bytea values:
+        // the JSON string decodes to PostgreSQL's canonical \x<hex> text representation.
+        sb.append("\\x");
         for (byte b : bytes) {
             sb.append(Character.forDigit((b >> 4) & 0xF, 16));
             sb.append(Character.forDigit(b & 0xF, 16));

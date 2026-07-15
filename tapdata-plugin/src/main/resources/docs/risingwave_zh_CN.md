@@ -112,3 +112,5 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
 9. **JDBC 可见性屏障**：RisingWave 的 JDBC insert 是异步可见的。connector 只会在后续
    update/delete 依赖未刷新的 insert 时，以及一个写入 batch 结束时执行 `FLUSH`；相互独立的
    update/delete 可以保留在同一个 batch 中。
+10. **JSONB 模式中的二进制值**：`byte[]` 会以 PostgreSQL bytea hex 文本（`\\x<hex>`）存为
+    JSON string。JSONB 没有原生 binary scalar；需要原始字节的消费者应按此表示解码。
