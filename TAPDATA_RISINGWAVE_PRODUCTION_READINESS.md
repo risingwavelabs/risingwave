@@ -736,3 +736,28 @@ Status: Ready for the user to install the connector manually.
   task-inspect/measurement APIs are a TapData Community image/UI/Agent compatibility issue, not a
   RisingWave connector failure; production qualification should use a pinned, internally matched
   TapData release rather than the mutable `latest` tag.
+
+### 2026-07-15 - Post-review Concurrency, Discovery, and Secret Hardening
+
+Status: Implemented and verified locally; final package/review gate pending.
+
+- Confirmed and fixed the missing `FLUSH` after `clearTable` so a JDBC clear is query-visible before
+  a WebSocket reload starts. A live clear-to-streaming-reload test verifies only the replacement row
+  remains.
+- Confirmed that PDK write callbacks may reach the connector concurrently while PostgreSQL JDBC
+  connections are not thread-safe. JDBC write batches now serialize around the shared connection;
+  a concurrent same-key integration test verifies one final target row without duplicate-key races.
+- Fixed filtered schema discovery so a requested missing table returns no models instead of falling
+  back to every base table. Added the defensive `table_name` PK join condition; this is hygiene, not
+  a known PostgreSQL correctness failure because constraint names are schema-scoped.
+- Replaced per-table `HttpClient` construction with one shared client. The table WebSocket cache now
+  uses leases, retains at most 100 idle/cached clients, evicts only clients without in-flight work,
+  and closes overflow clients after their active batch rather than interrupting an ACK wait.
+- Removed webhook-secret literals from table validation DDL. Signed tables now use
+  `VALIDATE SECRET <name>`; the connector can securely create/rotate/drop a per-table catalog Secret
+  or reference a user-managed Secret. Automatic management requires RisingWave Secret Management
+  and `CREATE SECRET` permission; unsigned WebSocket mode and JDBC mode do not require it.
+- Verified that `SHOW CREATE TABLE` contains the Secret reference but not its value, managed Secret
+  rotation works across connector restart, a user-managed Secret is not dropped, and all test-created
+  Secrets are cleaned up.
+- Current automated results: 28 unit tests passed and 27 live RisingWave integration tests passed.
