@@ -29,8 +29,8 @@ use thiserror_ext::AsReport;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
+    MonitoredObjectStore, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
+    ObjectRangeBounds, ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
 /// Opendal object storage.
@@ -138,7 +138,11 @@ impl ObjectStore for OpendalObjectStore {
             )))
         } else {
             Ok(OpendalStreamingUploader::Buffered(
-                OpendalBufferedStreamingUploader::new(self.op.clone(), path.to_owned()),
+                OpendalBufferedStreamingUploader::new(
+                    self.clone()
+                        .monitored(self.metrics.clone(), self.config.clone()),
+                    path.to_owned(),
+                ),
             ))
         }
     }
@@ -458,15 +462,15 @@ impl StreamingUploader for OpendalNativeStreamingUploader {
 }
 
 pub struct OpendalBufferedStreamingUploader {
-    op: Operator,
+    store: MonitoredObjectStore<OpendalObjectStore>,
     path: String,
     buf: BytesMut,
 }
 
 impl OpendalBufferedStreamingUploader {
-    fn new(op: Operator, path: String) -> Self {
+    fn new(store: MonitoredObjectStore<OpendalObjectStore>, path: String) -> Self {
         Self {
-            op,
+            store,
             path,
             buf: BytesMut::new(),
         }
@@ -480,12 +484,7 @@ impl StreamingUploader for OpendalBufferedStreamingUploader {
     }
 
     async fn finish(self) -> ObjectResult<()> {
-        if self.buf.is_empty() {
-            return Err(ObjectError::internal("upload empty object"));
-        }
-
-        self.op.write(&self.path, self.buf.freeze()).await?;
-        Ok(())
+        self.store.upload(&self.path, self.buf.freeze()).await
     }
 
     fn get_memory_usage(&self) -> u64 {
@@ -578,8 +577,12 @@ mod tests {
     #[tokio::test]
     async fn test_buffered_streaming_upload() {
         let store = OpendalObjectStore::test_new_memory_engine().unwrap();
-        let mut uploader =
-            OpendalBufferedStreamingUploader::new(store.op.clone(), "/abc".to_owned());
+        let mut uploader = OpendalBufferedStreamingUploader::new(
+            store
+                .clone()
+                .monitored(store.metrics.clone(), store.config.clone()),
+            "/abc".to_owned(),
+        );
 
         uploader.write_bytes(Bytes::from("123")).await.unwrap();
         assert_eq!(uploader.get_memory_usage(), 3);
@@ -594,7 +597,12 @@ mod tests {
     #[tokio::test]
     async fn test_empty_buffered_streaming_upload() {
         let store = OpendalObjectStore::test_new_memory_engine().unwrap();
-        let uploader = OpendalBufferedStreamingUploader::new(store.op.clone(), "/abc".to_owned());
+        let uploader = OpendalBufferedStreamingUploader::new(
+            store
+                .clone()
+                .monitored(store.metrics.clone(), store.config.clone()),
+            "/abc".to_owned(),
+        );
 
         uploader.finish().await.unwrap_err();
     }
