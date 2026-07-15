@@ -858,7 +858,7 @@ struct ClickhouseQueryEngine {
 
 /// Parse the inner `(database, table)` pair from a Distributed table's DDL.
 ///
-/// ClickHouse Distributed DDL looks like:
+/// `ClickHouse` Distributed DDL looks like:
 /// `ENGINE = Distributed('cluster', 'inner_db', 'inner_table', [sharding_key])`
 /// The database may be an empty string `''`, meaning the same database as the Distributed table.
 fn parse_distributed_inner_table(
