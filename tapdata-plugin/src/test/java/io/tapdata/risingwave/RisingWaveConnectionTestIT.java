@@ -1,7 +1,9 @@
 package io.tapdata.risingwave;
 
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -30,6 +32,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -124,6 +130,109 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void signedWebhookTableReferencesCatalogSecretWithoutExposingValue() throws Throwable {
+        String tableName = "tapdata_secret_" + shortSuffix();
+        String secretValue = "tapdata-secret-'" + shortSuffix();
+        String secretName = RisingWaveWebhookSecret.automaticName("public", tableName);
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "streaming", "root", "",
+                "ws://127.0.0.1:4560", secretValue);
+        try {
+            connector.init(context);
+            TapTable table = new TapTable(tableName)
+                    .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1));
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement();
+                 ResultSet resultSet = statement.executeQuery(
+                         "SHOW CREATE TABLE public.\"" + tableName + "\"")) {
+                assertTrue(resultSet.next());
+                String ddl = resultSet.getString(2);
+                assertTrue(ddl.contains("VALIDATE SECRET"));
+                assertTrue(ddl.contains(secretName));
+                assertTrue(!ddl.contains(secretValue));
+            }
+
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            TapDropTableEvent drop = new TapDropTableEvent();
+            drop.setTableId(tableName);
+            functions.getDropTableFunction().dropTable(null, drop);
+            assertEquals(0, querySecretCount(secretName));
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
+    void signedPrecheckCanUseAnExistingNamedSecretWithoutOwningItsLifecycle() throws Throwable {
+        String secretName = "tapdata_existing_secret_" + shortSuffix();
+        String secretValue = "existing-secret-" + shortSuffix();
+        try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE SECRET public.\"" + secretName
+                    + "\" WITH (backend = 'meta') AS "
+                    + RisingWaveSql.quoteStringLiteral(secretValue));
+        }
+
+        try {
+            TapConnectionContext context = connectionContext(
+                    "public", "streaming", "root", "",
+                    "ws://127.0.0.1:4560", secretValue);
+            context.getConnectionConfig().put("webhookSecretName", secretName);
+            List<TestItem> items = new ArrayList<>();
+
+            new RisingWaveConnector().connectionTest(context, items::add);
+
+            assertSuccessful(items, TestItem.ITEM_WRITE);
+            assertSuccessful(items, RisingWaveConnector.INGEST_ENDPOINT_TEST_ITEM);
+            assertEquals(1, querySecretCount(secretName));
+        } finally {
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP SECRET IF EXISTS public.\"" + secretName + "\"");
+            }
+        }
+    }
+
+    @Test
+    void restartingAgainstExistingTableRotatesManagedWebhookSecret() throws Throwable {
+        String tableName = "tapdata_secret_rotate_" + shortSuffix();
+        TapTable table = new TapTable(tableName)
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "varchar"));
+        TapConnectionContext firstContext = connectionContext(
+                "public", "streaming", "root", "",
+                "ws://127.0.0.1:4560", "first-secret");
+        RisingWaveConnector firstConnector = new RisingWaveConnector();
+        try {
+            firstConnector.init(firstContext);
+            firstConnector.createTable(null, new TapCreateTableEvent().table(table));
+        } finally {
+            firstConnector.stop(firstContext);
+        }
+
+        TapConnectionContext secondContext = connectionContext(
+                "public", "streaming", "root", "",
+                "ws://127.0.0.1:4560", "second-secret");
+        RisingWaveConnector secondConnector = new RisingWaveConnector();
+        try {
+            secondConnector.init(secondContext);
+            assertTrue(secondConnector.createTable(
+                    null, new TapCreateTableEvent().table(table)).getTableExists());
+            ConnectorFunctions functions = new ConnectorFunctions();
+            secondConnector.registerCapabilities(functions, new TapCodecsRegistry());
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(record(1, "rotated"))),
+                    table, ignored -> { });
+            awaitName(tableName, 1, "rotated");
+        } finally {
+            secondConnector.stop(secondContext);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void reportsUnreachableWebSocketEndpointAndCleansUpProbeTable() throws Throwable {
         List<TestItem> items = runConnectionTest(
                 "public", "streaming", "root", "",
@@ -143,6 +252,23 @@ class RisingWaveConnectionTestIT {
         assertFailed(items, RisingWaveConnector.SCHEMA_TEST_ITEM);
         assertFailed(items, TestItem.ITEM_WRITE);
         assertEquals(0, writeProbeTableCount());
+    }
+
+    @Test
+    void requestedMissingTableDoesNotFallBackToEveryTableInSchema() throws Throwable {
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "jdbc", "root", "", "ws://127.0.0.1:4560", "");
+        List<TapTable> discovered = new ArrayList<>();
+        try {
+            connector.init(context);
+            connector.discoverSchema(context,
+                    Collections.singletonList("tapdata_table_does_not_exist"), 100,
+                    discovered::addAll);
+            assertTrue(discovered.isEmpty());
+        } finally {
+            connector.stop(context);
+        }
     }
 
     @Test
@@ -417,6 +543,74 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void serializesConcurrentJdbcWritesOnTheSharedConnection() throws Throwable {
+        String tableName = "tapdata_jdbc_concurrent_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "jdbc", "root", "", "ws://127.0.0.1:4560", "");
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            connector.init(context);
+            TapTable table = new TapTable(tableName)
+                    .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                    .add(new TapField("name", "varchar"));
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            CountDownLatch start = new CountDownLatch(1);
+
+            Future<?> first = executor.submit(() -> writeAfterStart(
+                    start, functions, table, record(1, "first")));
+            Future<?> second = executor.submit(() -> writeAfterStart(
+                    start, functions, table, record(1, "second")));
+            start.countDown();
+            first.get(30, TimeUnit.SECONDS);
+            second.get(30, TimeUnit.SECONDS);
+
+            assertEquals(1, queryCount(tableName));
+        } finally {
+            executor.shutdownNow();
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
+    void clearFlushesBeforeSubsequentWebSocketReload() throws Throwable {
+        String tableName = "tapdata_clear_ws_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "streaming", "root", "", "ws://127.0.0.1:4560", "");
+        try {
+            connector.init(context);
+            TapTable table = new TapTable(tableName)
+                    .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                    .add(new TapField("name", "varchar"));
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(record(1, "old"))),
+                    table, ignored -> { });
+            awaitName(tableName, 1, "old");
+
+            TapClearTableEvent clear = new TapClearTableEvent();
+            clear.setTableId(tableName);
+            functions.getClearTableFunction().clearTable(null, clear);
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(record(2, "new"))),
+                    table, ignored -> { });
+
+            awaitName(tableName, 2, "new");
+            assertEquals(1, queryCount(tableName));
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void jdbcUpdatesKeylessRowsUsingTheBeforeImage() throws Throwable {
         String tableName = "tapdata_jdbc_keyless_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();
@@ -616,9 +810,37 @@ class RisingWaveConnectionTestIT {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 
+    private static void writeAfterStart(CountDownLatch start,
+                                        ConnectorFunctions functions,
+                                        TapTable table,
+                                        Map<String, Object> row) {
+        try {
+            start.await(10, TimeUnit.SECONDS);
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(table.getId()).after(row)),
+                    table, ignored -> { });
+        } catch (Throwable throwable) {
+            throw new RuntimeException(throwable);
+        }
+    }
+
     private static void dropTable(String tableName) throws Exception {
         try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
             statement.execute("DROP TABLE IF EXISTS public.\"" + tableName + "\"");
+            statement.execute("DROP SECRET IF EXISTS public.\""
+                    + RisingWaveWebhookSecret.automaticName("public", tableName) + "\"");
+        }
+    }
+
+    private static int querySecretCount(String secretName) throws Exception {
+        try (Connection connection = rootConnection(); java.sql.PreparedStatement statement =
+                     connection.prepareStatement("SELECT count(*) FROM rw_catalog.rw_secrets "
+                             + "WHERE name = ?")) {
+            statement.setString(1, secretName);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                return resultSet.getInt(1);
+            }
         }
     }
 

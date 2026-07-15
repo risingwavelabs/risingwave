@@ -26,6 +26,7 @@ final class RisingWaveConfig {
     private final String ingestMode;
     private final String ingestEndpoint;
     private final String webhookSecret;
+    private final String webhookSecretName;
     private final String timezone;
     private final String sslMode;
     private final String extraParameters;
@@ -42,6 +43,7 @@ final class RisingWaveConfig {
                 RisingWaveConnector.MODE_STREAMING);
         this.ingestEndpoint = config.getString("ingestEndpoint");
         this.webhookSecret = config.getString("webhookSecret");
+        this.webhookSecretName = trimToNull(config.getString("webhookSecretName"));
         this.timezone = trimToNull(config.getString("timezone"));
         this.sslMode = defaultIfBlank(config.getString("sslmode"), "prefer");
         this.extraParameters = trimToNull(config.getString("extParams"));
@@ -85,6 +87,10 @@ final class RisingWaveConfig {
 
     String webhookSecret() {
         return webhookSecret;
+    }
+
+    String webhookSecretName() {
+        return webhookSecretName;
     }
 
     String connectionString() {

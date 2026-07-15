@@ -61,6 +61,7 @@ class RisingWaveConfigTest {
         sameInstanceValues.put("schema", "another_schema");
         sameInstanceValues.put("password", "another-password");
         sameInstanceValues.put("webhookSecret", "another-webhook-secret");
+        sameInstanceValues.put("webhookSecretName", "existing_secret");
         RisingWaveConfig sameInstance = RisingWaveConfig.from(sameInstanceValues);
 
         DataMap otherDatabaseValues = baseValues();
@@ -68,6 +69,7 @@ class RisingWaveConfigTest {
         RisingWaveConfig otherDatabase = RisingWaveConfig.from(otherDatabaseValues);
 
         assertEquals(first.instanceUniqueId(), sameInstance.instanceUniqueId());
+        assertEquals("existing_secret", sameInstance.webhookSecretName());
         assertNotEquals(first.instanceUniqueId(), otherDatabase.instanceUniqueId());
 
         DataMap otherHostValues = baseValues();

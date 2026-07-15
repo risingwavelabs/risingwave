@@ -165,6 +165,25 @@
           },
           "x-index": 90
         },
+        "webhookSecretName": {
+          "required": false,
+          "type": "string",
+          "title": "${webhookSecretName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${webhookSecretNameTip}"
+          },
+          "x-reactions": {
+            "dependencies": ["ingest_mode", "webhookSecret"],
+            "fulfill": {
+              "state": {
+                "visible": "{{($deps[0] === 'streaming' || $deps[0] === 'streaming_jsonb') && !!$deps[1]}}"
+              }
+            }
+          },
+          "x-index": 100
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -241,6 +260,8 @@
       "ingestEndpointTip": "Optional WebSocket ingest base endpoint, including scheme, for example ws://host:4560 locally or wss://cloud-host for Cloud port 443. Leave blank to derive ws://<Host>:4560 from the Host field. Set it explicitly for TLS or a separate ingest host.",
       "webhookSecret": "Webhook Secret",
       "webhookSecretTip": "Shared secret used to sign the initial WebSocket auth frame when the target RisingWave table uses VALIDATE.",
+      "webhookSecretName": "RisingWave Secret Name",
+      "webhookSecretNameTip": "Optional existing Secret in the configured schema whose value matches Webhook Secret. If blank, the connector securely creates and manages one; this requires RisingWave Secret Management and CREATE SECRET permission.",
       "sslmode": "SSL Mode",
       "sslmodeTip": "SSL connection mode. Use 'prefer' for local (auto-negotiate) or 'require' for RisingWave Cloud.",
       "extParams": "Extra Parameters",
@@ -269,6 +290,8 @@
       "ingestEndpointTip": "可选的 WebSocket ingest 基础地址，需包含协议，例如本地 ws://host:4560，或使用 443 端口的 Cloud 地址 wss://cloud-host。留空时根据主机字段自动使用 ws://<主机>:4560；TLS 或独立 ingest 主机时请显式填写。",
       "webhookSecret": "Webhook 密钥",
       "webhookSecretTip": "当目标 RisingWave 表使用 VALIDATE 时，用于签名初始 WebSocket 认证消息的共享密钥。",
+      "webhookSecretName": "RisingWave Secret 名称",
+      "webhookSecretNameTip": "可选：配置 schema 中已有且值与 Webhook 密钥一致的 Secret。留空时 connector 会安全地创建并管理 Secret；这需要 RisingWave Secret Management 和 CREATE SECRET 权限。",
       "sslmode": "SSL 模式",
       "sslmodeTip": "SSL 连接模式。本地用 'prefer'（自动协商），RisingWave Cloud 用 'require'。",
       "extParams": "额外参数",

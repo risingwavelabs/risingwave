@@ -62,6 +62,7 @@ public class RisingWaveConnector implements TapConnector {
     static final String MODE_STREAMING = "streaming";
     static final String MODE_STREAMING_JSONB = "streaming_jsonb";
     static final String JSONB_PAYLOAD_COLUMN = "data";
+    static final int MAX_CACHED_WS_CLIENTS = 100;
     private Connection connection;
     private String schema;
 
@@ -69,11 +70,15 @@ public class RisingWaveConnector implements TapConnector {
     private String ingestMode;
 
     /** Only used in streaming mode. Per-table WsIngestClient cache. */
-    private final Map<String, WsIngestClient> wsClients = new LinkedHashMap<>();
+    private final Map<String, WsClientEntry> wsClients =
+            new LinkedHashMap<>(16, 0.75f, true);
     private String wsIngestEndpoint;
     private String wsDatabase;
     private String wsWebhookSecret;
+    private String wsWebhookSecretName;
     private final AtomicBoolean alive = new AtomicBoolean(false);
+    /** Serializes access to the shared JDBC connection on the write path. */
+    private final Object jdbcWriteLock = new Object();
 
     // ---- TapNode lifecycle ----
 
@@ -94,6 +99,7 @@ public class RisingWaveConnector implements TapConnector {
             this.wsIngestEndpoint = config.resolvedIngestEndpoint();
             this.wsDatabase = config.database();
             this.wsWebhookSecret = config.webhookSecret();
+            this.wsWebhookSecretName = config.webhookSecretName();
             debugLog("init() streaming mode, ingestEndpoint=" + wsIngestEndpoint + " db=" + wsDatabase);
         }
 
@@ -111,10 +117,10 @@ public class RisingWaveConnector implements TapConnector {
 
     private synchronized void closeResources() {
         alive.set(false);
-        List<WsIngestClient> clients = new ArrayList<>(wsClients.values());
+        List<WsClientEntry> clients = new ArrayList<>(wsClients.values());
         wsClients.clear();
-        for (WsIngestClient client : clients) {
-            try { client.close(); } catch (Exception ignored) {}
+        for (WsClientEntry client : clients) {
+            try { client.client.close(); } catch (Exception ignored) {}
         }
         closeQuietly(connection);
         connection = null;
@@ -155,6 +161,7 @@ public class RisingWaveConnector implements TapConnector {
                 "JOIN information_schema.key_column_usage kcu " +
                 "  ON tc.constraint_name = kcu.constraint_name " +
                 "  AND tc.table_schema = kcu.table_schema " +
+                "  AND tc.table_name = kcu.table_name " +
                 "WHERE tc.constraint_type = 'PRIMARY KEY' " +
                 "  AND tc.table_schema = ? " +
                 (tableFilter.isEmpty() ? "" : " AND tc.table_name IN (" + tableFilter + ")") +
@@ -200,7 +207,7 @@ public class RisingWaveConnector implements TapConnector {
         }
 
         // Discover table list if no tables specified and columns query returned nothing
-        if (tapTables.isEmpty()) {
+        if (tapTables.isEmpty() && (tables == null || tables.isEmpty())) {
             String tablesSql = "SELECT table_name FROM information_schema.tables " +
                     "WHERE table_schema = ? AND table_type = 'BASE TABLE' " +
                     "ORDER BY table_name";
@@ -303,7 +310,6 @@ public class RisingWaveConnector implements TapConnector {
         debugLog("writeRecordStreaming start table=" + table.getId()
                 + " events=" + events.size()
                 + " pk=" + primaryKeysOf(table));
-        WsIngestClient client = getOrCreateWsClient(table.getId());
         List<WsIngestClient.DmlOperation> operations = new ArrayList<>(events.size());
 
         for (TapRecordEvent event : events) {
@@ -344,11 +350,11 @@ public class RisingWaveConnector implements TapConnector {
             }
         }
 
-        List<CompletableFuture<Void>> futures = client.sendBatch(operations);
-
-        // Wait for all DMLs in this batch to be acked (persisted to Hummock).
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(120, java.util.concurrent.TimeUnit.SECONDS);
+        // Hold a lease through the ACK so cache eviction cannot close an in-flight stream.
+        try (WsClientLease lease = acquireWsClient(table.getId())) {
+            List<CompletableFuture<Void>> futures = lease.client().sendBatch(operations);
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(120, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
             debugLog("writeRecordStreaming ack wait ERROR: " + e.getMessage());
             // On ack failure, reconnect the client so next batch starts fresh.
@@ -371,7 +377,6 @@ public class RisingWaveConnector implements TapConnector {
             return;
         }
 
-        WsIngestClient client = getOrCreateWsClient(table.getId());
         List<WsIngestClient.DmlOperation> operations = new ArrayList<>(events.size());
         for (TapRecordEvent event : events) {
             if (!alive.get()) {
@@ -383,8 +388,8 @@ public class RisingWaveConnector implements TapConnector {
             operations.add(new WsIngestClient.DmlOperation("insert", null, document));
         }
 
-        try {
-            List<CompletableFuture<Void>> futures = client.sendBatch(operations);
+        try (WsClientLease lease = acquireWsClient(table.getId())) {
+            List<CompletableFuture<Void>> futures = lease.client().sendBatch(operations);
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(120, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -425,25 +430,62 @@ public class RisingWaveConnector implements TapConnector {
         return false;
     }
 
-    /** Get or create (and connect) a WsIngestClient for the given table. */
-    private synchronized WsIngestClient getOrCreateWsClient(String tableId) throws Exception {
-        WsIngestClient client = wsClients.get(tableId);
-        if (client == null) {
-            // Extract just the table name without schema prefix, if present
-            String tableName = tableId.contains(".") ? tableId.split("\\.", 2)[1] : tableId;
-            client = new WsIngestClient(wsIngestEndpoint, wsDatabase, schema, tableName, wsWebhookSecret);
-            client.connect();
-            wsClients.put(tableId, client);
-            debugLog("Created WsIngestClient for table=" + tableId + " ingestEndpoint=" + wsIngestEndpoint);
+    /** Acquire a client until the caller has received the ACK for its batch. */
+    private synchronized WsClientLease acquireWsClient(String tableId) throws Exception {
+        WsClientEntry existing = wsClients.get(tableId);
+        if (existing != null) {
+            existing.inUse++;
+            return new WsClientLease(tableId, existing, true);
         }
-        return client;
+
+        evictIdleWsClientIfFull();
+
+        String tableName = tableId.contains(".") ? tableId.split("\\.", 2)[1] : tableId;
+        WsIngestClient client = new WsIngestClient(
+                wsIngestEndpoint, wsDatabase, schema, tableName, wsWebhookSecret);
+        client.connect();
+        WsClientEntry created = new WsClientEntry(client);
+        boolean cached = wsClients.size() < MAX_CACHED_WS_CLIENTS;
+        if (cached) {
+            created.inUse = 1;
+            wsClients.put(tableId, created);
+        }
+        debugLog("Created WsIngestClient for table=" + tableId + " cached=" + cached
+                + " ingestEndpoint=" + wsIngestEndpoint);
+        return new WsClientLease(tableId, created, cached);
+    }
+
+    private void evictIdleWsClientIfFull() {
+        if (wsClients.size() < MAX_CACHED_WS_CLIENTS) {
+            return;
+        }
+        Iterator<Map.Entry<String, WsClientEntry>> iterator = wsClients.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, WsClientEntry> candidate = iterator.next();
+            if (candidate.getValue().inUse == 0) {
+                iterator.remove();
+                candidate.getValue().client.close();
+                return;
+            }
+        }
     }
 
     /** Remove and close the WsIngestClient for a table (called on error to force reconnect). */
     private synchronized void removeWsClient(String tableId) {
-        WsIngestClient client = wsClients.remove(tableId);
+        WsClientEntry client = wsClients.remove(tableId);
         if (client != null) {
-            try { client.close(); } catch (Exception ignored) {}
+            try { client.client.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private synchronized void releaseWsClient(String tableId, WsClientEntry entry, boolean cached) {
+        if (!cached) {
+            entry.client.close();
+            return;
+        }
+        WsClientEntry current = wsClients.get(tableId);
+        if (current == entry && current.inUse > 0) {
+            current.inUse--;
         }
     }
 
@@ -452,6 +494,14 @@ public class RisingWaveConnector implements TapConnector {
     private void writeRecordJdbc(List<TapRecordEvent> events,
                                    TapTable table,
                                    Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
+        synchronized (jdbcWriteLock) {
+            writeRecordJdbcLocked(events, table, resultConsumer);
+        }
+    }
+
+    private void writeRecordJdbcLocked(List<TapRecordEvent> events,
+                                       TapTable table,
+                                       Consumer<WriteListResult<TapRecordEvent>> resultConsumer) throws Throwable {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         long inserted = 0, updated = 0, deleted = 0;
         boolean dirty = false;
@@ -714,23 +764,51 @@ public class RisingWaveConnector implements TapConnector {
         }
 
         TableReference tableReference = tableReference(table.getId());
-        String tableName = tableReference.qualifiedName();
         if (tableExists(connection, tableReference)) {
             if (MODE_STREAMING_JSONB.equals(ingestMode)) {
                 validateExistingJsonbTable(connection, tableReference);
             } else {
                 validateExistingTable(connection, tableReference, table);
             }
+            if (isWebSocketMode(ingestMode)
+                    && wsWebhookSecret != null && !wsWebhookSecret.isEmpty()) {
+                RisingWaveWebhookSecret.prepare(connection, tableReference.schema, tableReference.table,
+                        wsWebhookSecretName, wsWebhookSecret);
+            }
             opts.tableExists(true);
             return opts;
         }
-        StringBuilder sql = new StringBuilder("CREATE TABLE ").append(tableName).append(" (");
+        RisingWaveWebhookSecret.Handle secretHandle = isWebSocketMode(ingestMode)
+                ? RisingWaveWebhookSecret.prepare(connection, tableReference.schema, tableReference.table,
+                        wsWebhookSecretName, wsWebhookSecret)
+                : RisingWaveWebhookSecret.Handle.disabled();
+        try {
+            return createNewTable(table, tableReference, secretHandle, opts);
+        } catch (Throwable error) {
+            try {
+                RisingWaveWebhookSecret.dropManaged(
+                        connection, tableReference.schema, secretHandle);
+            } catch (SQLException cleanupError) {
+                error.addSuppressed(cleanupError);
+            }
+            throw error;
+        }
+    }
+
+    private io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions createNewTable(
+            TapTable table,
+            TableReference tableReference,
+            RisingWaveWebhookSecret.Handle secretHandle,
+            io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions opts) throws SQLException {
+        LinkedHashMap<String, TapField> fields = table.getNameFieldMap();
+        StringBuilder sql = new StringBuilder("CREATE TABLE ")
+                .append(tableReference.qualifiedName()).append(" (");
 
         if (MODE_STREAMING_JSONB.equals(ingestMode)) {
             sql.append(RisingWaveSql.quoteIdentifier(JSONB_PAYLOAD_COLUMN)).append(" JSONB)")
                     .append(" WITH (connector = 'webhook')")
                     .append(RisingWaveSql.webhookValidationClause(
-                            wsWebhookSecret, JSONB_PAYLOAD_COLUMN));
+                            secretHandle.name(), JSONB_PAYLOAD_COLUMN));
             executeCreateTable(sql.toString(), table.getId(), opts);
             return opts;
         }
@@ -755,7 +833,7 @@ public class RisingWaveConnector implements TapConnector {
         sql.append(")");
         if (MODE_STREAMING.equals(ingestMode)) {
             sql.append(" WITH (connector = 'webhook')");
-            sql.append(RisingWaveSql.webhookValidationClause(wsWebhookSecret, null));
+            sql.append(RisingWaveSql.webhookValidationClause(secretHandle.name(), null));
         }
 
         executeCreateTable(sql.toString(), table.getId(), opts);
@@ -783,17 +861,31 @@ public class RisingWaveConnector implements TapConnector {
     private void clearTable(TapConnectorContext context,
                             io.tapdata.entity.event.ddl.table.TapClearTableEvent event) throws Throwable {
         String tableName = fullTableName(event.getTableId());
-        try (Statement st = connection.createStatement()) {
-            st.execute("DELETE FROM " + tableName);
+        synchronized (jdbcWriteLock) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("DELETE FROM " + tableName);
+                // clearTable may be followed immediately by WebSocket writes, which use a
+                // different protocol and connection. FLUSH is the cross-protocol visibility
+                // barrier that prevents old rows from briefly coexisting with the reload.
+                st.execute("FLUSH");
+            }
         }
     }
 
     private void dropTable(TapConnectorContext context,
                            io.tapdata.entity.event.ddl.table.TapDropTableEvent event) throws Throwable {
         removeWsClient(event.getTableId());
-        String tableName = fullTableName(event.getTableId());
-        try (Statement st = connection.createStatement()) {
-            st.execute("DROP TABLE IF EXISTS " + tableName);
+        TableReference table = tableReference(event.getTableId());
+        synchronized (jdbcWriteLock) {
+            try (Statement st = connection.createStatement()) {
+                st.execute("DROP TABLE IF EXISTS " + table.qualifiedName());
+            }
+            if (isWebSocketMode(ingestMode)
+                    && wsWebhookSecret != null && !wsWebhookSecret.isEmpty()
+                    && (wsWebhookSecretName == null || wsWebhookSecretName.isEmpty())) {
+                RisingWaveWebhookSecret.dropAutomatic(
+                        connection, table.schema, table.table);
+            }
         }
     }
 
@@ -950,6 +1042,23 @@ public class RisingWaveConnector implements TapConnector {
                 throw new SQLException("Existing target table " + table.qualifiedName()
                         + " is not webhook-backed and cannot receive WebSocket streaming writes");
             }
+            boolean configuredSecret = wsWebhookSecret != null && !wsWebhookSecret.isEmpty();
+            boolean validatesRequests = normalizedDdl.contains("validate ");
+            if (!configuredSecret && validatesRequests) {
+                throw new SQLException("Existing target table " + table.qualifiedName()
+                        + " requires webhook validation, but Webhook Secret is empty");
+            }
+            if (configuredSecret) {
+                String expectedSecret = wsWebhookSecretName == null || wsWebhookSecretName.isEmpty()
+                        ? RisingWaveWebhookSecret.automaticName(table.schema, table.table)
+                        : wsWebhookSecretName;
+                if (!normalizedDdl.contains("validate secret")
+                        || !normalizedDdl.contains(expectedSecret.toLowerCase(Locale.ROOT))) {
+                    throw new SQLException("Existing target table " + table.qualifiedName()
+                            + " does not reference the configured protected RisingWave Secret \""
+                            + expectedSecret + "\"; recreate the table or align Webhook Secret Name");
+                }
+            }
         }
     }
 
@@ -1002,6 +1111,40 @@ public class RisingWaveConnector implements TapConnector {
             primaryKeys.add(field.getName());
         }
         return primaryKeys;
+    }
+
+    private static final class WsClientEntry {
+        private final WsIngestClient client;
+        private int inUse;
+
+        private WsClientEntry(WsIngestClient client) {
+            this.client = client;
+        }
+    }
+
+    private final class WsClientLease implements AutoCloseable {
+        private final String tableId;
+        private final WsClientEntry entry;
+        private final boolean cached;
+        private boolean released;
+
+        private WsClientLease(String tableId, WsClientEntry entry, boolean cached) {
+            this.tableId = tableId;
+            this.entry = entry;
+            this.cached = cached;
+        }
+
+        private WsIngestClient client() {
+            return entry.client;
+        }
+
+        @Override
+        public void close() {
+            if (!released) {
+                released = true;
+                releaseWsClient(tableId, entry, cached);
+            }
+        }
     }
 
     private static final class TableReference {

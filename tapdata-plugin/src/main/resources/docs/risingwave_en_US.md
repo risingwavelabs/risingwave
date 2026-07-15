@@ -30,7 +30,11 @@ source produces insert events only; use JDBC when update or delete events must b
 
 In streaming mode, the connector **automatically creates** the target table with `WITH (connector = 'webhook')` when it does not exist. You do **not** need to create the table manually.
 
-If a **Webhook Secret** is configured in the Tapdata connection, the auto-created table includes a `VALIDATE` clause for HMAC-SHA256 signature verification:
+If a **Webhook Secret** is configured, the connector references a RisingWave catalog Secret so
+the value is not exposed by `SHOW CREATE TABLE`. Leave **RisingWave Secret Name** blank to let the
+connector create and manage a per-table Secret, or provide the name of an existing Secret in the
+configured schema whose value matches **Webhook Secret**. Automatic management requires Secret
+Management and `CREATE SECRET` permission.
 
 ```sql
 -- Auto-generated DDL (example):
@@ -39,9 +43,9 @@ CREATE TABLE "public"."orders" (
     "customer_name" varchar,
     "amount" numeric,
     PRIMARY KEY ("id")
-) WITH (connector = 'webhook') VALIDATE AS secure_compare(
+) WITH (connector = 'webhook') VALIDATE SECRET "tapdata_webhook_..." AS secure_compare(
     headers->>'x-rw-signature',
-    'sha256=' || encode(hmac('your-secret', payload, 'sha256'), 'hex')
+    'sha256=' || encode(hmac("tapdata_webhook_...", payload, 'sha256'), 'hex')
 );
 ```
 
@@ -93,6 +97,7 @@ ingest route, signature configuration, and required target-table DDL privileges 
 | Write Mode | No | streaming | `streaming` (recommended), `streaming_jsonb` (append-only), or `jdbc` (compatible fallback) |
 | Ingest Endpoint | No | Blank | Leave blank to use `ws://<Host>:4560` automatically; set explicitly for TLS or a separate ingest host |
 | Webhook Secret | No | — | HMAC secret for signing the WebSocket init frame (streaming mode only) |
+| RisingWave Secret Name | No | Auto-managed | Existing Secret in the configured schema; when blank, the connector creates and manages a protected per-table Secret |
 
 ### Limitations
 

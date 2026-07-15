@@ -188,14 +188,17 @@ final class RisingWaveConnectionTester {
         boolean created = false;
         Exception ddlError = null;
         Exception ingestError = null;
+        RisingWaveWebhookSecret.Handle secretHandle = RisingWaveWebhookSecret.Handle.disabled();
         try (Statement statement = connection.createStatement()) {
+            secretHandle = RisingWaveWebhookSecret.prepare(connection, config.schema(), table,
+                    config.webhookSecretName(), config.webhookSecret());
             String columns = jsonbMode
                     ? "(" + RisingWaveSql.quoteIdentifier(RisingWaveConnector.JSONB_PAYLOAD_COLUMN)
                             + " JSONB)"
                     : "(id BIGINT, probe_value VARCHAR, PRIMARY KEY (id))";
             statement.execute("CREATE TABLE " + qualifiedTable + " " + columns
                     + " WITH (connector = 'webhook')"
-                    + RisingWaveSql.webhookValidationClause(config.webhookSecret(),
+                    + RisingWaveSql.webhookValidationClause(secretHandle.name(),
                             jsonbMode ? RisingWaveConnector.JSONB_PAYLOAD_COLUMN : null));
             created = true;
 
@@ -228,6 +231,17 @@ final class RisingWaveConnectionTester {
                     RisingWaveConnector.debugLog("connectionTest() streaming probe cleanup ERROR table="
                             + qualifiedTable + ": " + cleanupError.getMessage());
                 }
+            }
+            try {
+                RisingWaveWebhookSecret.dropManaged(connection, config.schema(), secretHandle);
+            } catch (Exception cleanupError) {
+                if (ddlError == null) {
+                    ddlError = cleanupError;
+                } else {
+                    ddlError.addSuppressed(cleanupError);
+                }
+                RisingWaveConnector.debugLog("connectionTest() streaming secret cleanup ERROR table="
+                        + qualifiedTable + ": " + cleanupError.getMessage());
             }
         }
 

@@ -40,6 +40,8 @@ import javax.crypto.spec.SecretKeySpec;
 public class WsIngestClient implements AutoCloseable {
 
     private static final String SIGNATURE_HEADER = "x-rw-signature";
+    /** Shares the selector, executor, and connection pool across all table clients. */
+    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper()
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
@@ -72,11 +74,10 @@ public class WsIngestClient implements AutoCloseable {
     /** Establish the WebSocket connection and send the signed init frame. */
     public void connect() throws Exception {
         RisingWaveConnector.debugLog("WsIngestClient.connect uri=" + wsUri);
-        HttpClient client = HttpClient.newHttpClient();
         String initJson = buildInitJson(System.currentTimeMillis());
         String signature = signPayload(initJson);
 
-        java.net.http.WebSocket.Builder builder = client.newWebSocketBuilder();
+        java.net.http.WebSocket.Builder builder = HTTP_CLIENT.newWebSocketBuilder();
         if (!signature.isEmpty()) {
             builder.header(SIGNATURE_HEADER, signature);
         }

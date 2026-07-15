@@ -19,6 +19,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import io.tapdata.risingwave.streaming.WsIngestClient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -102,6 +103,30 @@ class RisingWaveConnectorTest {
                 RisingWaveSql.quoteIdentifier("simple"));
         org.junit.jupiter.api.Assertions.assertEquals("\"odd\"\"name\"",
                 RisingWaveSql.quoteIdentifier("odd\"name"));
+        assertEquals("'it''s protected'",
+                RisingWaveSql.quoteStringLiteral("it's protected"));
+    }
+
+    @Test
+    void webhookValidationReferencesCatalogSecretInsteadOfInliningValue() {
+        String clause = RisingWaveSql.webhookValidationClause("tapdata_secret", null);
+
+        assertTrue(clause.contains("VALIDATE SECRET \"tapdata_secret\""));
+        assertTrue(clause.contains("hmac(\"tapdata_secret\", payload"));
+        assertFalse(clause.contains("your-secret-value"));
+    }
+
+    @Test
+    void rejectsQualifiedOrUnsafeWebhookSecretNames() {
+        IllegalArgumentException qualified = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveWebhookSecret.prepare(
+                        null, "public", "orders", "other.secret", "value"));
+        assertTrue(qualified.getMessage().contains("unqualified"));
+
+        IllegalArgumentException injected = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveWebhookSecret.prepare(
+                        null, "public", "orders", "secret; DROP TABLE orders", "value"));
+        assertTrue(injected.getMessage().contains("identifier"));
     }
 
     @Test
@@ -189,5 +214,38 @@ class RisingWaveConnectorTest {
         assertEquals("numeric", RisingWaveSql.canonicalType("numeric(20, 4)"));
         assertEquals("timestamp with time zone",
                 RisingWaveSql.canonicalType("timestamptz"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void evictsOnlyIdleClientsFromFullWebSocketCache() throws Throwable {
+        RisingWaveConnector connector = new RisingWaveConnector();
+        java.lang.reflect.Field field = RisingWaveConnector.class.getDeclaredField("wsClients");
+        field.setAccessible(true);
+        java.util.Map<String, Object> clients =
+                (java.util.Map<String, Object>) field.get(connector);
+        Class<?> entryClass = Class.forName(
+                "io.tapdata.risingwave.RisingWaveConnector$WsClientEntry");
+        java.lang.reflect.Constructor<?> constructor =
+                entryClass.getDeclaredConstructor(WsIngestClient.class);
+        constructor.setAccessible(true);
+
+        for (int index = 0; index < RisingWaveConnector.MAX_CACHED_WS_CLIENTS; index++) {
+            WsIngestClient client = new WsIngestClient(
+                    "ws://127.0.0.1:4560", "dev", "public", "table_" + index, "");
+            clients.put("table_" + index, constructor.newInstance(client));
+        }
+        java.lang.reflect.Field inUse = entryClass.getDeclaredField("inUse");
+        inUse.setAccessible(true);
+        inUse.setInt(clients.get("table_0"), 1);
+        java.lang.reflect.Method evict = RisingWaveConnector.class
+                .getDeclaredMethod("evictIdleWsClientIfFull");
+        evict.setAccessible(true);
+        evict.invoke(connector);
+
+        assertEquals(RisingWaveConnector.MAX_CACHED_WS_CLIENTS - 1, clients.size());
+        assertTrue(clients.containsKey("table_0"));
+        assertFalse(clients.containsKey("table_1"));
+        connector.stop(null);
     }
 }

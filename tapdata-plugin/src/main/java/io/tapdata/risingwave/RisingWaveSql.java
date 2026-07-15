@@ -16,6 +16,11 @@ final class RisingWaveSql {
         return '"' + identifier.replace("\"", "\"\"") + '"';
     }
 
+    static String quoteStringLiteral(String value) {
+        Objects.requireNonNull(value, "value");
+        return '\'' + value.replace("'", "''") + '\'';
+    }
+
     static String buildTableFilter(List<String> tables) {
         if (tables == null || tables.isEmpty()) {
             return "";
@@ -52,17 +57,17 @@ final class RisingWaveSql {
         return sql.toString();
     }
 
-    static String webhookValidationClause(String webhookSecret, String jsonbPayloadColumn) {
-        if (webhookSecret == null || webhookSecret.isEmpty()) {
+    static String webhookValidationClause(String webhookSecretName, String jsonbPayloadColumn) {
+        if (webhookSecretName == null || webhookSecretName.isEmpty()) {
             return "";
         }
-        String escapedSecret = webhookSecret.replace("'", "''");
+        String secretIdentifier = quoteIdentifier(webhookSecretName);
         String signedPayload = jsonbPayloadColumn == null
                 ? "payload" : quoteIdentifier(jsonbPayloadColumn);
-        return " VALIDATE AS secure_compare("
+        return " VALIDATE SECRET " + secretIdentifier + " AS secure_compare("
                 + "headers->>'x-rw-signature', "
-                + "'sha256=' || encode(hmac('" + escapedSecret
-                + "', " + signedPayload + ", 'sha256'), 'hex'))";
+                + "'sha256=' || encode(hmac(" + secretIdentifier
+                + ", " + signedPayload + ", 'sha256'), 'hex'))";
     }
 
     static String mapDiscoveredType(String dataType, String udtName) {
