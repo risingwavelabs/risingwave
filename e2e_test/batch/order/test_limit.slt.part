@@ -319,11 +319,11 @@ SELECT * FROM generate_series(0,4,1) as t(v) order by v LIMIT 2 OFFSET 1.5*2;
 4
 
 # A non-constant expression after OFFSET is rejected.
-statement error
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET generate_series(1, 2);
 
 # A negative offset is rejected.
-statement error
+statement error OFFSET must not be negative, but found: -1
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET -1;
 
 # NULL LIMIT means no limit and NULL OFFSET means zero, following PostgreSQL.
@@ -343,21 +343,21 @@ SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1 FETCH FIRST 1+1
 1
 2
 
-# A column reference in OFFSET is rejected (as in PostgreSQL).
-statement error
+# A column reference is rejected in OFFSET: it is not visible in the offset scope.
+statement error Invalid column: v
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET v;
 
-# An aggregate in OFFSET is rejected (as in PostgreSQL).
-statement error
+# An aggregate in OFFSET is rejected.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
 SELECT count(*) FROM generate_series(0,3,1) as t(v) OFFSET count(*);
 
-# A window function in OFFSET is rejected (as in PostgreSQL).
-statement error
+# A window function in OFFSET is rejected.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET row_number() OVER ();
 
 # A volatile function in OFFSET is rejected: RisingWave folds LIMIT/OFFSET to a
 # plan-time constant, unlike PostgreSQL which evaluates it once at executor start.
-statement error
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET (random() * 10)::int8;
 
 
