@@ -34,7 +34,10 @@ use crate::connector_common::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
-use crate::sink::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
+use crate::sink::decouple_checkpoint_log_sink::{
+    iceberg_default_commit_checkpoint_interval,
+    default_commit_checkpoint_size_threshold_mb,
+};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
@@ -106,6 +109,7 @@ pub const ENABLE_COMPACTION: &str = "enable_compaction";
 pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
 pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 pub const WRITE_MODE: &str = "write_mode";
+pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
 pub const FORMAT_VERSION: &str = "format_version";
 pub const SNAPSHOT_EXPIRATION_RETAIN_LAST: &str = "snapshot_expiration_retain_last";
 pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_age_millis";
@@ -325,6 +329,20 @@ pub struct IcebergConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub commit_checkpoint_interval: u64,
+
+    /// Commit on the next checkpoint barrier after total buffered write size across
+    /// all writers exceeds this threshold in MiB. The coordinator sums per-writer
+    /// byte reports and broadcasts the same commit decision to all writers, ensuring
+    /// vnode-aligned commits at the same epoch.
+    ///
+    /// Default 512 MiB balances Iceberg's recommended file size (128-512 MiB on disk)
+    /// against the ~3-10x in-memory-to-columnar-compressed ratio. At 512 MiB in
+    /// memory, each commit produces ~50-170 MiB Parquet files — within the healthy
+    /// range for analytical queries.
+    #[serde(default = "default_commit_checkpoint_size_threshold_mb")]
+    #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub commit_checkpoint_size_threshold_mb: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,

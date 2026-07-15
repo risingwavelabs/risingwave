@@ -115,6 +115,36 @@ impl CoordinatorStreamHandle {
         }
     }
 
+    pub async fn report_bytes(
+        &mut self,
+        epoch: u64,
+        buffered_bytes: u64,
+    ) -> anyhow::Result<bool> {
+        self.send_request(CoordinateRequest {
+            msg: Some(coordinate_request::Msg::ReportBytesRequest(
+                coordinate_request::ReportBytesRequest {
+                    epoch,
+                    buffered_bytes,
+                },
+            )),
+        })
+        .await?;
+        match self.next_response().await? {
+            CoordinateResponse {
+                msg: Some(coordinate_response::Msg::ReportBytesResponse(
+                    coordinate_response::ReportBytesResponse {
+                        should_commit,
+                        ..
+                    },
+                )),
+            } => Ok(should_commit),
+            msg => Err(anyhow!(
+                "should get report bytes response but get {:?}",
+                msg
+            )),
+        }
+    }
+
     pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<u64> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::UpdateVnodeRequest(

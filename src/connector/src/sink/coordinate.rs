@@ -28,6 +28,7 @@ use super::{
     LogSinker, SinkCoordinationRpcClientEnum, SinkLogReader, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::sink::decouple_checkpoint_log_sink::should_force_commit_on_checkpoint_barrier;
+use crate::sink::iceberg::COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogStoreReadItem, Result, SinkError, SinkParam, TruncateOffset};
 
@@ -37,6 +38,7 @@ pub struct CoordinatedLogSinker<W: SinkWriter<CommitMetadata = Option<SinkMetada
     param: SinkParam,
     vnode_bitmap: Bitmap,
     commit_checkpoint_interval: NonZeroU64,
+    commit_checkpoint_size_threshold_bytes: Option<u64>,
     sink_writer_metrics: SinkWriterMetrics,
 }
 
@@ -47,6 +49,11 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
         writer: W,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Result<Self> {
+        let commit_checkpoint_size_threshold_bytes =
+            param.properties.get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|&mb| mb > 0)
+                .map(|mb| mb.saturating_mul(1024 * 1024));
         Ok(Self {
             writer,
             sink_coordinate_client: writer_param
@@ -65,6 +72,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
                 })?
                 .clone(),
             commit_checkpoint_interval,
+            commit_checkpoint_size_threshold_bytes,
             sink_writer_metrics: SinkWriterMetrics::new(writer_param),
         })
     }
@@ -258,6 +266,40 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                 return pending().await;
                             }
                             log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                        } else if self.commit_checkpoint_size_threshold_bytes.is_some() {
+                            let buffered_bytes = sink_writer.buffered_bytes();
+                            // Skip the RPC round-trip when there is no buffered data
+                            if buffered_bytes == 0 {
+                                sink_writer.barrier(false).await?;
+                            } else {
+                                let should_commit = coordinator_stream_handle
+                                    .report_bytes(epoch, buffered_bytes)
+                                    .await?;
+
+                                if should_commit {
+                                    let start_time = Instant::now();
+                                    let metadata = sink_writer.barrier(true).await?;
+                                    let metadata = metadata.ok_or_else(|| {
+                                        SinkError::Coordinator(anyhow!(
+                                            "should get metadata on checkpoint barrier"
+                                        ))
+                                    })?;
+                                    coordinator_stream_handle
+                                        .commit(epoch, metadata, None)
+                                        .await?;
+                                    sink_writer_metrics
+                                        .sink_commit_duration
+                                        .observe(start_time.elapsed().as_secs_f64());
+
+                                    current_checkpoint = 0;
+                                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                                } else {
+                                    let metadata = sink_writer.barrier(false).await?;
+                                    if let Some(metadata) = metadata {
+                                        warn!(?metadata, "get metadata on non-checkpoint barrier");
+                                    }
+                                }
+                            }
                         } else {
                             let metadata = sink_writer.barrier(false).await?;
                             if let Some(metadata) = metadata {

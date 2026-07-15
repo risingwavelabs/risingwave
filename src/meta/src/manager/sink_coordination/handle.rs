@@ -102,6 +102,23 @@ impl SinkWriterCoordinationHandle {
             .map_err(|_| anyhow!("fail to send commit response of epoch {}", epoch))
     }
 
+    pub(super) fn send_report_bytes_response(
+        &mut self,
+        epoch: u64,
+        should_commit: bool,
+    ) -> anyhow::Result<()> {
+        self.response_tx
+            .send(Ok(CoordinateResponse {
+                msg: Some(coordinate_response::Msg::ReportBytesResponse(
+                    coordinate_response::ReportBytesResponse {
+                        epoch,
+                        should_commit,
+                    },
+                )),
+            }))
+            .map_err(|_| anyhow!("fail to send report bytes response"))
+    }
+
     pub(super) fn stop(&mut self) -> anyhow::Result<()> {
         self.response_tx
             .send(Ok(CoordinateResponse {
@@ -122,7 +139,8 @@ impl SinkWriterCoordinationHandle {
             match &request {
                 coordinate_request::Msg::StartRequest(_)
                 | coordinate_request::Msg::Stop(_)
-                | coordinate_request::Msg::AlignInitialEpochRequest(_) => {}
+                | coordinate_request::Msg::AlignInitialEpochRequest(_)
+                | coordinate_request::Msg::ReportBytesRequest(_) => {}
                 coordinate_request::Msg::CommitRequest(request) => {
                     if let Some(prev_epoch) = self.prev_epoch
                         && request.epoch < prev_epoch

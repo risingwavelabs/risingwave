@@ -403,6 +403,7 @@ impl ManagerWorker {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::sync::Arc;
@@ -418,6 +419,7 @@ mod tests {
     use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
+    use risingwave_connector::sink::iceberg::COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB;
     use risingwave_connector::sink::{
         SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkError, SinkParam,
         TwoPhaseCommitCoordinator,
@@ -955,6 +957,262 @@ mod tests {
         );
         drop(client2);
         assert!(commit_future.await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_size_based_commit_via_coordinator() {
+        let db = prepare_db_backend().await;
+
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
+            "1".to_owned(),
+        );
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties,
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let epoch2 = 234;
+        let epoch3 = 235;
+
+        let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        all_vnode.shuffle(&mut rand::rng());
+        let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode1 = build_bitmap(first);
+        let vnode2 = build_bitmap(second);
+
+        let metadata = [
+            [vec![1u8, 2u8], vec![3u8, 4u8]],
+            [vec![5u8, 6u8], vec![]],
+        ];
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let metadata = metadata.clone();
+                let db = db.clone();
+                move |param, new_writer_rx| {
+                    let metadata = metadata.clone();
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                MockSinglePhaseCoordinator::new_coordinator(
+                                    0,
+                                    move |epoch, metadata_list, count: &mut usize| {
+                                        *count += 1;
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|m| match m {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        match *count {
+                                            1 => {
+                                                assert_eq!(epoch, epoch2);
+                                                assert_eq!(2, metadata_list.len());
+                                                assert_eq!(metadata[0][0], metadata_list[0]);
+                                                assert_eq!(metadata[0][1], metadata_list[1]);
+                                            }
+                                            2 => {
+                                                assert_eq!(epoch, epoch3);
+                                                assert_eq!(2, metadata_list.len());
+                                                assert_eq!(metadata[1][1], metadata_list[0]);
+                                                assert_eq!(metadata[1][0], metadata_list[1]);
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap()
+            .0
+        };
+
+        let (mut client1, mut client2) =
+            join(build_client(vnode1), pin!(build_client(vnode2))).await;
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch1),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
+
+        // Report bytes below the 1MB threshold: each writer reports 400KB,
+        // total 800KB < 1MB → should_commit=false
+        {
+            let mut report_future1 = pin!(client1.report_bytes(epoch1, 409600));
+            assert!(
+                poll_fn(|cx| Poll::Ready(report_future1.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            let (result1, result2) = join(
+                report_future1,
+                client2.report_bytes(epoch1, 409600),
+            )
+            .await;
+            assert!(!result1.unwrap());
+            assert!(!result2.unwrap());
+        }
+
+        // Report bytes exceeding the 1MB threshold: each writer reports 600KB,
+        // total 1.2MB ≥ 1MB → should_commit=true
+        {
+            let mut report_future1 = pin!(client1.report_bytes(epoch2, 614400));
+            assert!(
+                poll_fn(|cx| Poll::Ready(report_future1.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            let (result1, result2) = join(
+                report_future1,
+                client2.report_bytes(epoch2, 614400),
+            )
+            .await;
+            assert!(result1.unwrap());
+            assert!(result2.unwrap());
+        }
+
+        // Both writers commit at the same epoch after should_commit=true
+        {
+            let mut commit_future = pin!(
+                client2
+                    .commit(
+                        epoch2,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata[0][1].clone(),
+                            })),
+                        },
+                        None,
+                    )
+                    .map(|result| result.unwrap())
+            );
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            join(
+                commit_future,
+                client1
+                    .commit(
+                        epoch2,
+                        SinkMetadata {
+                            metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                metadata: metadata[0][0].clone(),
+                            })),
+                        },
+                        None,
+                    )
+                    .map(|result| result.unwrap()),
+            )
+            .await;
+        }
+
+        // Next round: report bytes above threshold again and commit at epoch3
+        {
+            let (result1, result2) = join(
+                client1.report_bytes(epoch3, 2_000_000),
+                client2.report_bytes(epoch3, 2_000_000),
+            )
+            .await;
+            assert!(result1.unwrap());
+            assert!(result2.unwrap());
+
+            let (result1, result2) = join(
+                client1.commit(
+                    epoch3,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1][0].clone(),
+                        })),
+                    },
+                    None,
+                ),
+                client2.commit(
+                    epoch3,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1][1].clone(),
+                        })),
+                    },
+                    None,
+                ),
+            )
+            .await;
+            result1.unwrap();
+            result2.unwrap();
+        }
     }
 
     #[tokio::test]

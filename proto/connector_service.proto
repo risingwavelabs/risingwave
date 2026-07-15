@@ -243,12 +243,18 @@ message CoordinateRequest {
     common.Buffer vnode_bitmap = 1;
   }
 
+  message ReportBytesRequest {
+    uint64 epoch = 1;
+    uint64 buffered_bytes = 2;
+  }
+
   oneof msg {
     StartCoordinationRequest start_request = 1;
     CommitRequest commit_request = 2;
     UpdateVnodeBitmapRequest update_vnode_request = 3;
     bool stop = 4;
     uint64 align_initial_epoch_request = 5;
+    ReportBytesRequest report_bytes_request = 6;
   }
 }
 
@@ -261,11 +267,17 @@ message CoordinateResponse {
     uint64 epoch = 1;
   }
 
+  message ReportBytesResponse {
+    uint64 epoch = 1;
+    bool should_commit = 2;
+  }
+
   oneof msg {
     StartCoordinationResponse start_response = 1;
     CommitResponse commit_response = 2;
     bool stopped = 3;
     uint64 align_initial_epoch_response = 4;
+    ReportBytesResponse report_bytes_response = 5;
   }
 }
 
