@@ -15,6 +15,9 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.junit.jupiter.api.Test;
 
@@ -36,27 +39,31 @@ class RisingWaveConnectorTest {
 
     @Test
     void parsesRisingWaveVersionFromPostgresCompatibleVersionString() {
-        assertArrayEquals(new int[]{3, 0, 0}, RisingWaveConnector.parseRisingWaveVersion(
+        assertArrayEquals(new int[]{3, 0, 0}, RisingWaveConnectionTester.parseRisingWaveVersion(
                 "PostgreSQL 13.14.0-RisingWave-3.0.0 (abc123)"));
-        assertArrayEquals(new int[]{3, 2, 1}, RisingWaveConnector.parseRisingWaveVersion(
+        assertArrayEquals(new int[]{3, 2, 1}, RisingWaveConnectionTester.parseRisingWaveVersion(
                 "PostgreSQL 13.14.0-RisingWave-3.2.1-alpha"));
+        assertEquals("3.2.1", RisingWaveConnectionTester.parseRisingWaveVersionString(
+                "PostgreSQL 13.14.0-RisingWave-3.2.1-alpha"));
+        assertEquals("3.2.0", RisingWaveConnectionTester.parseRisingWaveVersionString(
+                "PostgreSQL 13.14.0-RisingWave-3.2"));
     }
 
     @Test
     void acceptsSupportedWebSocketVersions() {
-        assertTrue(RisingWaveConnector.supportsWebSocketIngest(
+        assertTrue(RisingWaveConnectionTester.supportsWebSocketIngest(
                 "PostgreSQL 13.14.0-RisingWave-3.0.0"));
-        assertTrue(RisingWaveConnector.supportsWebSocketIngest(
+        assertTrue(RisingWaveConnectionTester.supportsWebSocketIngest(
                 "PostgreSQL 13.14.0-RisingWave-4.1.0"));
     }
 
     @Test
     void rejectsUnsupportedOrUnknownWebSocketVersions() {
-        assertFalse(RisingWaveConnector.supportsWebSocketIngest(
+        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest(
                 "PostgreSQL 13.14.0-RisingWave-2.9.9"));
-        assertFalse(RisingWaveConnector.supportsWebSocketIngest("PostgreSQL 16.2"));
-        assertFalse(RisingWaveConnector.supportsWebSocketIngest(null));
-        assertNull(RisingWaveConnector.parseRisingWaveVersion("unknown"));
+        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest("PostgreSQL 16.2"));
+        assertFalse(RisingWaveConnectionTester.supportsWebSocketIngest(null));
+        assertNull(RisingWaveConnectionTester.parseRisingWaveVersion("unknown"));
     }
 
     @Test
@@ -72,11 +79,29 @@ class RisingWaveConnectorTest {
     }
 
     @Test
+    void reportsInvalidPortAsConnectionTestFailure() throws Throwable {
+        DataMap config = DataMap.create()
+                .kv("host", "127.0.0.1")
+                .kv("port", "not-a-port")
+                .kv("database", "dev");
+        TapConnectionContext context = new TapConnectionContext(
+                null, config, DataMap.create(), null);
+        java.util.List<TestItem> items = new java.util.ArrayList<>();
+
+        new RisingWaveConnector().connectionTest(context, items::add);
+
+        assertEquals(1, items.size());
+        assertEquals(TestItem.ITEM_CONNECTION, items.get(0).getItem());
+        assertEquals(TestItem.RESULT_FAILED, items.get(0).getResult());
+        assertTrue(items.get(0).getInformation().contains("Port must be a number"));
+    }
+
+    @Test
     void quotesSqlIdentifiersIncludingEmbeddedQuotes() {
         org.junit.jupiter.api.Assertions.assertEquals("\"simple\"",
-                RisingWaveConnector.quoteIdentifier("simple"));
+                RisingWaveSql.quoteIdentifier("simple"));
         org.junit.jupiter.api.Assertions.assertEquals("\"odd\"\"name\"",
-                RisingWaveConnector.quoteIdentifier("odd\"name"));
+                RisingWaveSql.quoteIdentifier("odd\"name"));
     }
 
     @Test
@@ -158,11 +183,11 @@ class RisingWaveConnectorTest {
 
     @Test
     void canonicalizesEquivalentRisingWaveTypes() {
-        assertEquals("integer", RisingWaveConnector.canonicalRisingWaveType("int4"));
-        assertEquals("varchar", RisingWaveConnector.canonicalRisingWaveType("text"));
-        assertEquals("varchar", RisingWaveConnector.canonicalRisingWaveType("character varying"));
-        assertEquals("numeric", RisingWaveConnector.canonicalRisingWaveType("numeric(20, 4)"));
+        assertEquals("integer", RisingWaveSql.canonicalType("int4"));
+        assertEquals("varchar", RisingWaveSql.canonicalType("text"));
+        assertEquals("varchar", RisingWaveSql.canonicalType("character varying"));
+        assertEquals("numeric", RisingWaveSql.canonicalType("numeric(20, 4)"));
         assertEquals("timestamp with time zone",
-                RisingWaveConnector.canonicalRisingWaveType("timestamptz"));
+                RisingWaveSql.canonicalType("timestamptz"));
     }
 }

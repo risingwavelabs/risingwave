@@ -1,6 +1,5 @@
 package io.tapdata.risingwave;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -9,13 +8,6 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.type.TapDate;
-import io.tapdata.entity.schema.type.TapDateTime;
-import io.tapdata.entity.schema.type.TapJson;
-import io.tapdata.entity.schema.type.TapMap;
-import io.tapdata.entity.schema.type.TapTime;
-import io.tapdata.entity.schema.type.TapType;
-import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.schema.value.TapArrayValue;
 import io.tapdata.entity.schema.value.TapBinaryValue;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
@@ -38,8 +30,6 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.risingwave.streaming.WsIngestClient;
 
 import java.sql.*;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -72,10 +62,6 @@ public class RisingWaveConnector implements TapConnector {
     static final String MODE_STREAMING = "streaming";
     static final String MODE_STREAMING_JSONB = "streaming_jsonb";
     static final String JSONB_PAYLOAD_COLUMN = "data";
-    private static final java.util.regex.Pattern RISINGWAVE_VERSION_PATTERN =
-            java.util.regex.Pattern.compile("(?i)RisingWave[-/\\s]+v?(\\d+)\\.(\\d+)(?:\\.(\\d+))?");
-    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
-
     private Connection connection;
     private String schema;
 
@@ -100,27 +86,20 @@ public class RisingWaveConnector implements TapConnector {
         closeResources();
         debugLog("init() called");
         DataMap cfg = context.getConnectionConfig();
-        this.schema = cfg.getString("schema");
-        if (schema == null || schema.isEmpty()) {
-            schema = "public";
-        }
-        this.ingestMode = cfg.getString("ingest_mode");
-        if (ingestMode == null || ingestMode.isEmpty()) {
-            ingestMode = MODE_STREAMING;
-        }
+        RisingWaveConfig config = RisingWaveConfig.from(cfg);
+        this.schema = config.schema();
+        this.ingestMode = config.ingestMode();
 
         if (isWebSocketMode(ingestMode)) {
-            this.wsIngestEndpoint = resolveIngestEndpoint(
-                    cfg.getString("ingestEndpoint"), cfg.getString("host"));
-            this.wsDatabase = cfg.getString("database");
-            this.wsWebhookSecret = cfg.getString("webhookSecret");
-            if (wsDatabase == null || wsDatabase.isEmpty()) wsDatabase = "dev";
+            this.wsIngestEndpoint = config.resolvedIngestEndpoint();
+            this.wsDatabase = config.database();
+            this.wsWebhookSecret = config.webhookSecret();
             debugLog("init() streaming mode, ingestEndpoint=" + wsIngestEndpoint + " db=" + wsDatabase);
         }
 
         // Always open a JDBC connection for schema discovery and DDL operations. Resolve all
         // WebSocket configuration first so a configuration failure cannot leak this connection.
-        this.connection = openConnection(context);
+        this.connection = RisingWaveJdbc.open(config);
         alive.set(true);
         debugLog("init() done, schema=" + schema + " ingestMode=" + ingestMode);
     }
@@ -150,235 +129,7 @@ public class RisingWaveConnector implements TapConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext context,
                                             Consumer<TestItem> consumer) throws Throwable {
-        ConnectionOptions options = ConnectionOptions.create();
-        DataMap cfg = context.getConnectionConfig();
-        String mode = cfg.getString("ingest_mode");
-        if (mode == null || mode.isEmpty()) {
-            mode = MODE_STREAMING;
-        }
-        String schemaName = configuredSchema(cfg);
-        options.setNamespaces(Collections.singletonList(schemaName));
-        debugLog("connectionTest() start host=" + cfg.getString("host")
-                + " port=" + cfg.getObject("port")
-                + " database=" + cfg.getString("database")
-                + " schema=" + schemaName
-                + " ingestMode=" + mode);
-        // Always test JDBC connectivity for schema discovery and DDL operations.
-        try (Connection conn = openConnection(context)) {
-            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY,
-                    "Connected to RisingWave"));
-            testVersion(conn, mode, consumer);
-            if (testSchema(conn, schemaName, consumer)) {
-                if (isWebSocketMode(mode)) {
-                    testStreamingWrite(conn, cfg, schemaName, consumer,
-                            MODE_STREAMING_JSONB.equals(mode));
-                } else {
-                    testJdbcWritePrivilege(conn, schemaName, consumer);
-                }
-            } else {
-                consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
-                        "Write access cannot be verified because schema \"" + schemaName + "\" is unavailable"));
-                if (isWebSocketMode(mode)) {
-                    consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
-                            "WebSocket ingest cannot be verified because schema \""
-                                    + schemaName + "\" is unavailable"));
-                }
-            }
-        } catch (Exception e) {
-            debugLog("connectionTest() JDBC ERROR: " + e.getClass().getName() + ": " + e.getMessage());
-            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED,
-                    "Connection failed: " + e.getMessage()));
-        }
-
-        return options;
-    }
-
-    private void testVersion(Connection conn, String mode, Consumer<TestItem> consumer) {
-        try (Statement st = conn.createStatement();
-             ResultSet rs = st.executeQuery("SELECT version()")) {
-            String version = rs.next() ? rs.getString(1) : "unknown";
-            debugLog("connectionTest() version=" + version);
-            if (isWebSocketMode(mode) && !supportsWebSocketIngest(version)) {
-                consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED,
-                        "WebSocket streaming requires RisingWave " + MINIMUM_WEBSOCKET_VERSION
-                                + " or later; server reported: " + version));
-            } else {
-                consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, version));
-            }
-        } catch (Exception e) {
-            debugLog("connectionTest() version ERROR: " + e.getClass().getName() + ": " + e.getMessage());
-            consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED,
-                    "Version check failed: " + e.getMessage()));
-        }
-    }
-
-    private boolean testSchema(Connection conn, String schemaName, Consumer<TestItem> consumer) {
-        String sql = "SELECT count(*) FROM rw_catalog.rw_schemas WHERE name = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, schemaName);
-            try (ResultSet rs = ps.executeQuery()) {
-                boolean exists = rs.next() && rs.getInt(1) > 0;
-                if (exists) {
-                    consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_SUCCESSFULLY,
-                            "Schema \"" + schemaName + "\" exists"));
-                    return true;
-                }
-            }
-            consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_FAILED,
-                    "Schema \"" + schemaName + "\" does not exist"));
-        } catch (Exception e) {
-            debugLog("connectionTest() schema ERROR: " + e.getClass().getName() + ": " + e.getMessage());
-            consumer.accept(new TestItem(SCHEMA_TEST_ITEM, TestItem.RESULT_FAILED,
-                    "Schema check failed: " + e.getMessage()));
-        }
-        return false;
-    }
-
-    private void testJdbcWritePrivilege(Connection conn, String schemaName, Consumer<TestItem> consumer) {
-        String probeTable = "tap___test_" + UUID.randomUUID().toString().replace("-", "");
-        String qualifiedTable = quoteIdentifier(schemaName) + "." + quoteIdentifier(probeTable);
-        boolean created = false;
-        try (Statement st = conn.createStatement()) {
-            st.execute("CREATE TABLE " + qualifiedTable
-                    + " (id BIGINT PRIMARY KEY, probe_value VARCHAR)");
-            created = true;
-            st.executeUpdate("INSERT INTO " + qualifiedTable + " VALUES (1, 'initial')");
-            st.execute("FLUSH");
-            st.executeUpdate("UPDATE " + qualifiedTable + " SET probe_value = 'updated' WHERE id = 1");
-            st.execute("FLUSH");
-            try (ResultSet resultSet = st.executeQuery(
-                    "SELECT probe_value FROM " + qualifiedTable + " WHERE id = 1")) {
-                if (!resultSet.next() || !"updated".equals(resultSet.getString(1))) {
-                    throw new SQLException("Updated probe row was not query-visible after FLUSH");
-                }
-            }
-            st.executeUpdate("DELETE FROM " + qualifiedTable + " WHERE id = 1");
-            st.execute("FLUSH");
-            try (ResultSet resultSet = st.executeQuery(
-                    "SELECT count(*) FROM " + qualifiedTable)) {
-                if (!resultSet.next() || resultSet.getLong(1) != 0) {
-                    throw new SQLException("Deleted probe row remained query-visible after FLUSH");
-                }
-            }
-            st.execute("DROP TABLE " + qualifiedTable);
-            created = false;
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY,
-                    "Create, insert, update, delete, and drop succeeded in schema \"" + schemaName + "\""));
-        } catch (Exception e) {
-            debugLog("connectionTest() write privilege ERROR: " + e.getClass().getName() + ": " + e.getMessage());
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
-                    "Write privilege check failed in schema \"" + schemaName + "\": " + e.getMessage()));
-        } finally {
-            if (created) {
-                try (Statement cleanup = conn.createStatement()) {
-                    cleanup.execute("DROP TABLE IF EXISTS " + qualifiedTable);
-                } catch (Exception cleanupError) {
-                    debugLog("connectionTest() write probe cleanup ERROR table=" + qualifiedTable
-                            + ": " + cleanupError.getMessage());
-                }
-            }
-        }
-    }
-
-    private void testStreamingWrite(Connection conn, DataMap cfg, String schemaName,
-                                    Consumer<TestItem> consumer, boolean jsonbMode) {
-        String probeTable = "tap___test_" + UUID.randomUUID().toString().replace("-", "");
-        String qualifiedTable = quoteIdentifier(schemaName) + "." + quoteIdentifier(probeTable);
-        String ingestEndpoint = resolveIngestEndpoint(
-                cfg.getString("ingestEndpoint"), cfg.getString("host"));
-        String database = cfg.getString("database");
-        if (database == null || database.isEmpty()) {
-            database = "dev";
-        }
-        String webhookSecret = cfg.getString("webhookSecret");
-
-        boolean created = false;
-        Exception ddlError = null;
-        Exception ingestError = null;
-        try (Statement st = conn.createStatement()) {
-            String columns = jsonbMode
-                    ? "(" + quoteIdentifier(JSONB_PAYLOAD_COLUMN) + " JSONB)"
-                    : "(id BIGINT, probe_value VARCHAR, PRIMARY KEY (id))";
-            st.execute("CREATE TABLE " + qualifiedTable + " " + columns
-                    + " WITH (connector = 'webhook')"
-                    + webhookValidationClause(webhookSecret, jsonbMode));
-            created = true;
-
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("id", 1L);
-            row.put("probe_value", "websocket_precheck");
-            try (WsIngestClient client = new WsIngestClient(
-                    ingestEndpoint, database, schemaName, probeTable, webhookSecret)) {
-                client.connect();
-                List<CompletableFuture<Void>> futures = client.sendBatch(Collections.singletonList(
-                        new WsIngestClient.DmlOperation("insert", null, row)));
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                        .get(30, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                ingestError = e;
-                debugLog("connectionTest() websocket ingest ERROR endpoint=" + ingestEndpoint
-                        + ": " + e.getClass().getName() + ": " + e.getMessage());
-            }
-        } catch (Exception e) {
-            ddlError = e;
-            debugLog("connectionTest() streaming DDL ERROR table=" + qualifiedTable
-                    + ": " + e.getClass().getName() + ": " + e.getMessage());
-        } finally {
-            if (created) {
-                try (Statement cleanup = conn.createStatement()) {
-                    cleanup.execute("DROP TABLE " + qualifiedTable);
-                } catch (Exception cleanupError) {
-                    ddlError = cleanupError;
-                    debugLog("connectionTest() streaming probe cleanup ERROR table=" + qualifiedTable
-                            + ": " + cleanupError.getMessage());
-                }
-            }
-        }
-
-        if (ddlError == null) {
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY,
-                    "Create and drop of a webhook-backed table succeeded in schema \""
-                            + schemaName + "\""));
-        } else {
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED,
-                    "Webhook table create/drop check failed in schema \"" + schemaName
-                            + "\": " + ddlError.getMessage()));
-        }
-
-        if (!created) {
-            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
-                    "WebSocket ingest cannot be verified because the temporary webhook table could not be created"));
-        } else if (ingestError == null) {
-            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_SUCCESSFULLY,
-                    "WebSocket connection, signed init, DML write, and RisingWave ACK succeeded"));
-        } else {
-            consumer.accept(new TestItem(INGEST_ENDPOINT_TEST_ITEM, TestItem.RESULT_FAILED,
-                    "WebSocket ingest check failed: " + ingestError.getMessage()));
-        }
-    }
-
-    static boolean supportsWebSocketIngest(String versionOutput) {
-        int[] version = parseRisingWaveVersion(versionOutput);
-        if (version == null) {
-            return false;
-        }
-        return version[0] > 3 || (version[0] == 3 && version[1] >= 0);
-    }
-
-    static int[] parseRisingWaveVersion(String versionOutput) {
-        if (versionOutput == null) {
-            return null;
-        }
-        java.util.regex.Matcher matcher = RISINGWAVE_VERSION_PATTERN.matcher(versionOutput);
-        if (!matcher.find()) {
-            return null;
-        }
-        int patch = matcher.group(3) == null ? 0 : Integer.parseInt(matcher.group(3));
-        return new int[]{
-                Integer.parseInt(matcher.group(1)),
-                Integer.parseInt(matcher.group(2)),
-                patch
-        };
+        return RisingWaveConnectionTester.test(context, consumer);
     }
 
     @Override
@@ -386,7 +137,7 @@ public class RisingWaveConnector implements TapConnector {
                                int tableSize,
                                Consumer<List<TapTable>> consumer) throws Throwable {
         String schemaName = getSchema(context);
-        String tableFilter = buildTableFilter(tables);
+        String tableFilter = RisingWaveSql.buildTableFilter(tables);
         debugLog("discoverSchema() start schema=" + schemaName + " tables=" + tables
                 + " tableSize=" + tableSize);
 
@@ -432,11 +183,8 @@ public class RisingWaveConnector implements TapConnector {
                     TapTable tapTable = tapTables.computeIfAbsent(tableName, TapTable::new);
                     TapField field = new TapField();
                     field.setName(rs.getString("column_name"));
-                    field.setDataType(mapDataType(rs.getString("data_type"),
-                            rs.getString("udt_name"),
-                            rs.getObject("character_maximum_length"),
-                            rs.getObject("numeric_precision"),
-                            rs.getObject("numeric_scale")));
+                    field.setDataType(RisingWaveSql.mapDiscoveredType(
+                            rs.getString("data_type"), rs.getString("udt_name")));
                     field.setNullable("YES".equalsIgnoreCase(rs.getString("is_nullable")));
                     tapTable.add(field);
                 }
@@ -565,13 +313,16 @@ public class RisingWaveConnector implements TapConnector {
             try {
                 if (event instanceof TapInsertRecordEvent) {
                     TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
-                    Map<String, Object> after = normalizeRecordForStreaming(insert.getAfter(), table, true);
+                    Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
+                            insert.getAfter(), table, true);
                     operations.add(new WsIngestClient.DmlOperation("insert", null, after));
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
                     TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                    Map<String, Object> before = normalizeRecordForStreaming(update.getBefore(), table, true);
-                    Map<String, Object> after = normalizeRecordForStreaming(update.getAfter(), table, true);
+                    Map<String, Object> before = RisingWaveValueConverter.normalizeStreamingRecord(
+                            update.getBefore(), table, true);
+                    Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
+                            update.getAfter(), table, true);
                     if (requiresDeleteBeforeUpsert(table, before, after)) {
                         operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     }
@@ -579,7 +330,8 @@ public class RisingWaveConnector implements TapConnector {
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
-                    Map<String, Object> before = normalizeRecordForStreaming(delete.getBefore(), table, true);
+                    Map<String, Object> before = RisingWaveValueConverter.normalizeStreamingRecord(
+                            delete.getBefore(), table, true);
                     operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     deleted++;
                 } else {
@@ -626,7 +378,8 @@ public class RisingWaveConnector implements TapConnector {
                 throw new java.util.concurrent.CancellationException("Connector is stopping");
             }
             TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
-            Map<String, Object> document = normalizeRecordForStreaming(insert.getAfter(), table, false);
+            Map<String, Object> document = RisingWaveValueConverter.normalizeStreamingRecord(
+                    insert.getAfter(), table, false);
             operations.add(new WsIngestClient.DmlOperation("insert", null, document));
         }
 
@@ -792,11 +545,11 @@ public class RisingWaveConnector implements TapConnector {
         List<String> cols = new ArrayList<>(record.keySet());
         String tableName = fullTableName(table.getId());
         String sql = "INSERT INTO " + tableName + " (" +
-                quoteCols(cols) + ") VALUES (" +
-                placeholders(cols.size()) + ")";
+                RisingWaveSql.quoteColumns(cols) + ") VALUES (" +
+                RisingWaveSql.placeholders(cols.size()) + ")";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             for (int i = 0; i < cols.size(); i++) {
-                setParam(ps, i + 1, record.get(cols.get(i)));
+                RisingWaveValueConverter.setJdbcParameter(ps, i + 1, record.get(cols.get(i)));
             }
             ps.executeUpdate();
         }
@@ -822,13 +575,13 @@ public class RisingWaveConnector implements TapConnector {
         StringBuilder sql = new StringBuilder("UPDATE ").append(tableName).append(" SET ");
         for (int i = 0; i < setCols.size(); i++) {
             if (i > 0) sql.append(", ");
-            sql.append(quoteIdentifier(setCols.get(i))).append(" = ?");
+            sql.append(RisingWaveSql.quoteIdentifier(setCols.get(i))).append(" = ?");
         }
         sql.append(" WHERE ");
         for (int i = 0; i < filterCols.size(); i++) {
             if (i > 0) sql.append(" AND ");
             String column = filterCols.get(i);
-            sql.append(quoteIdentifier(column));
+            sql.append(RisingWaveSql.quoteIdentifier(column));
             if (before.get(column) == null) {
                 sql.append(" IS NULL");
             } else {
@@ -839,12 +592,12 @@ public class RisingWaveConnector implements TapConnector {
         try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
             int idx = 1;
             for (String col : setCols) {
-                setParam(ps, idx++, after.get(col));
+                RisingWaveValueConverter.setJdbcParameter(ps, idx++, after.get(col));
             }
             for (String column : filterCols) {
                 Object value = before.get(column);
                 if (value != null) {
-                    setParam(ps, idx++, value);
+                    RisingWaveValueConverter.setJdbcParameter(ps, idx++, value);
                 }
             }
             return ps.executeUpdate();
@@ -881,7 +634,7 @@ public class RisingWaveConnector implements TapConnector {
         for (int i = 0; i < columns.size(); i++) {
             if (i > 0) sql.append(" AND ");
             String column = columns.get(i);
-            sql.append(quoteIdentifier(column));
+            sql.append(RisingWaveSql.quoteIdentifier(column));
             if (record.get(column) == null) {
                 sql.append(" IS NULL");
             } else {
@@ -893,7 +646,7 @@ public class RisingWaveConnector implements TapConnector {
             for (String column : columns) {
                 Object value = record.get(column);
                 if (value != null) {
-                    setParam(statement, index++, value);
+                    RisingWaveValueConverter.setJdbcParameter(statement, index++, value);
                 }
             }
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -914,7 +667,7 @@ public class RisingWaveConnector implements TapConnector {
         StringBuilder sql = new StringBuilder("DELETE FROM ").append(tableName).append(" WHERE ");
         for (int i = 0; i < filterCols.size(); i++) {
             if (i > 0) sql.append(" AND ");
-            sql.append(quoteIdentifier(filterCols.get(i)));
+            sql.append(RisingWaveSql.quoteIdentifier(filterCols.get(i)));
             if (record.get(filterCols.get(i)) == null) {
                 sql.append(" IS NULL");
             } else {
@@ -926,7 +679,9 @@ public class RisingWaveConnector implements TapConnector {
             int idx = 1;
             for (String col : filterCols) {
                 Object val = record.get(col);
-                if (val != null) setParam(ps, idx++, val);
+                if (val != null) {
+                    RisingWaveValueConverter.setJdbcParameter(ps, idx++, val);
+                }
             }
             ps.executeUpdate();
         }
@@ -972,9 +727,10 @@ public class RisingWaveConnector implements TapConnector {
         StringBuilder sql = new StringBuilder("CREATE TABLE ").append(tableName).append(" (");
 
         if (MODE_STREAMING_JSONB.equals(ingestMode)) {
-            sql.append(quoteIdentifier(JSONB_PAYLOAD_COLUMN)).append(" JSONB)")
+            sql.append(RisingWaveSql.quoteIdentifier(JSONB_PAYLOAD_COLUMN)).append(" JSONB)")
                     .append(" WITH (connector = 'webhook')")
-                    .append(webhookValidationClause(wsWebhookSecret, true));
+                    .append(RisingWaveSql.webhookValidationClause(
+                            wsWebhookSecret, JSONB_PAYLOAD_COLUMN));
             executeCreateTable(sql.toString(), table.getId(), opts);
             return opts;
         }
@@ -983,7 +739,8 @@ public class RisingWaveConnector implements TapConnector {
         List<String> colDefs = new ArrayList<>();
         for (Map.Entry<String, TapField> entry : fields.entrySet()) {
             TapField f = entry.getValue();
-            String colDef = quoteIdentifier(f.getName()) + " " + toRisingWaveType(f);
+            String colDef = RisingWaveSql.quoteIdentifier(f.getName()) + " "
+                    + RisingWaveSql.targetType(f);
             if (!MODE_STREAMING.equals(ingestMode) && Boolean.FALSE.equals(f.getNullable())) {
                 colDef += " NOT NULL";
             }
@@ -992,12 +749,13 @@ public class RisingWaveConnector implements TapConnector {
         sql.append(String.join(", ", colDefs));
 
         if (pks != null && !pks.isEmpty()) {
-            sql.append(", PRIMARY KEY (").append(quoteCols(new ArrayList<>(pks))).append(")");
+            sql.append(", PRIMARY KEY (")
+                    .append(RisingWaveSql.quoteColumns(new ArrayList<>(pks))).append(")");
         }
         sql.append(")");
         if (MODE_STREAMING.equals(ingestMode)) {
             sql.append(" WITH (connector = 'webhook')");
-            sql.append(webhookValidationClause(wsWebhookSecret, false));
+            sql.append(RisingWaveSql.webhookValidationClause(wsWebhookSecret, null));
         }
 
         executeCreateTable(sql.toString(), table.getId(), opts);
@@ -1041,56 +799,13 @@ public class RisingWaveConnector implements TapConnector {
 
     // ---- Helpers ----
 
-    private Connection openConnection(TapConnectionContext context) throws SQLException {
-        // Explicitly load the JDBC driver - required when running inside Tapdata's PDK classloader
-        // where ServiceLoader-based auto-discovery may not work for shaded JARs
-        try {
-            Class.forName("org.postgresql.Driver");
-        } catch (ClassNotFoundException e) {
-            throw new SQLException("PostgreSQL JDBC driver not found in classpath", e);
-        }
-        DataMap cfg = context.getConnectionConfig();
-        String host = cfg.getString("host");
-        Object portObj = cfg.getObject("port");
-        int port = portObj != null ? Integer.parseInt(portObj.toString()) : 4566;
-        String database = cfg.getString("database");
-        if (database == null || database.isEmpty()) database = "dev";
-        String user = cfg.getString("user");
-        if (user == null || user.isEmpty()) user = "root";
-        String password = cfg.getString("password");
-        if (password == null) password = "";
-
-        String url = "jdbc:postgresql://" + host + ":" + port + "/" + database +
-                "?socketTimeout=30&loginTimeout=30&tcpKeepAlive=true";
-        Properties props = new Properties();
-        props.setProperty("user", user);
-        props.setProperty("password", password);
-        // Use a driver property so offsets such as +08:00 are not corrupted by URL decoding.
-        String timezone = cfg.getString("timezone");
-        if (timezone != null && !timezone.isEmpty()) {
-            props.setProperty("options", "-c timezone=" + timezone);
-        }
-        // SSL mode: prefer by default (works for both local non-TLS and cloud TLS deployments).
-        // Cloud deployments require TLS for SNI-based tenant routing.
-        String sslmode = cfg.getString("sslmode");
-        if (sslmode == null || sslmode.isEmpty()) sslmode = "prefer";
-        props.setProperty("sslmode", sslmode);
-        // Extra JDBC parameters
-        String extParams = cfg.getString("extParams");
-        if (extParams != null && !extParams.isEmpty()) {
-            url += "&" + extParams;
-        }
-        return DriverManager.getConnection(url, props);
-    }
-
     private String getSchema(TapConnectionContext context) {
         if (schema != null && !schema.isEmpty()) return schema;
         return configuredSchema(context.getConnectionConfig());
     }
 
     private static String configuredSchema(DataMap cfg) {
-        String configuredSchema = cfg.getString("schema");
-        return (configuredSchema != null && !configuredSchema.isEmpty()) ? configuredSchema : "public";
+        return RisingWaveConfig.from(cfg).schema();
     }
 
     static String resolveIngestEndpoint(String configuredEndpoint, String host) {
@@ -1106,23 +821,6 @@ public class RisingWaveConnector implements TapConnector {
             endpoint = endpoint.replace("{Host}", host.trim());
         }
         return endpoint;
-    }
-
-    static String quoteIdentifier(String identifier) {
-        Objects.requireNonNull(identifier, "identifier");
-        return '"' + identifier.replace("\"", "\"\"") + '"';
-    }
-
-    private static String webhookValidationClause(String webhookSecret, boolean jsonbMode) {
-        if (webhookSecret == null || webhookSecret.isEmpty()) {
-            return "";
-        }
-        String escapedSecret = webhookSecret.replace("'", "''");
-        String signedPayload = jsonbMode ? quoteIdentifier(JSONB_PAYLOAD_COLUMN) : "payload";
-        return " VALIDATE AS secure_compare("
-                + "headers->>'x-rw-signature', "
-                + "'sha256=' || encode(hmac('" + escapedSecret
-                + "', " + signedPayload + ", 'sha256'), 'hex'))";
     }
 
     static boolean isWebSocketMode(String mode) {
@@ -1175,8 +873,9 @@ public class RisingWaveConnector implements TapConnector {
                 missingColumns.add(requiredColumn);
                 continue;
             }
-            String expectedType = canonicalRisingWaveType(toRisingWaveType(expected.getValue()));
-            String actualType = canonicalRisingWaveType(existingColumns.get(requiredColumn));
+            String expectedType = RisingWaveSql.canonicalType(
+                    RisingWaveSql.targetType(expected.getValue()));
+            String actualType = RisingWaveSql.canonicalType(existingColumns.get(requiredColumn));
             if (!expectedType.equals(actualType)) {
                 incompatibleColumns.add(requiredColumn + " (expected " + expectedType
                         + ", found " + actualType + ")");
@@ -1228,7 +927,8 @@ public class RisingWaveConnector implements TapConnector {
             }
         }
         if (columns.size() != 1
-                || !"jsonb".equals(canonicalRisingWaveType(columns.get(JSONB_PAYLOAD_COLUMN)))) {
+                || !"jsonb".equals(RisingWaveSql.canonicalType(
+                        columns.get(JSONB_PAYLOAD_COLUMN)))) {
             throw new SQLException("Existing target table " + table.qualifiedName()
                     + " must contain exactly one JSONB column named \"" + JSONB_PAYLOAD_COLUMN
                     + "\" for WebSocket JSONB append-only mode; found " + columns);
@@ -1304,33 +1004,6 @@ public class RisingWaveConnector implements TapConnector {
         return primaryKeys;
     }
 
-    static String canonicalRisingWaveType(String dataType) {
-        if (dataType == null) {
-            return "text";
-        }
-        String type = dataType.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        int parameters = type.indexOf('(');
-        if (parameters >= 0) {
-            type = type.substring(0, parameters).trim();
-        }
-        switch (type) {
-            case "int": case "int4": case "integer": return "integer";
-            case "int8": case "bigint": case "bigserial": case "serial": return "bigint";
-            case "int2": case "smallint": return "smallint";
-            case "float4": case "real": return "real";
-            case "float8": case "double precision": return "double precision";
-            case "decimal": case "numeric": return "numeric";
-            case "bool": case "boolean": return "boolean";
-            case "char": case "character": case "character varying": case "text":
-            case "varchar": case "uuid": return "varchar";
-            case "time without time zone": case "time": return "time";
-            case "timestamp without time zone": case "timestamp": return "timestamp";
-            case "timestamptz": case "timestamp with time zone": return "timestamp with time zone";
-            case "json": case "jsonb": return "jsonb";
-            default: return type;
-        }
-    }
-
     private static final class TableReference {
         private final String schema;
         private final String table;
@@ -1341,263 +1014,9 @@ public class RisingWaveConnector implements TapConnector {
         }
 
         private String qualifiedName() {
-            return quoteIdentifier(schema) + "." + quoteIdentifier(table);
+            return RisingWaveSql.quoteIdentifier(schema) + "."
+                    + RisingWaveSql.quoteIdentifier(table);
         }
-    }
-
-    private static String buildTableFilter(List<String> tables) {
-        if (tables == null || tables.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < tables.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append("'").append(tables.get(i).replace("'", "''")).append("'");
-        }
-        return sb.toString();
-    }
-
-    private static String quoteCols(List<String> cols) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < cols.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(quoteIdentifier(cols.get(i)));
-        }
-        return sb.toString();
-    }
-
-    private static String placeholders(int n) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < n; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("?");
-        }
-        return sb.toString();
-    }
-
-    private static String mapDataType(String dataType, String udtName,
-                                       Object charMaxLen, Object numPrec, Object numScale) {
-        if (dataType == null) return "text";
-        switch (dataType.toLowerCase()) {
-            case "integer": case "int": case "int4": return "integer";
-            case "bigint": case "int8": return "bigint";
-            case "smallint": case "int2": return "smallint";
-            case "real": case "float4": return "real";
-            case "double precision": case "float8": return "double precision";
-            case "numeric": case "decimal":
-                // RisingWave does not support numeric(p,s) with precision/scale constraints
-                return "numeric";
-            case "boolean": case "bool": return "boolean";
-            case "character varying": case "varchar":
-                // RisingWave does not support varchar(N) with length specification
-                return "varchar";
-            case "character": case "char":
-                // RisingWave does not support CHAR type
-                return "varchar";
-            case "text": return "text";
-            case "date": return "date";
-            case "time without time zone": case "time": return "time";
-            case "timestamp without time zone": case "timestamp": return "timestamp";
-            case "timestamp with time zone": case "timestamptz": return "timestamp with time zone";
-            case "bytea": return "bytea";
-            case "jsonb": return "jsonb";
-            case "json": return "jsonb";
-            case "uuid": return "varchar";
-            default:
-                // Fallback: use the udt_name if available
-                if (udtName != null && !udtName.isEmpty()) {
-                    return mapDataType(udtName, null, charMaxLen, numPrec, numScale);
-                }
-                return "text";
-        }
-    }
-
-    private static String toRisingWaveType(TapField field) {
-        String dt = field.getDataType();
-        if (dt == null) return "text";
-        String lower = dt.toLowerCase();
-        // RisingWave does not support varchar(N) or char(N) with length specification
-        if (lower.startsWith("varchar(") || lower.startsWith("character varying(")) {
-            return "varchar";
-        }
-        // RisingWave does not support CHAR type, convert to varchar (no length)
-        if (lower.startsWith("char(") || lower.equals("char")
-                || lower.startsWith("character(") || lower.equals("character")) {
-            return "varchar";
-        }
-        // RisingWave does not support numeric(p,s) with precision/scale
-        if (lower.startsWith("numeric(") || lower.startsWith("decimal(")) {
-            return "numeric";
-        }
-        // RisingWave does not support SERIAL type
-        if (lower.contains("serial")) {
-            return "bigint";
-        }
-        return dt;
-    }
-
-    /**
-     * Convert Tapdata PDK value types to JDBC-compatible types.
-     * The PostgreSQL JDBC driver cannot infer SQL types for Tapdata-specific classes
-     * like DateTime, so we convert them to standard java.sql types.
-     */
-    private static Object convertValue(Object value) {
-        if (value == null) return null;
-        if (value instanceof DateTime) {
-            return ((DateTime) value).toTimestamp();
-        }
-        if (value instanceof java.util.Date && !(value instanceof java.sql.Date)
-                && !(value instanceof java.sql.Timestamp)) {
-            return new java.sql.Timestamp(((java.util.Date) value).getTime());
-        }
-        return value;
-    }
-
-    private static void setParam(PreparedStatement ps, int idx, Object value) throws SQLException {
-        Object converted = convertValue(value);
-        ps.setObject(idx, converted);
-    }
-
-    private static Map<String, Object> normalizeRecordForStreaming(
-            Map<String, Object> record, TapTable table, boolean typedColumns) {
-        if (record == null) {
-            return null;
-        }
-
-        LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
-        Map<String, TapField> fields = table == null ? null : table.getNameFieldMap();
-        for (Map.Entry<String, Object> entry : record.entrySet()) {
-            TapField field = fields == null ? null : fields.get(entry.getKey());
-            normalized.put(entry.getKey(), normalizeValueForStreaming(
-                    entry.getValue(), field, typedColumns, false));
-        }
-        return normalized;
-    }
-
-    private static Object normalizeValueForStreaming(
-            Object value, TapField field, boolean typedColumns,
-            boolean stringifyExactNumbers) {
-        if (value == null) {
-            return null;
-        }
-
-        TapType tapType = field == null ? null : field.getTapType();
-        if (tapType instanceof TapDate && value instanceof DateTime) {
-            java.sql.Date date = ((DateTime) value).toSqlDate();
-            return date == null ? null : date.toString();
-        }
-        if (tapType instanceof TapTime && value instanceof DateTime) {
-            java.sql.Time time = ((DateTime) value).toTime();
-            return time == null ? null : time.toString();
-        }
-        if (tapType instanceof TapDateTime && value instanceof DateTime) {
-            DateTime dateTime = (DateTime) value;
-            if (dateTime.getTimeZone() != null) {
-                ZonedDateTime zonedDateTime = dateTime.toZonedDateTime();
-                if (zonedDateTime != null) {
-                    return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(zonedDateTime.toOffsetDateTime());
-                }
-            }
-            Timestamp timestamp = dateTime.toTimestamp();
-            return timestamp == null ? null : timestamp.toString();
-        }
-        boolean stringifyNumbers = stringifyExactNumbers
-                || !typedColumns
-                || isDecimalField(field)
-                || isJsonLikeField(field, tapType);
-        if (stringifyNumbers && value instanceof java.math.BigDecimal) {
-            // Webhook JSON-number decoding can round through floating point. Typed NUMERIC columns
-            // parse an exact decimal string, while JSONB keeps the exact value as a JSON string.
-            return ((java.math.BigDecimal) value).toPlainString();
-        }
-        if (stringifyNumbers && value instanceof java.math.BigInteger) {
-            return value.toString();
-        }
-        if (typedColumns && value instanceof byte[] && isBinaryField(field)) {
-            // The webhook decoder uses PostgreSQL's standard bytea text format by default.
-            // Jackson's normal byte[] representation is Base64 and would be stored incorrectly.
-            return toPostgresByteaHex((byte[]) value);
-        }
-        if (isJsonLikeField(field, tapType) && value instanceof CharSequence) {
-            String json = value.toString().trim();
-            if (json.isEmpty()) {
-                return value.toString();
-            }
-            try {
-                return JSON_MAPPER.readValue(json, Object.class);
-            } catch (java.io.IOException e) {
-                throw new IllegalArgumentException("Invalid JSON value for field "
-                        + (field == null ? "<unknown>" : field.getName()), e);
-            }
-        }
-
-        if (value instanceof Map<?, ?>) {
-            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
-                String key = entry.getKey() == null ? "null" : entry.getKey().toString();
-                normalized.put(key, normalizeValueForStreaming(
-                        entry.getValue(), null, typedColumns, stringifyNumbers));
-            }
-            return normalized;
-        }
-        if (value instanceof Collection<?>) {
-            List<Object> normalized = new ArrayList<>();
-            for (Object element : (Collection<?>) value) {
-                normalized.add(normalizeValueForStreaming(
-                        element, null, typedColumns, stringifyNumbers));
-            }
-            return normalized;
-        }
-        if (value.getClass().isArray() && !(value instanceof byte[])) {
-            int length = java.lang.reflect.Array.getLength(value);
-            List<Object> normalized = new ArrayList<>(length);
-            for (int i = 0; i < length; i++) {
-                normalized.add(normalizeValueForStreaming(
-                        java.lang.reflect.Array.get(value, i), null, typedColumns, stringifyNumbers));
-            }
-            return normalized;
-        }
-        if (value instanceof DateTime) {
-            Timestamp timestamp = ((DateTime) value).toTimestamp();
-            return timestamp == null ? null : timestamp.toString();
-        }
-
-        return value;
-    }
-
-    private static boolean isJsonLikeField(TapField field, TapType tapType) {
-        if (tapType instanceof TapJson || tapType instanceof TapMap) {
-            return true;
-        }
-        if (field == null || field.getDataType() == null) {
-            return false;
-        }
-        String dataType = field.getDataType().toLowerCase(Locale.ROOT);
-        return dataType.contains("json");
-    }
-
-    private static boolean isDecimalField(TapField field) {
-        if (field == null || field.getDataType() == null) {
-            return false;
-        }
-        String dataType = field.getDataType().toLowerCase(Locale.ROOT);
-        return dataType.startsWith("numeric") || dataType.startsWith("decimal");
-    }
-
-    private static boolean isBinaryField(TapField field) {
-        return field != null && field.getDataType() != null
-                && "bytea".equalsIgnoreCase(field.getDataType().trim());
-    }
-
-    private static String toPostgresByteaHex(byte[] bytes) {
-        char[] hex = new char[2 + bytes.length * 2];
-        hex[0] = '\\';
-        hex[1] = 'x';
-        final char[] digits = "0123456789abcdef".toCharArray();
-        for (int i = 0; i < bytes.length; i++) {
-            int value = bytes[i] & 0xff;
-            hex[2 + i * 2] = digits[value >>> 4];
-            hex[3 + i * 2] = digits[value & 0x0f];
-        }
-        return new String(hex);
     }
 
     private static void closeQuietly(AutoCloseable c) {

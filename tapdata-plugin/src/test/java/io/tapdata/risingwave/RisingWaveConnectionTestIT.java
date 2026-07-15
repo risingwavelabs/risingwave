@@ -10,6 +10,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.risingwave.streaming.WsIngestClient;
@@ -56,6 +57,21 @@ class RisingWaveConnectionTestIT {
         assertSuccessful(items, TestItem.ITEM_WRITE);
         assertSuccessful(items, RisingWaveConnector.INGEST_ENDPOINT_TEST_ITEM);
         assertEquals(0, writeProbeTableCount());
+    }
+
+    @Test
+    void returnsStablePdkConnectionIdentityAndServerMetadata() throws Throwable {
+        TapConnectionContext context = connectionContext(
+                "public", "jdbc", "root", "", "ws://127.0.0.1:4560", "");
+        List<TestItem> items = new ArrayList<>();
+
+        ConnectionOptions options = new RisingWaveConnector().connectionTest(context, items::add);
+
+        assertSuccessful(items, TestItem.ITEM_CONNECTION);
+        assertEquals("127.0.0.1:4566/dev/public", options.getConnectionString());
+        assertEquals(64, options.getInstanceUniqueId().length());
+        assertEquals(java.util.Collections.singletonList("public"), options.getNamespaces());
+        assertEquals("3.1.0", options.getDbVersion());
     }
 
     @Test
