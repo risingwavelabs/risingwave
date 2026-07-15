@@ -226,7 +226,9 @@ impl Sink for IcebergSink {
             }
         }
 
-        let _ = self.create_and_validate_table().await?;
+        let table = self.create_and_validate_table().await?;
+        self.config
+            .validate_manifest_rewrite_format(table.metadata().format_version())?;
         Ok(())
     }
 

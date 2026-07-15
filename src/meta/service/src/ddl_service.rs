@@ -1696,6 +1696,25 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn rewrite_iceberg_table_manifests(
+        &self,
+        request: Request<RewriteIcebergTableManifestsRequest>,
+    ) -> Result<Response<RewriteIcebergTableManifestsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        self.iceberg_compaction_manager
+            .check_and_rewrite_manifests(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to rewrite manifests: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(RewriteIcebergTableManifestsResponse {
+            status: None,
+        }))
+    }
+
     async fn create_iceberg_table(
         &self,
         request: Request<CreateIcebergTableRequest>,

@@ -337,6 +337,9 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        RewriteIcebergTableManifestsRequest {
+            sink_id: SinkId,
+        }
         RisectlResumeBackfillRequest {
             job_id: JobId,
             fragment_id: FragmentId,

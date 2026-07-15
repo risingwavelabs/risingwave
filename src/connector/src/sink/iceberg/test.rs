@@ -18,6 +18,7 @@ use iceberg::spec::{
     FormatVersion, NestedField, NullOrder, PrimitiveType, Schema as IcebergSchema, SortDirection,
     Type,
 };
+use iceberg::transaction::{MANIFEST_MIN_MERGE_COUNT_DEFAULT, MANIFEST_TARGET_SIZE_BYTES_DEFAULT};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
@@ -30,9 +31,10 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType,
-    DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
-    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_MANIFEST_REWRITE,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig,
+    IcebergOrderKeyField, IcebergWriteMode, MANIFEST_REWRITE_MIN_COUNT_TO_MERGE,
+    MANIFEST_REWRITE_TARGET_SIZE_BYTES, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
@@ -391,6 +393,9 @@ fn test_parse_iceberg_config() {
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
+            enable_manifest_rewrite: false,
+            manifest_rewrite_target_size_bytes: None,
+            manifest_rewrite_min_count_to_merge: None,
             max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
@@ -710,6 +715,15 @@ fn test_config_constants_consistency() {
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         "snapshot_expiration_clear_expired_meta_data"
     );
+    assert_eq!(ENABLE_MANIFEST_REWRITE, "enable_manifest_rewrite");
+    assert_eq!(
+        MANIFEST_REWRITE_TARGET_SIZE_BYTES,
+        "manifest_rewrite_target_size_bytes"
+    );
+    assert_eq!(
+        MANIFEST_REWRITE_MIN_COUNT_TO_MERGE,
+        "manifest_rewrite_min_count_to_merge"
+    );
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
     assert_eq!(
         COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
@@ -745,6 +759,9 @@ fn test_parse_compaction_config() {
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
         ("compaction.write_parquet_max_row_group_bytes", "67108864"),
+        ("enable_manifest_rewrite", "true"),
+        ("manifest_rewrite_target_size_bytes", "16777216"),
+        ("manifest_rewrite_min_count_to_merge", "12"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -762,6 +779,11 @@ fn test_parse_compaction_config() {
     assert_eq!(config.write_parquet_compression(), "zstd");
     assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
     assert_eq!(config.write_parquet_max_row_group_bytes(), Some(67_108_864));
+    assert!(config.enable_manifest_rewrite);
+    assert_eq!(config.manifest_rewrite_target_size_bytes, Some(16_777_216));
+    assert_eq!(config.manifest_rewrite_min_count_to_merge, Some(12));
+    assert_eq!(config.manifest_rewrite_target_size_bytes(), 16_777_216);
+    assert_eq!(config.manifest_rewrite_min_count_to_merge(), 12);
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -783,6 +805,17 @@ fn test_parse_compaction_config() {
     assert!(config.enable_snapshot_expiration);
     assert_eq!(config.snapshot_expiration_max_age_millis, None);
     assert_eq!(config.snapshot_expiration_retain_last, None);
+    assert!(!config.enable_manifest_rewrite);
+    assert_eq!(config.manifest_rewrite_target_size_bytes, None);
+    assert_eq!(config.manifest_rewrite_min_count_to_merge, None);
+    assert_eq!(
+        config.manifest_rewrite_target_size_bytes(),
+        MANIFEST_TARGET_SIZE_BYTES_DEFAULT as u64
+    );
+    assert_eq!(
+        config.manifest_rewrite_min_count_to_merge(),
+        MANIFEST_MIN_MERGE_COUNT_DEFAULT as usize
+    );
     assert_eq!(config.max_snapshots_num_before_compaction, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
@@ -810,6 +843,60 @@ fn test_parse_compaction_config() {
     let config = IcebergConfig::from_btreemap(values).unwrap();
     assert!(!config.enable_compaction);
     assert_eq!(config.max_snapshots_num_before_compaction, Some(1000));
+}
+
+#[test]
+fn test_reject_manifest_rewrite_for_v3() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("format_version", "3"),
+        ("enable_manifest_rewrite", "true"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`enable_manifest_rewrite` is not supported for Iceberg format version 3")
+    );
+}
+
+#[test]
+fn test_reject_zero_manifest_rewrite_settings() {
+    for option in [
+        "manifest_rewrite_target_size_bytes",
+        "manifest_rewrite_min_count_to_merge",
+    ] {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            (option, "0"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("`{option}` must be greater than 0"))
+        );
+    }
 }
 
 #[test]
