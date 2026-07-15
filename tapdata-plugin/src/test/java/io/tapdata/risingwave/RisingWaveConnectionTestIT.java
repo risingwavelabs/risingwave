@@ -515,6 +515,37 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void websocketStreamingWritesQualifiedTableIdsToTheirDeclaredSchema() throws Throwable {
+        String targetSchema = "tapdata_ws_schema_" + shortSuffix();
+        String tableName = "orders";
+        String tableId = targetSchema + "." + tableName;
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "streaming", "root", "", "ws://127.0.0.1:4560", "");
+        TapTable table = new TapTable(tableId)
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "varchar"));
+        try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE SCHEMA " + RisingWaveSql.quoteIdentifier(targetSchema));
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableId).after(record(1, "qualified"))),
+                    table, ignored -> { });
+
+            awaitQualifiedName(targetSchema, tableName, 1, "qualified");
+        } finally {
+            connector.stop(context);
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP SCHEMA IF EXISTS " + RisingWaveSql.quoteIdentifier(targetSchema)
+                        + " CASCADE");
+            }
+        }
+    }
+
+    @Test
     void jdbcSupportsSameKeyUpdatePrimaryKeyChangeAndDelete() throws Throwable {
         String tableName = "tapdata_jdbc_dml_" + shortSuffix();
         RisingWaveConnector connector = new RisingWaveConnector();
@@ -939,6 +970,28 @@ class RisingWaveConnectionTestIT {
         do {
             actual = queryQuantityOrNull(tableName, id);
             if (java.util.Objects.equals(expected, actual)) {
+                return;
+            }
+            Thread.sleep(100L);
+        } while (System.nanoTime() < deadline);
+        assertEquals(expected, actual);
+    }
+
+    private static void awaitQualifiedName(String schema, String tableName, int id, String expected)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        String actual = null;
+        do {
+            try (Connection connection = rootConnection();
+                 java.sql.PreparedStatement statement = connection.prepareStatement(
+                         "SELECT name FROM " + RisingWaveSql.quoteIdentifier(schema) + "."
+                                 + RisingWaveSql.quoteIdentifier(tableName) + " WHERE id = ?")) {
+                statement.setInt(1, id);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    actual = resultSet.next() ? resultSet.getString(1) : null;
+                }
+            }
+            if (expected.equals(actual)) {
                 return;
             }
             Thread.sleep(100L);

@@ -489,9 +489,9 @@ public class RisingWaveConnector implements TapConnector {
 
         evictIdleWsClientIfFull();
 
-        String tableName = tableId.contains(".") ? tableId.split("\\.", 2)[1] : tableId;
+        TableReference table = tableReference(tableId);
         WsIngestClient client = new WsIngestClient(
-                wsIngestEndpoint, wsDatabase, schema, tableName, wsWebhookSecret);
+                wsIngestEndpoint, wsDatabase, table.schema, table.table, wsWebhookSecret);
         client.connect();
         WsClientEntry created = new WsClientEntry(client);
         boolean cached = wsClients.size() < MAX_CACHED_WS_CLIENTS;
