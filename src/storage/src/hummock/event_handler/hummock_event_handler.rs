@@ -34,6 +34,7 @@ use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::version::LocalHummockVersionDelta;
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use risingwave_pb::meta::{PbServingTableVnodeMappings, PbTableRefillRuntimeConfig};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
@@ -45,8 +46,6 @@ use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-#[cfg(test)]
-use crate::hummock::event_handler::refiller::TableCacheRefillContextMap;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
@@ -196,29 +195,22 @@ struct HummockEventHandlerMetrics {
     event_handler_on_apply_table_refill_runtime_config: Histogram,
 }
 
-fn table_cache_refill_policies_to_map(
-    policies: risingwave_pb::meta::TableCacheRefillPolicies,
-) -> HashMap<TableId, CacheRefillPolicy> {
-    policies
-        .policies
-        .into_iter()
-        .filter_map(|pb_policy| {
-            let table_id = TableId::from(pb_policy.table_id);
-            let pb_policy_enum = match pb_policy.get_policy() {
-                Ok(policy) => policy,
-                Err(_) => {
-                    tracing::warn!(
-                        table_id = pb_policy.table_id,
-                        policy = pb_policy.policy,
-                        "ignore unknown table cache refill policy"
-                    );
-                    return None;
-                }
-            };
-            let policy = CacheRefillPolicy::from_protobuf(pb_policy_enum)?;
-            Some((table_id, policy))
-        })
-        .collect()
+fn table_cache_refill_policy_from_protobuf(
+    pb_policy: risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy,
+) -> Option<(TableId, CacheRefillPolicy)> {
+    let table_id = TableId::from(pb_policy.table_id);
+    let policy = match PbCacheRefillPolicy::try_from(pb_policy.policy) {
+        Ok(policy) => CacheRefillPolicy::from_protobuf(policy)?,
+        Err(_) => {
+            tracing::warn!(
+                table_id = pb_policy.table_id,
+                policy = pb_policy.policy,
+                "ignore unknown table cache refill policy"
+            );
+            return None;
+        }
+    };
+    Some((table_id, policy))
 }
 
 fn serving_table_vnode_mappings_to_map(
@@ -377,8 +369,13 @@ impl HummockEventHandler {
         config: PbTableRefillRuntimeConfig,
     ) {
         if let Some(policies) = config.table_cache_refill_policies {
-            refiller
-                .replace_table_cache_refill_policies(table_cache_refill_policies_to_map(policies));
+            let policies = policies
+                .table_policies
+                .into_iter()
+                .chain(policies.internal_table_policies)
+                .filter_map(table_cache_refill_policy_from_protobuf)
+                .collect();
+            refiller.replace_table_cache_refill_policies(policies);
         }
 
         if let Some(mappings) = config.serving_table_vnode_mappings {
@@ -541,13 +538,6 @@ impl HummockEventHandler {
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
         self.uploader.buffer_tracker()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn table_cache_refill_context_map(
-        &self,
-    ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
-        self.refiller.table_cache_refill_context_map()
     }
 }
 
@@ -1137,7 +1127,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
-    use parking_lot::{Mutex, RwLock};
+    use parking_lot::Mutex;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::Role;
@@ -1148,7 +1138,6 @@ mod tests {
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
     use risingwave_pb::meta::serving_table_vnode_mappings::PbServingTableVnodeMapping;
-    use risingwave_pb::meta::subscribe_response::Operation;
     use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
     use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
     use risingwave_pb::meta::{
@@ -1167,295 +1156,249 @@ mod tests {
         prepare_uploader_order_test_spawn_task_fn,
     };
     use crate::hummock::event_handler::{
-        HummockEvent, HummockEventHandler, HummockObserverEvent, HummockReadVersionRef,
-        LocalInstanceGuard, LocalInstanceId,
+        HummockEvent, HummockEventHandler, HummockReadVersionRef, LocalInstanceGuard,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
-    use crate::hummock::store::version::HummockReadVersion;
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
     use crate::store::SealCurrentEpochOptions;
 
-    fn pinned_version_for_test(id: u64) -> PinnedVersion {
-        PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: id.into(),
-                ..Default::default()
-            }),
-            unbounded_channel().0,
-        )
-    }
-
-    fn table_cache_refill_policies_for_test(
-        policies: impl IntoIterator<Item = (TableId, CacheRefillPolicy)>,
-    ) -> TableCacheRefillPolicies {
-        TableCacheRefillPolicies {
-            policies: policies
-                .into_iter()
-                .map(|(table_id, policy)| PbTableCacheRefillPolicy {
-                    table_id: table_id.as_raw_id(),
-                    policy: policy.to_protobuf() as i32,
-                })
-                .collect(),
-        }
-    }
-
-    fn table_refill_runtime_config_for_test(
-        policies: impl IntoIterator<Item = (TableId, CacheRefillPolicy)>,
-        serving_vnodes: HashMap<TableId, Bitmap>,
-    ) -> PbTableRefillRuntimeConfig {
-        PbTableRefillRuntimeConfig {
-            table_cache_refill_policies: Some(table_cache_refill_policies_for_test(policies)),
-            serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
-                mappings: serving_vnodes
-                    .into_iter()
-                    .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                        table_id: table_id.as_raw_id(),
-                        bitmap: Some(bitmap.to_protobuf()),
-                    })
-                    .collect(),
-            }),
-            ..Default::default()
-        }
-    }
-
-    async fn refiller_for_test(role: Role) -> CacheRefiller {
-        let storage_opt = default_opts_for_test();
-        CacheRefiller::new(
-            role,
-            CacheRefillConfig::from_storage_opts(&storage_opt),
-            mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
-        )
-    }
-
-    #[test]
-    fn test_unknown_table_cache_refill_policy_is_ignored() {
-        let table_id = TableId::new(233);
-        let unknown_table_id = TableId::new(234);
-        let policies = super::table_cache_refill_policies_to_map(TableCacheRefillPolicies {
-            policies: vec![
-                PbTableCacheRefillPolicy {
-                    table_id: table_id.as_raw_id(),
-                    policy: PbCacheRefillPolicy::Serving as i32,
-                },
-                PbTableCacheRefillPolicy {
-                    table_id: unknown_table_id.as_raw_id(),
-                    policy: i32::MAX,
-                },
-            ],
-        });
-
-        assert_eq!(policies.len(), 1);
-        assert_eq!(policies.get(&table_id), Some(&CacheRefillPolicy::Serving));
-        assert!(!policies.contains_key(&unknown_table_id));
-    }
-
-    #[test]
-    fn test_serving_table_vnode_mapping_without_bitmap_is_ignored() {
-        let table_id = TableId::new(233);
-        let missing_bitmap_table_id = TableId::new(234);
-        let bitmap = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let mappings = super::serving_table_vnode_mappings_to_map(PbServingTableVnodeMappings {
-            mappings: vec![
-                PbServingTableVnodeMapping {
-                    table_id: table_id.as_raw_id(),
-                    bitmap: Some(bitmap.to_protobuf()),
-                },
-                PbServingTableVnodeMapping {
-                    table_id: missing_bitmap_table_id.as_raw_id(),
-                    bitmap: None,
-                },
-            ],
-        });
-
-        assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings.get(&table_id), Some(&bitmap));
-        assert!(!mappings.contains_key(&missing_bitmap_table_id));
-    }
-
     #[tokio::test]
-    async fn test_table_refill_runtime_config_applies_from_observer_event() {
-        let table_id = TableId::new(233);
-        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let initial_version = pinned_version_for_test(1);
-        let (_observer_event_tx, observer_event_rx) = unbounded_channel();
-        let storage_opt = default_opts_for_test();
-        let metrics = Arc::new(HummockStateStoreMetrics::unused());
-
-        let mut event_handler = HummockEventHandler::new_inner(
-            Role::Serving,
-            observer_event_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
-            CacheRefillConfig::from_storage_opts(&storage_opt),
-            RecentVersions::new(initial_version, 10, metrics.clone()),
-            BufferTracker::from_storage_opts(&storage_opt, &metrics),
-            Arc::new(|_, _| spawn(async { unreachable!("upload task should not be spawned") })),
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        assert!(
-            event_handler
-                .table_cache_refill_context_map()
-                .read()
-                .get(&table_id)
-                .is_none()
-        );
-        event_handler.handle_observer_event(HummockObserverEvent::TableRefillRuntimeConfig(
-            Operation::Snapshot,
-            table_refill_runtime_config_for_test(
-                [(table_id, CacheRefillPolicy::Serving)],
-                HashMap::from([(table_id, serving_vnodes.clone())]),
-            ),
-        ));
-
-        let context_map = event_handler.table_cache_refill_context_map().read();
-        let context = context_map.get(&table_id).unwrap();
-        assert_eq!(context.policy, CacheRefillPolicy::Serving);
-        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
-    }
-
-    #[tokio::test]
-    async fn test_runtime_serving_mapping_update_full_replaces_context() {
+    async fn test_runtime_config_fields_are_independent_full_replacements() {
         let old_table_id = TableId::new(233);
-        let new_table_id = TableId::new(234);
-        let old_serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let new_serving_vnodes = Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 0..8);
-        let mut refiller = refiller_for_test(Role::Serving).await;
-
-        HummockEventHandler::apply_table_refill_runtime_config(
-            &mut refiller,
-            table_refill_runtime_config_for_test(
-                [
-                    (old_table_id, CacheRefillPolicy::Serving),
-                    (new_table_id, CacheRefillPolicy::Serving),
-                ],
-                HashMap::from([(old_table_id, old_serving_vnodes.clone())]),
-            ),
+        let internal_table_id = TableId::new(234);
+        let new_table_id = TableId::new(235);
+        let old_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let new_vnodes = Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 0..8);
+        let storage_opt = default_opts_for_test();
+        let mut refiller = CacheRefiller::new(
+            Role::Both,
+            CacheRefillConfig::from_storage_opts(&storage_opt),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
         );
+
         HummockEventHandler::apply_table_refill_runtime_config(
             &mut refiller,
             PbTableRefillRuntimeConfig {
                 table_cache_refill_policies: Some(TableCacheRefillPolicies {
-                    policies: vec![
-                        PbTableCacheRefillPolicy {
-                            table_id: old_table_id.as_raw_id(),
-                            policy: PbCacheRefillPolicy::Serving as i32,
-                        },
-                        PbTableCacheRefillPolicy {
-                            table_id: new_table_id.as_raw_id(),
-                            policy: PbCacheRefillPolicy::Serving as i32,
-                        },
-                    ],
+                    table_policies: vec![PbTableCacheRefillPolicy {
+                        table_id: old_table_id.as_raw_id(),
+                        policy: PbCacheRefillPolicy::Serving as i32,
+                    }],
+                    internal_table_policies: vec![PbTableCacheRefillPolicy {
+                        table_id: internal_table_id.as_raw_id(),
+                        policy: PbCacheRefillPolicy::Both as i32,
+                    }],
+                }),
+                serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
+                    mappings: vec![PbServingTableVnodeMapping {
+                        table_id: old_table_id.as_raw_id(),
+                        bitmap: Some(old_vnodes.to_protobuf()),
+                    }],
                 }),
                 ..Default::default()
             },
         );
-        {
-            let context_map = refiller.table_cache_refill_context_map().read();
-            let old_context = context_map.get(&old_table_id).unwrap();
-            assert_eq!(old_context.policy, CacheRefillPolicy::Serving);
-            assert_eq!(
-                old_context.serving_vnode_bitmap.as_ref(),
-                Some(&old_serving_vnodes)
-            );
-        }
+        let snapshot = refiller.table_cache_refill_monitor_snapshot();
+        assert_eq!(
+            snapshot.policies,
+            HashMap::from([
+                (old_table_id, CacheRefillPolicy::Serving),
+                (internal_table_id, CacheRefillPolicy::Both),
+            ])
+        );
+        assert_eq!(
+            snapshot.serving_table_vnode_mapping,
+            HashMap::from([(old_table_id, old_vnodes)])
+        );
+
         HummockEventHandler::apply_table_refill_runtime_config(
             &mut refiller,
             PbTableRefillRuntimeConfig {
                 serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                     mappings: vec![PbServingTableVnodeMapping {
                         table_id: new_table_id.as_raw_id(),
-                        bitmap: Some(new_serving_vnodes.to_protobuf()),
+                        bitmap: Some(new_vnodes.to_protobuf()),
                     }],
                 }),
                 ..Default::default()
             },
         );
-
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(
-            context_map
-                .get(&old_table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_none())
-        );
-        let new_context = context_map.get(&new_table_id).unwrap();
-        assert_eq!(new_context.policy, CacheRefillPolicy::Serving);
+        let snapshot = refiller.table_cache_refill_monitor_snapshot();
         assert_eq!(
-            new_context.serving_vnode_bitmap.as_ref(),
-            Some(&new_serving_vnodes)
+            snapshot.policies,
+            HashMap::from([
+                (old_table_id, CacheRefillPolicy::Serving),
+                (internal_table_id, CacheRefillPolicy::Both),
+            ])
         );
+        assert_eq!(
+            snapshot.serving_table_vnode_mapping,
+            HashMap::from([(new_table_id, new_vnodes.clone())])
+        );
+
+        HummockEventHandler::apply_table_refill_runtime_config(
+            &mut refiller,
+            PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(TableCacheRefillPolicies::default()),
+                ..Default::default()
+            },
+        );
+        let snapshot = refiller.table_cache_refill_monitor_snapshot();
+        assert!(snapshot.policies.is_empty());
+        assert_eq!(
+            snapshot.serving_table_vnode_mapping,
+            HashMap::from([(new_table_id, new_vnodes)])
+        );
+
+        HummockEventHandler::apply_table_refill_runtime_config(
+            &mut refiller,
+            PbTableRefillRuntimeConfig {
+                serving_table_vnode_mappings: Some(PbServingTableVnodeMappings::default()),
+                ..Default::default()
+            },
+        );
+        let snapshot = refiller.table_cache_refill_monitor_snapshot();
+        assert!(snapshot.policies.is_empty());
+        assert!(snapshot.serving_table_vnode_mapping.is_empty());
     }
 
     #[test]
-    fn test_local_read_versions_tracks_per_table_vnodes() {
-        fn read_version(
-            table_id: TableId,
-            instance_id: LocalInstanceId,
-            committed_version: &PinnedVersion,
-            vnode_range: std::ops::Range<usize>,
-        ) -> HummockReadVersionRef {
-            Arc::new(RwLock::new(HummockReadVersion::new(
-                table_id,
-                instance_id,
-                committed_version.clone(),
-                Arc::new(Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, vnode_range)),
-            )))
+    fn test_runtime_config_ignores_invalid_entries() {
+        let table_id = TableId::new(233);
+        for policy in [PbCacheRefillPolicy::Unspecified as i32, i32::MAX] {
+            assert!(
+                super::table_cache_refill_policy_from_protobuf(PbTableCacheRefillPolicy {
+                    table_id: table_id.as_raw_id(),
+                    policy,
+                })
+                .is_none()
+            );
         }
 
-        fn assert_vnodes(vnodes: Bitmap, expected: std::ops::Range<usize>) {
+        assert!(
+            super::serving_table_vnode_mappings_to_map(PbServingTableVnodeMappings {
+                mappings: vec![PbServingTableVnodeMapping {
+                    table_id: table_id.as_raw_id(),
+                    bitmap: None,
+                }],
+            })
+            .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_read_version_events_update_refiller_streaming_mapping() {
+        fn assert_vnodes(vnodes: &Bitmap, expected: std::ops::Range<usize>) {
             assert_eq!(vnodes.count_ones(), expected.len());
-            for vnode in expected {
-                assert!(vnodes.is_set(vnode));
-            }
+            assert!(expected.into_iter().all(|vnode| vnodes.is_set(vnode)));
         }
 
         let table_id = TableId::new(233);
         let other_table_id = TableId::new(234);
-        let committed_version = RecentVersions::new(
-            pinned_version_for_test(1),
-            10,
-            Arc::new(HummockStateStoreMetrics::unused()),
-        )
-        .latest_version()
-        .clone();
-        let read_version_1 = read_version(table_id, 1, &committed_version, 0..8);
-        let read_version_2 = read_version(table_id, 2, &committed_version, 8..16);
-        let other_read_version = read_version(other_table_id, 3, &committed_version, 32..40);
+        let (_observer_event_tx, observer_event_rx) = unbounded_channel();
+        let metrics = Arc::new(HummockStateStoreMetrics::unused());
+        let storage_opt = default_opts_for_test();
+        let (spawn_upload_task, _) = prepare_uploader_order_test_spawn_task_fn(false);
+        let pinned_version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+                id: 1.into(),
+                ..Default::default()
+            }),
+            unbounded_channel().0,
+        );
+        let mut event_handler = HummockEventHandler::new_inner(
+            Role::Streaming,
+            observer_event_rx,
+            mock_sstable_store().await,
+            metrics.clone(),
+            CacheRefillConfig::from_storage_opts(&storage_opt),
+            RecentVersions::new(pinned_version, 10, metrics.clone()),
+            BufferTracker::from_storage_opts(&storage_opt, &metrics),
+            spawn_upload_task,
+            CacheRefiller::default_spawn_refill_task(),
+        );
 
-        let mut local_read_versions = super::LocalReadVersions::default();
-        local_read_versions.insert(1, table_id, read_version_1.clone());
-        local_read_versions.insert(2, table_id, read_version_2);
-        local_read_versions.insert(3, other_table_id, other_read_version);
+        let (tx, rx) = oneshot::channel();
+        event_handler.handle_hummock_event(HummockEvent::RegisterReadVersion {
+            table_id,
+            new_read_version_sender: tx,
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 0..8)),
+        });
+        let (_read_version_1, mut guard_1) = rx.await.unwrap();
 
-        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 0..16);
+        let (tx, rx) = oneshot::channel();
+        event_handler.handle_hummock_event(HummockEvent::RegisterReadVersion {
+            table_id,
+            new_read_version_sender: tx,
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 8..16)),
+        });
+        let (_read_version_2, mut guard_2) = rx.await.unwrap();
+
+        let (tx, rx) = oneshot::channel();
+        event_handler.handle_hummock_event(HummockEvent::RegisterReadVersion {
+            table_id: other_table_id,
+            new_read_version_sender: tx,
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 32..40)),
+        });
+        let (_other_read_version, mut other_guard) = rx.await.unwrap();
+
+        let snapshot = event_handler.refiller.table_cache_refill_monitor_snapshot();
+        let vnodes = snapshot
+            .streaming_table_vnode_mapping
+            .get(&table_id)
+            .unwrap();
+        assert_vnodes(vnodes, 0..16);
         assert_vnodes(
-            local_read_versions.table_vnodes(other_table_id).unwrap(),
+            snapshot
+                .streaming_table_vnode_mapping
+                .get(&other_table_id)
+                .unwrap(),
             32..40,
         );
 
-        read_version_1
-            .write()
-            .update_vnode_bitmap(Arc::new(Bitmap::from_range(
-                VirtualNode::COUNT_FOR_TEST,
-                16..24,
-            )));
-        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 8..24);
+        guard_1.event_sender.take();
+        event_handler.handle_hummock_event(HummockEvent::DestroyReadVersion {
+            instance_id: guard_1.instance_id,
+        });
+        let snapshot = event_handler.refiller.table_cache_refill_monitor_snapshot();
+        assert_vnodes(
+            snapshot
+                .streaming_table_vnode_mapping
+                .get(&table_id)
+                .unwrap(),
+            8..16,
+        );
 
-        let (removed_table_id, removed_read_version) = local_read_versions.remove(1);
-        assert_eq!(removed_table_id, table_id);
-        assert!(Arc::ptr_eq(&removed_read_version, &read_version_1));
-        assert_vnodes(local_read_versions.table_vnodes(table_id).unwrap(), 8..16);
+        guard_2.event_sender.take();
+        event_handler.handle_hummock_event(HummockEvent::DestroyReadVersion {
+            instance_id: guard_2.instance_id,
+        });
+        let snapshot = event_handler.refiller.table_cache_refill_monitor_snapshot();
+        assert!(
+            !snapshot
+                .streaming_table_vnode_mapping
+                .contains_key(&table_id)
+        );
+        assert_vnodes(
+            snapshot
+                .streaming_table_vnode_mapping
+                .get(&other_table_id)
+                .unwrap(),
+            32..40,
+        );
 
-        local_read_versions.remove(2);
-        assert!(local_read_versions.table_vnodes(table_id).is_none());
-        assert!(!local_read_versions.is_empty());
-        local_read_versions.remove(3);
-        assert!(local_read_versions.is_empty());
+        other_guard.event_sender.take();
+        event_handler.handle_hummock_event(HummockEvent::DestroyReadVersion {
+            instance_id: other_guard.instance_id,
+        });
     }
 
     #[tokio::test]
@@ -1611,7 +1554,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_clear_tables() {
+    async fn test_clear_one_table_preserves_other_table_uploads() {
         let table_id1 = TableId::new(1);
         let table_id2 = TableId::new(2);
         let epoch0 = test_epoch(233);
@@ -1878,18 +1821,24 @@ mod tests {
 
         task1_1_finish_tx.send(()).unwrap();
         let sync_data1 = task1_1_rx.await.unwrap().unwrap();
-        sync_data1
-            .uploaded_ssts
-            .iter()
-            .all(|sst| sst.epochs() == &vec![epoch1]);
+        assert!(!sync_data1.uploaded_ssts.is_empty());
+        assert!(
+            sync_data1
+                .uploaded_ssts
+                .iter()
+                .all(|sst| sst.epochs().as_slice() == [epoch1])
+        );
         task1_2_finish_tx.send(()).unwrap();
         assert!(poll_fn(|cx| Poll::Ready(sync_rx2.poll_unpin(cx).is_pending())).await);
         task1_2_2_finish_tx.send(()).unwrap();
         let sync_data2 = sync_rx2.await.unwrap().unwrap();
-        sync_data2
-            .uploaded_ssts
-            .iter()
-            .all(|sst| sst.epochs() == &vec![epoch2]);
+        assert!(!sync_data2.uploaded_ssts.is_empty());
+        assert!(
+            sync_data2
+                .uploaded_ssts
+                .iter()
+                .all(|sst| sst.epochs().as_slice() == [epoch2])
+        );
 
         send_event(HummockEvent::Shutdown);
         join_handle.await.unwrap();

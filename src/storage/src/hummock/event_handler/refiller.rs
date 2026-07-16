@@ -25,7 +25,6 @@ use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
@@ -381,7 +380,6 @@ pub(crate) struct CacheRefiller {
     table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
     streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
-    table_cache_refill_context_map: Arc<RwLock<TableCacheRefillContextMap>>,
 }
 
 impl CacheRefiller {
@@ -393,7 +391,6 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let table_cache_refill_context_map = Arc::new(RwLock::new(HashMap::new()));
         let default_policy = config.table_cache_refill_default_policy;
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
@@ -412,7 +409,6 @@ impl CacheRefiller {
             table_cache_refill_policies: HashMap::new(),
             streaming_table_vnode_mapping: HashMap::new(),
             serving_table_vnode_mapping: HashMap::new(),
-            table_cache_refill_context_map,
         }
     }
 
@@ -446,15 +442,18 @@ impl CacheRefiller {
     }
 
     fn new_cache_refill_context(&self, deltas: &[SstDeltaInfo]) -> CacheRefillContext {
-        let table_ids = Self::table_ids_in_deltas(deltas);
+        let table_ids = deltas.iter().flat_map(|delta| {
+            delta
+                .insert_sst_infos
+                .iter()
+                .flat_map(|sst| sst.table_ids.iter().copied())
+        });
         CacheRefillContext {
             config: self.config.clone(),
             meta_refill_concurrency: self.meta_refill_concurrency.clone(),
             concurrency: self.concurrency.clone(),
             sstable_store: self.sstable_store.clone(),
-            table_cache_refill_context_map: Arc::new(
-                self.get_table_cache_refill_context_map(&table_ids),
-            ),
+            table_cache_refill_context_map: Arc::new(self.table_cache_refill_contexts(table_ids)),
         }
     }
 
@@ -462,34 +461,20 @@ impl CacheRefiller {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    /// Replaces the complete explicit table refill policy map and rebuilds affected tables.
+    /// Replaces the complete policy snapshot applicable to this worker.
     pub(crate) fn replace_table_cache_refill_policies(
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
-        let table_ids = self
-            .table_cache_refill_policies
-            .keys()
-            .chain(policies.keys())
-            .copied()
-            .collect::<HashSet<_>>();
         self.table_cache_refill_policies = policies;
-        self.rebuild_table_cache_refill_contexts(table_ids);
     }
 
-    /// Replaces the complete serving vnode mapping snapshot and rebuilds affected tables.
+    /// Replaces the complete serving vnode mapping snapshot.
     pub(crate) fn replace_serving_table_vnode_mapping(
         &mut self,
         mapping: HashMap<TableId, Bitmap>,
     ) {
-        let table_ids = self
-            .serving_table_vnode_mapping
-            .keys()
-            .chain(mapping.keys())
-            .copied()
-            .collect::<HashSet<_>>();
         self.serving_table_vnode_mapping = mapping;
-        self.rebuild_table_cache_refill_contexts(table_ids);
     }
 
     pub(crate) fn update_streaming_table_vnodes(
@@ -503,115 +488,58 @@ impl CacheRefiller {
         } else {
             self.streaming_table_vnode_mapping.remove(&table_id);
         }
-        self.rebuild_table_cache_refill_contexts([table_id]);
     }
 
-    fn rebuild_table_cache_refill_contexts(&self, table_ids: impl IntoIterator<Item = TableId>) {
-        let mut table_cache_refill_context_map = self.table_cache_refill_context_map.write();
-        for table_id in table_ids {
-            self.rebuild_table_cache_refill_context(&mut table_cache_refill_context_map, table_id);
-        }
-    }
-
-    fn rebuild_table_cache_refill_context(
+    fn table_cache_refill_contexts(
         &self,
-        table_cache_refill_context_map: &mut TableCacheRefillContextMap,
-        table_id: TableId,
-    ) {
-        tracing::debug!(?table_id, "rebuild table cache refill context for table");
-
-        let policy = self
-            .table_cache_refill_policies
-            .get(&table_id)
-            .copied()
-            .unwrap_or(self.default_policy);
-
-        if policy.is_streaming_scoped() && !self.role.for_streaming() {
-            tracing::warn!(
-                ?table_id,
-                ?policy,
-                role = ?self.role,
-                "skip materializing streaming vnode bitmap because worker role cannot provide streaming ownership evidence",
-            );
-        }
-        let streaming_vnode_bitmap = (self.role.for_streaming() && policy.is_streaming_scoped())
-            .then(|| self.streaming_table_vnode_mapping.get(&table_id).cloned())
-            .flatten();
-        if policy.is_serving_scoped() && !self.role.for_serving() {
-            tracing::warn!(
-                ?table_id,
-                ?policy,
-                role = ?self.role,
-                "skip materializing serving vnode bitmap because worker role cannot provide serving ownership evidence",
-            );
-        }
-        // `Enabled` normally does not use bitmap filtering. The only exception is L0
-        // insert-only refill, where serving workers still need serving-locality evidence.
-        let serving_vnode_bitmap = (self.role.for_serving()
-            && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
-        .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
-        .flatten();
-
-        if self.table_cache_refill_policies.contains_key(&table_id)
-            || streaming_vnode_bitmap.is_some()
-            || serving_vnode_bitmap.is_some()
-        {
-            table_cache_refill_context_map.insert(
-                table_id,
-                TableCacheRefillContext {
-                    streaming_vnode_bitmap,
-                    serving_vnode_bitmap,
-                    policy,
-                },
-            );
-        } else {
-            table_cache_refill_context_map.remove(&table_id);
-        }
-    }
-
-    fn table_ids_in_deltas(deltas: &[SstDeltaInfo]) -> HashSet<TableId> {
-        deltas
-            .iter()
-            .flat_map(|delta| {
-                delta
-                    .insert_sst_infos
-                    .iter()
-                    .flat_map(|sst| sst.table_ids.iter().copied())
-            })
-            .collect()
-    }
-
-    fn get_table_cache_refill_context_map(
-        &self,
-        table_ids: &HashSet<TableId>,
+        table_ids: impl IntoIterator<Item = TableId>,
     ) -> TableCacheRefillContextMap {
-        let table_cache_refill_context_map = self.table_cache_refill_context_map.read();
+        let for_streaming = self.role.for_streaming();
+        let for_serving = self.role.for_serving();
         table_ids
-            .iter()
-            .map(|table_id| {
-                let context = table_cache_refill_context_map
-                    .get(table_id)
-                    .cloned()
-                    .unwrap_or(TableCacheRefillContext {
-                        streaming_vnode_bitmap: None,
-                        serving_vnode_bitmap: None,
-                        policy: self.default_policy,
-                    });
-                (*table_id, context)
+            .into_iter()
+            .filter_map(|table_id| {
+                if for_serving
+                    && !for_streaming
+                    && !self.serving_table_vnode_mapping.contains_key(&table_id)
+                {
+                    return None;
+                }
+                let policy = self
+                    .table_cache_refill_policies
+                    .get(&table_id)
+                    .copied()
+                    .unwrap_or(self.default_policy);
+                let streaming_vnode_bitmap = (for_streaming && policy.is_streaming_scoped())
+                    .then(|| self.streaming_table_vnode_mapping.get(&table_id).cloned())
+                    .flatten();
+                // `Enabled` normally does not use bitmap filtering. The only exception is L0
+                // insert-only refill, where serving workers still need serving-locality evidence.
+                let serving_vnode_bitmap = (for_serving
+                    && (policy.is_serving_scoped() || policy.is_unscoped_enabled()))
+                .then(|| self.serving_table_vnode_mapping.get(&table_id).cloned())
+                .flatten();
+                Some((
+                    table_id,
+                    TableCacheRefillContext {
+                        streaming_vnode_bitmap,
+                        serving_vnode_bitmap,
+                        policy,
+                    },
+                ))
             })
             .collect()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn table_cache_refill_context_map(
-        &self,
-    ) -> &Arc<RwLock<TableCacheRefillContextMap>> {
-        &self.table_cache_refill_context_map
     }
 
     pub(crate) fn table_cache_refill_monitor_snapshot(&self) -> TableCacheRefillMonitorSnapshot {
+        let table_ids = self
+            .table_cache_refill_policies
+            .keys()
+            .chain(self.streaming_table_vnode_mapping.keys())
+            .chain(self.serving_table_vnode_mapping.keys())
+            .copied();
         TableCacheRefillMonitorSnapshot {
-            contexts: self.table_cache_refill_context_map.read().clone(),
+            contexts: self.table_cache_refill_contexts(table_ids),
             policies: self.table_cache_refill_policies.clone(),
             default_policy: self.default_policy,
             streaming_table_vnode_mapping: self.streaming_table_vnode_mapping.clone(),
@@ -1213,13 +1141,6 @@ mod tests {
         )
     }
 
-    async fn gen_test_sst(
-        table_id: TableId,
-        sstable_store: SstableStoreRef,
-    ) -> (TableHolder, SstableInfo) {
-        gen_test_sst_with_object_id(table_id, sstable_store, 1).await
-    }
-
     async fn gen_test_sst_with_object_id(
         table_id: TableId,
         sstable_store: SstableStoreRef,
@@ -1263,7 +1184,8 @@ mod tests {
                 Some(recent_filter) => mock_sstable_store_with_recent_filter(recent_filter).await,
                 None => mock_sstable_store().await,
             };
-            let (sst, sst_info) = gen_test_sst(table_id, sstable_store.clone()).await;
+            let (sst, sst_info) =
+                gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1).await;
             Self {
                 table_id,
                 sstable_store,
@@ -1280,7 +1202,7 @@ mod tests {
             serving_vnode_bitmap: Option<Bitmap>,
             configure: impl FnOnce(&mut CacheRefillConfig),
         ) -> CacheRefillContext {
-            let mut config = test_refill_config(policy);
+            let mut config = test_refill_config(CacheRefillPolicy::Enabled);
             config.data_refill_levels.insert(0);
             configure(&mut config);
             CacheRefillContext {
@@ -1339,100 +1261,123 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_serving_snapshot_updates_table_context_lifecycle() {
+    async fn test_table_cache_refill_contexts_by_role_and_policy() {
+        struct Case {
+            name: &'static str,
+            role: Role,
+            default_policy: CacheRefillPolicy,
+            policy: Option<CacheRefillPolicy>,
+            has_streaming_vnodes: bool,
+            has_serving_vnodes: bool,
+            expected: Option<(CacheRefillPolicy, bool, bool)>,
+        }
+
+        let cases = [
+            Case {
+                name: "streaming role uses streaming side of Both",
+                role: Role::Streaming,
+                default_policy: CacheRefillPolicy::Disabled,
+                policy: Some(CacheRefillPolicy::Both),
+                has_streaming_vnodes: true,
+                has_serving_vnodes: true,
+                expected: Some((CacheRefillPolicy::Both, true, false)),
+            },
+            Case {
+                name: "serving role uses serving side of Both",
+                role: Role::Serving,
+                default_policy: CacheRefillPolicy::Disabled,
+                policy: Some(CacheRefillPolicy::Both),
+                has_streaming_vnodes: true,
+                has_serving_vnodes: true,
+                expected: Some((CacheRefillPolicy::Both, false, true)),
+            },
+            Case {
+                name: "both role keeps both sides",
+                role: Role::Both,
+                default_policy: CacheRefillPolicy::Disabled,
+                policy: Some(CacheRefillPolicy::Both),
+                has_streaming_vnodes: true,
+                has_serving_vnodes: true,
+                expected: Some((CacheRefillPolicy::Both, true, true)),
+            },
+            Case {
+                name: "streaming scope without ownership has no usable bitmap",
+                role: Role::Streaming,
+                default_policy: CacheRefillPolicy::Disabled,
+                policy: Some(CacheRefillPolicy::Streaming),
+                has_streaming_vnodes: false,
+                has_serving_vnodes: false,
+                expected: Some((CacheRefillPolicy::Streaming, false, false)),
+            },
+            Case {
+                name: "pure serving worker excludes unmapped table",
+                role: Role::Serving,
+                default_policy: CacheRefillPolicy::Disabled,
+                policy: Some(CacheRefillPolicy::Serving),
+                has_streaming_vnodes: false,
+                has_serving_vnodes: false,
+                expected: None,
+            },
+            Case {
+                name: "default Enabled retains serving ownership",
+                role: Role::Serving,
+                default_policy: CacheRefillPolicy::Enabled,
+                policy: None,
+                has_streaming_vnodes: false,
+                has_serving_vnodes: true,
+                expected: Some((CacheRefillPolicy::Enabled, false, true)),
+            },
+            Case {
+                name: "explicit policy overrides default",
+                role: Role::Serving,
+                default_policy: CacheRefillPolicy::Enabled,
+                policy: Some(CacheRefillPolicy::Disabled),
+                has_streaming_vnodes: false,
+                has_serving_vnodes: true,
+                expected: Some((CacheRefillPolicy::Disabled, false, false)),
+            },
+        ];
+
         let table_id = TableId::from(233);
-        let removed_table_id = TableId::from(234);
-        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let mut refiller = CacheRefiller::new(
-            Role::Serving,
-            test_refill_config(CacheRefillPolicy::Disabled),
-            mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
-        );
+        let vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let sstable_store = mock_sstable_store().await;
+        for case in cases {
+            let mut refiller = CacheRefiller::new(
+                case.role,
+                test_refill_config(case.default_policy),
+                sstable_store.clone(),
+                CacheRefiller::default_spawn_refill_task(),
+            );
+            if let Some(policy) = case.policy {
+                refiller.replace_table_cache_refill_policies(HashMap::from([(table_id, policy)]));
+            }
+            if case.has_streaming_vnodes {
+                refiller.update_streaming_table_vnodes(table_id, Some(vnodes.clone()));
+            }
+            if case.has_serving_vnodes {
+                refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+                    table_id,
+                    vnodes.clone(),
+                )]));
+            }
 
-        refiller.replace_table_cache_refill_policies(HashMap::from([
-            (table_id, CacheRefillPolicy::Serving),
-            (removed_table_id, CacheRefillPolicy::Serving),
-        ]));
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(
-            context_map
-                .get(&table_id)
-                .is_none_or(|context| context.serving_vnode_bitmap.is_none())
-        );
-        drop(context_map);
-
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([
-            (table_id, serving_vnodes.clone()),
-            (removed_table_id, serving_vnodes.clone()),
-        ]));
-
-        let context_map = refiller.table_cache_refill_context_map().read();
-        let context = context_map.get(&table_id).unwrap();
-        assert!(context.streaming_vnode_bitmap.is_none());
-        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&serving_vnodes));
-        assert!(
-            context_map
-                .get(&removed_table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_some())
-        );
-        drop(context_map);
-
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
-            table_id,
-            serving_vnodes.clone(),
-        )]));
-
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert_eq!(
-            context_map
-                .get(&table_id)
-                .and_then(|context| context.serving_vnode_bitmap.as_ref()),
-            Some(&serving_vnodes)
-        );
-        assert!(
-            context_map
-                .get(&removed_table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_none())
-        );
+            let contexts = refiller.table_cache_refill_contexts([table_id]);
+            let actual = contexts.get(&table_id).map(|context| {
+                (
+                    context.policy,
+                    context.streaming_vnode_bitmap.is_some(),
+                    context.serving_vnode_bitmap.is_some(),
+                )
+            });
+            assert_eq!(actual, case.expected, "{}", case.name);
+        }
     }
 
     #[tokio::test]
-    async fn test_policy_runtime_config_replacement_removes_context_without_active_vnodes() {
+    async fn test_refill_task_captures_runtime_context_snapshot() {
         let table_id = TableId::from(233);
-        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
-        let mut refiller = CacheRefiller::new(
-            Role::Serving,
-            test_refill_config(CacheRefillPolicy::Disabled),
-            mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, serving_vnodes)]));
-        refiller.replace_table_cache_refill_policies(HashMap::from([(
-            table_id,
-            CacheRefillPolicy::Serving,
-        )]));
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(
-            context_map
-                .get(&table_id)
-                .is_some_and(|context| context.serving_vnode_bitmap.is_some())
-        );
-        drop(context_map);
-
-        refiller.replace_table_cache_refill_policies(HashMap::new());
-
-        let context_map = refiller.table_cache_refill_context_map().read();
-        assert!(context_map.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_refill_task_materializes_context_for_delta_tables() {
-        let explicit_table_id = TableId::from(233);
-        let default_table_id = TableId::from(234);
-        let excluded_table_id = TableId::from(235);
-        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let old_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let new_vnodes = Bitmap::from_range(VirtualNode::COUNT_FOR_TEST, 0..8);
         let captured_context = Arc::new(Mutex::new(None::<CacheRefillContext>));
         let captured_context_clone = captured_context.clone();
         let spawn_refill_task: SpawnRefillTask = Arc::new(move |_, context, _, _| {
@@ -1440,29 +1385,23 @@ mod tests {
             tokio::spawn(async {})
         });
         let mut refiller = CacheRefiller::new(
-            Role::Both,
+            Role::Serving,
             test_refill_config(CacheRefillPolicy::Enabled),
             mock_sstable_store().await,
             spawn_refill_task,
         );
 
-        refiller.replace_table_cache_refill_policies(HashMap::from([
-            (explicit_table_id, CacheRefillPolicy::Serving),
-            (excluded_table_id, CacheRefillPolicy::Serving),
-        ]));
-        refiller.update_streaming_table_vnodes(
-            default_table_id,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-        );
-        refiller.replace_serving_table_vnode_mapping(HashMap::from([
-            (explicit_table_id, serving_vnodes.clone()),
-            (excluded_table_id, serving_vnodes.clone()),
-        ]));
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Serving,
+        )]));
+        refiller
+            .replace_serving_table_vnode_mapping(HashMap::from([(table_id, old_vnodes.clone())]));
 
         refiller.start_cache_refill(
             vec![SstDeltaInfo {
                 insert_sst_infos: vec![SstableInfo::from(SstableInfoInner {
-                    table_ids: vec![explicit_table_id, default_table_id],
+                    table_ids: vec![table_id],
                     ..Default::default()
                 })],
                 ..Default::default()
@@ -1470,80 +1409,119 @@ mod tests {
             pinned_version_for_test(),
             pinned_version_for_test(),
         );
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Disabled,
+        )]));
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, new_vnodes)]));
 
         let captured_context = captured_context.lock();
-        let table_cache_refill_context_map = &captured_context
+        let context = captured_context
             .as_ref()
             .unwrap()
-            .table_cache_refill_context_map;
-        let explicit_context = table_cache_refill_context_map
-            .get(&explicit_table_id)
+            .table_cache_refill_context_map
+            .get(&table_id)
             .unwrap();
-        assert_eq!(explicit_context.policy, CacheRefillPolicy::Serving);
-        assert_eq!(
-            explicit_context.serving_vnode_bitmap.as_ref(),
-            Some(&serving_vnodes)
-        );
-
-        let default_context = table_cache_refill_context_map
-            .get(&default_table_id)
-            .unwrap();
-        assert_eq!(default_context.policy, CacheRefillPolicy::Enabled);
-        assert!(default_context.streaming_vnode_bitmap.is_none());
-        assert!(default_context.serving_vnode_bitmap.is_none());
-        assert!(!table_cache_refill_context_map.contains_key(&excluded_table_id));
+        assert_eq!(context.policy, CacheRefillPolicy::Serving);
+        assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&old_vnodes));
     }
 
     #[tokio::test]
-    async fn test_l0_normal_data_refill_applies_table_cache_refill_policy() {
+    async fn test_normal_refill_applies_policy_and_vnode_ownership() {
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
         let delta = fixture.normal_l0_delta();
-        let enabled_context = fixture.context(CacheRefillPolicy::Enabled, None, None, |_| {});
-        let enabled_tasks = fixture.generate(&enabled_context, &delta).await;
-        assert!(
-            !enabled_tasks.is_empty(),
-            "L0 refill should reach task generation before the table policy filter"
-        );
+        let owned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0]);
+        let unowned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1]);
+        let cases = vec![
+            ("Enabled", CacheRefillPolicy::Enabled, None, None, true),
+            (
+                "Disabled",
+                CacheRefillPolicy::Disabled,
+                Some(owned.clone()),
+                Some(owned.clone()),
+                false,
+            ),
+            (
+                "Streaming match",
+                CacheRefillPolicy::Streaming,
+                Some(owned.clone()),
+                None,
+                true,
+            ),
+            (
+                "Streaming miss",
+                CacheRefillPolicy::Streaming,
+                Some(unowned.clone()),
+                None,
+                false,
+            ),
+            (
+                "Streaming ownership missing",
+                CacheRefillPolicy::Streaming,
+                None,
+                None,
+                false,
+            ),
+            (
+                "Serving match",
+                CacheRefillPolicy::Serving,
+                None,
+                Some(owned.clone()),
+                true,
+            ),
+            (
+                "Serving miss",
+                CacheRefillPolicy::Serving,
+                None,
+                Some(unowned.clone()),
+                false,
+            ),
+            (
+                "Serving ownership missing",
+                CacheRefillPolicy::Serving,
+                None,
+                None,
+                false,
+            ),
+            (
+                "Both streaming match",
+                CacheRefillPolicy::Both,
+                Some(owned.clone()),
+                Some(unowned.clone()),
+                true,
+            ),
+            (
+                "Both serving match",
+                CacheRefillPolicy::Both,
+                Some(unowned.clone()),
+                Some(owned),
+                true,
+            ),
+            (
+                "Both misses",
+                CacheRefillPolicy::Both,
+                Some(unowned.clone()),
+                Some(unowned),
+                false,
+            ),
+        ];
 
-        let disabled_context = fixture.context(CacheRefillPolicy::Disabled, None, None, |_| {});
-        let disabled_tasks = fixture.generate(&disabled_context, &delta).await;
-
-        assert!(
-            disabled_tasks.is_empty(),
-            "L0 should skip inheritance filter but still apply table cache refill policy"
-        );
+        for (name, policy, streaming_vnodes, serving_vnodes, should_refill) in cases {
+            let context = fixture.context(policy, streaming_vnodes, serving_vnodes, |_| {});
+            assert_eq!(
+                !fixture.generate(&context, &delta).await.is_empty(),
+                should_refill,
+                "{name}"
+            );
+        }
     }
 
     #[tokio::test]
-    async fn test_normal_refill_orders_policy_before_recent_admission() {
+    async fn test_normal_refill_applies_recent_and_inheritance_filters() {
         let recent_filter = SimpleRecentFilter::new(3, Duration::from_secs(60));
         let fixture =
             DataRefillGeneratorTestFixture::new(Some(Arc::new(recent_filter.clone().into()))).await;
         let delta = fixture.normal_l0_delta();
-
-        let enabled_context = fixture.context(CacheRefillPolicy::Enabled, None, None, |config| {
-            config.skip_recent_filter = false;
-        });
-        assert!(
-            fixture.generate(&enabled_context, &delta).await.is_empty(),
-            "default Enabled must remain gated by the recent filter"
-        );
-
-        let streaming_context = fixture.context(
-            CacheRefillPolicy::Streaming,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            None,
-            |config| {
-                config.skip_recent_filter = false;
-            },
-        );
-        assert!(
-            fixture
-                .generate(&streaming_context, &delta)
-                .await
-                .is_empty(),
-            "explicit Streaming policy is not an implicit skip_recent_filter"
-        );
 
         let serving_context = fixture.context(
             CacheRefillPolicy::Serving,
@@ -1556,19 +1534,6 @@ mod tests {
         assert!(
             fixture.generate(&serving_context, &delta).await.is_empty(),
             "explicit Serving policy is not an implicit skip_recent_filter"
-        );
-
-        let disabled_context = fixture.context(
-            CacheRefillPolicy::Disabled,
-            None,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            |config| {
-                config.skip_recent_filter = false;
-            },
-        );
-        assert!(
-            fixture.generate(&disabled_context, &delta).await.is_empty(),
-            "Disabled policy still has the highest priority"
         );
 
         recent_filter.insert((fixture.deleted_sst_object_id, usize::MAX));
@@ -1654,126 +1619,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_l0_insert_only_refill_requires_serving_ownership() {
+    async fn test_l0_insert_only_refill_policy_uses_serving_ownership() {
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
-        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let delta = fixture.l0_insert_only_delta();
-
-        let enabled_without_serving =
-            fixture.context(CacheRefillPolicy::Enabled, None, None, |_| {});
-        let enabled_without_serving_tasks =
-            fixture.generate(&enabled_without_serving, &delta).await;
-        assert!(
-            enabled_without_serving_tasks.is_empty(),
-            "default Enabled must not unconditionally refill L0 insert-only SSTs"
-        );
-
-        let streaming_context = fixture.context(
-            CacheRefillPolicy::Streaming,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            None,
-            |_| {},
-        );
-        let streaming_tasks = fixture.generate(&streaming_context, &delta).await;
-        assert!(
-            streaming_tasks.is_empty(),
-            "pure streaming L0 insert-only SSTs are already warmed by the uploader"
-        );
-
-        let enabled_serving_context = fixture.context(
-            CacheRefillPolicy::Enabled,
-            None,
-            Some(serving_vnodes.clone()),
-            |_| {},
-        );
-        let enabled_serving_tasks = fixture.generate(&enabled_serving_context, &delta).await;
-        assert!(
-            !enabled_serving_tasks.is_empty(),
-            "Enabled is table-level allow, but L0 insert-only still needs serving ownership"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_l0_insert_only_block_refill_decision_uses_serving_ownership() {
-        let table_id = TableId::from(233);
-        let (sst, _) = gen_test_sst(table_id, mock_sstable_store().await).await;
-        let build_context =
-            |policy, streaming_vnode_bitmap, serving_vnode_bitmap| super::TableCacheRefillContext {
-                streaming_vnode_bitmap,
-                serving_vnode_bitmap,
-                policy,
-            };
-
         let cases = [
             (
                 "Enabled + serving overlap",
-                build_context(
-                    CacheRefillPolicy::Enabled,
-                    None,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                ),
+                CacheRefillPolicy::Enabled,
+                None,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
                 true,
             ),
             (
-                "Enabled + streaming overlap only",
-                build_context(
-                    CacheRefillPolicy::Enabled,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                    None,
-                ),
+                "Enabled without serving ownership",
+                CacheRefillPolicy::Enabled,
+                None,
+                None,
                 false,
             ),
             (
                 "Serving + serving overlap",
-                build_context(
-                    CacheRefillPolicy::Serving,
-                    None,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                ),
+                CacheRefillPolicy::Serving,
+                None,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
                 true,
             ),
             (
-                "Streaming + streaming overlap",
-                build_context(
-                    CacheRefillPolicy::Streaming,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                    None,
-                ),
+                "Serving without serving ownership",
+                CacheRefillPolicy::Serving,
+                None,
+                None,
                 false,
             ),
             (
-                "Both + streaming overlap + serving empty",
-                build_context(
-                    CacheRefillPolicy::Both,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                    Some(Bitmap::zeros(VirtualNode::COUNT_FOR_TEST)),
-                ),
+                "Streaming + streaming overlap",
+                CacheRefillPolicy::Streaming,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                None,
+                false,
+            ),
+            (
+                "Both + streaming overlap + serving non-overlap",
+                CacheRefillPolicy::Both,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1])),
                 false,
             ),
             (
                 "Both + serving overlap",
-                build_context(
-                    CacheRefillPolicy::Both,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                ),
+                CacheRefillPolicy::Both,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
                 true,
             ),
             (
                 "Disabled + serving overlap",
-                build_context(
-                    CacheRefillPolicy::Disabled,
-                    None,
-                    Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                ),
+                CacheRefillPolicy::Disabled,
+                None,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
                 false,
             ),
         ];
 
-        for (name, context, expected) in cases {
+        for (name, policy, streaming_vnodes, serving_vnodes, should_refill) in cases {
+            let context = fixture.context(policy, streaming_vnodes, serving_vnodes, |config| {
+                config.skip_recent_filter = false;
+                config.skip_inheritance_filter = false;
+            });
             assert_eq!(
-                context.allows_insert_only_data_refill_block(&sst, 0),
-                expected,
+                !fixture.generate(&context, &delta).await.is_empty(),
+                should_refill,
                 "{name}"
             );
         }

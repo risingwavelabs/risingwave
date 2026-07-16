@@ -19,7 +19,7 @@ use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
-use risingwave_meta::controller::fragment::FragmentParallelismInfo;
+use risingwave_meta::controller::fragment::FragmentServingInfo;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model::{FragmentId, WorkerId};
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -215,7 +215,7 @@ impl NotificationServiceImpl {
     ) -> MetaResult<(
         Vec<Table>,
         PbTableCacheRefillPolicies,
-        HashMap<FragmentId, FragmentParallelismInfo>,
+        HashMap<FragmentId, FragmentServingInfo>,
         NotificationVersion,
     )> {
         let catalog_guard = self
@@ -227,12 +227,12 @@ impl NotificationServiceImpl {
         tables.extend(catalog_guard.dropped_tables.values().cloned());
         let table_cache_refill_policies =
             catalog_guard.table_cache_refill_policies_snapshot().await?;
-        let streaming_parallelisms = catalog_guard.fragment_parallelisms().await?;
+        let fragment_serving_infos = catalog_guard.fragment_serving_infos().await?;
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((
             tables,
             table_cache_refill_policies,
-            streaming_parallelisms,
+            fragment_serving_infos,
             notification_version,
         ))
     }
@@ -352,7 +352,7 @@ impl NotificationServiceImpl {
     }
 
     async fn hummock_subscribe(&self, worker_id: WorkerId) -> MetaResult<MetaSnapshot> {
-        let (tables, table_cache_refill_policies, streaming_parallelisms, catalog_version) =
+        let (tables, table_cache_refill_policies, fragment_serving_infos, catalog_version) =
             self.get_hummock_catalog_snapshot().await?;
         let hummock_version = self
             .hummock_manager
@@ -365,7 +365,7 @@ impl NotificationServiceImpl {
             &self.serving_vnode_mapping,
             worker_id,
             table_cache_refill_policies,
-            &streaming_parallelisms,
+            &fragment_serving_infos,
             catalog_version,
         );
 

@@ -32,11 +32,10 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::MetaResult;
-use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::fragment::FragmentServingInfo;
 use crate::controller::session_params::SessionParamsControllerRef;
 use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef, WorkerKey};
 use crate::model::FragmentId;
-use crate::table_refill::build_hummock_serving_table_vnode_mappings;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
@@ -50,18 +49,51 @@ impl ServingVnodeMapping {
         self.serving_vnode_mappings.read().clone()
     }
 
+    pub(crate) fn table_vnode_mappings_by_worker(
+        &self,
+        worker_ids: impl IntoIterator<Item = WorkerId>,
+        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
+    ) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
+        let mut result = worker_ids
+            .into_iter()
+            .map(|worker_id| (worker_id, HashMap::new()))
+            .collect::<HashMap<_, _>>();
+        let serving_vnode_mappings = self.all();
+
+        for (fragment_id, mapping) in &serving_vnode_mappings {
+            let Some(info) = fragment_serving_infos.get(fragment_id) else {
+                tracing::warn!(%fragment_id, "fragment serving info not found");
+                continue;
+            };
+            let Some(table_id) = info.result_table_id else {
+                continue;
+            };
+
+            for (worker_slot_id, bitmap) in mapping.to_bitmaps() {
+                let Some(table_mappings) = result.get_mut(&worker_slot_id.worker_id()) else {
+                    continue;
+                };
+                table_mappings
+                    .entry(table_id)
+                    .and_modify(|current| *current |= &bitmap)
+                    .or_insert(bitmap);
+            }
+        }
+        result
+    }
+
     /// Upsert mapping for given fragments according to the latest `workers`.
     /// Returns (successful updates, failed updates).
     pub fn upsert(
         &self,
-        streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: HashSet<FragmentId> = HashSet::default();
-        for (fragment_id, info) in streaming_parallelisms {
+        for (fragment_id, info) in fragment_serving_infos {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(fragment_id);
                 let max_parallelism = match info.distribution_type {
@@ -123,11 +155,11 @@ pub async fn on_meta_start(
     serving_vnode_mapping: ServingVnodeMappingRef,
     max_serving_parallelism: Option<u64>,
 ) {
-    let (serving_compute_nodes, streaming_parallelisms) = fetch_serving_infos(metadata_manager)
+    let (serving_compute_nodes, fragment_serving_infos) = fetch_serving_infos(metadata_manager)
         .await
         .expect("fail to fetch serving infos");
     let (mappings, failed) = serving_vnode_mapping.upsert(
-        &streaming_parallelisms,
+        &fragment_serving_infos,
         &serving_compute_nodes,
         max_serving_parallelism,
     );
@@ -151,13 +183,10 @@ pub async fn on_meta_start(
 
 pub(crate) async fn fetch_serving_infos(
     metadata_manager: &MetadataManager,
-) -> MetaResult<(
-    Vec<WorkerNode>,
-    HashMap<FragmentId, FragmentParallelismInfo>,
-)> {
-    let parallelisms = metadata_manager
+) -> MetaResult<(Vec<WorkerNode>, HashMap<FragmentId, FragmentServingInfo>)> {
+    let fragment_serving_infos = metadata_manager
         .catalog_controller
-        .fragment_parallelisms()
+        .fragment_serving_infos()
         .await?;
     let serving_compute_nodes = metadata_manager
         .cluster_controller
@@ -165,7 +194,7 @@ pub(crate) async fn fetch_serving_infos(
         .await?;
     Ok((
         serving_compute_nodes,
-        parallelisms
+        fragment_serving_infos
             .into_iter()
             .map(|(fragment_id, info)| (fragment_id as FragmentId, info))
             .collect(),
@@ -176,18 +205,23 @@ pub(crate) async fn sync_serving_table_vnode_mappings_to_hummock(
     notification_manager: &NotificationManagerRef,
     serving_vnode_mapping: &ServingVnodeMappingRef,
     workers: &[WorkerNode],
-    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+    fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
 ) {
+    let mut table_vnode_mappings = serving_vnode_mapping.table_vnode_mappings_by_worker(
+        workers.iter().map(|worker| worker.id),
+        fragment_serving_infos,
+    );
     for worker in workers {
         let Some(host) = worker.host.clone() else {
             tracing::warn!(worker_id = %worker.id, "serving worker host not found");
             continue;
         };
+        let table_vnode_mapping = table_vnode_mappings
+            .remove(&worker.id)
+            .expect("requested worker must have a table vnode mapping");
         let config = PbTableRefillRuntimeConfig {
-            serving_table_vnode_mappings: Some(build_hummock_serving_table_vnode_mappings(
-                serving_vnode_mapping,
-                worker.id,
-                streaming_parallelisms,
+            serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+                &table_vnode_mapping,
             )),
             ..Default::default()
         };
@@ -208,7 +242,7 @@ pub fn start_serving_vnode_mapping_worker(
     notification_manager.insert_local_sender(local_notification_tx);
     let join_handle = tokio::spawn(async move {
         let reset = || async {
-            let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager)
+            let (workers, fragment_serving_infos) = fetch_serving_infos(&metadata_manager)
                 .await
                 .expect("fail to fetch serving infos");
             let max_serving_parallelism = session_params
@@ -217,7 +251,7 @@ pub fn start_serving_vnode_mapping_worker(
                 .batch_parallelism()
                 .map(|p| p.get());
             let (mappings, failed) = serving_vnode_mapping.upsert(
-                &streaming_parallelisms,
+                &fragment_serving_infos,
                 &workers,
                 max_serving_parallelism,
             );
@@ -241,7 +275,7 @@ pub fn start_serving_vnode_mapping_worker(
                 &notification_manager,
                 &serving_vnode_mapping,
                 &workers,
-                &streaming_parallelisms,
+                &fragment_serving_infos,
             )
             .await;
         };
@@ -264,14 +298,14 @@ pub fn start_serving_vnode_mapping_worker(
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
-                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager)
+                                    let (workers, fragment_serving_infos) = fetch_serving_infos(&metadata_manager)
                                         .await
                                         .expect("fail to fetch serving infos");
-                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id| {
-                                        match streaming_parallelisms.get(frag_id) {
+                                    let filtered_fragment_serving_infos = fragment_ids.iter().filter_map(|frag_id| {
+                                        match fragment_serving_infos.get(frag_id) {
                                             Some(info) => Some((*frag_id, info.clone())),
                                             None => {
-                                                tracing::warn!(fragment_id = %frag_id, "streaming parallelism not found");
+                                                tracing::warn!(fragment_id = %frag_id, "fragment serving info not found");
                                                 None
                                             }
                                         }
@@ -281,7 +315,7 @@ pub fn start_serving_vnode_mapping_worker(
                                         .await
                                         .batch_parallelism()
                                         .map(|p|p.get());
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(&filtered_streaming_parallelisms, &workers, max_serving_parallelism);
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(&filtered_fragment_serving_infos, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
@@ -294,7 +328,7 @@ pub fn start_serving_vnode_mapping_worker(
                                         &notification_manager,
                                         &serving_vnode_mapping,
                                         &workers,
-                                        &streaming_parallelisms,
+                                        &fragment_serving_infos,
                                     )
                                     .await;
                                 }
@@ -307,14 +341,14 @@ pub fn start_serving_vnode_mapping_worker(
 
                                     serving_vnode_mapping.remove(&fragment_ids);
                                     notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
-                                    let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager)
+                                    let (workers, fragment_serving_infos) = fetch_serving_infos(&metadata_manager)
                                         .await
                                         .expect("fail to fetch serving infos");
                                     sync_serving_table_vnode_mappings_to_hummock(
                                         &notification_manager,
                                         &serving_vnode_mapping,
                                         &workers,
-                                        &streaming_parallelisms,
+                                        &fragment_serving_infos,
                                     )
                                     .await;
                                 }
@@ -335,47 +369,7 @@ pub fn start_serving_vnode_mapping_worker(
     (join_handle, shutdown_tx)
 }
 
-fn append_table_vnode_mapping_for_worker(
-    table_vnode_mapping: &mut HashMap<TableId, Bitmap>,
-    worker_id: WorkerId,
-    state_table_ids: &HashSet<TableId>,
-    worker_slot_vnode_mapping: &WorkerSlotMapping,
-) {
-    for (worker_slot_id, bitmap) in &worker_slot_vnode_mapping.to_bitmaps() {
-        if worker_slot_id.worker_id() != worker_id {
-            continue;
-        }
-        for table_id in state_table_ids {
-            table_vnode_mapping
-                .entry(*table_id)
-                .and_modify(|b| *b |= bitmap.clone())
-                .or_insert_with(|| bitmap.clone());
-        }
-    }
-}
-
-pub fn build_table_vnode_mapping_for_worker(
-    worker_id: WorkerId,
-    fragment_worker_slot_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
-    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
-) -> HashMap<TableId, Bitmap> {
-    let mut table_vnode_mapping = HashMap::new();
-    for (fragment_id, mapping) in fragment_worker_slot_mappings {
-        let Some(info) = streaming_parallelisms.get(fragment_id) else {
-            tracing::warn!(%fragment_id, "streaming parallelism not found");
-            continue;
-        };
-        append_table_vnode_mapping_for_worker(
-            &mut table_vnode_mapping,
-            worker_id,
-            &info.state_table_ids,
-            mapping,
-        );
-    }
-    table_vnode_mapping
-}
-
-pub fn to_pb_serving_table_vnode_mappings(
+pub(crate) fn to_pb_serving_table_vnode_mappings(
     table_vnode_mapping: &HashMap<TableId, Bitmap>,
 ) -> PbServingTableVnodeMappings {
     PbServingTableVnodeMappings {
@@ -391,7 +385,7 @@ pub fn to_pb_serving_table_vnode_mappings(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::hash::{VirtualNode, WorkerSlotId};
     use risingwave_pb::common::{HostAddress, worker_node};
     use risingwave_pb::meta::subscribe_response::Info;
     use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
@@ -419,8 +413,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_table_vnode_mappings_merge_worker_slots() {
+        let worker1 = WorkerId::new(1);
+        let worker2 = WorkerId::new(2);
+        let worker3 = WorkerId::new(3);
+        let slot1 = WorkerSlotId::new(worker1, 0);
+        let slot2 = WorkerSlotId::new(worker1, 1);
+        let slot3 = WorkerSlotId::new(worker2, 0);
+        let fragment_id = FragmentId::new(233);
+        let table_id = TableId::new(234);
+        let mapping = WorkerSlotMapping::new_uniform(
+            [slot1, slot2, slot3].into_iter(),
+            VirtualNode::COUNT_FOR_TEST,
+        );
+        let slot_bitmaps = mapping.to_bitmaps();
+        let serving_vnode_mapping = ServingVnodeMapping {
+            serving_vnode_mappings: RwLock::new(HashMap::from([(fragment_id, mapping)])),
+        };
+        let fragment_serving_infos = HashMap::from([(
+            fragment_id,
+            FragmentServingInfo {
+                result_table_id: Some(table_id),
+                distribution_type: FragmentDistributionType::Hash,
+                vnode_count: VirtualNode::COUNT_FOR_TEST,
+            },
+        )]);
+
+        let mappings = serving_vnode_mapping
+            .table_vnode_mappings_by_worker([worker1, worker2, worker3], &fragment_serving_infos);
+        let mut worker1_bitmap = slot_bitmaps[&slot1].clone();
+        worker1_bitmap |= &slot_bitmaps[&slot2];
+        assert_eq!(mappings[&worker1][&table_id], worker1_bitmap);
+        assert_eq!(mappings[&worker2][&table_id], slot_bitmaps[&slot3]);
+        assert!(mappings[&worker3].is_empty());
+    }
+
     #[tokio::test]
-    async fn test_sync_serving_table_vnode_mappings_to_hummock_targets_each_worker() {
+    async fn test_sync_serving_table_vnode_mappings_to_hummock_targets_only_result_tables() {
         let notification_manager =
             Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
         let worker1 = serving_worker(1);
@@ -433,27 +463,49 @@ mod tests {
         notification_manager.insert_sender(SubscribeType::Hummock, worker_key1, tx1);
         notification_manager.insert_sender(SubscribeType::Hummock, worker_key2, tx2);
 
-        let table_id = TableId::from(233);
+        let table_id = TableId::new(233);
         let fragment_id = FragmentId::new(234);
+        let private_fragment_id = FragmentId::new(235);
         let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
-        let streaming_parallelisms = HashMap::from([(
-            fragment_id,
-            FragmentParallelismInfo {
-                distribution_type: FragmentDistributionType::Hash,
-                vnode_count: VirtualNode::COUNT_FOR_TEST,
-                state_table_ids: HashSet::from([table_id]),
-            },
-        )]);
+        let fragment_serving_infos = HashMap::from([
+            (
+                fragment_id,
+                FragmentServingInfo {
+                    result_table_id: Some(table_id),
+                    distribution_type: FragmentDistributionType::Hash,
+                    vnode_count: VirtualNode::COUNT_FOR_TEST,
+                },
+            ),
+            (
+                private_fragment_id,
+                FragmentServingInfo {
+                    result_table_id: None,
+                    distribution_type: FragmentDistributionType::Hash,
+                    vnode_count: VirtualNode::COUNT_FOR_TEST,
+                },
+            ),
+        ]);
         let (upserted, failed) =
-            serving_vnode_mapping.upsert(&streaming_parallelisms, &workers, None);
-        assert_eq!(upserted.len(), 1);
+            serving_vnode_mapping.upsert(&fragment_serving_infos, &workers, None);
+        assert_eq!(upserted.len(), 2);
         assert!(failed.is_empty());
+        let expected_bitmaps = upserted[&fragment_id]
+            .to_bitmaps()
+            .into_iter()
+            .map(|(worker_slot_id, bitmap)| (worker_slot_id.worker_id(), bitmap))
+            .collect::<HashMap<_, _>>();
+        // Give the non-result fragment a distinct mapping. If it were incorrectly
+        // associated with `table_id`, it would expand the table's ownership to all vnodes.
+        serving_vnode_mapping.serving_vnode_mappings.write().insert(
+            private_fragment_id,
+            WorkerSlotMapping::new_single(WorkerSlotId::new(worker1.id, 0)),
+        );
 
         sync_serving_table_vnode_mappings_to_hummock(
             &notification_manager,
             &serving_vnode_mapping,
             &workers,
-            &streaming_parallelisms,
+            &fragment_serving_infos,
         )
         .await;
 
@@ -462,19 +514,22 @@ mod tests {
         assert!(rx1.try_recv().is_err());
         assert!(rx2.try_recv().is_err());
 
-        let serving_bitmap_count = |response: SubscribeResponse| {
+        let serving_bitmap = |response: SubscribeResponse| {
             let Some(Info::TableRefillRuntimeConfig(config)) = response.info else {
                 panic!("expect table refill runtime config");
             };
             let mappings = config.serving_table_vnode_mappings.unwrap().mappings;
             assert_eq!(mappings.len(), 1);
             assert_eq!(mappings[0].table_id, table_id.as_raw_id());
-            Bitmap::from(mappings[0].bitmap.clone().unwrap()).count_ones()
+            Bitmap::from(mappings[0].bitmap.clone().unwrap())
         };
-        let count1 = serving_bitmap_count(response1);
-        let count2 = serving_bitmap_count(response2);
-        assert!(count1 > 0);
-        assert!(count2 > 0);
-        assert_eq!(count1 + count2, VirtualNode::COUNT_FOR_TEST);
+        let bitmap1 = serving_bitmap(response1);
+        let bitmap2 = serving_bitmap(response2);
+        assert_eq!(bitmap1, expected_bitmaps[&worker1.id]);
+        assert_eq!(bitmap2, expected_bitmaps[&worker2.id]);
+        assert_eq!(
+            bitmap1.count_ones() + bitmap2.count_ones(),
+            VirtualNode::COUNT_FOR_TEST
+        );
     }
 }

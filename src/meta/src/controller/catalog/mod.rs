@@ -202,32 +202,60 @@ impl CatalogControllerInner {
                 policies_by_job.insert(job_id, policy);
             }
         }
-
         if policies_by_job.is_empty() {
             return Ok(PbTableCacheRefillPolicies::default());
         }
 
-        let internal_tables: Vec<(TableId, Option<JobId>)> = Table::find()
+        let result_table_ids = policies_by_job
+            .keys()
+            .map(|job_id| job_id.as_mv_table_id())
+            .collect_vec();
+        let tables: Vec<(TableId, TableType, Option<JobId>)> = Table::find()
             .select_only()
             .column(table::Column::TableId)
+            .column(table::Column::TableType)
             .column(table::Column::BelongsToJobId)
-            .filter(table::Column::BelongsToJobId.is_in(policies_by_job.keys().copied()))
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Internal)
+                    .and(table::Column::BelongsToJobId.is_in(policies_by_job.keys().copied()))
+                    .or(table::Column::TableId.is_in(result_table_ids)),
+            )
             .into_tuple()
             .all(&self.db)
             .await?;
 
-        let policies = internal_tables
-            .into_iter()
-            .filter_map(|(table_id, job_id)| {
-                let policy = policies_by_job.get(&job_id?)?;
-                Some(PbTableCacheRefillPolicy {
+        let mut table_policies = Vec::new();
+        let mut internal_table_policies = Vec::new();
+        for (table_id, table_type, belongs_to_job_id) in tables {
+            if table_type == TableType::Internal {
+                let Some(policy) =
+                    belongs_to_job_id.and_then(|job_id| policies_by_job.get(&job_id))
+                else {
+                    continue;
+                };
+                internal_table_policies.push(PbTableCacheRefillPolicy {
                     table_id: table_id.as_raw_id(),
                     policy: policy.to_protobuf() as i32,
-                })
-            })
-            .collect();
+                });
+                continue;
+            }
 
-        Ok(PbTableCacheRefillPolicies { policies })
+            let Some(policy) = policies_by_job.get(&table_id.as_job_id()) else {
+                continue;
+            };
+            table_policies.push(PbTableCacheRefillPolicy {
+                table_id: table_id.as_raw_id(),
+                policy: policy.to_protobuf() as i32,
+            });
+        }
+        table_policies.sort_unstable_by_key(|policy| policy.table_id);
+        internal_table_policies.sort_unstable_by_key(|policy| policy.table_id);
+
+        Ok(PbTableCacheRefillPolicies {
+            table_policies,
+            internal_table_policies,
+        })
     }
 }
 

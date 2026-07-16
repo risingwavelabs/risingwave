@@ -183,6 +183,7 @@ impl HummockStorage {
         let observer_manager = ObserverManager::new(
             notification_client,
             HummockObserverNode::new(
+                role,
                 compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
                 observer_event_tx.clone(),

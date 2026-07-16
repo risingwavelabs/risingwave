@@ -14,14 +14,11 @@
 
 use std::str::FromStr;
 
-use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
-#[derive(
-    Copy, Debug, Clone, PartialEq, Eq, Display, EnumAsInner, SerializeDisplay, DeserializeFromStr,
-)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, Display, SerializeDisplay, DeserializeFromStr)]
 #[display(style = "snake_case")]
 pub enum CacheRefillPolicy {
     /// Enable normal cache refill for the table.
@@ -86,5 +83,44 @@ impl CacheRefillPolicy {
 
     pub fn is_serving_scoped(self) -> bool {
         matches!(self, Self::Serving | Self::Both)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_refill_policy_contract() {
+        for (policy, name, unscoped, streaming, serving) in [
+            (CacheRefillPolicy::Enabled, "enabled", true, false, false),
+            (CacheRefillPolicy::Disabled, "disabled", false, false, false),
+            (
+                CacheRefillPolicy::Streaming,
+                "streaming",
+                false,
+                true,
+                false,
+            ),
+            (CacheRefillPolicy::Serving, "serving", false, false, true),
+            (CacheRefillPolicy::Both, "both", false, true, true),
+        ] {
+            assert_eq!(policy.to_string(), name);
+            assert_eq!(name.parse(), Ok(policy));
+            assert_eq!(name.to_ascii_uppercase().parse(), Ok(policy));
+            assert_eq!(
+                CacheRefillPolicy::from_protobuf(policy.to_protobuf()),
+                Some(policy)
+            );
+            assert_eq!(policy.is_unscoped_enabled(), unscoped);
+            assert_eq!(policy.is_streaming_scoped(), streaming);
+            assert_eq!(policy.is_serving_scoped(), serving);
+        }
+
+        assert_eq!(
+            CacheRefillPolicy::from_protobuf(PbCacheRefillPolicy::Unspecified),
+            None
+        );
+        assert!("unknown".parse::<CacheRefillPolicy>().is_err());
     }
 }

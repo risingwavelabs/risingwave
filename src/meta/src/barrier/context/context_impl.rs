@@ -246,7 +246,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .table_cache_refill_policies_snapshot()
             .await?;
-        let (serving_workers, fragment_parallelisms) =
+        let (serving_workers, fragment_serving_infos) =
             fetch_serving_infos(&self.metadata_manager).await?;
 
         self.env
@@ -263,7 +263,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             &self.env.notification_manager_ref(),
             &self.serving_vnode_mapping,
             &serving_workers,
-            &fragment_parallelisms,
+            &fragment_serving_infos,
         )
         .await;
         Ok(())

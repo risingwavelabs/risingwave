@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::WorkerId;
 use risingwave_common_service::ObserverManager;
@@ -78,6 +79,7 @@ pub async fn prepare_first_valid_version(
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
+            Role::None,
             Arc::new(CompactionCatalogManager::default()),
             backup_manager,
             observer_event_tx.clone(),
