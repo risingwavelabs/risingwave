@@ -351,6 +351,14 @@
   expected_outputs:
   - batch_plan
   - batch_local_plan
+- name: covering index with residual predicate outside the index
+  sql: |
+    create materialized view mc as select 1 as id, 'a' as val, 'x' as tag;
+    create index mc_idx on mc (id) include (val);
+    select 1 from mc where id = 1 and tag = 'x';
+  expected_outputs:
+  - batch_plan
+  - batch_local_plan
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);
