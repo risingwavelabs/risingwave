@@ -105,7 +105,8 @@ Finding `BUILD-001`:
 
 ### 2026-07-16 - Source Update Images and WebSocket Payload Boundary
 
-Status: Passed for PostgreSQL, MySQL `FULL`, and default MongoDB; SQL Server remains untested.
+Status: Passed for PostgreSQL, MySQL `FULL`, default MongoDB, and Kafka-to-JSONB;
+SQL Server remains untested.
 
 Source matrix results:
 
@@ -121,9 +122,26 @@ Source matrix results:
 - MySQL 8.4 with `binlog_row_image=MINIMAL`: TapData's Debezium source failed before the event
   reached the target with `Data row is smaller than a column index`. The target retained its last
   valid row. Production MySQL sources therefore require `binlog_row_image=FULL`.
+- MySQL 8.4 defaults `binlog_row_image` to `FULL`. `MINIMAL` is an explicit operational choice that
+  reduces binlog storage and replication traffic, especially for high-write or wide-row tables.
+  The requirement for `FULL` belongs in source setup documentation or source-side task validation:
+  the RisingWave target connector cannot inspect or repair a source binlog image.
+- Kafka 3.9.1 (`apache/kafka-native:3.9.1`) to WebSocket JSONB append-only passed. The task consumed
+  existing records, stayed in `running`, and delivered a record produced after the task entered
+  incremental sync. The RisingWave table contained the expected JSON documents. TapData's bundled
+  deprecated Kafka connector required the test-only JVM option
+  `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED` under Java 17; without it the
+  source failed before target invocation with `IllegalAccessError` in `KafkaExceptionCollector`.
+  The source connector also converted nested JSON objects and arrays to JSON strings, so preserving
+  nested JSON structure requires qualification with TapData's current enhanced Kafka connector.
+- Keyed Kafka WebSocket streaming was rejected during target validation because the inferred Kafka
+  model had no primary key. This is the expected behavior. Plain Kafka records should use JSONB
+  append-only unless the source model supplies a real primary key and full-row update images.
 - SQL Server was not runnable because the installed TapData instance and local connector checkout
-  did not contain a SQL Server connector. This is a remaining external qualification item, not a
-  known target-connector failure.
+  did not contain a SQL Server connector. The local Docker daemon is ARM64, while Microsoft's SQL
+  Server Linux container is supported on x86-64 only; emulation would not be release evidence.
+  SQL Server remains an external qualification item for an x86-64 runner with the supported TapData
+  connector, not a known target-connector failure.
 
 Native WebSocket payload results:
 
