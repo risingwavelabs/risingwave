@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
-use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::id::FragmentId;
@@ -30,28 +29,11 @@ pub(crate) use batch_refresh_job::{
 };
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
-use crate::MetaResult;
-use crate::barrier::context::collect_pinned_snapshot_epochs;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
 use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::stream::StreamFragmentGraph;
-
-fn pinned_snapshot_epochs_from_fragment_infos(
-    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
-    let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
-        StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-            fragment_infos
-                .values()
-                .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
-        )?;
-    let snapshot_backfill_info = snapshot_backfill_info
-        .ok_or_else(|| anyhow!("snapshot backfill job has no snapshot backfill info"))?;
-    collect_pinned_snapshot_epochs(&snapshot_backfill_info, &cross_db_snapshot_backfill_info)
-}
 
 /// Build a fake `BarrierInfo` for independent partial-graph barriers.
 ///

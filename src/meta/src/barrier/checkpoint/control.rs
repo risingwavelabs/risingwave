@@ -235,6 +235,12 @@ impl CheckpointControl {
         let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
         for database in self.databases.values() {
             let database = database.running_state()?;
+            for (&table_id, epochs) in database.database_info.pinned_snapshot_epochs() {
+                pinned_snapshot_epochs
+                    .entry(table_id)
+                    .or_default()
+                    .extend(epochs);
+            }
             for job in database.independent_checkpoint_job_controls.values() {
                 if let Some(job_pins) = job.pinned_snapshot_epochs() {
                     for (&table_id, epochs) in job_pins {

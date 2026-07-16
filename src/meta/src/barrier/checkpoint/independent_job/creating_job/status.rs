@@ -18,7 +18,6 @@ use std::mem::{replace, take};
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -113,7 +112,6 @@ pub(super) enum CreatingStreamingJobStatus {
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
-        pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>>,
         snapshot_epoch: u64,
         info: CreatingJobInfo,
         /// The `prev_epoch` of pending non checkpoint barriers

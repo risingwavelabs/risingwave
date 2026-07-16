@@ -743,9 +743,9 @@ impl InflightDatabaseInfo {
             .any(|tracker| tracker.is_finished())
     }
 
-    pub(super) fn has_creating_jobs(&self) -> bool {
+    pub(super) fn pinned_snapshot_epochs(&self) -> impl Iterator<Item = (&TableId, &HashSet<u64>)> {
         self.iter_creating_job_tracker()
-            .any(|tracker| !tracker.is_finished())
+            .flat_map(|tracker| tracker.pinned_snapshot_epochs())
     }
 
     pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {

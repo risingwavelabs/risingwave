@@ -828,8 +828,8 @@ impl PartialGraphRecoverer<'_> {
                     .values()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
-            .0;
-            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+            .0
+            .ok_or_else(|| {
                 anyhow!(
                     "recovered snapshot backfill job {} has no snapshot backfill info",
                     job_id
@@ -904,7 +904,7 @@ impl PartialGraphRecoverer<'_> {
                                 &fragment_infos,
                                 backfill_order_state,
                                 hummock_version_stats,
-                            ),
+                            )?,
                         }
                     } else {
                         CreateStreamingJobStatus::Created
@@ -1138,10 +1138,8 @@ impl PartialGraphRecoverer<'_> {
                     .values()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
-            .0;
-            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
-                anyhow!("batch refresh job {} has no snapshot backfill info", job_id)
-            })?;
+            .0
+            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
 
             let upstream_table_ids: HashSet<TableId> = snapshot_backfill_info
                 .upstream_mv_table_id_to_backfill_epoch
