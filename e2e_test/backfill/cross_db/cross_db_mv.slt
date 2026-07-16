@@ -99,7 +99,36 @@ select count(*) from mv1;
 10000
 
 statement ok
+create materialized view mv_rate_limit with (backfill_rate_limit = 0) as select * from d1.public.t1;
+
+query I retry 4 backoff 1s
+select count(*) from rw_ddl_progress;
+----
+1
+
+sleep 2s
+
+query I
+select count(*) from mv_rate_limit;
+----
+0
+
+statement ok
+alter materialized view mv_rate_limit set backfill_rate_limit = 1000;
+
+statement ok
+wait
+
+query ok
+select count(*) from mv_rate_limit;
+----
+10000
+
+statement ok
 set database to d2;
+
+statement ok
+drop materialized view mv_rate_limit;
 
 statement ok
 drop materialized view mv1;
