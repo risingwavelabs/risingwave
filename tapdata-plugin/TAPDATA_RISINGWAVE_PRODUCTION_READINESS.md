@@ -103,6 +103,55 @@ Finding `BUILD-001`:
   connector. Subsequent final-connector local and Cloud tasks both stopped normally, so this is a
   P1 operational observation rather than a connector release blocker.
 
+### 2026-07-16 - Source Update Images and WebSocket Payload Boundary
+
+Status: Passed for PostgreSQL, MySQL `FULL`, and default MongoDB; SQL Server remains untested.
+
+Source matrix results:
+
+- PostgreSQL real CDC: insert, update of selected SQL columns, primary-key change, and delete
+  previously passed against keyed WebSocket streaming. Unchanged target columns were preserved.
+- MongoDB default `enableFillingModifiedData=true`: a real TapData replication task passed
+  top-level update, nested update, top-level `$unset`, nested `$unset`, and delete. The connector
+  fix treats an empty MongoDB `before` image as unavailable identity rather than a primary-key
+  change; otherwise it would send `delete {}` before the valid upsert and RisingWave would reject
+  the batch for missing `_id`.
+- MySQL 8.4 with `binlog_row_image=FULL`: updating only `name` updated the target while preserving
+  `quantity` and `note`.
+- MySQL 8.4 with `binlog_row_image=MINIMAL`: TapData's Debezium source failed before the event
+  reached the target with `Data row is smaller than a column index`. The target retained its last
+  valid row. Production MySQL sources therefore require `binlog_row_image=FULL`.
+- SQL Server was not runnable because the installed TapData instance and local connector checkout
+  did not contain a SQL Server connector. This is a remaining external qualification item, not a
+  known target-connector failure.
+
+Native WebSocket payload results:
+
+- Raw single-frame payloads with wire sizes 8,388,681 bytes, 15,728,713 bytes, and 16,776,265
+  bytes received durable ACKs from the local RisingWave frontend.
+- A 16,777,289-byte frame and a 17,825,865-byte frame closed with WebSocket code 1006 and no close
+  frame. This confirms the effective 16 MiB single-frame boundary in the tested frontend stack.
+- The connector intentionally uses an 8 MiB safety limit. It splits a multi-record logical batch
+  into ordered frames and waits for each ACK. One source record whose serialized DML operation is
+  over 8 MiB fails locally with an explicit error because it cannot be split into independent DML
+  records.
+
+Verification for the final local code in this pass:
+
+- `mvn test`: 36 passed.
+- `mvn -Drisingwave.it=true -Dtest=RisingWaveConnectionTestIT test`: 32 passed with Java 17 and
+  `-DsocksNonProxyHosts='localhost|127.*'` to bypass the host's configured SOCKS proxy.
+- `mvn package -DskipTests`: passed.
+- TapData source-matrix tasks and temporary source/target databases were removed after the run.
+
+Release observations:
+
+- Re-registering changed Java code under the same connector metadata hash can leave TapData Agent
+  using a cached old JAR. Release artifacts must use an immutable, non-SNAPSHOT version; upgrade
+  testing must verify the loaded artifact checksum after Agent restart.
+- The current `1.0-SNAPSHOT` connector and `2.0.8-SNAPSHOT` PDK dependencies still require an
+  explicit release-version and CI decision before publication.
+
 ### 2026-07-14 - TapData Runtime Restart
 
 Status: Passed.
