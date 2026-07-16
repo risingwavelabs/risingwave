@@ -143,7 +143,19 @@ impl CipherConfig {
         input: &[u8],
         operation: CipherMode,
     ) -> std::result::Result<Box<[u8]>, ErrorStack> {
-        let mut decrypter = Crypter::new(self.cipher, operation, self.crypt_key.as_ref(), None)?;
+        let iv = match self.mode {
+            Mode::Cbc => Some(vec![
+                0;
+                self.cipher.iv_len().unwrap_or(self.cipher.block_size())
+            ]),
+            Mode::Ecb => None,
+        };
+        let mut decrypter = Crypter::new(
+            self.cipher,
+            operation,
+            self.crypt_key.as_ref(),
+            iv.as_deref(),
+        )?;
         let enable_padding = match self.padding {
             Padding::Pkcs => true,
             Padding::None => false,
@@ -190,6 +202,8 @@ struct CryptographyError {
 
 #[cfg(test)]
 mod test {
+    use hex_literal::hex;
+
     use super::*;
 
     #[test]
@@ -231,6 +245,20 @@ mod test {
             decrypted,
             (*b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff").into()
         )
+    }
+
+    #[test]
+    fn encrypt_cbc_uses_zero_iv() {
+        let key = hex!("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let data = hex!("00112233445566778899aabbccddeeff");
+        let expected = hex!("8ea2b7ca516745bfeafc49904b496089");
+        let config = CipherConfig::parse_cipher_config(&key, "aes-cbc/pad:none").unwrap();
+
+        let encrypted = encrypt(&data, &config).unwrap();
+        assert_eq!(encrypted.as_ref(), expected.as_slice());
+
+        let decrypted = decrypt(&encrypted, &config).unwrap();
+        assert_eq!(decrypted.as_ref(), data.as_slice());
     }
 
     #[test]
