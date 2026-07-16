@@ -386,12 +386,15 @@ impl ExternalTableReaderImpl {
     /// For each given primary key column (by name), returns whether comparing the RisingWave
     /// `i64` value needs upstream unsigned `BIGINT` semantics. Only MySQL `BIGINT UNSIGNED` can
     /// overflow into a negative `i64`; other connectors are always false.
-    pub fn pk_column_unsigned_i64_compare_flags(&self, pk_names: &[String]) -> Vec<bool> {
+    pub fn pk_column_unsigned_i64_compare_flags(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<bool>> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => {
                 mysql.pk_column_unsigned_i64_compare_flags(pk_names)
             }
-            _ => vec![false; pk_names.len()],
+            _ => Ok(vec![false; pk_names.len()]),
         }
     }
 

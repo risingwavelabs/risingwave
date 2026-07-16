@@ -430,7 +430,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .collect();
             upstream_table_reader
                 .reader
-                .pk_column_unsigned_i64_compare_flags(&pk_names)
+                .pk_column_unsigned_i64_compare_flags(&pk_names)?
         };
 
         tracing::info!(

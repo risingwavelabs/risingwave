@@ -615,7 +615,7 @@ impl MySqlExternalTableReader {
     /// (`FLOAT`/`DOUBLE`/`DECIMAL UNSIGNED`) keep their own comparison semantics. Only
     /// `BIGINT UNSIGNED` can be represented as a negative `i64` in RisingWave and needs
     /// unsigned `u64` comparison/conversion.
-    fn needs_unsigned_i64_compare(&self, column_name: &str) -> bool {
+    fn needs_unsigned_i64_compare(&self, column_name: &str) -> ConnectorResult<bool> {
         self.upstream_mysql_pk_infos
             .iter()
             .find(|(col_name, _)| col_name == column_name)
@@ -623,11 +623,19 @@ impl MySqlExternalTableReader {
                 let col_type = col_type.to_lowercase();
                 col_type.starts_with("bigint") && col_type.contains("unsigned")
             })
-            .unwrap_or(false)
+            .ok_or_else(|| {
+                anyhow!(
+                    "primary key column `{column_name}` not found in upstream MySQL primary key info"
+                )
+                .into()
+            })
     }
 
     /// For each given primary key column (by name), whether it needs unsigned `i64` comparison.
-    pub(crate) fn pk_column_unsigned_i64_compare_flags(&self, pk_names: &[String]) -> Vec<bool> {
+    pub(crate) fn pk_column_unsigned_i64_compare_flags(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<bool>> {
         pk_names
             .iter()
             .map(|name| self.needs_unsigned_i64_compare(name))
@@ -693,7 +701,9 @@ impl MySqlExternalTableReader {
                             DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
-                                if int64_val < 0 && self.needs_unsigned_i64_compare(pk.as_str()) {
+                                if int64_val < 0
+                                    && self.needs_unsigned_i64_compare(pk.as_str())?
+                                {
                                     Value::from(self.convert_negative_to_unsigned(int64_val))
                                 } else {
                                     Value::from(int64_val)

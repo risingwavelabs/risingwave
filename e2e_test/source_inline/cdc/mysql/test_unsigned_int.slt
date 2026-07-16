@@ -237,7 +237,11 @@ mysql -e "
         info VARCHAR(50) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+"
 
+system ok
+mysql -e "
+    USE risedev;
     INSERT INTO test_unsigned_bigint_backfill_buffer (id, info)
     SELECT 9223372036854775808 + ones.n + tens.n * 10 + hundreds.n * 100, 'backfill'
     FROM
