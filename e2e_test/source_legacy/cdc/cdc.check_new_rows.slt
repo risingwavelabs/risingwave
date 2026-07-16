@@ -236,10 +236,10 @@ ORDER BY c_boolean, c_bigint, c_date;
 {}                            {}                                          {}
 NULL                          NULL                                        NULL
 {NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
-{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      NULL
+{"{}"}                        {bb488f9b-330d-4012-b849-12adeb49e57e}      {happy,ok,NULL}
 {}                            {}                                          {}
 NULL                          NULL                                        NULL
-{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
+{NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} {NULL,happy}
 
 query TTT
 SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
