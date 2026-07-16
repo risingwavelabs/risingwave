@@ -52,7 +52,6 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
-const DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
@@ -129,11 +128,8 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     /// The maximum size in bytes for each `StarRocks` stream load request payload.
-    /// Defaults to 64 `MiB`.
-    #[serde(
-        rename = "starrocks.max_batch_size_bytes",
-        default = "default_starrocks_max_batch_size_bytes"
-    )]
+    /// Defaults to unlimited.
+    #[serde(rename = "starrocks.max_batch_size_bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_batch_size_bytes: Option<u64>,
@@ -149,10 +145,6 @@ impl EnforceSecret for StarrocksConfig {
 
 fn default_commit_checkpoint_interval() -> u64 {
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
-}
-
-fn default_starrocks_max_batch_size_bytes() -> Option<u64> {
-    Some(DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES)
 }
 
 impl StarrocksConfig {
@@ -1007,13 +999,10 @@ mod tests {
     }
 
     #[test]
-    fn starrocks_max_batch_size_bytes_uses_default() {
+    fn starrocks_max_batch_size_bytes_defaults_to_none() {
         let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
 
-        assert_eq!(
-            config.max_batch_size_bytes,
-            Some(DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES)
-        );
+        assert_eq!(config.max_batch_size_bytes, None);
     }
 
     #[test]
