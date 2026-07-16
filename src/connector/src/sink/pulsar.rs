@@ -72,8 +72,6 @@ async fn build_pulsar_producer(
     pulsar: &Pulsar<TokioExecutor>,
     config: &PulsarConfig,
 ) -> Result<Producer<TokioExecutor>> {
-    let routing_policy = pulsar_producer_routing_policy(config.producer_properties.routing_mode);
-
     // Reduce async state machine size (see `clippy::large_futures`).
     Box::pin(
         pulsar
@@ -81,7 +79,9 @@ async fn build_pulsar_producer(
             .with_options(ProducerOptions {
                 batch_size: Some(config.producer_properties.batch_size),
                 batch_byte_size: Some(config.producer_properties.batch_byte_size),
-                routing_policy: Some(routing_policy),
+                routing_policy: pulsar_producer_routing_policy(
+                    config.producer_properties.routing_mode,
+                ),
                 ..Default::default()
             })
             .with_topic(&config.common.topic)
@@ -91,10 +91,10 @@ async fn build_pulsar_producer(
     .await
 }
 
-fn pulsar_producer_routing_policy(routing_mode: Option<PulsarRoutingMode>) -> RoutingPolicy {
-    routing_mode
-        .map(Into::into)
-        .unwrap_or(RoutingPolicy::RoundRobin)
+fn pulsar_producer_routing_policy(
+    routing_mode: Option<PulsarRoutingMode>,
+) -> Option<RoutingPolicy> {
+    routing_mode.map(Into::into)
 }
 
 #[derive(Debug, Copy, Clone, Display, Deserialize, EnumString)]
@@ -512,13 +512,10 @@ mod tests {
     }
 
     #[test]
-    fn test_pulsar_producer_routing_policy_defaults_to_round_robin() {
+    fn test_pulsar_producer_routing_policy_preserves_unset_default() {
         let config = parse_config_with([]);
 
-        assert!(matches!(
-            pulsar_producer_routing_policy(config.producer_properties.routing_mode),
-            RoutingPolicy::RoundRobin
-        ));
+        assert!(pulsar_producer_routing_policy(config.producer_properties.routing_mode).is_none());
     }
 
     #[test]
@@ -527,7 +524,7 @@ mod tests {
 
         assert!(matches!(
             pulsar_producer_routing_policy(config.producer_properties.routing_mode),
-            RoutingPolicy::Single
+            Some(RoutingPolicy::Single)
         ));
     }
 
