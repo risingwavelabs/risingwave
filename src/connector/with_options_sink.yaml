@@ -1507,6 +1507,17 @@ PulsarConfig:
     field_type: usize
     required: false
     default: 1 << 20
+  - name: properties.routing.mode
+    field_type: PulsarRoutingMode
+    required: false
+    alias:
+    - properties.routing_mode
+    - routing_mode
+    - pulsar.routing_mode
+    - pulsar.routing.mode
+    - pulsar.properties.routing.mode
+    - pulsar.properties.routing_mode
+    allow_alter_on_fly: true
 RedShiftConfig:
   fields:
   - name: jdbc.url
