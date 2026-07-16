@@ -145,6 +145,7 @@ pub struct PulsarPropertiesProducer {
         alias = "pulsar.properties.routing_mode"
     )]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     routing_mode: Option<PulsarRoutingMode>,
 }
 
