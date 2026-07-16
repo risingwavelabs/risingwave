@@ -71,9 +71,13 @@ impl SourceManager {
         &self,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<SourceSplitAssignment> {
-        let core = self.core.lock().await;
-
         let source_fragments = table_fragments.stream_source_fragments();
+        // Avoid touching the contended `core` lock for jobs with no source fragments.
+        if source_fragments.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let core = self.core.lock().await;
 
         let mut assigned = HashMap::new();
 

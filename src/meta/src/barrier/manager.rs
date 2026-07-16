@@ -31,7 +31,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::BarrierManagerRequest::MayHaveSnapshotBackfillingJob;
+use crate::barrier::BarrierManagerRequest::MayHaveCreatingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
@@ -39,7 +39,8 @@ use crate::barrier::{
     RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
@@ -153,14 +154,12 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
-    pub async fn may_snapshot_backfilling_job(&self) -> MetaResult<bool> {
+    pub async fn may_have_creating_job(&self) -> MetaResult<bool> {
         let (tx, rx) = oneshot::channel();
         self.request_tx
-            .send(MayHaveSnapshotBackfillingJob(tx))
-            .context("failed to send has snapshot backfilling job request")?;
-        Ok(rx
-            .await
-            .context("failed to wait has snapshot backfilling job")?)
+            .send(MayHaveCreatingJob(tx))
+            .context("failed to send has creating job request")?;
+        Ok(rx.await.context("failed to wait has creating job")?)
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
@@ -193,6 +192,7 @@ impl GlobalBarrierManager {
 }
 
 impl GlobalBarrierManager {
+    #[expect(clippy::too_many_arguments)]
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -200,7 +200,8 @@ impl GlobalBarrierManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
@@ -215,7 +216,8 @@ impl GlobalBarrierManager {
             hummock_manager,
             source_manager,
             sink_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
             scale_controller,
             request_rx,
             barrier_scheduler,

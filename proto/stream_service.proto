@@ -11,10 +11,10 @@ import "stream_plan.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-enum PbIcebergV3SinkRole {
-  PB_ICEBERG_V3_SINK_ROLE_UNSPECIFIED = 0;
-  PB_ICEBERG_V3_SINK_ROLE_WRITER = 1;
-  PB_ICEBERG_V3_SINK_ROLE_DV_MERGER = 2;
+enum PbIcebergPkIndexSinkRole {
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_UNSPECIFIED = 0;
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_WRITER = 1;
+  PB_ICEBERG_PK_INDEX_SINK_ROLE_POSITION_DELETE_MERGER = 2;
 }
 
 message InjectBarrierRequest {
@@ -134,14 +134,14 @@ message BarrierCompleteResponse {
     uint32 source_id = 2;
   }
   repeated CdcSourceOffsetUpdated cdc_source_offset_updated = 17;
-  message IcebergV3SinkMetadata {
+  message IcebergPkIndexSinkMetadata {
     uint32 reporter_actor_id = 1;
     uint32 sink_id = 2;
     uint64 prev_epoch = 3;
-    PbIcebergV3SinkRole role = 4;
+    PbIcebergPkIndexSinkRole role = 4;
     connector_service.SinkMetadata metadata = 5;
   }
-  repeated IcebergV3SinkMetadata iceberg_v3_sink_metadata = 18;
+  repeated IcebergPkIndexSinkMetadata iceberg_pk_index_sink_metadata = 18;
 }
 
 message StreamingControlStreamRequest {

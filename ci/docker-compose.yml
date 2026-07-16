@@ -37,6 +37,16 @@ services:
       timeout: 5s
       retries: 5
 
+  moto:
+    image: motoserver/moto:5.0.3
+    ports:
+      - 5000
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request\nurllib.request.urlopen('http://127.0.0.1:5000/moto-api/', timeout=2)\nPY"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # TODO: reuse the same mysql instance for connector test and meta store
   #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
   mysql-meta:
@@ -447,6 +457,7 @@ services:
       - db
       - message_queue
       - schemaregistry
+      - moto
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

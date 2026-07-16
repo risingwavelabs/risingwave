@@ -57,6 +57,8 @@ BigQueryConfig:
     field_type: bool
     required: false
     default: Default::default
+    alias:
+    - create_table_if_not_exists
   - name: bigquery.credentials
     field_type: String
     required: false
@@ -238,7 +240,7 @@ DorisConfig:
     required: true
   - name: doris.stream_load.http.timeout.ms
     field_type: u64
-    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    comments: The timeout in milliseconds for stream load http request, defaults to 30 seconds.
     required: false
     default: 30 * 1000
     allow_alter_on_fly: true
@@ -499,6 +501,9 @@ IcebergConfig:
     field_type: String
     required: false
   - name: glue.region
+    field_type: String
+    required: false
+  - name: glue.endpoint
     field_type: String
     required: false
   - name: glue.id
@@ -812,7 +817,8 @@ IcebergConfig:
     field_type: bool
     comments: |-
       Whether to enable PK index for upsert sink. Default is false.
-      It's used for V3 upsert iceberg sink to generate delete vectors.
+      For upsert iceberg sinks (V2/V3, merge-on-read): maintain a pk index and write
+      position deletes instead of equality deletes.
     required: false
     default: Default::default
 KafkaConfig:

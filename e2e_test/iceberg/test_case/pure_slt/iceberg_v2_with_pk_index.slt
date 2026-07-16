@@ -1,0 +1,141 @@
+statement ok
+create secret hosted_catalog_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Test hosted catalog connection using the warehouse created by risedev
+statement ok
+create connection hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_v2_pk_index',
+    s3.access.key = secret hosted_catalog_secret,
+    s3.secret.key = secret hosted_catalog_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.hosted_catalog_conn';
+
+statement ok
+create table t_v2(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 3,
+    format_version = 2,
+    partition_by = 'id',
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+statement ok
+insert into t_v2 values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+statement ok
+flush;
+
+statement ok
+update t_v2 set v1 = 150 where id = 1;
+
+statement ok
+delete from t_v2 where id = 2;
+
+statement ok
+FLUSH;
+
+# The pk-index path writes file-scoped position deletes. In V2 these are parquet
+# delete files (PositionDeletes), not puffin deletion vectors.
+query ?? retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v2'
+  and content = 'PositionDeletes'
+  and file_format = 'parquet';
+----
+t
+
+# The pk-index path must never produce equality deletes.
+query ?? retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v2'
+  and content = 'EqualityDeletes';
+----
+t
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v2;
+----
+1 alice 150
+3 charlie 300
+
+# Another delete across a new checkpoint should still only use position deletes.
+statement ok
+delete from t_v2 where id = 1;
+
+statement ok
+FLUSH;
+
+query ?? retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v2'
+  and content = 'EqualityDeletes';
+----
+t
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v2;
+----
+3 charlie 300
+
+statement ok
+DROP TABLE t_v2;
+
+statement ok
+DROP CONNECTION hosted_catalog_conn;
+
+# Test storage catalog connection with format version 2
+statement ok
+create connection storage_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'storage',
+    warehouse.path = 's3://hummock001/iceberg_v2_pk_index',
+    s3.access.key = secret hosted_catalog_secret,
+    s3.secret.key = secret hosted_catalog_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.storage_catalog_conn';
+
+statement ok
+create table t_v2_storage(id int primary key, name varchar)
+with(
+    commit_checkpoint_interval = 2,
+    format_version = 2,
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+statement ok
+insert into t_v2_storage values(1, 'alice'), (2, 'bob');
+
+statement ok
+flush;
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v2_storage;
+----
+1 alice
+2 bob
+
+statement ok
+DROP TABLE t_v2_storage;
+
+statement ok
+DROP CONNECTION storage_catalog_conn;
+
+statement ok
+DROP SECRET hosted_catalog_secret;

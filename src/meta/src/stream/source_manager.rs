@@ -24,7 +24,9 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::ObjectId;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
@@ -334,7 +336,12 @@ impl SourceManager {
         {
             let sources = metadata_manager.list_sources().await?;
             for source in sources {
-                create_source_worker_async(source, &mut managed_sources, metrics.clone())?
+                create_source_worker_async(
+                    source,
+                    &mut managed_sources,
+                    metrics.clone(),
+                    env.await_tree_reg().clone(),
+                )?
             }
         }
 
@@ -447,9 +454,13 @@ impl SourceManager {
             return Ok(());
         }
 
-        let handle = create_source_worker(source, self.metrics.clone())
-            .await
-            .context("failed to create source worker")?;
+        let handle = create_source_worker(
+            source,
+            self.metrics.clone(),
+            core.env.await_tree_reg().clone(),
+        )
+        .await
+        .context("failed to create source worker")?;
 
         core.managed_sources.insert(source_id, handle);
 

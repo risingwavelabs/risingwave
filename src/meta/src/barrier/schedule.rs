@@ -785,7 +785,11 @@ impl ScheduledBarriers {
                         unreachable!("only drop and cancel streaming jobs should be buffered");
                     }
                 }
-                notifiers.into_iter().for_each(|notify| {
+                // `run_command` waits for both the started and collected notifications. These
+                // buffered commands are pre-applied during recovery without injecting a real
+                // barrier, so complete both waiters here.
+                notifiers.into_iter().for_each(|mut notify| {
+                    notify.notify_started();
                     notify.notify_collected();
                 });
             }
@@ -955,16 +959,16 @@ mod tests {
             unimplemented!()
         }
 
-        async fn pre_commit_iceberg_v3_sink_metadata(
+        async fn pre_commit_iceberg_pk_index_sink_metadata(
             &self,
             _reports: Vec<
-                risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+                risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
             >,
         ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
             unimplemented!()
         }
 
-        async fn commit_iceberg_v3_sink_metadata(
+        async fn commit_iceberg_pk_index_sink_metadata(
             &self,
             _sink_ids: Vec<risingwave_meta_model::SinkId>,
         ) -> MetaResult<()> {

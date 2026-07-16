@@ -25,6 +25,34 @@
     └─StreamProject { exprs: [t_since_sink_as_select.v1, (t_since_sink_as_select.v2 + 1:Int32) as $expr1] }
       └─StreamFilter [upsert] { predicate: (t_since_sink_as_select.v2 > 10:Int32) }
         └─StreamTableScan { table: t_since_sink_as_select, columns: [t_since_sink_as_select.v1, t_since_sink_as_select.v2], stream_scan_type: SnapshotBackfill, stream_key: [t_since_sink_as_select.v1], pk: [v1], dist: UpstreamHashShard(t_since_sink_as_select.v1) }
+- name: reject upsert sink primary-key mismatch by default
+  sql: |
+    create table t_reject_unsafe_upsert_sink (id int primary key, value int);
+    explain (verbose) create sink s_reject_unsafe_upsert_sink as
+    select id, value from t_reject_unsafe_upsert_sink
+    with (
+      connector = 'blackhole',
+      type = 'upsert',
+      primary_key = 'value',
+      snapshot = 'false'
+    );
+  planner_error: 'Bind error: When sinking from an upsert stream, the downstream primary key must be the same as or a subset of the one derived from the stream.'
+- name: unsafe allow upsert sink primary-key mismatch
+  sql: |
+    set streaming_unsafe_allow_upsert_sink_pk_mismatch = true;
+    create table t_unsafe_upsert_sink (id int primary key, value int);
+    explain (verbose) create sink s_unsafe_upsert_sink as
+    select id, value from t_unsafe_upsert_sink
+    with (
+      connector = 'blackhole',
+      type = 'upsert',
+      primary_key = 'value',
+      snapshot = 'false'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [id, value], downstream_pk: [t_unsafe_upsert_sink.value] }
+    └─StreamExchange { dist: HashShard(t_unsafe_upsert_sink.value) }
+      └─StreamTableScan { table: t_unsafe_upsert_sink, columns: [t_unsafe_upsert_sink.id, t_unsafe_upsert_sink.value], stream_scan_type: UpstreamOnly, stream_key: [t_unsafe_upsert_sink.id], pk: [id], dist: UpstreamHashShard(t_unsafe_upsert_sink.id) }
 - id: create_upsert_jdbc_sink_with_downstream_pk1
   sql: |
     create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
@@ -309,7 +337,7 @@
       enable_pk_index = 'true'
     );
   explain_output: |
-    StreamIcebergWithPkIndexDvMerger
+    StreamIcebergWithPkIndexPositionDeleteMerger
     └─StreamExchange { dist: HashShard(file_path) }
       └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id], downstream_pk: [t1._row_id] }
         └─StreamExchange { dist: HashShard(t1._row_id) }
@@ -335,7 +363,7 @@
       enable_pk_index = 'true'
     );
   explain_output: |
-    StreamIcebergWithPkIndexDvMerger
+    StreamIcebergWithPkIndexPositionDeleteMerger
     └─StreamExchange { dist: HashShard(file_path) }
       └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id], downstream_pk: [t1._row_id] }
         └─StreamExchange { dist: HashShard(t1._row_id) }
@@ -397,7 +425,7 @@
       enable_pk_index = 'true'
     );
   explain_output: |
-    StreamIcebergWithPkIndexDvMerger
+    StreamIcebergWithPkIndexPositionDeleteMerger
     └─StreamExchange { dist: HashShard(file_path) }
       └─StreamIcebergWithPkIndexWriter { columns: [v1, t.v2, t.v3], downstream_pk: [v1, t.v2, t.v3] }
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
@@ -423,7 +451,7 @@
       enable_pk_index = 'true'
     );
   explain_output: |
-    StreamIcebergWithPkIndexDvMerger
+    StreamIcebergWithPkIndexPositionDeleteMerger
     └─StreamExchange { dist: HashShard(file_path) }
       └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4], downstream_pk: [v1, v2] }
         └─StreamExchange { dist: HashShard(u.v1, o.oid) }

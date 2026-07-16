@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Manager for the Iceberg V3 sink path. Owns per-sink commit coordinators that
+//! Manager for the Iceberg pk-index sink path. Owns per-sink commit coordinators that
 //! drive iceberg `commit_epoch` ahead of hummock `commit_epoch` and persist
 //! exactly-once state via `pending_sink_state`.
 //!
 //! This is intentionally separate from [`crate::manager::sink_coordination`]
-//! (which serves V1/V2 sinks via gRPC). Future V3 responsibilities such as
+//! (which serves V1/V2 sinks via gRPC). Future responsibilities such as
 //! per-sink compaction will live alongside the per-sink commit coordinator here.
 
 pub mod backfill;
@@ -27,15 +27,15 @@ mod manager;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-pub use manager::IcebergV3SinkManager;
+pub use manager::IcebergPkIndexSinkManager;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, IcebergConfig};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbSink;
 
-/// Returns true if the given sink properties identify a Iceberg V3 sink
+/// Returns true if the given sink properties identify a Iceberg pk-index sink
 /// (i.e. an iceberg sink with `enable_pk_index = 'true'`).
-pub fn is_iceberg_v3_sink(properties: &BTreeMap<String, String>) -> bool {
+pub fn is_iceberg_pk_index_sink(properties: &BTreeMap<String, String>) -> bool {
     let connector_match = properties
         .get(UPSTREAM_SOURCE_KEY)
         .map(|v| v.eq_ignore_ascii_case("iceberg"))
@@ -48,7 +48,7 @@ pub fn is_iceberg_v3_sink(properties: &BTreeMap<String, String>) -> bool {
 }
 
 /// Build an [`IcebergConfig`] from a [`PbSink`], filling secret refs along the
-/// way. Used at CREATE SINK time and during recovery to (re-)register the V3
+/// way. Used at CREATE SINK time and during recovery to (re-)register the
 /// commit coordinator.
 pub fn build_iceberg_config(pb_sink: &PbSink) -> anyhow::Result<IcebergConfig> {
     let properties: BTreeMap<String, String> = pb_sink.properties.clone().into_iter().collect();

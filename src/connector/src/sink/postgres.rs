@@ -33,13 +33,27 @@ use tokio_postgres::types::Type as PgType;
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
-use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::connector_common::{
+    PgConnectionConfig, PostgresExternalTable, SslMode, TcpKeepaliveConfig, create_pg_client,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const POSTGRES_SINK: &str = "postgres";
+
+const CHECK_FOREIGN_KEY_SQL: &str = r#"
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = $1
+          AND t.relname = $2
+          AND c.contype = 'f'
+    )
+"#;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -69,30 +83,6 @@ pub struct PostgresConfig {
     pub tcp_keepalive: Option<TcpKeepaliveConfig>,
 }
 
-#[serde_as]
-#[derive(Debug, Clone, Deserialize)]
-pub struct TcpKeepaliveConfig {
-    #[serde(rename = "tcp.keepalive.idle")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_idle: u32,
-    #[serde(rename = "tcp.keepalive.interval")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_interval: u32,
-    #[serde(rename = "tcp.keepalive.count")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_count: u32,
-}
-
-impl Default for TcpKeepaliveConfig {
-    fn default() -> Self {
-        Self {
-            tcp_keepalive_idle: 10 * 60, // 10 minutes,
-            tcp_keepalive_interval: 10,
-            tcp_keepalive_count: 3,
-        }
-    }
-}
-
 impl EnforceSecret for PostgresConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
         "password", "ssl.root.cert"
@@ -105,6 +95,46 @@ fn default_max_batch_rows() -> usize {
 
 fn default_schema() -> String {
     "public".to_owned()
+}
+
+fn tcp_keepalive_from_config(config: &PostgresConfig) -> Option<TcpKeepaliveConfig> {
+    if config.tcp_keepalive_enable {
+        config
+            .tcp_keepalive
+            .clone()
+            .or_else(|| Some(TcpKeepaliveConfig::default()))
+    } else {
+        None
+    }
+}
+
+async fn ensure_no_foreign_key(config: &PostgresConfig) -> Result<()> {
+    let pg_conn = config.pg_connection_config();
+    let client = create_pg_client(&pg_conn, tcp_keepalive_from_config(config)).await?;
+
+    ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await
+}
+
+async fn ensure_no_foreign_key_with_client(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<()> {
+    let has_foreign_key = client
+        .query_one(CHECK_FOREIGN_KEY_SQL, &[&schema, &table])
+        .await
+        .context("failed to check foreign key constraints")?
+        .get::<_, bool>(0);
+
+    if has_foreign_key {
+        return Err(SinkError::Config(anyhow!(
+            "Postgres sink does not support target table \"{}\".\"{}\" with foreign key constraints. Please remove foreign key constraints from the target table or choose a different sink table.",
+            schema,
+            table,
+        )));
+    }
+
+    Ok(())
 }
 
 impl PostgresConfig {
@@ -121,6 +151,18 @@ impl PostgresConfig {
             )));
         }
         Ok(config)
+    }
+
+    pub fn pg_connection_config(&self) -> PgConnectionConfig {
+        PgConnectionConfig {
+            host: self.host.clone(),
+            port: self.port,
+            user: self.user.clone(),
+            password: self.password.clone(),
+            database: self.database.clone(),
+            ssl_mode: self.ssl_mode.clone(),
+            ssl_root_cert: self.ssl_root_cert.clone(),
+        }
     }
 }
 
@@ -182,18 +224,15 @@ impl Sink for PostgresSink {
             )));
         }
 
+        ensure_no_foreign_key(&self.config).await?;
+
         // Verify our sink schema is compatible with Postgres
         {
+            let pg_conn = self.config.pg_connection_config();
             let pg_table = PostgresExternalTable::connect(
-                &self.config.user,
-                &self.config.password,
-                &self.config.host,
-                self.config.port,
-                &self.config.database,
+                &pg_conn,
                 &self.config.schema,
                 &self.config.table,
-                &self.config.ssl_mode,
-                &self.config.ssl_root_cert,
                 self.is_append_only,
             )
             .await
@@ -304,40 +343,21 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let tcp_keepalive = if config.tcp_keepalive_enable {
-            config
-                .tcp_keepalive
-                .or_else(|| Some(TcpKeepaliveConfig::default()))
-        } else {
-            None
-        };
+        let tcp_keepalive = tcp_keepalive_from_config(&config);
 
-        let client = create_pg_client(
-            &config.user,
-            &config.password,
-            &config.host,
-            &config.port.to_string(),
-            &config.database,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
-            tcp_keepalive,
-        )
-        .await?;
+        let pg_conn = config.pg_connection_config();
+        let client = create_pg_client(&pg_conn, tcp_keepalive).await?;
+
+        ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await?;
 
         let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
 
         // Rewrite schema types for serialization
         let (pk_types, schema_types) = {
             let name_to_type = PostgresExternalTable::type_mapping(
-                &config.user,
-                &config.password,
-                &config.host,
-                config.port,
-                &config.database,
+                &pg_conn,
                 &config.schema,
                 &config.table,
-                &config.ssl_mode,
-                &config.ssl_root_cert,
                 is_append_only,
             )
             .await?;

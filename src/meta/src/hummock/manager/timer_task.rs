@@ -300,6 +300,20 @@ async fn supervise_child_loops(
                 Ok(()) => {
                     panic!("Hummock timer handler loop [{name}] exited unexpectedly");
                 }
+                // A cancellation means the runtime is aborting detached tasks during shutdown;
+                // treat it as a benign shutdown signal and drain the rest instead of failing.
+                Err(e) if e.is_cancelled() => {
+                    let _ = child_shutdown_tx.send(true);
+                    while let Some((name, result)) = child_handles.next().await {
+                        if let Err(e) = result {
+                            warn!(
+                                handler = name,
+                                error = %e.as_report(),
+                                "Hummock timer handler loop failed during shutdown"
+                            );
+                        }
+                    }
+                }
                 Err(e) => {
                     panic!("Hummock timer handler loop [{name}] failed: {}", e.as_report());
                 }

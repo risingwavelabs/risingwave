@@ -77,6 +77,8 @@ pub struct IcebergCommon {
     pub glue_iam_role_arn: Option<String>,
     #[serde(rename = "glue.region")]
     pub glue_region: Option<String>,
+    #[serde(rename = "glue.endpoint")]
+    pub glue_endpoint: Option<String>,
     /// AWS Client id, can be omitted for storage catalog or when
     /// caller's AWS account ID matches glue id
     #[serde(rename = "glue.id")]
@@ -292,18 +294,239 @@ impl IcebergTableIdentifier {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IcebergCatalogRuntime {
+    NativeRust,
+    JavaJni,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IcebergCatalogKind {
+    Storage,
+    Rest(IcebergCatalogRuntime),
+    Glue(IcebergCatalogRuntime),
+    Hive,
+    Jdbc,
+    Snowflake,
+    Mock,
+}
+
+impl IcebergCatalogKind {
+    fn resolve(common: &IcebergCommon) -> ConnectorResult<Self> {
+        let catalog_type = common.catalog_type();
+        let kind = match catalog_type {
+            "storage" => Self::Storage,
+            "rest" if common.vended_credentials() => Self::Rest(IcebergCatalogRuntime::NativeRust),
+            "rest" => Self::Rest(IcebergCatalogRuntime::JavaJni),
+            "rest_rust" => Self::Rest(IcebergCatalogRuntime::NativeRust),
+            "glue" => Self::Glue(IcebergCatalogRuntime::JavaJni),
+            "glue_rust" => Self::Glue(IcebergCatalogRuntime::NativeRust),
+            "hive" => Self::Hive,
+            "jdbc" => Self::Jdbc,
+            "snowflake" => Self::Snowflake,
+            #[cfg(any(test, madsim))]
+            "mock_v3" => Self::Mock,
+            "mock" => Self::Mock,
+            _ => {
+                bail!(
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
+                    catalog_type
+                )
+            }
+        };
+        Ok(kind)
+    }
+
+    pub fn is_rest(self) -> bool {
+        matches!(self, Self::Rest(_))
+    }
+
+    fn jni_impl(self) -> Option<JniCatalogImpl> {
+        match self {
+            Self::Rest(IcebergCatalogRuntime::JavaJni) => Some(JniCatalogImpl::Rest),
+            Self::Glue(IcebergCatalogRuntime::JavaJni) => Some(JniCatalogImpl::Glue),
+            Self::Hive => Some(JniCatalogImpl::Hive),
+            Self::Jdbc => Some(JniCatalogImpl::Jdbc),
+            Self::Snowflake => Some(JniCatalogImpl::Snowflake),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JniCatalogImpl {
+    Hive,
+    Jdbc,
+    Snowflake,
+    Rest,
+    Glue,
+}
+
+impl JniCatalogImpl {
+    fn catalog_type(self) -> &'static str {
+        match self {
+            Self::Hive => "hive",
+            Self::Jdbc => "jdbc",
+            Self::Snowflake => "snowflake",
+            Self::Rest => "rest",
+            Self::Glue => "glue",
+        }
+    }
+
+    fn class_name(self) -> &'static str {
+        match self {
+            Self::Hive => "org.apache.iceberg.hive.HiveCatalog",
+            Self::Jdbc => "org.apache.iceberg.jdbc.JdbcCatalog",
+            Self::Snowflake => "org.apache.iceberg.snowflake.SnowflakeCatalog",
+            Self::Rest => "org.apache.iceberg.rest.RESTCatalog",
+            Self::Glue => "org.apache.iceberg.aws.glue.GlueCatalog",
+        }
+    }
+}
+
+enum CatalogBuildPlan {
+    Storage(StorageCatalogConfig),
+    NativeRest(HashMap<String, String>),
+    NativeGlue(HashMap<String, String>),
+    Jni {
+        file_io_props: HashMap<String, String>,
+        catalog_name: String,
+        catalog_impl: JniCatalogImpl,
+        java_catalog_props: HashMap<String, String>,
+    },
+    Mock,
+}
+
+pub struct ResolvedIcebergCatalogConfig<'a> {
+    common: &'a IcebergCommon,
+    kind: IcebergCatalogKind,
+    java_catalog_props: HashMap<String, String>,
+}
+
+impl<'a> ResolvedIcebergCatalogConfig<'a> {
+    pub fn kind(&self) -> IcebergCatalogKind {
+        self.kind
+    }
+
+    fn build_plan(&self) -> ConnectorResult<CatalogBuildPlan> {
+        match self.kind {
+            IcebergCatalogKind::Storage => self.common.build_storage_catalog_config(),
+            IcebergCatalogKind::Rest(IcebergCatalogRuntime::NativeRust) => {
+                self.common.build_native_rest_catalog_props()
+            }
+            IcebergCatalogKind::Glue(IcebergCatalogRuntime::NativeRust) => {
+                self.common.build_native_glue_catalog_props()
+            }
+            IcebergCatalogKind::Mock => Ok(CatalogBuildPlan::Mock),
+            kind => {
+                let catalog_impl = kind.jni_impl().expect("java catalog kind has JNI impl");
+                let (file_io_props, java_catalog_props) = self
+                    .common
+                    .build_jni_catalog_configs(catalog_impl, &self.java_catalog_props)?;
+                Ok(CatalogBuildPlan::Jni {
+                    file_io_props,
+                    catalog_name: self.common.catalog_name(),
+                    catalog_impl,
+                    java_catalog_props,
+                })
+            }
+        }
+    }
+
+    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
+        match self.build_plan()? {
+            CatalogBuildPlan::Storage(config) => {
+                let catalog = storage_catalog::StorageCatalog::new(config)?;
+                Ok(Arc::new(catalog))
+            }
+            CatalogBuildPlan::NativeRest(iceberg_configs) => {
+                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .load("rest", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
+                Ok(Arc::new(catalog))
+            }
+            CatalogBuildPlan::NativeGlue(iceberg_configs) => {
+                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
+                    .load("glue", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
+                Ok(Arc::new(catalog))
+            }
+            CatalogBuildPlan::Jni {
+                file_io_props,
+                catalog_name,
+                catalog_impl,
+                java_catalog_props,
+            } => {
+                jni_catalog::JniCatalog::build_catalog(
+                    file_io_props,
+                    catalog_name,
+                    catalog_impl.class_name(),
+                    java_catalog_props,
+                )
+                .await
+            }
+            CatalogBuildPlan::Mock => Ok(Arc::new(mock_catalog::MockCatalog {})),
+        }
+    }
+
+    pub async fn load_table(&self, table: &IcebergTableIdentifier) -> ConnectorResult<Table> {
+        let catalog = self
+            .create_catalog()
+            .await
+            .context("Unable to load iceberg catalog")?;
+
+        let table_id = table
+            .to_table_ident()
+            .context("Unable to parse table name")?;
+
+        let table = catalog.load_table(&table_id).await?;
+        Ok(rebuild_table_with_shared_cache(table).await)
+    }
+}
+
+pub fn iceberg_java_catalog_props_from_options<'a>(
+    options: impl Iterator<Item = (&'a str, &'a str)>,
+) -> HashMap<String, String> {
+    options
+        .filter(|(k, _v)| {
+            k.starts_with("catalog.")
+                && k != &"catalog.uri"
+                && k != &"catalog.type"
+                && k != &"catalog.name"
+                && k != &"catalog.header"
+        })
+        .map(|(k, v)| (k[8..].to_owned(), v.to_owned()))
+        .collect()
+}
+
 impl IcebergCommon {
     pub fn catalog_type(&self) -> &str {
-        let catalog_type: &str = self.catalog_type.as_deref().unwrap_or("storage");
-        if self.vended_credentials() && catalog_type == "rest" {
-            "rest_rust"
-        } else {
-            catalog_type
-        }
+        self.catalog_type.as_deref().unwrap_or("storage")
     }
 
     pub fn vended_credentials(&self) -> bool {
         self.vended_credentials.unwrap_or(false)
+    }
+
+    pub fn resolve_catalog_kind(&self) -> ConnectorResult<IcebergCatalogKind> {
+        IcebergCatalogKind::resolve(self)
+    }
+
+    pub fn is_rest_catalog(&self) -> ConnectorResult<bool> {
+        Ok(self.resolve_catalog_kind()?.is_rest())
+    }
+
+    pub fn resolve_catalog_config(
+        &self,
+        java_catalog_props: HashMap<String, String>,
+    ) -> ConnectorResult<ResolvedIcebergCatalogConfig<'_>> {
+        Ok(ResolvedIcebergCatalogConfig {
+            common: self,
+            kind: self.resolve_catalog_kind()?,
+            java_catalog_props,
+        })
     }
 
     fn glue_access_key(&self) -> Option<&str> {
@@ -320,6 +543,17 @@ impl IcebergCommon {
 
     fn glue_region(&self) -> Option<&str> {
         self.glue_region.as_deref().or(self.s3_region.as_deref())
+    }
+
+    fn glue_endpoint(&self) -> Option<&str> {
+        self.glue_endpoint
+            .as_deref()
+            .or_else(|| match self.resolve_catalog_kind() {
+                Ok(IcebergCatalogKind::Glue(IcebergCatalogRuntime::JavaJni)) => {
+                    self.catalog_uri.as_deref()
+                }
+                _ => None,
+            })
     }
 
     pub fn catalog_name(&self) -> String {
@@ -369,22 +603,175 @@ impl IcebergCommon {
         self.enable_config_load.unwrap_or(false)
     }
 
+    fn build_storage_catalog_config(&self) -> ConnectorResult<CatalogBuildPlan> {
+        let warehouse = self
+            .warehouse_path
+            .clone()
+            .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
+        let url = Url::parse(warehouse.as_ref())
+            .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
+
+        let config = match url.scheme() {
+            "s3" | "s3a" => StorageCatalogConfig::S3(
+                storage_catalog::StorageCatalogS3Config::builder()
+                    .warehouse(warehouse)
+                    .access_key(self.s3_access_key.clone())
+                    .secret_key(self.s3_secret_key.clone())
+                    .region(self.s3_region.clone())
+                    .endpoint(self.s3_endpoint.clone())
+                    .path_style_access(self.s3_path_style_access)
+                    .enable_config_load(Some(self.enable_config_load()))
+                    .build(),
+            ),
+            "gs" | "gcs" => StorageCatalogConfig::Gcs(
+                storage_catalog::StorageCatalogGcsConfig::builder()
+                    .warehouse(warehouse)
+                    .credential(self.gcs_credential.clone())
+                    .enable_config_load(Some(self.enable_config_load()))
+                    .build(),
+            ),
+            "azblob" => StorageCatalogConfig::Azblob(
+                storage_catalog::StorageCatalogAzblobConfig::builder()
+                    .warehouse(warehouse)
+                    .account_name(self.azblob_account_name.clone())
+                    .account_key(self.azblob_account_key.clone())
+                    .endpoint(self.azblob_endpoint_url.clone())
+                    .build(),
+            ),
+            scheme => bail!("Unsupported warehouse scheme: {}", scheme),
+        };
+
+        Ok(CatalogBuildPlan::Storage(config))
+    }
+
+    fn build_native_rest_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
+        let mut iceberg_configs = HashMap::new();
+
+        // check gcs credential or s3 access key and secret key
+        if let Some(gcs_credential) = &self.gcs_credential {
+            iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
+        } else {
+            if let Some(region) = &self.s3_region {
+                iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
+            }
+            if let Some(endpoint) = &self.s3_endpoint {
+                iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
+            }
+            if let Some(access_key) = &self.s3_access_key {
+                iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+            }
+            if let Some(secret_key) = &self.s3_secret_key {
+                iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+            }
+            if let Some(path_style_access) = &self.s3_path_style_access {
+                iceberg_configs.insert(
+                    S3_PATH_STYLE_ACCESS.to_owned(),
+                    path_style_access.to_string(),
+                );
+            }
+        };
+
+        if let Some(credential) = &self.catalog_credential {
+            iceberg_configs.insert("credential".to_owned(), credential.clone());
+        }
+        if let Some(token) = &self.catalog_token {
+            iceberg_configs.insert("token".to_owned(), token.clone());
+        }
+        if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
+            iceberg_configs.insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
+        }
+        if let Some(scope) = &self.catalog_scope {
+            iceberg_configs.insert("scope".to_owned(), scope.clone());
+        }
+
+        let headers = self.headers()?;
+        for (header_name, header_value) in headers {
+            iceberg_configs.insert(format!("header.{}", header_name), header_value);
+        }
+
+        iceberg_configs.insert(
+            iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
+            self.catalog_uri
+                .clone()
+                .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
+        );
+        if let Some(warehouse_path) = &self.warehouse_path {
+            iceberg_configs.insert(
+                iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
+                warehouse_path.clone(),
+            );
+        }
+
+        Ok(CatalogBuildPlan::NativeRest(iceberg_configs))
+    }
+
+    fn build_native_glue_catalog_props(&self) -> ConnectorResult<CatalogBuildPlan> {
+        let mut iceberg_configs = HashMap::new();
+        // glue
+        if let Some(region) = self.glue_region() {
+            iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.to_owned());
+        }
+        if let Some(access_key) = self.glue_access_key() {
+            iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.to_owned());
+        }
+        if let Some(secret_key) = self.glue_secret_key() {
+            iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.to_owned());
+        }
+        // s3
+        if let Some(region) = &self.s3_region {
+            iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
+        }
+        if let Some(endpoint) = &self.s3_endpoint {
+            iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
+        }
+        if let Some(access_key) = &self.s3_access_key {
+            iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+        }
+        if let Some(secret_key) = &self.s3_secret_key {
+            iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+        }
+        if let Some(role_arn) = &self.s3_iam_role_arn {
+            iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
+        }
+        if let Some(path_style_access) = &self.s3_path_style_access {
+            iceberg_configs.insert(
+                S3_PATH_STYLE_ACCESS.to_owned(),
+                path_style_access.to_string(),
+            );
+        }
+        iceberg_configs.insert(
+            iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
+            self.warehouse_path
+                .clone()
+                .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
+        );
+        if let Some(uri) = self.catalog_uri.as_deref() {
+            iceberg_configs.insert(
+                iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
+                uri.to_owned(),
+            );
+        }
+
+        Ok(CatalogBuildPlan::NativeGlue(iceberg_configs))
+    }
+
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
+        catalog_impl: JniCatalogImpl,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
         let enable_config_load = self.enable_config_load();
         let file_io_props = {
-            let catalog_type = self.catalog_type().to_owned();
+            let catalog_type = catalog_impl.catalog_type();
 
             // Non-S3/Glue object-store backends only work with a REST catalog. This
             // function is only invoked for catalog_type in {hive, snowflake, jdbc, rest,
             // glue}, so the only accepted value here is "rest".
             let require_rest = |backend: &str| -> ConnectorResult<()> {
-                if catalog_type != "rest" {
-                    bail!("{} unsupported in {} catalog", backend, &catalog_type);
+                if catalog_impl != JniCatalogImpl::Rest {
+                    bail!("{} unsupported in {} catalog", backend, catalog_type);
                 }
                 Ok(())
             };
@@ -522,7 +909,7 @@ impl IcebergCommon {
                         let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                         let url = Url::parse(warehouse_path);
                         if (url.is_err() || is_s3_tables || is_bq_catalog_federation)
-                            && (catalog_type == "rest" || catalog_type == "rest_rust")
+                            && catalog_impl == JniCatalogImpl::Rest
                         {
                             // If the warehouse path is not a valid URL, it could be:
                             // - A warehouse name in REST catalog
@@ -553,8 +940,8 @@ impl IcebergCommon {
                     }
                 }
                 None => {
-                    if catalog_type != "rest" && catalog_type != "rest_rust" {
-                        bail!("`warehouse.path` must be set in {} catalog", &catalog_type);
+                    if catalog_impl != JniCatalogImpl::Rest {
+                        bail!("`warehouse.path` must be set in {} catalog", catalog_type);
                     }
                 }
             }
@@ -626,8 +1013,8 @@ impl IcebergCommon {
                 java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
-            match self.catalog_type() {
-                "rest" => {
+            match catalog_impl {
+                JniCatalogImpl::Rest => {
                     // Handle security type for REST catalog (Iceberg 1.10+)
                     if let Some(security) = &self.catalog_security {
                         match security.to_lowercase().as_str() {
@@ -718,7 +1105,7 @@ impl IcebergCommon {
                         }
                     }
                 }
-                "glue" => {
+                JniCatalogImpl::Glue => {
                     let glue_access_key = self.glue_access_key();
                     let glue_secret_key = self.glue_secret_key();
                     let has_glue_credentials =
@@ -767,10 +1154,13 @@ impl IcebergCommon {
 
                     if let Some(region) = self.glue_region() {
                         java_catalog_configs.insert("client.region".to_owned(), region.to_owned());
-                        java_catalog_configs.insert(
-                            "glue.endpoint".to_owned(),
-                            format!("https://glue.{}.amazonaws.com", region),
-                        );
+                    }
+                    let glue_endpoint = self.glue_endpoint().map(str::to_owned).or_else(|| {
+                        self.glue_region()
+                            .map(|region| format!("https://glue.{}.amazonaws.com", region))
+                    });
+                    if let Some(endpoint) = glue_endpoint {
+                        java_catalog_configs.insert("glue.endpoint".to_owned(), endpoint);
                     }
 
                     if let Some(glue_id) = self.glue_id.as_deref() {
@@ -778,7 +1168,7 @@ impl IcebergCommon {
                     }
                     self.apply_java_s3_file_io_assume_role_configs(&mut java_catalog_configs);
                 }
-                "jdbc" => {
+                JniCatalogImpl::Jdbc => {
                     self.apply_java_aws_client_assume_role_configs(&mut java_catalog_configs);
                 }
                 _ => {}
@@ -815,226 +1205,6 @@ impl IcebergCommon {
                 java_catalog_configs.insert("client.assume-role.region".to_owned(), region.clone());
             }
         }
-    }
-}
-
-impl IcebergCommon {
-    /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-    pub async fn create_catalog(
-        &self,
-        java_catalog_props: &HashMap<String, String>,
-    ) -> ConnectorResult<Arc<dyn Catalog>> {
-        match self.catalog_type() {
-            "storage" => {
-                let warehouse = self
-                    .warehouse_path
-                    .clone()
-                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
-                let url = Url::parse(warehouse.as_ref())
-                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
-
-                let config = match url.scheme() {
-                    "s3" | "s3a" => StorageCatalogConfig::S3(
-                        storage_catalog::StorageCatalogS3Config::builder()
-                            .warehouse(warehouse)
-                            .access_key(self.s3_access_key.clone())
-                            .secret_key(self.s3_secret_key.clone())
-                            .region(self.s3_region.clone())
-                            .endpoint(self.s3_endpoint.clone())
-                            .path_style_access(self.s3_path_style_access)
-                            .enable_config_load(Some(self.enable_config_load()))
-                            .build(),
-                    ),
-                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
-                        storage_catalog::StorageCatalogGcsConfig::builder()
-                            .warehouse(warehouse)
-                            .credential(self.gcs_credential.clone())
-                            .enable_config_load(Some(self.enable_config_load()))
-                            .build(),
-                    ),
-                    "azblob" => StorageCatalogConfig::Azblob(
-                        storage_catalog::StorageCatalogAzblobConfig::builder()
-                            .warehouse(warehouse)
-                            .account_name(self.azblob_account_name.clone())
-                            .account_key(self.azblob_account_key.clone())
-                            .endpoint(self.azblob_endpoint_url.clone())
-                            .build(),
-                    ),
-                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
-                };
-
-                let catalog = storage_catalog::StorageCatalog::new(config)?;
-                Ok(Arc::new(catalog))
-            }
-            "rest_rust" => {
-                let mut iceberg_configs = HashMap::new();
-
-                // check gcs credential or s3 access key and secret key
-                if let Some(gcs_credential) = &self.gcs_credential {
-                    iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
-                } else {
-                    if let Some(region) = &self.s3_region {
-                        iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
-                    }
-                    if let Some(endpoint) = &self.s3_endpoint {
-                        iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
-                    }
-                    if let Some(access_key) = &self.s3_access_key {
-                        iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
-                    }
-                    if let Some(secret_key) = &self.s3_secret_key {
-                        iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
-                    }
-                    if let Some(path_style_access) = &self.s3_path_style_access {
-                        iceberg_configs.insert(
-                            S3_PATH_STYLE_ACCESS.to_owned(),
-                            path_style_access.to_string(),
-                        );
-                    }
-                };
-
-                if let Some(credential) = &self.catalog_credential {
-                    iceberg_configs.insert("credential".to_owned(), credential.clone());
-                }
-                if let Some(token) = &self.catalog_token {
-                    iceberg_configs.insert("token".to_owned(), token.clone());
-                }
-                if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
-                    iceberg_configs
-                        .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
-                }
-                if let Some(scope) = &self.catalog_scope {
-                    iceberg_configs.insert("scope".to_owned(), scope.clone());
-                }
-
-                let headers = self.headers()?;
-                for (header_name, header_value) in headers {
-                    iceberg_configs.insert(format!("header.{}", header_name), header_value);
-                }
-
-                iceberg_configs.insert(
-                    iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
-                    self.catalog_uri
-                        .clone()
-                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
-                );
-                if let Some(warehouse_path) = &self.warehouse_path {
-                    iceberg_configs.insert(
-                        iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
-                        warehouse_path.clone(),
-                    );
-                }
-                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
-                    .load("rest", iceberg_configs)
-                    .await
-                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
-                Ok(Arc::new(catalog))
-            }
-            "glue_rust" => {
-                let mut iceberg_configs = HashMap::new();
-                // glue
-                if let Some(region) = self.glue_region() {
-                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.to_owned());
-                }
-                if let Some(access_key) = self.glue_access_key() {
-                    iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.to_owned());
-                }
-                if let Some(secret_key) = self.glue_secret_key() {
-                    iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.to_owned());
-                }
-                // s3
-                if let Some(region) = &self.s3_region {
-                    iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
-                }
-                if let Some(endpoint) = &self.s3_endpoint {
-                    iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
-                }
-                if let Some(access_key) = &self.s3_access_key {
-                    iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
-                }
-                if let Some(secret_key) = &self.s3_secret_key {
-                    iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
-                }
-                if let Some(role_arn) = &self.s3_iam_role_arn {
-                    iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
-                }
-                if let Some(path_style_access) = &self.s3_path_style_access {
-                    iceberg_configs.insert(
-                        S3_PATH_STYLE_ACCESS.to_owned(),
-                        path_style_access.to_string(),
-                    );
-                }
-                iceberg_configs.insert(
-                    iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
-                    self.warehouse_path
-                        .clone()
-                        .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
-                );
-                if let Some(uri) = self.catalog_uri.as_deref() {
-                    iceberg_configs.insert(
-                        iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
-                        uri.to_owned(),
-                    );
-                }
-                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
-                    .load("glue", iceberg_configs)
-                    .await
-                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
-                Ok(Arc::new(catalog))
-            }
-            catalog_type
-                if catalog_type == "hive"
-                    || catalog_type == "snowflake"
-                    || catalog_type == "jdbc"
-                    || catalog_type == "rest"
-                    || catalog_type == "glue" =>
-            {
-                // Create java catalog
-                let (file_io_props, java_catalog_props) =
-                    self.build_jni_catalog_configs(java_catalog_props)?;
-                let catalog_impl = match catalog_type {
-                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
-                    "rest" => "org.apache.iceberg.rest.RESTCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                    _ => unreachable!(),
-                };
-
-                jni_catalog::JniCatalog::build_catalog(
-                    file_io_props,
-                    self.catalog_name(),
-                    catalog_impl,
-                    java_catalog_props,
-                )
-            }
-            "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
-            _ => {
-                bail!(
-                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
-                    self.catalog_type()
-                )
-            }
-        }
-    }
-
-    /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
-    pub async fn load_table(
-        &self,
-        table: &IcebergTableIdentifier,
-        java_catalog_props: &HashMap<String, String>,
-    ) -> ConnectorResult<Table> {
-        let catalog = self
-            .create_catalog(java_catalog_props)
-            .await
-            .context("Unable to load iceberg catalog")?;
-
-        let table_id = table
-            .to_table_ident()
-            .context("Unable to parse table name")?;
-
-        let table = catalog.load_table(&table_id).await?;
-        Ok(rebuild_table_with_shared_cache(table).await)
     }
 }
 
@@ -1079,6 +1249,7 @@ mod tests {
             glue_secret_key: None,
             glue_iam_role_arn: None,
             glue_region: None,
+            glue_endpoint: None,
             glue_id: None,
             gcs_credential: None,
             azblob_account_name: None,
@@ -1113,13 +1284,77 @@ mod tests {
     }
 
     #[test]
+    fn test_vended_rest_resolves_to_native_runtime_without_rewriting_catalog_type() {
+        let common = IcebergCommon {
+            vended_credentials: Some(true),
+            ..test_common("rest")
+        };
+
+        assert_eq!(common.catalog_type(), "rest");
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Rest(IcebergCatalogRuntime::NativeRust)
+        );
+    }
+
+    #[test]
+    fn test_rest_without_vended_credentials_resolves_to_jni_runtime() {
+        let common = test_common("rest");
+
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Rest(IcebergCatalogRuntime::JavaJni)
+        );
+    }
+
+    #[test]
+    fn test_mock_v3_resolves_to_mock_catalog_for_simulation_tests() {
+        let common = test_common("mock_v3");
+
+        assert_eq!(
+            common.resolve_catalog_kind().unwrap(),
+            IcebergCatalogKind::Mock
+        );
+    }
+
+    #[test]
+    fn test_extract_java_catalog_props_keeps_wire_options_flat() {
+        let options = HashMap::from([
+            ("catalog.type".to_owned(), "rest".to_owned()),
+            ("catalog.uri".to_owned(), "http://localhost:8181".to_owned()),
+            ("catalog.name".to_owned(), "demo".to_owned()),
+            ("catalog.header".to_owned(), "x=y".to_owned()),
+            (
+                "catalog.rest.signing_region".to_owned(),
+                "us-east-1".to_owned(),
+            ),
+            ("catalog.jdbc.user".to_owned(), "rw".to_owned()),
+        ]);
+
+        let java_props = iceberg_java_catalog_props_from_options(
+            options
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+
+        assert_eq!(java_props.get("rest.signing_region").unwrap(), "us-east-1");
+        assert_eq!(java_props.get("jdbc.user").unwrap(), "rw");
+        assert!(!java_props.contains_key("type"));
+        assert!(!java_props.contains_key("uri"));
+        assert!(!java_props.contains_key("name"));
+        assert!(!java_props.contains_key("header"));
+    }
+
+    #[test]
     fn test_glue_jni_catalog_uses_s3_assume_role_for_file_io() {
         let common = IcebergCommon {
             s3_iam_role_arn: Some("arn:aws:iam::123456789012:role/risingwave-s3".to_owned()),
             ..test_common("glue")
         };
 
-        let (_, java_catalog_configs) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+        let (_, java_catalog_configs) = common
+            .build_jni_catalog_configs(JniCatalogImpl::Glue, &HashMap::new())
+            .unwrap();
 
         assert_eq!(
             java_catalog_configs.get("s3.client-factory-impl").unwrap(),
@@ -1136,7 +1371,9 @@ mod tests {
     fn test_adlsgen2_service_principal_populates_file_io_configs_with_default_authority_host() {
         let common = test_adlsgen2_service_principal_common(None);
 
-        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+        let (file_io_props, _) = common
+            .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
+            .unwrap();
 
         assert_eq!(file_io_props.get(ADLS_TENANT_ID).unwrap(), "tenant-uuid");
         assert_eq!(file_io_props.get(ADLS_CLIENT_ID).unwrap(), "client-uuid");
@@ -1167,7 +1404,9 @@ mod tests {
         let common =
             test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us"));
 
-        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+        let (file_io_props, _) = common
+            .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
+            .unwrap();
 
         assert_eq!(
             file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
@@ -1203,7 +1442,7 @@ mod tests {
         for (authority_host, expected_error) in cases {
             let common = test_adlsgen2_service_principal_common(Some(authority_host));
             let err = common
-                .build_jni_catalog_configs(&HashMap::new())
+                .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
                 .unwrap_err();
             assert!(
                 format!("{:#}", err).contains(expected_error),
@@ -1217,7 +1456,9 @@ mod tests {
         let common =
             test_adlsgen2_service_principal_common(Some("https://login.microsoftonline.us/"));
 
-        let (file_io_props, _) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+        let (file_io_props, _) = common
+            .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
+            .unwrap();
 
         assert_eq!(
             file_io_props.get(ADLS_AUTHORITY_HOST).unwrap(),
@@ -1233,7 +1474,7 @@ mod tests {
         };
 
         let err = common
-            .build_jni_catalog_configs(&HashMap::new())
+            .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
             .unwrap_err();
         assert!(
             format!("{:#}", err).contains("exactly one auth mode"),
@@ -1249,7 +1490,7 @@ mod tests {
         };
 
         let err = common
-            .build_jni_catalog_configs(&HashMap::new())
+            .build_jni_catalog_configs(JniCatalogImpl::Rest, &HashMap::new())
             .unwrap_err();
         assert!(
             format!("{:#}", err).contains("requires all three"),

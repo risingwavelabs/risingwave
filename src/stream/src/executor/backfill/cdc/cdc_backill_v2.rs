@@ -23,9 +23,6 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{
-    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
-};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
@@ -37,7 +34,7 @@ use thiserror_ext::AsReport;
 use tracing::Instrument;
 
 use crate::executor::backfill::cdc::cdc_backfill::{
-    build_reader_and_poll_upstream, transform_upstream,
+    build_reader_and_poll_upstream, get_cdc_json_parse_handling_from_properties, transform_upstream,
 };
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -137,30 +134,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // If user sets debezium.time.precision.mode to "connect", it means the user can guarantee
         // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
         // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
-        let timestamp_handling: Option<TimestampHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestampHandling::Milli);
-        let timestamptz_handling: Option<TimestamptzHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimestamptzHandling::Milli);
-        let time_handling: Option<TimeHandling> = self
-            .properties
-            .get("debezium.time.precision.mode")
-            .map(|v| v == "connect")
-            .unwrap_or(false)
-            .then_some(TimeHandling::Milli);
-        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
-            .properties
-            .get("debezium.bigint.unsigned.handling.mode")
-            .map(|v| v == "precise")
-            .unwrap_or(false)
-            .then_some(BigintUnsignedHandlingMode::Precise);
+        let (timestamp_handling, timestamptz_handling, time_handling, bigint_unsigned_handling) =
+            get_cdc_json_parse_handling_from_properties(&self.properties);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;

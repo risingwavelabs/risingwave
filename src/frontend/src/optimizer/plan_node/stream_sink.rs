@@ -315,11 +315,11 @@ impl StreamSink {
                 .get(ENABLE_PK_INDEX)
                 .is_some_and(|v| v.eq_ignore_ascii_case("true"));
 
-        // For Iceberg V3 pk-index sinks, the iceberg primary key is derived entirely from the
+        // For Iceberg pk-index sinks, the iceberg primary key is derived entirely from the
         // upstream stream key, so the user must not specify `primary_key` explicitly.
         if is_iceberg_pk_index && properties.get(DOWNSTREAM_PK_KEY).is_some() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "Iceberg V3 sink with `enable_pk_index='true'` does not allow a user-specified `primary_key`. \
+                "Iceberg sink with `enable_pk_index='true'` does not allow a user-specified `primary_key`. \
                 The primary key is automatically derived from the upstream stream key.".to_owned(),
             )
             .into());
@@ -369,7 +369,7 @@ impl StreamSink {
         {
             downstream_pk = Some(derived_pk.clone())
         } else if is_iceberg_pk_index {
-            // For Iceberg V3 pk-index sinks: derive the iceberg primary key entirely from the
+            // For Iceberg pk-index sinks: derive the iceberg primary key entirely from the
             // upstream stream key. Every stream-key column becomes a pk column; hidden ones are
             // promoted to visible so they are carried into the iceberg table verbatim.
             let (pk, promoted) = promote_iceberg_pk_index_stream_key(&input, &mut columns)?;
@@ -418,16 +418,30 @@ impl StreamSink {
             )
         }
 
-        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
-        // might not be valid. We should reject the cases referencing such columns in primary key.
+        // The "upsert" property is defined based on a specific stream key: columns other than the
+        // stream key might not be valid. We should reject the cases referencing such columns in
+        // primary key unless the user explicitly opts in to the unsafe behavior.
         if let StreamKind::Upsert = input.stream_kind()
             && let Some(downstream_pk) = &downstream_pk
             && !downstream_pk.iter().all(|i| derived_pk.contains(i))
         {
-            bail_bind_error!(
-                "When sinking from an upsert stream, \
-                 the downstream primary key must be the same as or a subset of the one derived from the stream."
-            )
+            let unsafe_allow_pk_mismatch = input
+                .ctx()
+                .session_ctx()
+                .config()
+                .streaming_unsafe_allow_upsert_sink_pk_mismatch();
+            if !unsafe_allow_pk_mismatch {
+                bail_bind_error!(
+                    "When sinking from an upsert stream, \
+                     the downstream primary key must be the same as or a subset of the one derived from the stream."
+                )
+            }
+            input.ctx().session_ctx().notice_to_user(
+                "Unsafe upsert sink primary-key mismatch is allowed by session variable \
+                 `streaming_unsafe_allow_upsert_sink_pk_mismatch`. This may leave stale rows in \
+                 the downstream system if a downstream primary-key column changes without its \
+                 old value being emitted.",
+            );
         }
 
         if let Some(upstream_table) = &auto_refresh_schema_from_table
@@ -480,7 +494,7 @@ impl StreamSink {
                         RequiredDist::hash_shard(downstream_pk)
                     }
                     Some(s) if s == ICEBERG_SINK => {
-                        // V3 pk-index sinks shard by pk for state-table locality and never use the
+                        // pk-index sinks shard by pk for state-table locality and never use the
                         // partition-based shuffle, so skip computing the extra partition column
                         // entirely.
                         let partition_info = if is_iceberg_pk_index {
@@ -660,7 +674,7 @@ impl StreamSink {
         let sink = Self::new(input, sink_desc, log_store_type);
         if let Some(pk_names) = emit_pk_extension_notice {
             sink.base.ctx().session_ctx().notice_to_user(format!(
-                "Iceberg V3 sink `{}`: the iceberg primary key was automatically derived from \
+                "Iceberg pk-index sink `{}`: the iceberg primary key was automatically derived from \
                  the upstream stream key as ({}).",
                 sink.sink_desc.name, pk_names,
             ));
@@ -840,19 +854,19 @@ impl StreamSink {
     /// Convert this `StreamSink` into a `PlanRef`.
     ///
     /// For Iceberg pk index sinks, this rewrites the plan into
-    /// `Upstream → Writer → Exchange(Hash) → DvMerger` instead of a single `SinkNode`.
+    /// `Upstream → Writer → Exchange(Hash) → PositionDeleteMerger` instead of a single `SinkNode`.
     /// For all other sinks, returns `self` as-is.
     pub fn into_stream_plan(self) -> Result<PlanRef> {
-        use super::{StreamIcebergWithPkIndexDvMerger, StreamIcebergWithPkIndexWriter};
+        use super::{StreamIcebergWithPkIndexPositionDeleteMerger, StreamIcebergWithPkIndexWriter};
 
         if !is_iceberg_with_pk_index_sink(&self.sink_desc)? {
             return Ok(self.into());
         }
 
         let writer: PlanRef = StreamIcebergWithPkIndexWriter::from_stream_sink(&self)?.into();
-        let dv_merger: PlanRef =
-            StreamIcebergWithPkIndexDvMerger::new(writer, self.sink_desc).into();
-        Ok(dv_merger)
+        let position_delete_merger: PlanRef =
+            StreamIcebergWithPkIndexPositionDeleteMerger::new(writer, self.sink_desc).into();
+        Ok(position_delete_merger)
     }
 }
 
@@ -889,7 +903,7 @@ fn promote_iceberg_pk_index_stream_key(
     let stream_key = input.expect_stream_key();
     if stream_key.is_empty() {
         bail_invalid_input_syntax!(
-            "Iceberg V3 sink with `enable_pk_index='true'` requires a non-empty upstream stream key \
+            "Iceberg sink with `enable_pk_index='true'` requires a non-empty upstream stream key \
              to derive the primary key from."
         );
     }
@@ -911,7 +925,7 @@ fn promote_iceberg_pk_index_stream_key(
     // iceberg table.
     if let Some(col) = columns.iter().find(|c| c.is_hidden) {
         return Err(ErrorCode::InternalError(format!(
-            "iceberg V3 pk-index sink has a hidden column `{}` after stream-key promotion; \
+            "iceberg pk-index sink has a hidden column `{}` after stream-key promotion; \
              all sink columns must be visible",
             col.name()
         ))

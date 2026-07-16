@@ -27,7 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
@@ -411,24 +411,22 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument]
-    async fn pre_commit_iceberg_v3_sink_metadata(
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergV3SinkMetadata>,
+        reports: Vec<PbIcebergPkIndexSinkMetadata>,
     ) -> MetaResult<Vec<SinkId>> {
-        let grouped = group_v3_reports_by_sink(reports)?;
+        let grouped = group_reports_by_sink(reports)?;
         let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
         let futs = FuturesUnordered::new();
         for (sink_id, (prev_epoch, reports)) in grouped {
             if reports.is_empty() {
                 continue;
             }
-            let manager = &self.iceberg_v3_sink_manager;
+            let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
                 (
                     sink_id,
-                    manager
-                        .pre_commit_v3_epoch(sink_id, prev_epoch, reports)
-                        .await,
+                    manager.pre_commit_epoch(sink_id, prev_epoch, reports).await,
                 )
             });
         }
@@ -443,16 +441,16 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if errs.is_empty() {
             Ok(success_ids)
         } else {
-            Err(aggregate_v3_sink_errors("pre-commit", errs).into())
+            Err(aggregate_sink_errors("pre-commit", errs).into())
         }
     }
 
     #[await_tree::instrument]
-    async fn commit_iceberg_v3_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
+    async fn commit_iceberg_pk_index_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
         let futs = FuturesUnordered::new();
         for sink_id in sink_ids {
-            let manager = &self.iceberg_v3_sink_manager;
-            futs.push(async move { (sink_id, manager.commit_v3_epoch(sink_id).await) });
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move { (sink_id, manager.commit_epoch(sink_id).await) });
         }
 
         let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
@@ -463,7 +461,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if errs.is_empty() {
             Ok(())
         } else {
-            Err(aggregate_v3_sink_errors("commit", errs).into())
+            Err(aggregate_sink_errors("commit", errs).into())
         }
     }
 }
@@ -471,7 +469,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 /// Combine per-sink errors from a fan-out into a single `anyhow::Error`. The first failing
 /// sink's error is used as the source so the original chain is preserved; the message lists
 /// every failing `sink_id` and its error stringified.
-fn aggregate_v3_sink_errors(
+fn aggregate_sink_errors(
     phase: &'static str,
     mut errs: Vec<(SinkId, anyhow::Error)>,
 ) -> anyhow::Error {
@@ -491,10 +489,10 @@ fn aggregate_v3_sink_errors(
     ))
 }
 
-fn group_v3_reports_by_sink(
-    reports: Vec<PbIcebergV3SinkMetadata>,
-) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)>> {
-    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergV3SinkMetadata>)> = HashMap::new();
+fn group_reports_by_sink(
+    reports: Vec<PbIcebergPkIndexSinkMetadata>,
+) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)>> {
+    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)> = HashMap::new();
     for r in reports {
         let sink_id = r.sink_id;
         let prev_epoch = r.prev_epoch;
@@ -868,15 +866,18 @@ impl PostCollectCommand {
                     )
                     .await?;
 
-                let source_change = SourceChange::CreateJob {
-                    added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                };
-
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(source_change)
-                    .await;
+                let added_source_fragments = stream_job_fragments.stream_source_fragments();
+                let added_backfill_fragments = stream_job_fragments.source_backfill_fragments();
+                // Skip the source-manager notification (and its `core` lock) when the job has no source/backfill fragments.
+                if !added_source_fragments.is_empty() || !added_backfill_fragments.is_empty() {
+                    barrier_manager_context
+                        .source_manager
+                        .apply_source_change(SourceChange::CreateJob {
+                            added_source_fragments,
+                            added_backfill_fragments,
+                        })
+                        .await;
+                }
 
                 if let Some(old_sink_id) = replace_sink {
                     barrier_manager_context

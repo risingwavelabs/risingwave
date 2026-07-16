@@ -90,13 +90,7 @@ impl IcebergScanExecutor {
         let data_types = self.schema.data_types();
 
         let data_file_scan_tasks = match Option::take(&mut self.file_scan_tasks) {
-            Some(IcebergFileScanTask::Data(data_file_scan_tasks)) => data_file_scan_tasks,
-            Some(IcebergFileScanTask::EqualityDelete(equality_delete_file_scan_tasks)) => {
-                equality_delete_file_scan_tasks
-            }
-            Some(IcebergFileScanTask::PositionDelete(position_delete_file_scan_tasks)) => {
-                position_delete_file_scan_tasks
-            }
+            Some(file_scan_tasks) => file_scan_tasks.into_tasks(),
             None => {
                 bail!("file_scan_tasks must be Some")
             }
@@ -118,6 +112,9 @@ impl IcebergScanExecutor {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
+                    // Iceberg V2 scans expose delete files separately for delete-file scan nodes.
+                    // From V3 onward, deletion vectors are attached to data-file tasks and must be
+                    // applied by iceberg-rs during the data scan.
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
