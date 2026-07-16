@@ -52,6 +52,7 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
+const DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
@@ -128,8 +129,11 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     /// The maximum size in bytes for each `StarRocks` stream load request payload.
-    /// If unset, RisingWave does not split the request by payload size.
-    #[serde(rename = "starrocks.max_batch_size_bytes", default)]
+    /// Defaults to 64 MiB.
+    #[serde(
+        rename = "starrocks.max_batch_size_bytes",
+        default = "default_starrocks_max_batch_size_bytes"
+    )]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_batch_size_bytes: Option<u64>,
@@ -145,6 +149,10 @@ impl EnforceSecret for StarrocksConfig {
 
 fn default_commit_checkpoint_interval() -> u64 {
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+}
+
+fn default_starrocks_max_batch_size_bytes() -> Option<u64> {
+    Some(DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES)
 }
 
 impl StarrocksConfig {
@@ -172,6 +180,43 @@ impl StarrocksConfig {
         }
         Ok(config)
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct LoadRequestSizeDecision {
+    finish_current_load: bool,
+    next_batch_size_bytes: u64,
+}
+
+fn decide_load_request_size(
+    current_batch_size_bytes: u64,
+    row_size: u64,
+    max_batch_size_bytes: u64,
+) -> Result<LoadRequestSizeDecision> {
+    if row_size > max_batch_size_bytes {
+        return Err(SinkError::Starrocks(format!(
+            "single row payload size {} bytes exceeds `starrocks.max_batch_size_bytes` limit {} bytes",
+            row_size, max_batch_size_bytes
+        )));
+    }
+
+    if current_batch_size_bytes > 0
+        && current_batch_size_bytes
+            .checked_add(row_size)
+            .is_none_or(|next_batch_size_bytes| next_batch_size_bytes > max_batch_size_bytes)
+    {
+        return Ok(LoadRequestSizeDecision {
+            finish_current_load: true,
+            next_batch_size_bytes: row_size,
+        });
+    }
+
+    Ok(LoadRequestSizeDecision {
+        finish_current_load: false,
+        next_batch_size_bytes: current_batch_size_bytes
+            .checked_add(row_size)
+            .expect("sum is checked against max_batch_size_bytes above"),
+    })
 }
 
 #[derive(Debug)]
@@ -491,10 +536,19 @@ impl StarrocksSinkWriter {
 
     async fn write_row_json(&mut self, row_json_string: String) -> Result<()> {
         let row_size = row_json_string.len() as u64;
-        if let Some(max_batch_size_bytes) = self.max_batch_size_bytes
-            && self.client.is_some()
-            && self.current_batch_size_bytes > 0
-            && self.current_batch_size_bytes + row_size > max_batch_size_bytes
+        let size_decision = self
+            .max_batch_size_bytes
+            .map(|max_batch_size_bytes| {
+                decide_load_request_size(
+                    self.current_batch_size_bytes,
+                    row_size,
+                    max_batch_size_bytes,
+                )
+            })
+            .transpose()?;
+        if size_decision
+            .as_ref()
+            .is_some_and(|decision| decision.finish_current_load)
         {
             self.finish_load_request().await?;
         }
@@ -504,8 +558,8 @@ impl StarrocksSinkWriter {
             .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
             .write(row_json_string.into())
             .await?;
-        if self.max_batch_size_bytes.is_some() {
-            self.current_batch_size_bytes += row_size;
+        if let Some(size_decision) = size_decision {
+            self.current_batch_size_bytes = size_decision.next_batch_size_bytes;
         }
         Ok(())
     }
@@ -953,10 +1007,13 @@ mod tests {
     }
 
     #[test]
-    fn starrocks_max_batch_size_bytes_is_optional() {
+    fn starrocks_max_batch_size_bytes_uses_default() {
         let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
 
-        assert_eq!(config.max_batch_size_bytes, None);
+        assert_eq!(
+            config.max_batch_size_bytes,
+            Some(DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES)
+        );
     }
 
     #[test]
@@ -979,6 +1036,48 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("`starrocks.max_batch_size_bytes` must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn starrocks_batch_size_allows_exact_limit() {
+        assert_eq!(
+            decide_load_request_size(3, 2, 5).unwrap(),
+            LoadRequestSizeDecision {
+                finish_current_load: false,
+                next_batch_size_bytes: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn starrocks_batch_size_rolls_over_before_exceeding_limit() {
+        assert_eq!(
+            decide_load_request_size(4, 2, 5).unwrap(),
+            LoadRequestSizeDecision {
+                finish_current_load: true,
+                next_batch_size_bytes: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn starrocks_batch_size_rejects_single_oversized_row() {
+        let err = decide_load_request_size(0, 6, 5).unwrap_err();
+
+        assert!(err.to_string().contains(
+            "single row payload size 6 bytes exceeds `starrocks.max_batch_size_bytes` limit 5 bytes"
+        ));
+    }
+
+    #[test]
+    fn starrocks_batch_size_rolls_over_on_u64_overflow() {
+        assert_eq!(
+            decide_load_request_size(u64::MAX, 1, u64::MAX).unwrap(),
+            LoadRequestSizeDecision {
+                finish_current_load: true,
+                next_batch_size_bytes: 1,
+            }
         );
     }
 }

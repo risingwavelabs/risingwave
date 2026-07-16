@@ -1869,9 +1869,9 @@ StarrocksConfig:
     field_type: u64
     comments: |-
       The maximum size in bytes for each `StarRocks` stream load request payload.
-      If unset, RisingWave does not split the request by payload size.
+      Defaults to 64 MiB.
     required: false
-    default: Default::default
+    default: Some(DEFAULT_STARROCKS_MAX_BATCH_SIZE_BYTES)
     allow_alter_on_fly: true
   - name: r#type
     field_type: String
