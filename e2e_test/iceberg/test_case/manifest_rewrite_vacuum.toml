@@ -1,5 +1,4 @@
 init_sqls = [
-    'SET `spark.sql.catalog.demo.cache-enabled`=`false`',
     'CREATE SCHEMA IF NOT EXISTS demo_db',
     'DROP TABLE IF EXISTS demo_db.manifest_rewrite_vacuum_table PURGE',
     '''
