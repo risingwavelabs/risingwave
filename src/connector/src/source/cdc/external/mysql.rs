@@ -701,9 +701,7 @@ impl MySqlExternalTableReader {
                             DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
-                                if int64_val < 0
-                                    && self.needs_unsigned_i64_compare(pk.as_str())?
-                                {
+                                if int64_val < 0 && self.needs_unsigned_i64_compare(pk.as_str())? {
                                     Value::from(self.convert_negative_to_unsigned(int64_val))
                                 } else {
                                     Value::from(int64_val)

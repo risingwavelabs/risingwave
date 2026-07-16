@@ -271,7 +271,7 @@ create table rw_unsigned_bigint_backfill_buffer (
 query B retry 30 backoff 1s
 select count(*) > 0 and count(*) < 1000 from rw_unsigned_bigint_backfill_buffer;
 ----
-true
+t
 
 system ok
 mysql -e "
