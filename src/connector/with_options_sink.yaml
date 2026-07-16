@@ -1865,6 +1865,13 @@ StarrocksConfig:
     field_type: String
     comments: Enable partial update
     required: false
+  - name: starrocks.max_batch_size_bytes
+    field_type: u64
+    comments: |-
+      The maximum size in bytes for each `StarRocks` stream load request payload.
+      Defaults to unlimited.
+    required: false
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
