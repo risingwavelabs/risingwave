@@ -357,6 +357,10 @@ SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1 FETCH FIRST 1+1
 1
 2
 
+# A bad FETCH quantity reports the FETCH clause, not LIMIT.
+statement error FETCH FIRST must not be negative, but found: -1
+SELECT * FROM generate_series(0,4,1) as t(v) order by v FETCH FIRST -1 ROWS ONLY;
+
 # A column reference is rejected in OFFSET: it is not visible in the offset scope.
 statement error Invalid column: v
 SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET v;
