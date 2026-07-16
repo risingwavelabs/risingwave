@@ -106,7 +106,9 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
    JSON 字符串，因为 RisingWave JSON number 可能发生舍入。
 7. **流式更新需要完整行**：RisingWave WebSocket upsert 会替换整行。source 若发送部分
    update image，connector 会用 `before` 和 `after` 还原完整行；两者仍无法补齐全部目标列时，
-   更新会失败，而不会静默把缺失列写成 `NULL`。
+   更新会失败，而不会静默把缺失列写成 `NULL`。source 的 `removedFields` 若删除顶层列，
+   connector 会将该列写成 SQL `NULL`；删除 `profile.name` 这类嵌套字段时，source 必须提供
+   父列 `profile` 的完整 post-image。
 8. **大记录存在 frame 限制**：connector 会把 batch 拆成小于 8 MiB 的有序 WebSocket
    payload。单条 source record 本身超过该大小时无法安全拆分，会返回明确错误。
 9. **JDBC 可见性屏障**：RisingWave 的 JDBC insert 是异步可见的。connector 只会在后续

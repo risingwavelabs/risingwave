@@ -329,7 +329,8 @@ public class RisingWaveConnector implements TapConnector {
                             update.getBefore(), table, true);
                     Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
                             update.getAfter(), table, true);
-                    Map<String, Object> completeAfter = completeStreamingUpdate(table, before, after);
+                    Map<String, Object> completeAfter = completeStreamingUpdate(
+                            table, before, after, update.getRemovedFields());
                     if (requiresDeleteBeforeUpsert(table, before, completeAfter)) {
                         operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     }
@@ -440,6 +441,13 @@ public class RisingWaveConnector implements TapConnector {
     static Map<String, Object> completeStreamingUpdate(TapTable table,
                                                         Map<String, Object> before,
                                                         Map<String, Object> after) {
+        return completeStreamingUpdate(table, before, after, Collections.emptyList());
+    }
+
+    static Map<String, Object> completeStreamingUpdate(TapTable table,
+                                                        Map<String, Object> before,
+                                                        Map<String, Object> after,
+                                                        List<String> removedFields) {
         if (after == null) {
             throw new IllegalArgumentException("WebSocket streaming update for table "
                     + tableName(table) + " is missing its after image");
@@ -455,6 +463,9 @@ public class RisingWaveConnector implements TapConnector {
         }
         // Map.putAll preserves the distinction between an absent key and an explicit null value.
         combined.putAll(after);
+
+        rejectNestedPartialUpdates(table, after);
+        applyRemovedFields(table, after, combined, removedFields);
 
         List<String> missingColumns = new ArrayList<>();
         for (String column : table.getNameFieldMap().keySet()) {
@@ -473,6 +484,59 @@ public class RisingWaveConnector implements TapConnector {
             complete.put(column, combined.get(column));
         }
         return complete;
+    }
+
+    private static void rejectNestedPartialUpdates(TapTable table, Map<String, Object> after) {
+        Map<String, TapField> targetFields = table.getNameFieldMap();
+        for (String sourceField : after.keySet()) {
+            if (targetFields.containsKey(sourceField)) {
+                continue;
+            }
+            int separator = sourceField == null ? -1 : sourceField.indexOf('.');
+            if (separator <= 0) {
+                continue;
+            }
+            String topLevelField = sourceField.substring(0, separator);
+            if (targetFields.containsKey(topLevelField) && !after.containsKey(topLevelField)) {
+                throw incompleteNestedPostImage(table, sourceField, topLevelField);
+            }
+        }
+    }
+
+    private static void applyRemovedFields(TapTable table,
+                                           Map<String, Object> after,
+                                           Map<String, Object> combined,
+                                           List<String> removedFields) {
+        if (removedFields == null || removedFields.isEmpty()) {
+            return;
+        }
+        Map<String, TapField> targetFields = table.getNameFieldMap();
+        for (String removedField : removedFields) {
+            if (removedField == null || removedField.isEmpty()) {
+                continue;
+            }
+            if (targetFields.containsKey(removedField)) {
+                // A removed top-level source field maps to SQL NULL in a relational target.
+                combined.put(removedField, null);
+                continue;
+            }
+
+            int separator = removedField.indexOf('.');
+            if (separator <= 0) {
+                continue;
+            }
+            String topLevelField = removedField.substring(0, separator);
+            if (targetFields.containsKey(topLevelField) && !after.containsKey(topLevelField)) {
+                throw incompleteNestedPostImage(table, removedField, topLevelField);
+            }
+        }
+    }
+
+    private static IllegalArgumentException incompleteNestedPostImage(
+            TapTable table, String nestedField, String topLevelField) {
+        return new IllegalArgumentException("WebSocket streaming update for table "
+                + tableName(table) + " changes nested field " + nestedField
+                + " but does not include a complete post-image for column " + topLevelField);
     }
 
     private static String tableName(TapTable table) {

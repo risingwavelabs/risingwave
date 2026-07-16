@@ -111,7 +111,9 @@ ingest route, signature configuration, and required target-table DDL privileges 
 7. **Streaming updates require a complete row**: RisingWave WebSocket upserts replace the full
    row. When a source emits a partial update image, the connector reconstructs the complete row
    from its `before` and `after` images. If neither image contains all target columns, the update
-   fails rather than silently converting absent columns to `NULL`.
+   fails rather than silently converting absent columns to `NULL`. A source `removedFields` entry
+   for a top-level column is written as SQL `NULL`. Removing a nested field such as `profile.name`
+   requires the source to provide a complete post-image for the parent `profile` column.
 8. **Large records have a frame limit**: The connector splits batches into ordered WebSocket
    payloads below 8 MiB. A single source record larger than that cannot be split safely and fails
    with an explicit error.

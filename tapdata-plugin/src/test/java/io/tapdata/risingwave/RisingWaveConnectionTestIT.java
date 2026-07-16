@@ -534,6 +534,25 @@ class RisingWaveConnectionTestIT {
                     TapUpdateRecordEvent.create().table(tableName)
                             .before(afterPartial).after(explicitNull)), table, ignored -> { });
             awaitQuantity(tableName, 1, null);
+
+            Map<String, Object> beforeRemoval = new LinkedHashMap<>();
+            beforeRemoval.put("id", 1);
+            beforeRemoval.put("name", "after");
+            beforeRemoval.put("quantity", 55);
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(explicitNull).after(beforeRemoval)), table, ignored -> { });
+            awaitQuantity(tableName, 1, 55);
+
+            Map<String, Object> afterRemoval = new LinkedHashMap<>();
+            afterRemoval.put("id", 1);
+            afterRemoval.put("name", "after");
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(beforeRemoval).after(afterRemoval)
+                            .removedFields(Collections.singletonList("quantity"))),
+                    table, ignored -> { });
+            awaitQuantity(tableName, 1, null);
         } finally {
             connector.stop(context);
             dropTable(tableName);

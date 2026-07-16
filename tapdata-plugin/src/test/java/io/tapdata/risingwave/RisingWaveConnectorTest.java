@@ -212,6 +212,61 @@ class RisingWaveConnectorTest {
     }
 
     @Test
+    void mapsRemovedTopLevelFieldsToNullForStreamingUpdates() {
+        TapTable table = new TapTable("orders")
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("name", "text"))
+                .add(new TapField("quantity", "integer"));
+        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
+        before.put("id", 1);
+        before.put("name", "before");
+        before.put("quantity", 42);
+        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
+        after.put("id", 1);
+        after.put("name", "after");
+
+        java.util.Map<String, Object> complete = RisingWaveConnector.completeStreamingUpdate(
+                table, before, after, java.util.Collections.singletonList("quantity"));
+
+        assertNull(complete.get("quantity"));
+    }
+
+    @Test
+    void rejectsNestedRemovedFieldsWithoutCompletePostImages() {
+        TapTable table = new TapTable("profiles")
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("profile", "jsonb"));
+        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
+        before.put("id", 1);
+        before.put("profile", java.util.Collections.singletonMap("name", "before"));
+        java.util.Map<String, Object> after = java.util.Collections.singletonMap("id", 1);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after,
+                        java.util.Collections.singletonList("profile.name")));
+
+        assertTrue(error.getMessage().contains("complete post-image for column profile"));
+    }
+
+    @Test
+    void rejectsNestedPartialUpdatesWithoutCompletePostImages() {
+        TapTable table = new TapTable("profiles")
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("profile", "jsonb"));
+        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
+        before.put("id", 1);
+        before.put("profile", java.util.Collections.singletonMap("name", "before"));
+        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
+        after.put("id", 1);
+        after.put("profile.name", "after");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after));
+
+        assertTrue(error.getMessage().contains("complete post-image for column profile"));
+    }
+
+    @Test
     void rejectsKeylessModelsForWebSocketStreaming() {
         TapTable keylessTable = new TapTable("keyless")
                 .add(new TapField("id", "integer"))

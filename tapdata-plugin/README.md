@@ -192,7 +192,9 @@ python3 setup_pipeline.py
 WebSocket streaming requires every replicated table to have a primary key. Inserts and
 same-primary-key updates are sent as upserts. If an
 update changes any primary-key column, the connector sends a delete for the before image followed
-by an upsert for the after image in the same WebSocket batch. Deletes use the before image.
+by an upsert for the after image in the same WebSocket batch. Deletes use the before image. Partial
+updates are completed from the before image. Removed top-level fields become SQL `NULL`; nested
+field removal requires a complete post-image for the parent column.
 
 WebSocket JSONB append-only mode creates each target as `data JSONB` without a primary key and
 stores the complete source record as the JSON document. It accepts insert events only. Update and
