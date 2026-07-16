@@ -1242,7 +1242,8 @@ fn reject_pk_filtered_by_debezium_column_filter_inner(
             for (pattern, regex) in &patterns {
                 if regex.is_match(pk_full_name).map_err(|err| {
                     ErrorCode::InvalidInputSyntax(format!(
-                        "failed to evaluate Debezium column filter pattern `{pattern}` in `{EXCLUDE_KEY}`: {err}"
+                        "failed to evaluate Debezium column filter pattern `{pattern}` in `{EXCLUDE_KEY}`: {}",
+                        err.as_report()
                     ))
                 })? {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -1264,7 +1265,8 @@ fn reject_pk_filtered_by_debezium_column_filter_inner(
             for (_, regex) in &patterns {
                 if regex.is_match(pk_full_name).map_err(|err| {
                     ErrorCode::InvalidInputSyntax(format!(
-                        "failed to evaluate Debezium column filter pattern in `{INCLUDE_KEY}`: {err}"
+                        "failed to evaluate Debezium column filter pattern in `{INCLUDE_KEY}`: {}",
+                        err.as_report()
                     ))
                 })? {
                     included = true;
@@ -1298,7 +1300,8 @@ fn compile_debezium_column_filter_patterns(
             let anchored_pattern = format!("(?i:^(?:{pattern})$)");
             let regex = Regex::new(&anchored_pattern).map_err(|err| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "invalid Debezium column filter pattern `{pattern}` in `{key}`: {err}"
+                    "invalid Debezium column filter pattern `{pattern}` in `{key}`: {}",
+                    err.as_report()
                 ))
             })?;
             Ok((pattern.to_owned(), regex))
