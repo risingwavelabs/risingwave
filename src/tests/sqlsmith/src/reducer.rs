@@ -58,7 +58,9 @@ fn shrink_statements(sql: &str) -> Result<String> {
 
     // Session variable before the failing query.
     let session_variable = sql_statements
-        .get(sql_statements.len() - 2)
+        .len()
+        .checked_sub(2)
+        .and_then(|idx| sql_statements.get(idx))
         .filter(|statement| matches!(statement, Statement::SetVariable { .. }));
 
     let failing_query = sql_statements
