@@ -40,6 +40,7 @@ url = "2"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+avro_resolve_java = { path = "../../utils/avro_resolve_java" }
 expect-test = "1"
 fs-err = "3"
 hex = "0.4"

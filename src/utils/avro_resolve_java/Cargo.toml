@@ -16,3 +16,6 @@ hex = "0.4"
 [[test]]
 name = "json_cases"
 harness = false
+
+[lints]
+workspace = true

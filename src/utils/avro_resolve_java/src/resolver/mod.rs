@@ -296,6 +296,7 @@ fn union_equiv<'s>(
             if wb.len() != rb.len() {
                 return false;
             }
+            #[expect(clippy::disallowed_methods)]
             wb.iter()
                 .zip(rb.iter())
                 .all(|(w, r)| union_equiv(w, w_names, r, r_names, seen))
@@ -312,6 +313,7 @@ fn union_equiv<'s>(
                 if wb.len() != rb.len() {
                     seen.insert(wsc.clone(), false);
                 } else {
+                    #[expect(clippy::disallowed_methods)]
                     for (ww, rr) in wb.iter().zip(rb.iter()) {
                         if ww.name != rr.name
                             || !union_equiv(&ww.schema, w_names, &rr.schema, r_names, seen)

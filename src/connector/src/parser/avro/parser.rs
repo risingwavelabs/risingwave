@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{Reader, Schema, from_avro_datum};
+use apache_avro::{Reader, Schema};
+use avro_resolve_java::from_avro_datum;
 use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
-use apache_avro::from_avro_datum;
+use avro_resolve_java::from_avro_datum;
 use risingwave_connector_codec::AvroSchema;
 use risingwave_connector_codec::decoder::Access;
 use risingwave_connector_codec::decoder::avro::{

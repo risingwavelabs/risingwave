@@ -547,7 +547,8 @@ pub(crate) fn avro_to_jsonb(avro: &Value, builder: &mut jsonbb::Builder) -> Acce
 mod tests {
     use std::str::FromStr;
 
-    use apache_avro::{Decimal as AvroDecimal, from_avro_datum};
+    use apache_avro::Decimal as AvroDecimal;
+    use avro_resolve_java::from_avro_datum;
     use expect_test::expect;
     use risingwave_common::types::{Datum, Decimal};
 
@@ -809,29 +810,29 @@ mod tests {
         // Bug: We got variant 2 (Fax) here, if we pass the reader schema.
         let wrong_value = from_avro_datum(&s, &mut bytes.as_slice(), Some(&s));
         expect![[r#"
-                Ok(
-                    Record(
-                        [
-                            (
-                                "unionTypeComplex",
-                                Union(
-                                    2,
-                                    Record(
-                                        [
-                                            (
-                                                "inner",
-                                                Int(
-                                                    6,
-                                                ),
+            Ok(
+                Record(
+                    [
+                        (
+                            "unionTypeComplex",
+                            Union(
+                                3,
+                                Record(
+                                    [
+                                        (
+                                            "inner",
+                                            Int(
+                                                6,
                                             ),
-                                        ],
-                                    ),
+                                        ),
+                                    ],
                                 ),
                             ),
-                        ],
-                    ),
-                )
-            "#]]
+                        ),
+                    ],
+                ),
+            )
+        "#]]
         .assert_debug_eq(&wrong_value);
 
         // The bug below can explain what happened.
