@@ -66,7 +66,8 @@ impl TableChangeLogManager {
         limit: Option<u32>,
         fetch: impl Future<Output = HummockResult<TableChangeLogs>> + Send + 'static,
     ) -> HummockResult<TableChangeLogs> {
-        self.cache
+        let entry = self
+            .cache
             .entry(CacheKey {
                 table_id,
                 epoch_range,
@@ -81,10 +82,13 @@ impl TableChangeLogManager {
                     }
                     false
                 },
-            )
-            .value()
-            .clone()
-            .await
+            );
+        if entry.is_fresh() {
+            self.metrics.table_change_log_cache_miss.inc();
+        } else {
+            self.metrics.table_change_log_cache_hit.inc();
+        }
+        entry.value().clone().await
     }
 
     /// Fetches table change logs for the given `table_id` and `epoch_range`.

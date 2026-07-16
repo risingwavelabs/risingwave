@@ -97,6 +97,8 @@ pub struct HummockStateStoreMetrics {
     pub safe_version_hit: GenericCounter<AtomicU64>,
     pub safe_version_miss: GenericCounter<AtomicU64>,
     pub table_change_log_fetch_latency: Histogram,
+    pub table_change_log_cache_hit: GenericCounter<AtomicU64>,
+    pub table_change_log_cache_miss: GenericCounter<AtomicU64>,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -256,6 +258,17 @@ impl HummockStateStoreMetrics {
         );
         let table_change_log_fetch_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
+
+        let table_change_log_cache_counts = register_int_counter_vec_with_registry!(
+            "state_store_table_change_log_cache_counts",
+            "Total number of table change log cache lookups",
+            &["result"],
+            registry
+        )
+        .unwrap();
+        let table_change_log_cache_hit = table_change_log_cache_counts.with_label_values(&["hit"]);
+        let table_change_log_cache_miss =
+            table_change_log_cache_counts.with_label_values(&["miss"]);
 
         // ----- vector -----
         let vector_object_request_counts = register_guarded_int_counter_vec_with_registry!(
@@ -648,6 +661,8 @@ impl HummockStateStoreMetrics {
             safe_version_hit,
             safe_version_miss,
             table_change_log_fetch_latency,
+            table_change_log_cache_hit,
+            table_change_log_cache_miss,
         }
     }
 
