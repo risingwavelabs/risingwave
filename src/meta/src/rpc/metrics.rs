@@ -170,6 +170,8 @@ pub struct MetaMetrics {
     pub table_change_log_object_size: IntGaugeVec,
     /// Min epoch currently retained in table change log.
     pub table_change_log_min_epoch: IntGaugeVec,
+    /// Latency of serving table change log requests.
+    pub table_change_log_get_latency: Histogram,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -565,6 +567,14 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_table_change_log_get_latency",
+            "latency of serving table change log requests",
+            exponential_buckets(0.001, 5.0, 7).unwrap()
+        );
+        let table_change_log_get_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
@@ -1021,6 +1031,7 @@ impl MetaMetrics {
             table_change_log_object_count,
             table_change_log_object_size,
             table_change_log_min_epoch,
+            table_change_log_get_latency,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
