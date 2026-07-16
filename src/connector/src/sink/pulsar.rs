@@ -182,7 +182,12 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(PulsarConfig);
 
 impl EnforceSecret for PulsarConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -245,6 +250,8 @@ impl Sink for PulsarSink {
     type LogSinker = AsyncTruncateLogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         // Reduce async state machine size (see `clippy::large_futures`).

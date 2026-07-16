@@ -463,7 +463,12 @@ pub struct IcebergConfig {
         deserialize_with = "deserialize_bool_from_string"
     )]
     pub enable_pk_index: bool,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(IcebergConfig);
 
 impl EnforceSecret for IcebergConfig {
     fn enforce_secret<'a>(
@@ -576,6 +581,9 @@ impl IcebergConfig {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
+        config
+            .unknown_fields
+            .retain(|key, _| key != "connector" && !key.starts_with("catalog."));
 
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
