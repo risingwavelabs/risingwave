@@ -649,6 +649,14 @@ def main() -> int:
                 compare_mode("serving", expected_serving, actual_serving, serving_tables)
             )
 
+        if args.mode == "serving":
+            logger.info("Checking serving-only job tables are absent from streaming stats")
+            mismatches.extend(
+                check_mode_absent(
+                    "streaming", stats_by_worker, {**internal_tables, **result_tables}
+                )
+            )
+
         if mismatches:
             print("Result: MISMATCH")
             logger.error("Validation finished with %s mismatches", len(mismatches))

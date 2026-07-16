@@ -36,7 +36,7 @@ drop table sink_right;
 statement ok
 drop table sink_left;
 
-# Query-visible both-scope case. Job policy is copied to both the MV result
+# Query-visible MV policy cases. Job policy is copied to both the MV result
 # table and internal state; node role and vnode ownership scope actual refill.
 statement ok
 create table mv_left(v1 int, v2 int);
@@ -54,11 +54,27 @@ statement ok
 alter materialized view refill_mv set config(streaming.developer.cache_refill_policy = 'both');
 
 statement ok
+create materialized view serving_refill_mv as
+select mv_left.v1, count(*) as cnt
+from mv_left join mv_right on mv_left.v1 = mv_right.v1
+group by mv_left.v1;
+
+statement ok
+alter materialized view serving_refill_mv set config(streaming.developer.cache_refill_policy = 'serving');
+
+statement ok
 recover;
 
 skipif parallel
 system ok
 psql_refill_validate.py --job-name refill_mv --job-type "materialized view" --mode both --expect-policy both
+
+skipif parallel
+system ok
+psql_refill_validate.py --job-name serving_refill_mv --job-type "materialized view" --mode serving --expect-policy serving
+
+statement ok
+drop materialized view serving_refill_mv;
 
 statement ok
 drop materialized view refill_mv;

@@ -218,6 +218,18 @@ mod tests {
 
         let cases = [
             Case {
+                name: "mv_streaming",
+                object_type: ObjectType::Table,
+                result_table_type: Some(TableType::MaterializedView),
+                policy: CacheRefillPolicy::Streaming,
+            },
+            Case {
+                name: "mv_serving",
+                object_type: ObjectType::Table,
+                result_table_type: Some(TableType::MaterializedView),
+                policy: CacheRefillPolicy::Serving,
+            },
+            Case {
                 name: "mv_both",
                 object_type: ObjectType::Table,
                 result_table_type: Some(TableType::MaterializedView),
