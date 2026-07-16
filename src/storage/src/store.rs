@@ -253,6 +253,14 @@ pub trait StateStoreReadLog: StaticSendSync {
 
     fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64>;
 
+    fn prefetch_table_change_logs(
+        &self,
+        _start_epoch: u64,
+        _options: ReadLogOptions,
+    ) -> impl StorageFuture<'_, ()> {
+        async { Ok(()) }
+    }
+
     fn iter_log(
         &self,
         epoch_range: (u64, u64),

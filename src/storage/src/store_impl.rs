@@ -441,6 +441,22 @@ pub mod verify {
             Ok(actual)
         }
 
+        async fn prefetch_table_change_logs(
+            &self,
+            start_epoch: u64,
+            options: ReadLogOptions,
+        ) -> StorageResult<()> {
+            self.actual
+                .prefetch_table_change_logs(start_epoch, options.clone())
+                .await?;
+            if let Some(expected) = &self.expected {
+                expected
+                    .prefetch_table_change_logs(start_epoch, options)
+                    .await?;
+            }
+            Ok(())
+        }
+
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -1008,6 +1024,11 @@ mod dyn_state_store {
     #[async_trait::async_trait]
     pub trait DynStateStoreReadLog: StaticSendSync {
         async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64>;
+        async fn prefetch_table_change_logs(
+            &self,
+            start_epoch: u64,
+            options: ReadLogOptions,
+        ) -> StorageResult<()>;
         async fn iter_log(
             &self,
             epoch_range: (u64, u64),
@@ -1057,6 +1078,14 @@ mod dyn_state_store {
     impl<S: StateStoreReadLog> DynStateStoreReadLog for S {
         async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
             self.next_epoch(epoch, options).await
+        }
+
+        async fn prefetch_table_change_logs(
+            &self,
+            start_epoch: u64,
+            options: ReadLogOptions,
+        ) -> StorageResult<()> {
+            self.prefetch_table_change_logs(start_epoch, options).await
         }
 
         async fn iter_log(
@@ -1475,6 +1504,14 @@ mod dyn_state_store {
 
         async fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> StorageResult<u64> {
             (*self.0).next_epoch(epoch, options).await
+        }
+
+        fn prefetch_table_change_logs(
+            &self,
+            start_epoch: u64,
+            options: ReadLogOptions,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            (*self.0).prefetch_table_change_logs(start_epoch, options)
         }
 
         fn iter_log(

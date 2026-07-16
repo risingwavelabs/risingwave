@@ -849,6 +849,34 @@ impl StateStoreReadLog for HummockStorage {
         })
     }
 
+    async fn prefetch_table_change_logs(
+        &self,
+        start_epoch: u64,
+        options: ReadLogOptions,
+    ) -> StorageResult<()> {
+        let Some(max_epoch) = self
+            .recent_versions
+            .load()
+            .latest_version()
+            .deref()
+            .state_table_info
+            .info()
+            .get(&options.table_id)
+            .map(|i| i.committed_epoch)
+        else {
+            return Ok(());
+        };
+
+        if max_epoch < start_epoch {
+            return Ok(());
+        }
+
+        self.table_change_log_manager
+            .prefetch_table_change_logs(options.table_id, (start_epoch, max_epoch))
+            .await?;
+        Ok(())
+    }
+
     async fn iter_log(
         &self,
         epoch_range: (u64, u64),

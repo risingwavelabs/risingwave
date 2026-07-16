@@ -1260,6 +1260,29 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         Ok(stream.map_ok(|(_, row)| row))
     }
 
+    pub async fn prefetch_log(
+        &self,
+        start_epoch: u64,
+        min_end_epoch: HummockReadEpoch,
+    ) -> StorageResult<()> {
+        self.store
+            .try_wait_epoch(
+                min_end_epoch,
+                TryWaitEpochOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
+        self.store
+            .prefetch_table_change_logs(
+                start_epoch,
+                ReadLogOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
+    }
+
     pub async fn batch_iter_log_with_pk_bounds(
         &self,
         start_epoch: u64,
