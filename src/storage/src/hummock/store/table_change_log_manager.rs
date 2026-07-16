@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::HummockStateStoreMetrics;
 
 type InflightResult = Shared<Pin<Box<dyn Future<Output = HummockResult<TableChangeLogs>> + Send>>>;
 
@@ -40,14 +41,20 @@ struct CacheKey {
 pub struct TableChangeLogManager {
     cache: Cache<CacheKey, InflightResult>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    metrics: Arc<HummockStateStoreMetrics>,
 }
 
 impl TableChangeLogManager {
-    pub fn new(capacity: u64, hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
+    pub fn new(
+        capacity: u64,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        metrics: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         let cache = Cache::builder().max_capacity(capacity).build();
         Self {
             cache,
             hummock_meta_client,
+            metrics,
         }
     }
 
@@ -99,6 +106,7 @@ impl TableChangeLogManager {
         include_epoch_only: bool,
         limit: Option<u32>,
     ) -> HummockResult<TableChangeLogs> {
+        let _timer = self.metrics.table_change_log_fetch_latency.start_timer();
         let hummock_meta_client = self.hummock_meta_client.clone();
         let fetch = async move {
             hummock_meta_client
