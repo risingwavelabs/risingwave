@@ -14,14 +14,11 @@
 
 use std::str::FromStr;
 
-use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
-#[derive(
-    Copy, Debug, Clone, PartialEq, Eq, Display, EnumAsInner, SerializeDisplay, DeserializeFromStr,
-)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, Display, SerializeDisplay, DeserializeFromStr)]
 #[display(style = "snake_case")]
 pub enum CacheRefillPolicy {
     /// Enable normal cache refill for the table.

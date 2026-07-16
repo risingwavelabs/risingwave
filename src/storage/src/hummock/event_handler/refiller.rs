@@ -379,7 +379,8 @@ pub(crate) struct CacheRefiller {
     role: Role,
     default_policy: CacheRefillPolicy,
     table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
-    internal_table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
+    /// Contains every internal table. `None` means inheriting `default_policy`.
+    internal_table_cache_refill_policies: HashMap<TableId, Option<CacheRefillPolicy>>,
     streaming_table_vnode_mapping: HashMap<TableId, Bitmap>,
     serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
     table_cache_refill_context_map: TableCacheRefillContextMap,
@@ -464,11 +465,11 @@ impl CacheRefiller {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    /// Replaces the complete explicit table refill policy maps and rebuilds affected tables.
+    /// Replaces the complete table policy snapshot.
     pub(crate) fn replace_table_cache_refill_policies(
         &mut self,
         table_policies: HashMap<TableId, CacheRefillPolicy>,
-        internal_table_policies: HashMap<TableId, CacheRefillPolicy>,
+        internal_table_policies: HashMap<TableId, Option<CacheRefillPolicy>>,
     ) {
         let table_ids = self
             .table_cache_refill_policies
@@ -531,7 +532,7 @@ impl CacheRefiller {
             .copied();
         let is_internal_table = internal_table_policy.is_some();
         let policy = table_policy
-            .or(internal_table_policy)
+            .or(internal_table_policy.flatten())
             .unwrap_or(self.default_policy);
 
         if is_internal_table && !self.role.for_streaming() {
@@ -637,7 +638,11 @@ impl CacheRefiller {
         TableCacheRefillMonitorSnapshot {
             contexts: self.table_cache_refill_context_map.clone(),
             policies: self.table_cache_refill_policies.clone(),
-            internal_policies: self.internal_table_cache_refill_policies.clone(),
+            internal_policies: self
+                .internal_table_cache_refill_policies
+                .iter()
+                .filter_map(|(&table_id, &policy)| policy.map(|policy| (table_id, policy)))
+                .collect(),
             default_policy: self.default_policy,
             streaming_table_vnode_mapping: self.streaming_table_vnode_mapping.clone(),
             serving_table_vnode_mapping: self.serving_table_vnode_mapping.clone(),
@@ -1459,8 +1464,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_serving_role_disables_skipped_internal_table_policy() {
+    async fn test_serving_role_disables_internal_tables() {
         let internal_table_id = TableId::from(233);
+        let result_table_id = TableId::from(234);
         let mut refiller = CacheRefiller::new(
             Role::Serving,
             test_refill_config(CacheRefillPolicy::Enabled),
@@ -1468,22 +1474,55 @@ mod tests {
             CacheRefiller::default_spawn_refill_task(),
         );
 
-        refiller.replace_table_cache_refill_policies(
-            HashMap::new(),
-            HashMap::from([(internal_table_id, CacheRefillPolicy::Both)]),
-        );
-        assert!(
-            !refiller
-                .table_cache_refill_context_map()
-                .contains_key(&internal_table_id)
+        for policy in [None, Some(CacheRefillPolicy::Enabled)] {
+            refiller.replace_table_cache_refill_policies(
+                HashMap::new(),
+                HashMap::from([(internal_table_id, policy)]),
+            );
+            assert!(
+                !refiller
+                    .table_cache_refill_context_map()
+                    .contains_key(&internal_table_id)
+            );
+
+            let contexts = refiller.get_table_cache_refill_context_map(&HashSet::from([
+                internal_table_id,
+                result_table_id,
+            ]));
+            assert_eq!(
+                contexts[&internal_table_id].policy,
+                CacheRefillPolicy::Disabled
+            );
+            assert_eq!(
+                contexts[&result_table_id].policy,
+                CacheRefillPolicy::Enabled
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_internal_table_policy_inherits_default_and_accepts_override() {
+        let table_id = TableId::from(233);
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
         );
 
-        let contexts =
-            refiller.get_table_cache_refill_context_map(&HashSet::from([internal_table_id]));
-        assert_eq!(
-            contexts[&internal_table_id].policy,
-            CacheRefillPolicy::Disabled
-        );
+        for (policy, expected) in [
+            (None, CacheRefillPolicy::Disabled),
+            (Some(CacheRefillPolicy::Enabled), CacheRefillPolicy::Enabled),
+        ] {
+            refiller.replace_table_cache_refill_policies(
+                HashMap::new(),
+                HashMap::from([(table_id, policy)]),
+            );
+            assert_eq!(
+                refiller.table_cache_refill_context_map()[&table_id].policy,
+                expected
+            );
+        }
     }
 
     #[tokio::test]

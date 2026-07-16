@@ -15,31 +15,11 @@
 use std::collections::HashMap;
 
 use risingwave_meta_model::{FragmentId, WorkerId};
-use risingwave_pb::meta::{
-    PbServingTableVnodeMappings, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
-};
+use risingwave_pb::meta::{PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig};
 
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::NotificationVersion;
-use crate::serving::{
-    ServingVnodeMappingRef, build_table_vnode_mapping_for_worker,
-    to_pb_serving_table_vnode_mappings,
-};
-
-pub fn build_hummock_serving_table_vnode_mappings(
-    serving_vnode_mapping: &ServingVnodeMappingRef,
-    worker_id: WorkerId,
-    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
-) -> PbServingTableVnodeMappings {
-    let serving_vnode_mappings = serving_vnode_mapping.all();
-    let table_vnode_mapping = build_table_vnode_mapping_for_worker(
-        worker_id,
-        &serving_vnode_mappings,
-        streaming_parallelisms,
-    );
-
-    to_pb_serving_table_vnode_mappings(&table_vnode_mapping)
-}
+use crate::serving::{ServingVnodeMappingRef, to_pb_serving_table_vnode_mappings};
 
 pub fn build_hummock_table_refill_runtime_config(
     serving_vnode_mapping: &ServingVnodeMappingRef,
@@ -48,15 +28,16 @@ pub fn build_hummock_table_refill_runtime_config(
     streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
     version: NotificationVersion,
 ) -> PbTableRefillRuntimeConfig {
-    let serving_table_vnode_mappings = build_hummock_serving_table_vnode_mappings(
-        serving_vnode_mapping,
-        worker_id,
-        streaming_parallelisms,
-    );
+    let table_vnode_mapping = serving_vnode_mapping
+        .table_vnode_mappings_by_worker([worker_id], streaming_parallelisms)
+        .remove(&worker_id)
+        .expect("requested worker must have a table vnode mapping");
 
     PbTableRefillRuntimeConfig {
         table_cache_refill_policies: Some(table_cache_refill_policies),
-        serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
+        serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+            &table_vnode_mapping,
+        )),
         version,
     }
 }

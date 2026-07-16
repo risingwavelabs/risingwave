@@ -213,7 +213,7 @@ mod tests {
             name: &'static str,
             object_type: ObjectType,
             result_table_type: Option<TableType>,
-            policy: CacheRefillPolicy,
+            policy: Option<CacheRefillPolicy>,
         }
 
         let cases = [
@@ -221,25 +221,31 @@ mod tests {
                 name: "mv_streaming",
                 object_type: ObjectType::Table,
                 result_table_type: Some(TableType::MaterializedView),
-                policy: CacheRefillPolicy::Streaming,
+                policy: Some(CacheRefillPolicy::Streaming),
             },
             Case {
                 name: "mv_serving",
                 object_type: ObjectType::Table,
                 result_table_type: Some(TableType::MaterializedView),
-                policy: CacheRefillPolicy::Serving,
+                policy: Some(CacheRefillPolicy::Serving),
             },
             Case {
                 name: "mv_both",
                 object_type: ObjectType::Table,
                 result_table_type: Some(TableType::MaterializedView),
-                policy: CacheRefillPolicy::Both,
+                policy: Some(CacheRefillPolicy::Both),
             },
             Case {
                 name: "sink_both",
                 object_type: ObjectType::Sink,
                 result_table_type: None,
-                policy: CacheRefillPolicy::Both,
+                policy: Some(CacheRefillPolicy::Both),
+            },
+            Case {
+                name: "mv_default",
+                object_type: ObjectType::Table,
+                result_table_type: Some(TableType::MaterializedView),
+                policy: None,
             },
         ];
 
@@ -263,10 +269,10 @@ mod tests {
             if let Some(table_type) = case.result_table_type {
                 let result_table_id = job_id.as_mv_table_id();
                 insert_test_table(&txn, result_table_id, case.name, table_type, None, "").await?;
-                expected_table_policies.insert(
-                    result_table_id.as_raw_id(),
-                    case.policy.to_protobuf() as i32,
-                );
+                if let Some(policy) = case.policy {
+                    expected_table_policies
+                        .insert(result_table_id.as_raw_id(), policy.to_protobuf() as i32);
+                }
             }
 
             let internal_object = CatalogController::create_object(
@@ -289,7 +295,9 @@ mod tests {
             .await?;
             expected_internal_table_policies.insert(
                 internal_table_id.as_raw_id(),
-                case.policy.to_protobuf() as i32,
+                case.policy
+                    .map(CacheRefillPolicy::to_protobuf)
+                    .unwrap_or(PbCacheRefillPolicy::Unspecified) as i32,
             );
 
             streaming_job::ActiveModel {
@@ -297,10 +305,12 @@ mod tests {
                 job_status: Set(JobStatus::Created),
                 create_type: Set(CreateType::Foreground),
                 timezone: Set(None),
-                config_override: Set(Some(format!(
-                    "[streaming.developer]\ncache_refill_policy = \"{}\"\n",
-                    case.policy
-                ))),
+                config_override: Set(case.policy.map(|policy| {
+                    format!(
+                        "[streaming.developer]\ncache_refill_policy = \"{}\"\n",
+                        policy
+                    )
+                })),
                 adaptive_parallelism_strategy: Set(None),
                 parallelism: Set(StreamingParallelism::Adaptive),
                 backfill_parallelism: Set(None),
@@ -332,6 +342,27 @@ mod tests {
         assert_eq!(
             actual_internal_table_policies,
             expected_internal_table_policies
+        );
+
+        let inner = mgr.inner.write().await;
+        StreamingJob::update_many()
+            .col_expr(streaming_job::Column::ConfigOverride, Expr::value(""))
+            .exec(&inner.db)
+            .await?;
+        drop(inner);
+
+        let actual = mgr.table_cache_refill_policies_snapshot().await?;
+        assert!(actual.table_policies.is_empty());
+        assert_eq!(
+            actual
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            expected_internal_table_policies
+                .into_keys()
+                .map(|table_id| (table_id, PbCacheRefillPolicy::Unspecified as i32))
+                .collect()
         );
 
         Ok(())

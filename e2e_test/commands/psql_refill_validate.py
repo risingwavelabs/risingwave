@@ -294,6 +294,12 @@ def normalize_nested_vnodes(
     return normalized
 
 
+def has_owned_vnodes(data: dict[int, dict[int, list[int]]]) -> bool:
+    return any(
+        vnodes for per_table in data.values() for vnodes in per_table.values()
+    )
+
+
 def project_mode_stats(
     stats_by_worker: dict[int, dict[str, Any]],
     mode: str,
@@ -562,6 +568,8 @@ def main() -> int:
 
         refill_output = run_command([risectl, "hummock", "refill", "stats"])
         stats_by_worker = parse_refill_stats(refill_output)
+        if not stats_by_worker:
+            raise RuntimeError("No refill stats returned by any worker")
         logger.info("Loaded refill stats from %s workers", len(stats_by_worker))
 
         mismatches: list[str] = []
@@ -601,6 +609,11 @@ def main() -> int:
             expected_streaming = project_internal_streaming_stats(
                 stats_by_worker, streaming_table_ids
             )
+            if not has_owned_vnodes(expected_streaming):
+                raise RuntimeError(
+                    f"No streaming ownership found for job {job_id} "
+                    f"({resolved_job_type})"
+                )
             actual_streaming = project_mode_stats(
                 stats_by_worker, "streaming", streaming_table_ids
             )
@@ -634,7 +647,7 @@ def main() -> int:
                 result_fragment_id,
                 serving_rows,
             )
-            if not any(expected_serving.values()):
+            if not has_owned_vnodes(expected_serving):
                 raise RuntimeError(
                     f"No serving ownership found for job {job_id} result fragment "
                     f"{result_fragment_id}"

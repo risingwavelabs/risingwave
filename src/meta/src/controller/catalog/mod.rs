@@ -62,6 +62,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
+use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use risingwave_pb::meta::{PbObject, PbObjectGroup, PbTableCacheRefillPolicies};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
@@ -203,20 +204,19 @@ impl CatalogControllerInner {
             }
         }
 
-        if policies_by_job.is_empty() {
-            return Ok(PbTableCacheRefillPolicies::default());
-        }
-
-        let job_ids = policies_by_job.keys().copied().collect_vec();
-        let related_tables: Vec<(TableId, Option<JobId>)> = Table::find()
+        let result_table_ids = policies_by_job
+            .keys()
+            .map(|job_id| job_id.as_mv_table_id())
+            .collect_vec();
+        let tables: Vec<(TableId, TableType, Option<JobId>)> = Table::find()
             .select_only()
             .column(table::Column::TableId)
+            .column(table::Column::TableType)
             .column(table::Column::BelongsToJobId)
             .filter(
-                table::Column::BelongsToJobId
-                    .is_in(job_ids.iter().copied())
-                    .or(table::Column::TableId
-                        .is_in(job_ids.iter().map(|job_id| job_id.as_mv_table_id()))),
+                table::Column::TableType
+                    .eq(TableType::Internal)
+                    .or(table::Column::TableId.is_in(result_table_ids)),
             )
             .into_tuple()
             .all(&self.db)
@@ -224,17 +224,26 @@ impl CatalogControllerInner {
 
         let mut table_policies = Vec::new();
         let mut internal_table_policies = Vec::new();
-        for (table_id, belongs_to_job_id) in related_tables {
-            let job_id = belongs_to_job_id.unwrap_or_else(|| table_id.as_job_id());
-            let table_policy = PbTableCacheRefillPolicy {
-                table_id: table_id.as_raw_id(),
-                policy: policies_by_job[&job_id].to_protobuf() as i32,
-            };
-            if belongs_to_job_id.is_some() {
-                internal_table_policies.push(table_policy);
-            } else {
-                table_policies.push(table_policy);
+        for (table_id, table_type, belongs_to_job_id) in tables {
+            if table_type == TableType::Internal {
+                let policy = belongs_to_job_id
+                    .and_then(|job_id| policies_by_job.get(&job_id))
+                    .map(|policy| policy.to_protobuf())
+                    .unwrap_or(PbCacheRefillPolicy::Unspecified);
+                internal_table_policies.push(PbTableCacheRefillPolicy {
+                    table_id: table_id.as_raw_id(),
+                    policy: policy as i32,
+                });
+                continue;
             }
+
+            let Some(policy) = policies_by_job.get(&table_id.as_job_id()) else {
+                continue;
+            };
+            table_policies.push(PbTableCacheRefillPolicy {
+                table_id: table_id.as_raw_id(),
+                policy: policy.to_protobuf() as i32,
+            });
         }
         table_policies.sort_unstable_by_key(|policy| policy.table_id);
         internal_table_policies.sort_unstable_by_key(|policy| policy.table_id);
