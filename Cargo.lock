@@ -1116,6 +1116,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
+name = "avro_resolve_java"
+version = "0.1.0"
+dependencies = [
+ "apache-avro 0.21.0 (git+https://github.com/risingwavelabs/avro-rs?rev=1f2723802d4fb77b97fa084f7bb81e3b60b9e03f)",
+ "datatest-stable",
+ "fixedbitset 0.5.7",
+ "hex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "await-tree"
 version = "0.3.2-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2418,6 +2430,12 @@ checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
 dependencies = [
  "libbz2-rs-sys",
 ]
+
+[[package]]
+name = "camino"
+version = "1.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f2d30e4173c4026932d51d31d6b0613b1fd3014bf3f9f8943d4ba139c437ba0"
 
 [[package]]
 name = "cap-fs-ext"
@@ -4370,6 +4388,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "datatest-stable"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a867d7322eb69cf3a68a5426387a25b45cb3b9c5ee41023ee6cea92e2afadd82"
+dependencies = [
+ "camino",
+ "fancy-regex 0.14.0",
+ "libtest-mimic",
+ "walkdir",
+]
+
+[[package]]
 name = "deadpool"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5332,6 +5362,17 @@ name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
 
 [[package]]
 name = "fancy-regex"
@@ -11953,6 +11994,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
+ "avro_resolve_java",
  "await-tree",
  "aws-config",
  "aws-credential-types",
@@ -12082,6 +12124,7 @@ version = "3.0.1"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (git+https://github.com/risingwavelabs/avro-rs?rev=1f2723802d4fb77b97fa084f7bb81e3b60b9e03f)",
+ "avro_resolve_java",
  "bigdecimal 0.4.10",
  "chrono",
  "easy-ext",
@@ -12257,7 +12300,7 @@ dependencies = [
  "criterion",
  "educe",
  "expect-test",
- "fancy-regex",
+ "fancy-regex 0.17.0",
  "futures",
  "futures-async-stream",
  "futures-util",
@@ -12335,7 +12378,7 @@ dependencies = [
  "either",
  "enum-as-inner 0.7.0",
  "expect-test",
- "fancy-regex",
+ "fancy-regex 0.17.0",
  "fixedbitset 0.5.7",
  "futures",
  "futures-async-stream",
@@ -14228,9 +14271,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.145"
+version = "1.0.146"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+checksum = "217ca874ae0207aac254aa02c957ded05585a90892cc8d87f9e5fa49669dadd8"
 dependencies = [
  "itoa",
  "memchr",

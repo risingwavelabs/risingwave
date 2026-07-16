@@ -11,6 +11,7 @@ pub fn from_avro_datum<R: Read>(
     reader: &mut R,
     reader_schema: Option<&Schema>,
 ) -> AvroResult<Value> {
+    #[expect(clippy::disallowed_methods)]
     let v = apache_avro::from_avro_datum(writer_schema, reader, None)?;
     let Some(reader_schema) = reader_schema else {
         return Ok(v);
@@ -105,6 +106,7 @@ fn apply(
             let reader_order = inner.reader_order();
             let mut reader_values = vec![(String::new(), Value::Null); reader_order.len()];
             let mut reader_order_idx = 0;
+            #[expect(clippy::disallowed_methods)]
             for ((_old_name, v), a) in field_values.into_iter().zip(inner.actions()) {
                 if matches!(a, A::Skip { .. }) {
                     continue;

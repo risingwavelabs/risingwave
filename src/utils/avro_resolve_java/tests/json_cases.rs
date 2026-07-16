@@ -25,6 +25,7 @@ fn case(_path: &Path, raw: String) -> datatest_stable::Result<()> {
     let reader = apache_avro::Schema::parse(&case.reader).unwrap();
     let res_jv = avro_resolve_java::from_avro_datum(&writer, &mut bytes.as_slice(), Some(&reader));
     // panic!("{res_jv:#?}");
+    #[expect(clippy::disallowed_methods)]
     let res_rs = apache_avro::from_avro_datum(&writer, &mut bytes.as_slice(), Some(&reader));
     assert_eq!(res_jv.ok(), res_rs.ok());
     Ok(())
