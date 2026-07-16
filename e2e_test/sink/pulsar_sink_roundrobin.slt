@@ -48,6 +48,14 @@ INSERT INTO pulsar_roundrobin VALUES
     (6, 'first-6');
 
 statement ok
+FLUSH;
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM pulsar_roundrobin_source;
+----
+6
+
+statement ok
 UPDATE pulsar_roundrobin
 SET content = 'second-' || id::VARCHAR;
 
