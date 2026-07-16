@@ -31,7 +31,8 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::iceberg::{
     CompactionType, DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM,
     ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
-    IcebergWriteMode, parse_order_key_exprs, validate_order_key_columns,
+    IcebergWriteMode, ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT, parse_order_key_exprs,
+    validate_order_key_columns,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -391,6 +392,8 @@ fn test_parse_iceberg_config() {
             enable_manifest_rewrite: false,
             manifest_rewrite_target_size_bytes: None,
             manifest_rewrite_min_count_to_merge: None,
+            enable_orphan_file_cleanup: false,
+            orphan_file_cleanup_min_age_millis: None,
             max_snapshots_num_before_compaction: Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM),
             small_files_threshold_mb: None,
             delete_files_count_threshold: None,
@@ -606,6 +609,8 @@ fn test_parse_compaction_config() {
         ("enable_manifest_rewrite", "true"),
         ("manifest_rewrite_target_size_bytes", "16777216"),
         ("manifest_rewrite_min_count_to_merge", "12"),
+        ("enable_orphan_file_cleanup", "true"),
+        ("orphan_file_cleanup_min_age_millis", "172800000"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -628,6 +633,9 @@ fn test_parse_compaction_config() {
     assert_eq!(config.manifest_rewrite_min_count_to_merge, Some(12));
     assert_eq!(config.manifest_rewrite_target_size_bytes(), 16_777_216);
     assert_eq!(config.manifest_rewrite_min_count_to_merge(), 12);
+    assert!(config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_min_age_millis, Some(172_800_000));
+    assert_eq!(config.orphan_file_cleanup_min_age_millis(), 172_800_000);
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -652,6 +660,12 @@ fn test_parse_compaction_config() {
     assert!(!config.enable_manifest_rewrite);
     assert_eq!(config.manifest_rewrite_target_size_bytes, None);
     assert_eq!(config.manifest_rewrite_min_count_to_merge, None);
+    assert!(!config.enable_orphan_file_cleanup);
+    assert_eq!(config.orphan_file_cleanup_min_age_millis, None);
+    assert_eq!(
+        config.orphan_file_cleanup_min_age_millis(),
+        ORPHAN_FILE_CLEANUP_MIN_AGE_MILLIS_DEFAULT
+    );
     assert_eq!(
         config.manifest_rewrite_target_size_bytes(),
         MANIFEST_TARGET_SIZE_BYTES_DEFAULT as u64
@@ -741,6 +755,30 @@ fn test_reject_zero_manifest_rewrite_settings() {
                 .contains(&format!("`{option}` must be greater than 0"))
         );
     }
+}
+
+#[test]
+fn test_reject_unsafe_orphan_file_cleanup_min_age() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("orphan_file_cleanup_min_age_millis", "86399999"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`orphan_file_cleanup_min_age_millis` must be at least 86400000")
+    );
 }
 
 #[test]
