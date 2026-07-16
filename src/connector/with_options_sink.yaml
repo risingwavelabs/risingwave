@@ -1507,6 +1507,29 @@ PulsarConfig:
     field_type: usize
     required: false
     default: 1 << 20
+RabbitMqConfig:
+  fields:
+  - name: common
+    field_type: RabbitMqCommon
+    required: true
+  - name: exchange
+    field_type: String
+    comments: The exchange to which messages are published.
+    required: true
+  - name: routing_key
+    field_type: String
+    comments: The routing key used for every message.
+    required: false
+  - name: routing_key.field
+    field_type: String
+    comments: |-
+      A `varchar` column whose value is used as the routing key.
+      `routing_key` is used as a fallback when this column is null.
+    required: false
+  - name: r#type
+    field_type: String
+    comments: The sink operation mode. `RabbitMQ` currently only supports `append-only`.
+    required: true
 RedShiftConfig:
   fields:
   - name: jdbc.url

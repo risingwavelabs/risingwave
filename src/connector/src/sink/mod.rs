@@ -42,6 +42,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod postgres;
 pub mod pulsar;
+pub mod rabbitmq;
 pub mod redis;
 pub mod remote;
 pub mod snowflake_redshift;
@@ -136,6 +137,7 @@ macro_rules! for_all_sinks {
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
                 { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
+                { RabbitMq, $crate::sink::rabbitmq::RabbitMqSink, $crate::sink::rabbitmq::RabbitMqConfig },
                 { Jdbc, $crate::sink::remote::JdbcSink, () },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
                 { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::OpenSearchConfig },
@@ -1018,6 +1020,12 @@ pub enum SinkError {
     ),
     #[error("Nats error: {0}")]
     Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("RabbitMQ error: {0}")]
+    RabbitMq(
         #[source]
         #[backtrace]
         anyhow::Error,
