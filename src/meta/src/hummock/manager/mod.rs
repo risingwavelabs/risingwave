@@ -270,6 +270,7 @@ impl HummockManager {
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+        let state_store_url = state_store_url.expose();
 
         let state_store_dir: &str = sys_params.data_directory();
         let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
