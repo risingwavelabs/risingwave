@@ -169,10 +169,6 @@ impl CompleteBarrierTask {
                         &info.barrier_info,
                         command_name,
                     );
-                    GLOBAL_META_METRICS
-                        .last_committed_barrier_time
-                        .with_label_values(&[database_id.to_string().as_str()])
-                        .set(info.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
             }
 

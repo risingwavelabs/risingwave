@@ -19,7 +19,7 @@ use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::meta_snapshot_v2::{
-    MetaSnapshotV2, MetadataV2, decode_hummock_sequences_from_snapshot,
+    MetaSnapshotV2, MetadataV2, decode_hummock_sequences_from_stream,
 };
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use sea_orm::{DbErr, EntityTrait};
@@ -61,9 +61,10 @@ impl Loader<MetadataV2> for LoaderV2 {
 
         // validate and rewrite seq
         if newest_id > target_id {
-            let newest_hummock_sequences = decode_hummock_sequences_from_snapshot(
-                &self.backup_store.get_raw(newest_id).await?,
-            )?;
+            let newest_hummock_sequences = decode_hummock_sequences_from_stream(
+                self.backup_store.get_bytes_stream(newest_id).await?,
+            )
+            .await?;
             for seq in &target_snapshot.metadata.hummock_sequences {
                 let newest = newest_hummock_sequences
                     .iter()

@@ -428,6 +428,7 @@ pub struct MySqlExternalTableReader {
     pool: mysql_async::Pool,
     upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
     mysql_version: (u8, u8),
+    is_mariadb: bool,
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
@@ -435,17 +436,18 @@ impl ExternalTableReader for MySqlExternalTableReader {
         let mut conn = self.pool.get_conn().await?;
 
         // Choose SQL command based on MySQL version
-        let sql = if self.is_mysql_8_4_or_later() {
+        let sql = if !self.is_mariadb && self.is_mysql_8_4_or_later() {
             "SHOW BINARY LOG STATUS"
         } else {
             "SHOW MASTER STATUS"
         };
 
         tracing::debug!(
-            "Using SQL command: {} for MySQL version {}.{}",
+            "Using SQL command: {} for MySQL version {}.{} (is_mariadb={})",
             sql,
             self.mysql_version.0,
-            self.mysql_version.1
+            self.mysql_version.1,
+            self.is_mariadb
         );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
         let row = Itertools::exactly_one(rs.iter_mut())
@@ -493,7 +495,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     /// Get MySQL version from the connection
-    async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8)> {
+    async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8, bool)> {
         let mut conn = pool.get_conn().await?;
         let result: Option<String> = conn.query_first("SELECT VERSION()").await?;
 
@@ -506,7 +508,8 @@ impl MySqlExternalTableReader {
                 let minor_version = parts[1]
                     .parse::<u8>()
                     .context("Failed to parse minor version")?;
-                return Ok((major_version, minor_version));
+                let is_mariadb = version_str.to_lowercase().contains("mariadb");
+                return Ok((major_version, minor_version, is_mariadb));
             }
         }
         Err(anyhow!("Failed to get MySQL version").into())
@@ -541,11 +544,13 @@ impl MySqlExternalTableReader {
         let upstream_mysql_pk_infos =
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
         // Get MySQL version
-        let mysql_version = Self::get_mysql_version(&pool).await?;
+        let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
+        let mysql_version = (major_version, minor_version);
         tracing::info!(
-            "MySQL version detected: {}.{}",
+            "MySQL version detected: {}.{} (is_mariadb={})",
             mysql_version.0,
-            mysql_version.1
+            mysql_version.1,
+            is_mariadb
         );
 
         Ok(Self {
@@ -554,6 +559,7 @@ impl MySqlExternalTableReader {
             pool,
             upstream_mysql_pk_infos,
             mysql_version,
+            is_mariadb,
         })
     }
 
