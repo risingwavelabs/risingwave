@@ -129,7 +129,7 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     /// The maximum size in bytes for each `StarRocks` stream load request payload.
-    /// Defaults to 64 MiB.
+    /// Defaults to 64 `MiB`.
     #[serde(
         rename = "starrocks.max_batch_size_bytes",
         default = "default_starrocks_max_batch_size_bytes"
