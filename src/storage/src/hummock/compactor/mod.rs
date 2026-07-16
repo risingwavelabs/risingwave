@@ -98,7 +98,7 @@ use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
-    UnifiedSstableWriterFactory, validate_ssts,
+    StreamingSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -208,7 +208,7 @@ impl Compactor {
         };
 
         let (split_table_outputs, table_stats_map) = {
-            let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
+            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
             if self.task_config.use_block_based_filter {
                 self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                     factory,
