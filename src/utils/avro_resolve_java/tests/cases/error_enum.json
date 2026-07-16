@@ -1,0 +1,44 @@
+{
+    "hex": [
+        "00"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "UNKNOWN",
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,113 @@
+{
+    "hex": [
+        "0e4131392050726f",
+        "ec12fc28",
+        "00",
+        "02",
+        "3a536e6170647261676f6e203820456c69746520666f722047616c617879",
+        "f010b027",
+        "02e01e9022"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "record",
+                    "name": "Phone",
+                    "fields": [
+                        {
+                            "name": "cpu_model",
+                            "type": "string"
+                        },
+                        {
+                            "name": "screen_dim",
+                            "type": {
+                                "type": "record",
+                                "name": "Dim",
+                                "fields": [
+                                    {
+                                        "name": "width",
+                                        "type": "int"
+                                    },
+                                    {
+                                        "name": "height",
+                                        "type": "int"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "name": "secondary_screen",
+                            "type": [
+                                "null",
+                                "Dim"
+                            ],
+                            "default": null
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "f2",
+                "type": [
+                    "null",
+                    "Phone"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "record",
+                    "name": "Laptop",
+                    "fields": [
+                        {
+                            "name": "cpu_model",
+                            "type": "string"
+                        },
+                        {
+                            "name": "dedicated_gpu_model",
+                            "type": [
+                                "null",
+                                "string"
+                            ],
+                            "default": null
+                        },
+                        {
+                            "name": "screen_dim",
+                            "type": {
+                                "type": "record",
+                                "name": "Dim",
+                                "fields": [
+                                    {
+                                        "name": "width",
+                                        "type": "long"
+                                    },
+                                    {
+                                        "name": "height",
+                                        "type": "long"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "f2",
+                "type": [
+                    "null",
+                    "Laptop"
+                ]
+            }
+        ]
+    }
+}

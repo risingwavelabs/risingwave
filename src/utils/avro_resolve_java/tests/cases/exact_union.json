@@ -1,0 +1,91 @@
+{
+    "hex": [
+        "00"
+    ],
+    "writer": [
+        "null",
+        "boolean",
+        "int",
+        "long",
+        "float",
+        "double",
+        "bytes",
+        "string",
+        {
+            "type": "fixed",
+            "name": "md5",
+            "size": 16
+        },
+        {
+            "type": "enum",
+            "name": "Suit",
+            "symbols": [
+                "SPADES",
+                "HEARTS",
+                "DIAMONDS",
+                "CLUBS"
+            ]
+        },
+        {
+            "type": "array",
+            "items": "string"
+        },
+        {
+            "type": "map",
+            "values": "long"
+        },
+        {
+            "type": "record",
+            "name": "Sub",
+            "fields": [
+                {
+                    "name": "f1",
+                    "type": "int"
+                }
+            ]
+        }
+    ],
+    "reader": [
+        "null",
+        "boolean",
+        "int",
+        "long",
+        "float",
+        "double",
+        "bytes",
+        "string",
+        {
+            "type": "fixed",
+            "name": "md5",
+            "size": 16
+        },
+        {
+            "type": "enum",
+            "name": "Suit",
+            "symbols": [
+                "SPADES",
+                "HEARTS",
+                "DIAMONDS",
+                "CLUBS"
+            ]
+        },
+        {
+            "type": "array",
+            "items": "string"
+        },
+        {
+            "type": "map",
+            "values": "long"
+        },
+        {
+            "type": "record",
+            "name": "Sub",
+            "fields": [
+                {
+                    "name": "f1",
+                    "type": "int"
+                }
+            ]
+        }
+    ]
+}

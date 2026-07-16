@@ -1,0 +1,53 @@
+{
+    "hex": [
+        "0208416c6578"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f4",
+                "type": [
+                    "null",
+                    {
+                        "type": "record",
+                        "name": "Bio",
+                        "fields": [
+                            {
+                                "name": "name",
+                                "type": "string"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f4",
+                "type": [
+                    "null",
+                    {
+                        "type": "record",
+                        "name": "Bio",
+                        "fields": [
+                            {
+                                "name": "name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "zip_code",
+                                "type": "string"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+}

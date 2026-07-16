@@ -1,0 +1,261 @@
+{
+    "hex": [
+        "0404d2",
+        "04d2",
+        "0804303900",
+        "4830313233343536372d383961622d636465662d303132332d343536373839616263646566",
+        "000102030405060708090a0b0c0d0e0f",
+        "f0a802",
+        "f2c001",
+        "9c85e30b",
+        "80a0abfef962",
+        "8080f28183898506",
+        "8080d0e2c6bfce972f",
+        "80a0abfef962",
+        "8080f28183898506",
+        "8080d0e2c6bfce972f",
+        "010000000200000003000000"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f0",
+                "type": {
+                    "type": "bytes",
+                    "logicalType": "decimal",
+                    "precision": 4,
+                    "scale": 2
+                }
+            },
+            {
+                "name": "f1",
+                "type": {
+                    "type": "fixed",
+                    "name": "Decimal_4_2",
+                    "size": 2,
+                    "logicalType": "decimal",
+                    "precision": 4,
+                    "scale": 2
+                }
+            },
+            {
+                "name": "f2",
+                "type": {
+                    "type": "bytes",
+                    "logicalType": "big-decimal"
+                }
+            },
+            {
+                "name": "f3",
+                "type": {
+                    "type": "string",
+                    "logicalType": "uuid"
+                }
+            },
+            {
+                "name": "f4",
+                "type": {
+                    "type": "fixed",
+                    "name": "UUID",
+                    "size": 16,
+                    "logicalType": "uuid"
+                }
+            },
+            {
+                "name": "f5",
+                "type": {
+                    "type": "int",
+                    "logicalType": "date"
+                }
+            },
+            {
+                "name": "f6",
+                "type": {
+                    "type": "int",
+                    "logicalType": "time-millis"
+                }
+            },
+            {
+                "name": "f7",
+                "type": {
+                    "type": "long",
+                    "logicalType": "time-micros"
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-millis"
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-micros"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-nanos"
+                }
+            },
+            {
+                "name": "fb",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-millis"
+                }
+            },
+            {
+                "name": "fc",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-micros"
+                }
+            },
+            {
+                "name": "fd",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-nanos"
+                }
+            },
+            {
+                "name": "fe",
+                "type": {
+                    "type": "fixed",
+                    "name": "Duration",
+                    "size": 12,
+                    "logicalType": "duration"
+                }
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f0",
+                "type": {
+                    "type": "bytes",
+                    "logicalType": "decimal",
+                    "precision": 4,
+                    "scale": 2
+                }
+            },
+            {
+                "name": "f1",
+                "type": {
+                    "type": "fixed",
+                    "name": "Decimal_4_2",
+                    "size": 2,
+                    "logicalType": "decimal",
+                    "precision": 4,
+                    "scale": 2
+                }
+            },
+            {
+                "name": "f2",
+                "type": {
+                    "type": "bytes",
+                    "logicalType": "big-decimal"
+                }
+            },
+            {
+                "name": "f3",
+                "type": {
+                    "type": "string",
+                    "logicalType": "uuid"
+                }
+            },
+            {
+                "name": "f4",
+                "type": {
+                    "type": "fixed",
+                    "name": "UUID",
+                    "size": 16,
+                    "logicalType": "uuid"
+                }
+            },
+            {
+                "name": "f5",
+                "type": {
+                    "type": "int",
+                    "logicalType": "date"
+                }
+            },
+            {
+                "name": "f6",
+                "type": {
+                    "type": "int",
+                    "logicalType": "time-millis"
+                }
+            },
+            {
+                "name": "f7",
+                "type": {
+                    "type": "long",
+                    "logicalType": "time-micros"
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-millis"
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-micros"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "long",
+                    "logicalType": "timestamp-nanos"
+                }
+            },
+            {
+                "name": "fb",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-millis"
+                }
+            },
+            {
+                "name": "fc",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-micros"
+                }
+            },
+            {
+                "name": "fd",
+                "type": {
+                    "type": "long",
+                    "logicalType": "local-timestamp-nanos"
+                }
+            },
+            {
+                "name": "fe",
+                "type": {
+                    "type": "fixed",
+                    "name": "Duration",
+                    "size": 12,
+                    "logicalType": "duration"
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,44 @@
+{
+    "hex": [
+        "08",
+        "02",
+        "8001",
+        "02",
+        "03",
+        "00"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "LongList",
+        "fields": [
+            {
+                "name": "value",
+                "type": "long"
+            },
+            {
+                "name": "next",
+                "type": [
+                    "null",
+                    "LongList"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "LongList",
+        "fields": [
+            {
+                "name": "value",
+                "type": "long"
+            },
+            {
+                "name": "next",
+                "type": [
+                    "null",
+                    "LongList"
+                ]
+            }
+        ]
+    }
+}

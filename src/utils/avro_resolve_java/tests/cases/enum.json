@@ -1,0 +1,92 @@
+{
+    "hex": [
+        "00020402"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "enum",
+                    "name": "Mode",
+                    "symbols": [
+                        "MD5",
+                        "SHA1",
+                        "SHA256",
+                        "BLAKE2b"
+                    ]
+                }
+            },
+            {
+                "name": "f2",
+                "type": "Mode"
+            },
+            {
+                "name": "f3",
+                "type": "Mode"
+            },
+            {
+                "name": "noAdj",
+                "type": {
+                    "type": "enum",
+                    "name": "NoAdj",
+                    "symbols": [
+                        "A",
+                        "B",
+                        "C"
+                    ]
+                }
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f0",
+                "type": [
+                    "null",
+                    {
+                        "type": "enum",
+                        "name": "Mode",
+                        "symbols": [
+                            "DECOMMISSIONED",
+                            "SHA256",
+                            "BLAKE2b"
+                        ],
+                        "default": "DECOMMISSIONED"
+                    }
+                ],
+                "default": null
+            },
+            {
+                "name": "f1",
+                "type": "Mode"
+            },
+            {
+                "name": "f2",
+                "type": "Mode"
+            },
+            {
+                "name": "f3",
+                "type": "Mode"
+            },
+            {
+                "name": "noAdj",
+                "type": {
+                    "type": "enum",
+                    "name": "NoAdj",
+                    "symbols": [
+                        "A",
+                        "X",
+                        "C"
+                    ],
+                    "default": "X"
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,150 @@
+{
+    "hex": [
+        "02",
+        "0206",
+        "00",
+        "00",
+        "00"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "UNKNOWN",
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f2",
+                "type": [
+                    "null",
+                    {
+                        "type": "enum",
+                        "name": "Direction",
+                        "symbols": [
+                            "North",
+                            "East",
+                            "South",
+                            "West"
+                        ]
+                    },
+                    "Suit"
+                ]
+            },
+            {
+                "name": "f3",
+                "type": [
+                    "null",
+                    {
+                        "type": "fixed",
+                        "name": "Hash",
+                        "size": 16
+                    }
+                ]
+            },
+            {
+                "name": "f4",
+                "type": [
+                    "null",
+                    {
+                        "type": "record",
+                        "name": "Bio",
+                        "fields": [
+                            {
+                                "name": "name",
+                                "type": "string"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "name": "f5",
+                "type": [
+                    "null",
+                    "long"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f2",
+                "type": {
+                    "type": "enum",
+                    "name": "Direction",
+                    "symbols": [
+                        "North",
+                        "East",
+                        "South",
+                        "West"
+                    ]
+                }
+            },
+            {
+                "name": "f3",
+                "type": [
+                    "null",
+                    {
+                        "type": "fixed",
+                        "name": "Hash",
+                        "size": 32
+                    }
+                ]
+            },
+            {
+                "name": "f4",
+                "type": [
+                    "null",
+                    {
+                        "type": "record",
+                        "name": "Bio",
+                        "fields": [
+                            {
+                                "name": "name",
+                                "type": "string"
+                            },
+                            {
+                                "name": "zip_code",
+                                "type": "string"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "name": "f5",
+                "type": [
+                    "null",
+                    "int"
+                ]
+            }
+        ]
+    }
+}
