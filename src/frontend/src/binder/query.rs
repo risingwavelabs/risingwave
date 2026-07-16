@@ -37,6 +37,8 @@ pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<ColumnOrder>,
     pub limit: Option<ExprImpl>,
+    /// Clause name used in `limit` error messages: `"LIMIT"` or `"FETCH FIRST"`.
+    pub limit_clause: &'static str,
     pub offset: Option<ExprImpl>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
@@ -123,6 +125,7 @@ impl BoundQuery {
             body: BoundSetExpr::Values(values.into()),
             order: vec![],
             limit: None,
+            limit_clause: "LIMIT",
             offset: None,
             with_ties: false,
             extra_order_exprs: vec![],
@@ -147,7 +150,11 @@ impl RewriteExprsRecursive for BoundQuery {
     }
 }
 
-/// Whether an expression tree contains a bind parameter (`$n`).
+/// Whether the expression directly contains a bind parameter (`$n`).
+///
+/// This does not descend into subqueries: the default [`ExprVisitor`] does not visit them,
+/// so a `$n` nested inside a subquery is not reported here. That is fine for LIMIT/OFFSET,
+/// where a subquery never folds to a plan-time constant and is rejected regardless.
 fn expr_has_parameter(expr: &ExprImpl) -> bool {
     struct HasParameter(bool);
     impl ExprVisitor for HasParameter {
@@ -258,8 +265,10 @@ impl Binder {
         }: &Query,
     ) -> Result<BoundQuery> {
         let mut with_ties = false;
-        let limit = match (limit, fetch) {
-            (None, None) => None,
+        // Track the clause the limit came from so error messages name it correctly
+        // (a bad `FETCH FIRST` quantity must not report `LIMIT`).
+        let (limit, limit_clause) = match (limit, fetch) {
+            (None, None) => (None, "LIMIT"),
             (
                 None,
                 Some(Fetch {
@@ -268,16 +277,17 @@ impl Binder {
                 }),
             ) => {
                 with_ties = *fetch_with_ties;
-                match quantity {
-                    Some(v) => Some(v.clone()),
-                    None => Some(Expr::Value(Value::Number("1".to_owned()))),
-                }
+                let expr = match quantity {
+                    Some(v) => v.clone(),
+                    None => Expr::Value(Value::Number("1".to_owned())),
+                };
+                (Some(expr), "FETCH FIRST")
             }
-            (Some(limit), None) => Some(limit.clone()),
+            (Some(limit), None) => (Some(limit.clone()), "LIMIT"),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
         let limit = limit
-            .map(|expr| self.bind_limit_or_offset_expr("LIMIT", expr))
+            .map(|expr| self.bind_limit_or_offset_expr(limit_clause, expr))
             .transpose()?;
         let offset = offset
             .clone()
@@ -308,6 +318,7 @@ impl Binder {
             body,
             order,
             limit,
+            limit_clause,
             offset,
             with_ties,
             extra_order_exprs,

@@ -36,14 +36,17 @@ impl Planner {
             body,
             order,
             limit,
+            limit_clause,
             offset,
             with_ties,
             extra_order_exprs,
         } = query;
 
         // Bind parameters (`$n`) inside LIMIT/OFFSET have been substituted by
-        // now, so fold them to constant `u64`s here (see #23345).
-        let limit = eval_limit_or_offset(limit, "LIMIT", u64::MAX)?;
+        // now, so fold them to constant `u64`s here (see #23345). A `NULL` LIMIT
+        // maps to `LIMIT_ALL_COUNT` (u64::MAX / 2), not u64::MAX, so a later
+        // `offset + limit` cannot overflow (matches the `None` limit path below).
+        let limit = eval_limit_or_offset(limit, limit_clause, LIMIT_ALL_COUNT)?;
         let offset = eval_limit_or_offset(offset, "OFFSET", 0)?;
 
         let extra_order_exprs_len = extra_order_exprs.len();

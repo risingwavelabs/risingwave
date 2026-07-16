@@ -726,6 +726,60 @@ impl TestSuite {
             "expected a negative-offset error, got: {err}"
         );
 
+        // LIMIT bound to NULL means no limit, but a positive OFFSET still applies. This must
+        // not overflow `offset + limit` and crash (5 rows, so OFFSET 1 leaves 4). Uses
+        // generate_series (not the table) to avoid an unrelated pre-existing local-mode panic
+        // for unbounded LIMIT + OFFSET over a table scan (see PR discussion).
+        assert_eq!(
+            client
+                .query(
+                    "select v from generate_series(1, 5, 1) t(v) order by v limit $1 offset 1",
+                    &[&None::<i64>],
+                )
+                .await?
+                .len(),
+            4
+        );
+        assert_eq!(
+            client
+                .query(
+                    "select v from generate_series(1, 5, 1) t(v) limit $1 offset 1",
+                    &[&None::<i64>],
+                )
+                .await?
+                .len(),
+            4
+        );
+
+        // int8 overflow while folding `$1 + 1` after binding must be a clean error, not a panic.
+        let err = client
+            .query(
+                "select v from t_lo order by v offset $1::bigint + 1",
+                &[&i64::MAX],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("out of range")
+                || err.to_string().to_lowercase().contains("overflow"),
+            "expected an overflow error, got: {err}"
+        );
+
+        // A value that is still not constant after `$n` substitution (contains a volatile
+        // function) is rejected in the planner with a clear message.
+        let err = client
+            .query(
+                "select v from t_lo order by v offset ($1 + random())::int8",
+                &[&0_f64],
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("must reduce to a constant after parameter binding"),
+            "expected a non-constant-after-binding error, got: {err}"
+        );
+
         client.execute("drop table t_lo", &[]).await?;
         Ok(())
     }
