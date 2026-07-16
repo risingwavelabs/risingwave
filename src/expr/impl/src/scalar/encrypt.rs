@@ -143,13 +143,9 @@ impl CipherConfig {
         input: &[u8],
         operation: CipherMode,
     ) -> std::result::Result<Box<[u8]>, ErrorStack> {
-        let iv = match self.mode {
-            Mode::Cbc => Some(vec![
-                0;
-                self.cipher.iv_len().unwrap_or(self.cipher.block_size())
-            ]),
-            Mode::Ecb => None,
-        };
+        // Default the IV to all-zeros when the cipher requires one, to match pgcrypto:
+        // https://github.com/postgres/postgres/blob/REL_18_3/contrib/pgcrypto/pgcrypto.c#L325
+        let iv = self.cipher.iv_len().map(|len| vec![0u8; len]);
         let mut decrypter = Crypter::new(
             self.cipher,
             operation,
