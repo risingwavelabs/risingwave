@@ -424,6 +424,13 @@ public class RisingWaveConnector implements TapConnector {
             // before image to retract the old row before inserting the new image.
             return !before.equals(after);
         }
+        // Some sources, notably MongoDB, use an empty before image while still providing a
+        // complete after image. Missing identity is not a primary-key change: sending delete {}
+        // would make the webhook decoder reject the whole batch before it reaches the upsert.
+        if (!before.keySet().containsAll(primaryKeys)
+                || !after.keySet().containsAll(primaryKeys)) {
+            return false;
+        }
         for (String primaryKey : primaryKeys) {
             if (!Objects.equals(before.get(primaryKey), after.get(primaryKey))) {
                 return true;

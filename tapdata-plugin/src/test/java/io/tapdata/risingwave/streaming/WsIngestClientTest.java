@@ -148,6 +148,16 @@ class WsIngestClientTest {
         assertTrue(error.getMessage().contains("single WebSocket DML operation"));
     }
 
+    @Test
+    void rejectsSingleRecordThatExceedsTheConfiguredEightMibLimit() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> WsIngestClient.splitBatches(
+                        Collections.singletonList(largeInsert(1, 8 * 1024 * 1024)),
+                        WsIngestClient.MAX_BATCH_PAYLOAD_BYTES));
+
+        assertTrue(error.getMessage().contains("8388608 byte frame safety limit"));
+    }
+
     private static WsIngestClient.DmlOperation largeInsert(int id, int payloadLength) {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("id", id);

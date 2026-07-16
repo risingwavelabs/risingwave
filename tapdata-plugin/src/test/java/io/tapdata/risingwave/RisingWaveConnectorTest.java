@@ -161,6 +161,10 @@ class RisingWaveConnectorTest {
 
         assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(keyedTable, before, sameKey));
         assertTrue(RisingWaveConnector.requiresDeleteBeforeUpsert(keyedTable, before, changedKey));
+        assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(
+                keyedTable, java.util.Collections.emptyMap(), sameKey));
+        assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(
+                keyedTable, before, java.util.Collections.singletonMap("name", "after")));
         TapTable keylessTable = new TapTable("keyless")
                 .add(new TapField("id", "integer"))
                 .add(new TapField("name", "text"));

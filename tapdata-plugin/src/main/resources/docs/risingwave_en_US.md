@@ -113,7 +113,9 @@ ingest route, signature configuration, and required target-table DDL privileges 
    from its `before` and `after` images. If neither image contains all target columns, the update
    fails rather than silently converting absent columns to `NULL`. A source `removedFields` entry
    for a top-level column is written as SQL `NULL`. Removing a nested field such as `profile.name`
-   requires the source to provide a complete post-image for the parent `profile` column.
+   requires the source to provide a complete post-image for the parent `profile` column. MySQL
+   sources must use `binlog_row_image=FULL`; TapData's MySQL CDC reader rejects `MINIMAL` row
+   images before they reach this target connector.
 8. **Large records have a frame limit**: The connector splits batches into ordered WebSocket
    payloads below 8 MiB. A single source record larger than that cannot be split safely and fails
    with an explicit error.
