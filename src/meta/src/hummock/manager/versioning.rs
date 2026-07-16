@@ -326,6 +326,7 @@ impl HummockManager {
         exclude_empty: bool,
         limit: Option<u32>,
     ) -> TableChangeLogs {
+        let _timer = self.metrics.table_change_log_get_latency.start_timer();
         self.on_current_version(|version| {
             version
                 .table_change_log
