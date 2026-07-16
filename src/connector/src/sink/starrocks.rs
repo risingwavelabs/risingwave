@@ -585,7 +585,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
+                        SinkError::Starrocks(format!("Json serialize error: {}", e.as_report()))
                     })?;
                     self.write_row_json(row_json_string).await?;
                 }
@@ -596,7 +596,7 @@ impl StarrocksSinkWriter {
                         Value::String("1".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
+                        SinkError::Starrocks(format!("Json serialize error: {}", e.as_report()))
                     })?;
                     self.write_row_json(row_json_string).await?;
                 }
@@ -608,7 +608,7 @@ impl StarrocksSinkWriter {
                         Value::String("0".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
-                        SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
+                        SinkError::Starrocks(format!("Json serialize error: {}", e.as_report()))
                     })?;
                     self.write_row_json(row_json_string).await?;
                 }
