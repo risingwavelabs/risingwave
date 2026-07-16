@@ -1,0 +1,185 @@
+{
+    "hex": [
+        "01",
+        "02",
+        "04",
+        "0000c03f",
+        "0000000000000440",
+        "08deadbeef",
+        "0a68656c6c6f",
+        "000102030405060708090a0b0c0d0e0f",
+        "02",
+        "040261026200",
+        "02026b0e00",
+        "020278",
+        "04040102"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f0",
+                "type": "boolean"
+            },
+            {
+                "name": "f1",
+                "type": "int"
+            },
+            {
+                "name": "f2",
+                "type": "long"
+            },
+            {
+                "name": "f3",
+                "type": "float"
+            },
+            {
+                "name": "f4",
+                "type": "double"
+            },
+            {
+                "name": "f5",
+                "type": "bytes"
+            },
+            {
+                "name": "f6",
+                "type": "string"
+            },
+            {
+                "name": "f7",
+                "type": {
+                    "type": "fixed",
+                    "name": "md5",
+                    "size": 16
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "array",
+                    "items": "string"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "map",
+                    "values": "long"
+                }
+            },
+            {
+                "name": "fb",
+                "type": [
+                    "null",
+                    "string"
+                ]
+            },
+            {
+                "name": "fc",
+                "type": [
+                    "null",
+                    "string",
+                    "bytes"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f0",
+                "type": "boolean"
+            },
+            {
+                "name": "f1",
+                "type": "int"
+            },
+            {
+                "name": "f2",
+                "type": "long"
+            },
+            {
+                "name": "f3",
+                "type": "float"
+            },
+            {
+                "name": "f4",
+                "type": "double"
+            },
+            {
+                "name": "f5",
+                "type": "bytes"
+            },
+            {
+                "name": "f6",
+                "type": "string"
+            },
+            {
+                "name": "f7",
+                "type": {
+                    "type": "fixed",
+                    "name": "md5",
+                    "size": 16
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "array",
+                    "items": "string"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "map",
+                    "values": "long"
+                }
+            },
+            {
+                "name": "fb",
+                "type": [
+                    "null",
+                    "string"
+                ]
+            },
+            {
+                "name": "fc",
+                "type": [
+                    "null",
+                    "string",
+                    "bytes"
+                ]
+            }
+        ]
+    }
+}

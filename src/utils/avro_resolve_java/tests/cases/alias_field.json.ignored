@@ -1,0 +1,28 @@
+{
+    "hex": [
+        "7f"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f1",
+                "type": "int"
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "v1",
+                "aliases": [
+                    "f1"
+                ],
+                "type": "int"
+            }
+        ]
+    }
+}

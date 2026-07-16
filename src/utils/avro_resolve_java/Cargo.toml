@@ -1,0 +1,18 @@
+[package]
+name = "avro_resolve_java"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+apache-avro = { git = "https://github.com/risingwavelabs/avro-rs", rev = "1f2723802d4fb77b97fa084f7bb81e3b60b9e03f" }
+fixedbitset = "0.5"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.146"
+
+[dev-dependencies]
+datatest-stable = "0.3.3"
+hex = "0.4"
+
+[[test]]
+name = "json_cases"
+harness = false

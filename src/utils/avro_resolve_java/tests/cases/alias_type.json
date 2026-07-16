@@ -1,0 +1,131 @@
+{
+    "hex": [
+        "000102030405060708090a0b0c0d0e0f",
+        "02",
+        "04000600",
+        "02027afbade9e36a3f36d3d676c1b808451dd700",
+        "0204",
+        "04000102030405060708090a0b0c0d0e0f"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "f7",
+                "type": {
+                    "type": "fixed",
+                    "name": "md5",
+                    "size": 16
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "enum",
+                    "name": "Suit",
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "array",
+                    "items": "Suit"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "map",
+                    "values": "md5"
+                }
+            },
+            {
+                "name": "fb",
+                "type": [
+                    "null",
+                    "Suit"
+                ]
+            },
+            {
+                "name": "fc",
+                "type": [
+                    "null",
+                    "string",
+                    "md5"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Test",
+        "aliases": [
+            "Root"
+        ],
+        "fields": [
+            {
+                "name": "f7",
+                "type": {
+                    "type": "fixed",
+                    "name": "Md5",
+                    "aliases": [
+                        "md5"
+                    ],
+                    "size": 16
+                }
+            },
+            {
+                "name": "f8",
+                "type": {
+                    "type": "enum",
+                    "name": "Symbol",
+                    "aliases": [
+                        "Suit"
+                    ],
+                    "symbols": [
+                        "SPADES",
+                        "HEARTS",
+                        "DIAMONDS",
+                        "CLUBS"
+                    ]
+                }
+            },
+            {
+                "name": "f9",
+                "type": {
+                    "type": "array",
+                    "items": "Symbol"
+                }
+            },
+            {
+                "name": "fa",
+                "type": {
+                    "type": "map",
+                    "values": "Md5"
+                }
+            },
+            {
+                "name": "fb",
+                "type": [
+                    "null",
+                    "Symbol"
+                ]
+            },
+            {
+                "name": "fc",
+                "type": [
+                    "null",
+                    "string",
+                    "Md5"
+                ]
+            }
+        ]
+    }
+}

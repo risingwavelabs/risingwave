@@ -47,6 +47,7 @@ async-nats = { version = "0.47", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+avro_resolve_java = { path = "../utils/avro_resolve_java" }
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }

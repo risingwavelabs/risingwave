@@ -1,0 +1,11 @@
+{
+    "hex": [
+        "04"
+    ],
+    "writer": {
+        "type": "int"
+    },
+    "reader": {
+        "type": "long"
+    }
+}

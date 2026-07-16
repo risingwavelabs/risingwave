@@ -1,0 +1,142 @@
+{
+    "hex": [
+        "01",
+        "02",
+        "04",
+        "01",
+        "02",
+        "cdcccc3d",
+        "04c3b1",
+        "04c3b1",
+        "0a0102047f800100",
+        "02026b0e00",
+        "028001",
+        "047f"
+    ],
+    "writer": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "i2l",
+                "type": "int"
+            },
+            {
+                "name": "i2f",
+                "type": "int"
+            },
+            {
+                "name": "i2d",
+                "type": "int"
+            },
+            {
+                "name": "l2f",
+                "type": "long"
+            },
+            {
+                "name": "l2d",
+                "type": "long"
+            },
+            {
+                "name": "f2d",
+                "type": "float"
+            },
+            {
+                "name": "b2s",
+                "type": "bytes"
+            },
+            {
+                "name": "s2b",
+                "type": "string"
+            },
+            {
+                "name": "f_arr",
+                "type": {
+                    "type": "array",
+                    "items": "int"
+                }
+            },
+            {
+                "name": "f_map",
+                "type": {
+                    "type": "map",
+                    "values": "int"
+                }
+            },
+            {
+                "name": "f_opt",
+                "type": [
+                    "null",
+                    "int"
+                ]
+            },
+            {
+                "name": "f_union",
+                "type": [
+                    "null",
+                    "string",
+                    "int"
+                ]
+            }
+        ]
+    },
+    "reader": {
+        "type": "record",
+        "name": "Root",
+        "fields": [
+            {
+                "name": "i2l",
+                "type": "long"
+            },
+            {
+                "name": "i2f",
+                "type": "float"
+            },
+            {
+                "name": "i2d",
+                "type": "double"
+            },
+            {
+                "name": "l2f",
+                "type": "float"
+            },
+            {
+                "name": "l2d",
+                "type": "double"
+            },
+            {
+                "name": "f2d",
+                "type": "double"
+            },
+            {
+                "name": "f_arr",
+                "type": {
+                    "type": "array",
+                    "items": "long"
+                }
+            },
+            {
+                "name": "f_map",
+                "type": {
+                    "type": "map",
+                    "values": "long"
+                }
+            },
+            {
+                "name": "f_opt",
+                "type": [
+                    "null",
+                    "long"
+                ]
+            },
+            {
+                "name": "f_union",
+                "type": [
+                    "null",
+                    "string",
+                    "long"
+                ]
+            }
+        ]
+    }
+}
