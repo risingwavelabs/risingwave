@@ -663,10 +663,13 @@ pub async fn start_service_as_election_leader(
             Box::new(move || {
                 let barrier_manager = barrier_manager.clone();
                 Box::pin(async move {
-                    barrier_manager.may_have_creating_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having creating jobs. pause vacuum time travel");
-                        true
-                    })
+                    barrier_manager
+                        .get_pinned_snapshot_epochs()
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect pinned snapshot epochs. pause vacuum time travel");
+                            None
+                        })
                 })
             })
         }

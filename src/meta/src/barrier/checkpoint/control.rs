@@ -231,10 +231,22 @@ impl CheckpointControl {
             .map(|database| &database.database_info)
     }
 
-    pub(crate) fn may_have_creating_jobs(&self) -> bool {
-        self.databases
-            .values()
-            .any(|database| database.may_have_creating_jobs())
+    pub(crate) fn pinned_snapshot_epochs(&self) -> Option<HashMap<TableId, HashSet<u64>>> {
+        let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
+        for database in self.databases.values() {
+            let database = database.running_state()?;
+            for job in database.independent_checkpoint_job_controls.values() {
+                if let Some(job_pins) = job.pinned_snapshot_epochs() {
+                    for (&table_id, epochs) in job_pins {
+                        pinned_snapshot_epochs
+                            .entry(table_id)
+                            .or_default()
+                            .extend(epochs);
+                    }
+                }
+            }
+        }
+        Some(pinned_snapshot_epochs)
     }
 
     /// return Some(failed `database_id` -> `err`)
@@ -704,18 +716,6 @@ impl DatabaseCheckpointControlStatus {
             DatabaseCheckpointControlStatus::Running(state) => Some(state),
             DatabaseCheckpointControlStatus::Recovering(_) => None,
         }
-    }
-
-    fn may_have_creating_jobs(&self) -> bool {
-        self.running_state()
-            .map(|database| {
-                database.database_info.has_creating_jobs()
-                    || database
-                        .independent_checkpoint_job_controls
-                        .values()
-                        .any(|job| job.is_snapshot_backfilling())
-            })
-            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
     fn expect_running(&mut self, reason: &'static str) -> &mut DatabaseCheckpointControl {

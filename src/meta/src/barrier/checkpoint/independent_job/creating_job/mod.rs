@@ -103,6 +103,7 @@ impl CreatingStreamingJobControl {
         split_assignment: &SplitAssignment,
         actors: &RenderResult,
     ) -> MetaResult<&'a mut Self> {
+        let pinned_snapshot_epochs = create_info.pinned_snapshot_epochs()?;
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
         let database_id = info.streaming_job.database_id();
@@ -290,6 +291,7 @@ impl CreatingStreamingJobControl {
                     version_stats: version_stat.clone(),
                     create_mview_tracker,
                     snapshot_backfill_actors,
+                    pinned_snapshot_epochs,
                     snapshot_epoch,
                     info: job_info,
                     pending_non_checkpoint_barriers,
@@ -539,6 +541,8 @@ impl CreatingStreamingJobControl {
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Initial,
         );
+        let pinned_snapshot_epochs =
+            super::pinned_snapshot_epochs_from_fragment_infos(&info.fragment_infos)?;
 
         Ok((
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -555,6 +559,7 @@ impl CreatingStreamingJobControl {
                     &info.fragment_infos,
                 )
                 .collect(),
+                pinned_snapshot_epochs,
                 info,
                 snapshot_epoch,
                 pending_non_checkpoint_barriers,
@@ -769,6 +774,19 @@ impl CreatingStreamingJobControl {
             max(self.max_committed_epoch.unwrap_or(0), self.snapshot_epoch),
             self.snapshot_backfill_upstream_tables.clone(),
         )
+    }
+
+    pub(super) fn pinned_snapshot_epochs(&self) -> Option<&HashMap<TableId, HashSet<u64>>> {
+        match &self.status {
+            CreatingStreamingJobStatus::ConsumingSnapshot {
+                pinned_snapshot_epochs,
+                ..
+            } => Some(pinned_snapshot_epochs),
+            CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(..)
+            | CreatingStreamingJobStatus::PlaceHolder => None,
+        }
     }
 
     fn inject_barrier(

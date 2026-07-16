@@ -135,6 +135,7 @@ enum BatchRefreshJobStatus {
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_epoch: u64,
+        pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>>,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         pending_non_checkpoint_barriers: Vec<u64>,
         node_actors: HashMap<WorkerId, HashSet<ActorId>>,
@@ -483,6 +484,7 @@ impl BatchRefreshJobCheckpointControl {
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         batch_refresh_seconds: u64,
     ) -> MetaResult<Self> {
+        let pinned_snapshot_epochs = create_info.pinned_snapshot_epochs()?;
         debug!(
             %job_id,
             "new batch refresh job"
@@ -567,6 +569,7 @@ impl BatchRefreshJobCheckpointControl {
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
                 snapshot_epoch,
+                pinned_snapshot_epochs,
                 fragment_infos: render_result.fragment_infos,
                 pending_non_checkpoint_barriers,
                 node_actors: render_result.node_actors,
@@ -644,6 +647,8 @@ impl BatchRefreshJobCheckpointControl {
             backfill_order_state,
             version_stat,
         );
+        let pinned_snapshot_epochs =
+            super::pinned_snapshot_epochs_from_fragment_infos(&render_result.fragment_infos)?;
 
         let first_barrier_info = super::new_fake_barrier(
             &mut prev_epoch_fake_physical_time,
@@ -673,6 +678,7 @@ impl BatchRefreshJobCheckpointControl {
                 create_mview_tracker,
                 fragment_infos: render_result.fragment_infos,
                 snapshot_epoch,
+                pinned_snapshot_epochs,
                 pending_non_checkpoint_barriers,
                 node_actors: render_result.node_actors,
                 state_table_ids: render_result.state_table_ids,
@@ -1128,6 +1134,20 @@ impl BatchRefreshJobCheckpointControl {
         }
     }
 
+    pub(super) fn pinned_snapshot_epochs(&self) -> Option<&HashMap<TableId, HashSet<u64>>> {
+        match &self.status {
+            BatchRefreshJobStatus::ConsumingSnapshot {
+                pinned_snapshot_epochs,
+                ..
+            } => Some(pinned_snapshot_epochs),
+            BatchRefreshJobStatus::FinishingSnapshot { .. }
+            | BatchRefreshJobStatus::Idle { .. }
+            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
+            | BatchRefreshJobStatus::ConsumingLogStore { .. }
+            | BatchRefreshJobStatus::Resetting { .. } => None,
+        }
+    }
+
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { fragment_infos, .. } => Some(fragment_infos),
@@ -1139,16 +1159,6 @@ impl BatchRefreshJobCheckpointControl {
             | BatchRefreshJobStatus::Idle { .. }
             | BatchRefreshJobStatus::Resetting { .. } => None,
         }
-    }
-
-    pub(crate) fn is_snapshot_backfilling(&self) -> bool {
-        matches!(
-            self.status,
-            BatchRefreshJobStatus::ConsumingSnapshot { .. }
-                | BatchRefreshJobStatus::FinishingSnapshot { .. }
-                | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-                | BatchRefreshJobStatus::ConsumingLogStore { .. }
-        )
     }
 
     /// Whether this idle job should start a refresh run.

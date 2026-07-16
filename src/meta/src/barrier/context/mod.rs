@@ -15,6 +15,7 @@
 mod context_impl;
 pub(crate) mod recovery;
 
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -60,6 +61,13 @@ pub(super) struct CreateSnapshotBackfillJobCommandInfo {
 }
 
 impl CreateSnapshotBackfillJobCommandInfo {
+    pub(super) fn pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
+        collect_pinned_snapshot_epochs(
+            &self.snapshot_backfill_info,
+            &self.cross_db_snapshot_backfill_info,
+        )
+    }
+
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
         let job_type = if let Some(refresh_interval_sec) = self.refresh_interval_sec {
             CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
@@ -81,6 +89,34 @@ impl CreateSnapshotBackfillJobCommandInfo {
             resolved_split_assignment: self.resolved_split_assignment,
         }
     }
+}
+
+pub(super) fn collect_pinned_snapshot_epochs(
+    snapshot_backfill_info: &SnapshotBackfillInfo,
+    cross_db_snapshot_backfill_info: &SnapshotBackfillInfo,
+) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
+    let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
+    for (&table_id, &epoch) in snapshot_backfill_info
+        .upstream_mv_table_id_to_backfill_epoch
+        .iter()
+        .chain(
+            cross_db_snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .iter(),
+        )
+    {
+        let epoch = epoch.ok_or_else(|| {
+            anyhow::anyhow!(
+                "snapshot backfill epoch of upstream table {} has not been set",
+                table_id
+            )
+        })?;
+        pinned_snapshot_epochs
+            .entry(table_id)
+            .or_default()
+            .insert(epoch);
+    }
+    Ok(pinned_snapshot_epochs)
 }
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
@@ -234,5 +270,85 @@ impl GlobalBarrierWorkerContextImpl {
 
     pub(super) fn status(&self) -> Arc<ArcSwap<BarrierManagerStatus>> {
         self.status.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use risingwave_common::catalog::TableId;
+
+    use super::collect_pinned_snapshot_epochs;
+    use crate::barrier::SnapshotBackfillInfo;
+
+    #[test]
+    fn test_collect_pinned_snapshot_epochs() {
+        assert!(
+            collect_pinned_snapshot_epochs(
+                &SnapshotBackfillInfo {
+                    upstream_mv_table_id_to_backfill_epoch: HashMap::new(),
+                },
+                &SnapshotBackfillInfo {
+                    upstream_mv_table_id_to_backfill_epoch: HashMap::new(),
+                },
+            )
+            .unwrap()
+            .is_empty()
+        );
+
+        let local = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: HashMap::from([
+                (TableId::new(1), Some(100)),
+                (TableId::new(2), Some(200)),
+            ]),
+        };
+        let cross_database = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: HashMap::from([
+                (TableId::new(1), Some(100)),
+                (TableId::new(3), Some(300)),
+            ]),
+        };
+
+        assert_eq!(
+            collect_pinned_snapshot_epochs(&local, &cross_database).unwrap(),
+            HashMap::from([
+                (TableId::new(1), HashSet::from([100])),
+                (TableId::new(2), HashSet::from([200])),
+                (TableId::new(3), HashSet::from([300])),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_collect_multiple_epochs_for_same_table() {
+        let local = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: HashMap::from([(TableId::new(1), Some(100))]),
+        };
+        let cross_database = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: HashMap::from([(TableId::new(1), Some(200))]),
+        };
+
+        assert_eq!(
+            collect_pinned_snapshot_epochs(&local, &cross_database).unwrap(),
+            HashMap::from([(TableId::new(1), HashSet::from([100, 200]))])
+        );
+    }
+
+    #[test]
+    fn test_collect_pinned_snapshot_epochs_rejects_unresolved_epoch() {
+        let local = SnapshotBackfillInfo {
+            upstream_mv_table_id_to_backfill_epoch: HashMap::from([(TableId::new(1), None)]),
+        };
+
+        assert!(
+            collect_pinned_snapshot_epochs(
+                &local,
+                &SnapshotBackfillInfo {
+                    upstream_mv_table_id_to_backfill_epoch: HashMap::new(),
+                },
+            )
+            .is_err()
+        );
     }
 }
