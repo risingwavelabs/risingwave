@@ -10937,6 +10937,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "futures",
  "itertools 0.14.0",
  "madsim-tokio",
  "prost 0.13.4",
@@ -10948,6 +10949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.17",
+ "tracing",
  "twox-hash 2.1.0",
 ]
 
@@ -12309,6 +12311,7 @@ dependencies = [
  "crc32fast",
  "fail",
  "futures",
+ "futures-async-stream",
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "itertools 0.14.0",
@@ -12316,6 +12319,7 @@ dependencies = [
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal 0.53.3",
+ "pin-project-lite",
  "prometheus",
  "reqwest 0.12.25",
  "risingwave_common",
