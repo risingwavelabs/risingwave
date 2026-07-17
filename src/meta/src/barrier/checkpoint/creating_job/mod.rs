@@ -211,8 +211,7 @@ impl CreatingStreamingJobControl {
                 .collect(),
         };
 
-        let max_lagged_barrier_num =
-            control_stream_manager
+        let max_lagged_barrier_num = control_stream_manager
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
@@ -499,8 +498,7 @@ impl CreatingStreamingJobControl {
         };
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
 
-        let max_lagged_barrier_num =
-            control_stream_manager
+        let max_lagged_barrier_num = control_stream_manager
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
@@ -739,7 +737,6 @@ impl CreatingStreamingJobControl {
     }
 
     pub(super) fn should_merge_to_upstream(&self) -> bool {
-        let todo = 0;
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
             barriers_to_inject,
@@ -747,6 +744,7 @@ impl CreatingStreamingJobControl {
         } = &self.status
             && barriers_to_inject.is_none()
             && log_store_progress_tracker.is_finished()
+            && self.barrier_control.pending_barrier_count() <= self.max_lagged_barrier_num
         {
             true
         } else {
