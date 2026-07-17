@@ -5,9 +5,14 @@ import io.tapdata.entity.schema.TapField;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** SQL identifier and RisingWave type helpers shared by discovery, DDL, and DML paths. */
 final class RisingWaveSql {
+    private static final Pattern WEBHOOK_SECRET_REFERENCE = Pattern.compile(
+            "(?i)\\bvalidate\\s+secret\\s+(\"(?:[^\"]|\"\")*\"|[A-Za-z_][A-Za-z0-9_$]*)");
+
     private RisingWaveSql() {
     }
 
@@ -70,6 +75,22 @@ final class RisingWaveSql {
                 + ", " + signedPayload + ", 'sha256'), 'hex'))";
     }
 
+    static boolean referencesWebhookSecret(String ddl, String expectedSecret) {
+        if (ddl == null || expectedSecret == null || expectedSecret.isEmpty()) {
+            return false;
+        }
+        Matcher matcher = WEBHOOK_SECRET_REFERENCE.matcher(ddl);
+        if (!matcher.find()) {
+            return false;
+        }
+        String identifier = matcher.group(1);
+        if (identifier.startsWith("\"") && identifier.endsWith("\"")) {
+            return expectedSecret.equals(
+                    identifier.substring(1, identifier.length() - 1).replace("\"\"", "\""));
+        }
+        return expectedSecret.equals(identifier.toLowerCase(Locale.ROOT));
+    }
+
     static String mapDiscoveredType(String dataType, String udtName) {
         if (dataType == null) {
             return "text";
@@ -126,10 +147,7 @@ final class RisingWaveSql {
             return "text";
         }
         String type = dataType.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        int parameters = type.indexOf('(');
-        if (parameters >= 0) {
-            type = type.substring(0, parameters).trim();
-        }
+        type = type.replaceFirst("\\([^)]*\\)", "").trim().replaceAll("\\s+", " ");
         switch (type) {
             case "int": case "int4": case "integer": return "integer";
             case "int8": case "bigint": case "bigserial": case "serial": return "bigint";

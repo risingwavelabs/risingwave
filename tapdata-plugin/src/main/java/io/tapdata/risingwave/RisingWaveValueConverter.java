@@ -1,6 +1,8 @@
 package io.tapdata.risingwave;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
@@ -10,6 +12,7 @@ import io.tapdata.entity.schema.type.TapMap;
 import io.tapdata.entity.schema.type.TapTime;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.DateTime;
+import org.postgresql.util.PGobject;
 
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
@@ -17,6 +20,7 @@ import java.math.BigInteger;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -28,14 +32,21 @@ import java.util.Map;
 
 /** Converts TapData values into JDBC parameters or WebSocket-ingest JSON values. */
 final class RisingWaveValueConverter {
-    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private RisingWaveValueConverter() {
     }
 
-    static void setJdbcParameter(PreparedStatement statement, int index, Object value)
+    static void setJdbcParameter(
+            PreparedStatement statement, int index, Object value, TapField field)
             throws SQLException {
-        statement.setObject(index, toJdbcValue(value));
+        if (value == null && isJsonLikeField(field, field == null ? null : field.getTapType())) {
+            statement.setNull(index, Types.OTHER);
+            return;
+        }
+        statement.setObject(index, toJdbcValue(value, field));
     }
 
     static Map<String, Object> normalizeStreamingRecord(
@@ -54,15 +65,55 @@ final class RisingWaveValueConverter {
         return normalized;
     }
 
-    private static Object toJdbcValue(Object value) {
+    static Object toJdbcValue(Object value, TapField field) throws SQLException {
+        if (value == null) {
+            return null;
+        }
+        if (isJsonLikeField(field, field == null ? null : field.getTapType())) {
+            return toJsonbObject(value, field);
+        }
         if (value instanceof DateTime) {
-            return ((DateTime) value).toTimestamp();
+            DateTime dateTime = (DateTime) value;
+            String dataType = canonicalDataType(field);
+            if ("date".equals(dataType)) {
+                return dateTime.toSqlDate();
+            }
+            if ("time".equals(dataType)) {
+                return dateTime.toTime();
+            }
+            if ("timestamp with time zone".equals(dataType)
+                    && dateTime.toZonedDateTime() != null) {
+                return dateTime.toZonedDateTime().toOffsetDateTime();
+            }
+            if ("timestamp".equals(dataType)) {
+                return dateTime.toLocalDateTime();
+            }
+            return dateTime.toTimestamp();
         }
         if (value instanceof java.util.Date && !(value instanceof java.sql.Date)
                 && !(value instanceof Timestamp)) {
             return new Timestamp(((java.util.Date) value).getTime());
         }
         return value;
+    }
+
+    private static PGobject toJsonbObject(Object value, TapField field) throws SQLException {
+        String json;
+        try {
+            if (value instanceof CharSequence) {
+                json = value.toString();
+                JSON_MAPPER.readTree(json);
+            } else {
+                json = JSON_MAPPER.writeValueAsString(value);
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            throw new SQLException("Invalid JSON value for field "
+                    + (field == null ? "<unknown>" : field.getName()), e);
+        }
+        PGobject object = new PGobject();
+        object.setType("jsonb");
+        object.setValue(json);
+        return object;
     }
 
     private static Object normalizeStreamingValue(
@@ -72,25 +123,30 @@ final class RisingWaveValueConverter {
         }
 
         TapType tapType = field == null ? null : field.getTapType();
-        if (tapType instanceof TapDate && value instanceof DateTime) {
+        String dataType = canonicalDataType(field);
+        if ((tapType instanceof TapDate || "date".equals(dataType)) && value instanceof DateTime) {
             java.sql.Date date = ((DateTime) value).toSqlDate();
             return date == null ? null : date.toString();
         }
-        if (tapType instanceof TapTime && value instanceof DateTime) {
+        if ((tapType instanceof TapTime || "time".equals(dataType)) && value instanceof DateTime) {
             java.sql.Time time = ((DateTime) value).toTime();
             return time == null ? null : time.toString();
         }
-        if (tapType instanceof TapDateTime && value instanceof DateTime) {
+        if ((tapType instanceof TapDateTime || "timestamp".equals(dataType)
+                || "timestamp with time zone".equals(dataType)) && value instanceof DateTime) {
             DateTime dateTime = (DateTime) value;
-            if (dateTime.getTimeZone() != null) {
+            boolean preserveOffset = !typedColumns
+                    || "timestamp with time zone".equals(dataType)
+                    || (dataType == null && tapType instanceof TapDateTime
+                    && Boolean.TRUE.equals(((TapDateTime) tapType).getWithTimeZone()));
+            if (preserveOffset && dateTime.getTimeZone() != null) {
                 ZonedDateTime zonedDateTime = dateTime.toZonedDateTime();
                 if (zonedDateTime != null) {
                     return DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(
                             zonedDateTime.toOffsetDateTime());
                 }
             }
-            Timestamp timestamp = dateTime.toTimestamp();
-            return timestamp == null ? null : timestamp.toString();
+            return dateTime.toLocalDateTime().toString();
         }
 
         boolean stringifyNumbers = stringifyExactNumbers || !typedColumns
@@ -170,6 +226,10 @@ final class RisingWaveValueConverter {
     private static boolean isBinaryField(TapField field) {
         return field != null && field.getDataType() != null
                 && "bytea".equalsIgnoreCase(field.getDataType().trim());
+    }
+
+    private static String canonicalDataType(TapField field) {
+        return field == null ? null : RisingWaveSql.canonicalType(field.getDataType());
     }
 
     private static String toPostgresByteaHex(byte[] bytes) {

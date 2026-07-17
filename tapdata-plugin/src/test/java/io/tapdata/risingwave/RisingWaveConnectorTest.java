@@ -1,6 +1,10 @@
 package io.tapdata.risingwave;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.codec.filter.TapCodecsFilterManager;
+import io.tapdata.entity.conversion.impl.TargetTypesGeneratorImpl;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -8,6 +12,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.value.TapArrayValue;
 import io.tapdata.entity.schema.value.TapBinaryValue;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapJsonValue;
 import io.tapdata.entity.schema.value.TapMapValue;
@@ -15,17 +20,26 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.mapping.DefaultExpressionMatchingMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.risingwave.streaming.WsIngestClient;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,6 +131,25 @@ class RisingWaveConnectorTest {
     }
 
     @Test
+    void matchesWebhookSecretReferencesUsingSqlIdentifierRules() {
+        assertTrue(RisingWaveSql.referencesWebhookSecret(
+                "CREATE TABLE t (id int) VALIDATE SECRET \"CaseSensitive\" AS check()",
+                "CaseSensitive"));
+        assertFalse(RisingWaveSql.referencesWebhookSecret(
+                "CREATE TABLE t (id int) VALIDATE SECRET \"CaseSensitive\" AS check()",
+                "casesensitive"));
+        assertTrue(RisingWaveSql.referencesWebhookSecret(
+                "CREATE TABLE t (id int) VALIDATE   SECRET tapdata_secret AS check()",
+                "tapdata_secret"));
+        assertFalse(RisingWaveSql.referencesWebhookSecret(
+                "CREATE TABLE t (id int) VALIDATE SECRET other_tapdata_secret AS check()",
+                "tapdata_secret"));
+        assertFalse(RisingWaveSql.referencesWebhookSecret(
+                "CREATE TABLE t (id int) VALIDATE SECRET tapdata_secret$other AS check()",
+                "tapdata_secret"));
+    }
+
+    @Test
     void rejectsQualifiedOrUnsafeWebhookSecretNames() {
         IllegalArgumentException qualified = assertThrows(IllegalArgumentException.class,
                 () -> RisingWaveWebhookSecret.prepare(
@@ -142,132 +175,12 @@ class RisingWaveConnectorTest {
         assertTrue(registry.getCustomFromTapValueCodec(TapTimeValue.class) != null);
         assertTrue(registry.getCustomFromTapValueCodec(TapDateTimeValue.class) != null);
         assertTrue(registry.getCustomFromTapValueCodec(TapDateValue.class) != null);
-    }
 
-    @Test
-    void requiresDeleteBeforeUpsertOnlyWhenIdentityChanges() {
-        TapTable keyedTable = new TapTable("target")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("name", "text"));
-        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
-        before.put("id", 1);
-        before.put("name", "before");
-        java.util.Map<String, Object> sameKey = new java.util.LinkedHashMap<>();
-        sameKey.put("id", 1);
-        sameKey.put("name", "after");
-        java.util.Map<String, Object> changedKey = new java.util.LinkedHashMap<>();
-        changedKey.put("id", 2);
-        changedKey.put("name", "after");
-
-        assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(keyedTable, before, sameKey));
-        assertTrue(RisingWaveConnector.requiresDeleteBeforeUpsert(keyedTable, before, changedKey));
-        assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(
-                keyedTable, java.util.Collections.emptyMap(), sameKey));
-        assertFalse(RisingWaveConnector.requiresDeleteBeforeUpsert(
-                keyedTable, before, java.util.Collections.singletonMap("name", "after")));
-        TapTable keylessTable = new TapTable("keyless")
-                .add(new TapField("id", "integer"))
-                .add(new TapField("name", "text"));
-        assertTrue(RisingWaveConnector.requiresDeleteBeforeUpsert(keylessTable, before, sameKey));
-    }
-
-    @Test
-    void completesPartialStreamingUpdatesWithoutLosingExplicitNulls() {
-        TapTable table = new TapTable("orders")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("name", "text"))
-                .add(new TapField("quantity", "integer"));
-        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
-        before.put("id", 1);
-        before.put("name", "before");
-        before.put("quantity", 42);
-        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
-        after.put("id", 1);
-        after.put("name", "after");
-
-        java.util.Map<String, Object> merged = RisingWaveConnector.completeStreamingUpdate(
-                table, before, after);
-
-        assertEquals(1, merged.get("id"));
-        assertEquals("after", merged.get("name"));
-        assertEquals(42, merged.get("quantity"));
-
-        after.put("quantity", null);
-        assertTrue(RisingWaveConnector.completeStreamingUpdate(table, before, after)
-                .containsKey("quantity"));
-        assertNull(RisingWaveConnector.completeStreamingUpdate(table, before, after)
-                .get("quantity"));
-    }
-
-    @Test
-    void rejectsPartialStreamingUpdatesThatCannotFormCompleteRows() {
-        TapTable table = new TapTable("orders")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("name", "text"))
-                .add(new TapField("quantity", "integer"));
-        java.util.Map<String, Object> before = java.util.Collections.singletonMap("id", 1);
-        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
-        after.put("id", 1);
-        after.put("name", "after");
-
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after));
-        assertTrue(error.getMessage().contains("missing columns [quantity]"));
-    }
-
-    @Test
-    void mapsRemovedTopLevelFieldsToNullForStreamingUpdates() {
-        TapTable table = new TapTable("orders")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("name", "text"))
-                .add(new TapField("quantity", "integer"));
-        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
-        before.put("id", 1);
-        before.put("name", "before");
-        before.put("quantity", 42);
-        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
-        after.put("id", 1);
-        after.put("name", "after");
-
-        java.util.Map<String, Object> complete = RisingWaveConnector.completeStreamingUpdate(
-                table, before, after, java.util.Collections.singletonList("quantity"));
-
-        assertNull(complete.get("quantity"));
-    }
-
-    @Test
-    void rejectsNestedRemovedFieldsWithoutCompletePostImages() {
-        TapTable table = new TapTable("profiles")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("profile", "jsonb"));
-        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
-        before.put("id", 1);
-        before.put("profile", java.util.Collections.singletonMap("name", "before"));
-        java.util.Map<String, Object> after = java.util.Collections.singletonMap("id", 1);
-
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after,
-                        java.util.Collections.singletonList("profile.name")));
-
-        assertTrue(error.getMessage().contains("complete post-image for column profile"));
-    }
-
-    @Test
-    void rejectsNestedPartialUpdatesWithoutCompletePostImages() {
-        TapTable table = new TapTable("profiles")
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("profile", "jsonb"));
-        java.util.Map<String, Object> before = new java.util.LinkedHashMap<>();
-        before.put("id", 1);
-        before.put("profile", java.util.Collections.singletonMap("name", "before"));
-        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
-        after.put("id", 1);
-        after.put("profile.name", "after");
-
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> RisingWaveConnector.completeStreamingUpdate(table, before, after));
-
-        assertTrue(error.getMessage().contains("complete post-image for column profile"));
+        DateTime dateTime = new DateTime(ZonedDateTime.of(
+                2026, 7, 16, 10, 11, 12, 0, ZoneOffset.ofHours(8)));
+        Object converted = registry.getCustomFromTapValueCodec(TapDateTimeValue.class)
+                .fromTapValue(new TapDateTimeValue(dateTime));
+        assertSame(dateTime, converted);
     }
 
     @Test
@@ -317,6 +230,39 @@ class RisingWaveConnectorTest {
         assertEquals("numeric", RisingWaveSql.canonicalType("numeric(20, 4)"));
         assertEquals("timestamp with time zone",
                 RisingWaveSql.canonicalType("timestamptz"));
+        assertEquals("timestamp with time zone",
+                RisingWaveSql.canonicalType("timestamp(6) with time zone"));
+        assertEquals("timestamp",
+                RisingWaveSql.canonicalType("timestamp(3) without time zone"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pdkMapsTimestampTypesUsingTheirTimezoneSemantics() throws Exception {
+        Map<String, Object> spec;
+        try (InputStream input = getClass().getResourceAsStream("/spec_risingwave.json")) {
+            spec = new ObjectMapper().readValue(
+                    input, new TypeReference<LinkedHashMap<String, Object>>() { });
+        }
+        LinkedHashMap<String, DataMap> definitions = new LinkedHashMap<>();
+        ((Map<String, Map<String, Object>>) spec.get("dataTypes")).forEach(
+                (expression, definition) -> definitions.put(expression, DataMap.create(definition)));
+
+        LinkedHashMap<String, TapField> fields = new LinkedHashMap<>();
+        fields.put("plain", new TapField("plain", "source")
+                .tapType(new TapDateTime().withTimeZone(false).fraction(3)));
+        fields.put("zoned", new TapField("zoned", "source")
+                .tapType(new TapDateTime().withTimeZone(true).fraction(6)));
+        TapCodecsRegistry registry = new TapCodecsRegistry();
+        new RisingWaveConnector().registerCapabilities(new ConnectorFunctions(), registry);
+
+        LinkedHashMap<String, TapField> converted = new TargetTypesGeneratorImpl().convert(
+                fields,
+                new DefaultExpressionMatchingMap(definitions),
+                TapCodecsFilterManager.create(registry)).getData();
+
+        assertEquals("timestamp without time zone", converted.get("plain").getDataType());
+        assertEquals("timestamp with time zone", converted.get("zoned").getDataType());
     }
 
     @Test

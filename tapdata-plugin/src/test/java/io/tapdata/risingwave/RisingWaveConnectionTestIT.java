@@ -10,10 +10,14 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapDateTime;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.risingwave.streaming.WsIngestClient;
 import org.junit.jupiter.api.BeforeAll;
@@ -25,6 +29,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +43,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -339,6 +346,101 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void rejectsAnExistingUnsignedWebhookTableWhenSecretIsConfigured() throws Throwable {
+        String tableName = "tapdata_existing_unsigned_" + shortSuffix();
+        try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE public.\"" + tableName
+                    + "\" (id integer, PRIMARY KEY (id)) WITH (connector = 'webhook')");
+        }
+
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext("public", "streaming", "root", "",
+                "ws://127.0.0.1:4560", "configured-secret");
+        try {
+            connector.init(context);
+            TapTable table = new TapTable(tableName).add(new TapField("id", "integer").isPrimaryKey(true));
+            SQLException error = assertThrows(SQLException.class,
+                    () -> connector.createTable(null, new TapCreateTableEvent().table(table)));
+            assertTrue(error.getMessage().contains("does not reference the configured protected RisingWave Secret"));
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
+    void rejectsAnExistingWebhookTableThatReferencesAnotherSecret() throws Throwable {
+        String tableName = "tapdata_existing_wrong_secret_" + shortSuffix();
+        String expectedSecretName = "tapdata_expected_secret_" + shortSuffix();
+        String actualSecretName = "other_" + expectedSecretName;
+        try {
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("CREATE SECRET public.\"" + actualSecretName
+                        + "\" WITH (backend = 'meta') AS 'actual-secret'");
+                statement.execute("CREATE TABLE public.\"" + tableName
+                        + "\" (id integer, PRIMARY KEY (id)) WITH (connector = 'webhook')"
+                        + RisingWaveSql.webhookValidationClause(actualSecretName, null));
+            }
+
+            RisingWaveConnector connector = new RisingWaveConnector();
+            TapConnectionContext context = connectionContext("public", "streaming", "root", "",
+                    "ws://127.0.0.1:4560", "expected-secret");
+            context.getConnectionConfig().put("webhookSecretName", expectedSecretName);
+            try {
+                connector.init(context);
+                TapTable table = new TapTable(tableName)
+                        .add(new TapField("id", "integer").isPrimaryKey(true));
+                SQLException error = assertThrows(SQLException.class,
+                        () -> connector.createTable(null, new TapCreateTableEvent().table(table)));
+                assertTrue(error.getMessage().contains(expectedSecretName));
+                assertEquals(0, querySecretCount(expectedSecretName));
+            } finally {
+                connector.stop(context);
+            }
+        } finally {
+            dropTable(tableName);
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP SECRET IF EXISTS public.\"" + actualSecretName + "\"");
+                statement.execute("DROP SECRET IF EXISTS public.\"" + expectedSecretName + "\"");
+            }
+        }
+    }
+
+    @Test
+    void acceptsAnExistingWebhookTableThatReferencesTheConfiguredSecret() throws Throwable {
+        String tableName = "tapdata_existing_matching_secret_" + shortSuffix();
+        String secretName = "tapdata_matching_secret_" + shortSuffix();
+        try {
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("CREATE SECRET public.\"" + secretName
+                        + "\" WITH (backend = 'meta') AS 'old-secret'");
+                statement.execute("CREATE TABLE public.\"" + tableName
+                        + "\" (id integer, PRIMARY KEY (id)) WITH (connector = 'webhook')"
+                        + RisingWaveSql.webhookValidationClause(secretName, null));
+            }
+
+            RisingWaveConnector connector = new RisingWaveConnector();
+            TapConnectionContext context = connectionContext("public", "streaming", "root", "",
+                    "ws://127.0.0.1:4560", "rotated-secret");
+            context.getConnectionConfig().put("webhookSecretName", secretName);
+            try {
+                connector.init(context);
+                TapTable table = new TapTable(tableName)
+                        .add(new TapField("id", "integer").isPrimaryKey(true));
+                assertTrue(connector.createTable(
+                        null, new TapCreateTableEvent().table(table)).getTableExists());
+            } finally {
+                connector.stop(context);
+            }
+        } finally {
+            dropTable(tableName);
+            try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("DROP SECRET IF EXISTS public.\"" + secretName + "\"");
+            }
+        }
+    }
+
+    @Test
     void rejectsAnExistingNonWebhookTableInStreamingMode() throws Throwable {
         String tableName = "tapdata_existing_plain_" + shortSuffix();
         try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {
@@ -493,69 +595,41 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
-    void websocketStreamingCompletesPartialUpdatesAndPreservesExplicitNulls() throws Throwable {
-        String tableName = "tapdata_ws_partial_" + shortSuffix();
-        RisingWaveConnector connector = new RisingWaveConnector();
-        TapConnectionContext context = connectionContext(
-                "public", "streaming", "root", "", "ws://127.0.0.1:4560", "");
-        TapTable table = new TapTable(tableName)
-                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
-                .add(new TapField("name", "varchar"))
-                .add(new TapField("quantity", "integer"));
-        try {
-            connector.init(context);
-            connector.createTable(null, new TapCreateTableEvent().table(table));
-            ConnectorFunctions functions = new ConnectorFunctions();
-            connector.registerCapabilities(functions, new TapCodecsRegistry());
+    void websocketAndJdbcTreatReplaceAfterAsAuthoritative() throws Throwable {
+        for (String mode : java.util.Arrays.asList("streaming", "jdbc")) {
+            String tableName = "tapdata_" + mode + "_replace_" + shortSuffix();
+            RisingWaveConnector connector = new RisingWaveConnector();
+            TapConnectionContext context = connectionContext(
+                    "public", mode, "root", "", "ws://127.0.0.1:4560", "");
+            TapTable table = new TapTable(tableName)
+                    .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                    .add(new TapField("name", "varchar"))
+                    .add(new TapField("quantity", "integer"));
+            try {
+                connector.init(context);
+                connector.createTable(null, new TapCreateTableEvent().table(table));
+                ConnectorFunctions functions = new ConnectorFunctions();
+                connector.registerCapabilities(functions, new TapCodecsRegistry());
 
-            Map<String, Object> first = new LinkedHashMap<>();
-            first.put("id", 1);
-            first.put("name", "before");
-            first.put("quantity", 42);
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapInsertRecordEvent.create().table(tableName).after(first)), table, ignored -> { });
+                Map<String, Object> before = recordWithQuantity(1, "before", 42);
+                functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                        TapInsertRecordEvent.create().table(tableName).after(before)),
+                        table, ignored -> { });
 
-            Map<String, Object> partial = new LinkedHashMap<>();
-            partial.put("id", 1);
-            partial.put("name", "after");
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapUpdateRecordEvent.create().table(tableName).before(first).after(partial)),
-                    table, ignored -> { });
-            awaitQuantity(tableName, 1, 42);
+                Map<String, Object> replacement = record(1, "replacement");
+                TapUpdateRecordEvent replace = TapUpdateRecordEvent.create()
+                        .table(tableName).before(before).after(replacement);
+                replace.setIsReplaceEvent(true);
+                functions.getWriteRecordFunction().writeRecord(null,
+                        Collections.singletonList(replace), table, ignored -> { });
 
-            Map<String, Object> explicitNull = new LinkedHashMap<>();
-            explicitNull.put("id", 1);
-            explicitNull.put("quantity", null);
-            Map<String, Object> afterPartial = new LinkedHashMap<>();
-            afterPartial.put("id", 1);
-            afterPartial.put("name", "after");
-            afterPartial.put("quantity", 42);
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapUpdateRecordEvent.create().table(tableName)
-                            .before(afterPartial).after(explicitNull)), table, ignored -> { });
-            awaitQuantity(tableName, 1, null);
-
-            Map<String, Object> beforeRemoval = new LinkedHashMap<>();
-            beforeRemoval.put("id", 1);
-            beforeRemoval.put("name", "after");
-            beforeRemoval.put("quantity", 55);
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapUpdateRecordEvent.create().table(tableName)
-                            .before(explicitNull).after(beforeRemoval)), table, ignored -> { });
-            awaitQuantity(tableName, 1, 55);
-
-            Map<String, Object> afterRemoval = new LinkedHashMap<>();
-            afterRemoval.put("id", 1);
-            afterRemoval.put("name", "after");
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapUpdateRecordEvent.create().table(tableName)
-                            .before(beforeRemoval).after(afterRemoval)
-                            .removedFields(Collections.singletonList("quantity"))),
-                    table, ignored -> { });
-            awaitQuantity(tableName, 1, null);
-        } finally {
-            connector.stop(context);
-            dropTable(tableName);
+                awaitName(tableName, 1, "replacement");
+                awaitQuantity(tableName, 1, null);
+                assertEquals(1, queryCount(tableName));
+            } finally {
+                connector.stop(context);
+                dropTable(tableName);
+            }
         }
     }
 
@@ -618,15 +692,67 @@ class RisingWaveConnectionTestIT {
             assertEquals(1, queryCount(tableName));
 
             Map<String, Object> changedKey = record(2, "moved");
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+            Map<String, Object> changedKeyAgain = record(2, "updated-after-move");
+            functions.getWriteRecordFunction().writeRecord(null, java.util.Arrays.asList(
                     TapUpdateRecordEvent.create().table(tableName)
-                            .before(sameKeyUpdate).after(changedKey)), table, ignored -> { });
-            awaitName(tableName, 2, "moved");
+                            .before(sameKeyUpdate).after(changedKey),
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(changedKey).after(changedKeyAgain)), table, ignored -> { });
+            awaitName(tableName, 2, "updated-after-move");
             assertEquals(1, queryCount(tableName));
 
             functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapDeleteRecordEvent.create().table(tableName).before(changedKey)), table, ignored -> { });
+                    TapDeleteRecordEvent.create().table(tableName).before(changedKeyAgain)),
+                    table, ignored -> { });
             awaitCount(tableName, 0);
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
+    void jdbcBindsJsonbAndKeepsTheOldRowWhenANewKeyIsInvalid() throws Throwable {
+        String tableName = "tapdata_jdbc_jsonb_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext(
+                "public", "jdbc", "root", "", "ws://127.0.0.1:4560", "");
+        TapTable table = new TapTable(tableName)
+                .add(new TapField("id", "integer").isPrimaryKey(true).primaryKeyPos(1))
+                .add(new TapField("attributes", "jsonb"));
+        try {
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+
+            Map<String, Object> before = new LinkedHashMap<>();
+            before.put("id", 1);
+            before.put("attributes", Collections.singletonMap("state", "before"));
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName).after(before)),
+                    table, ignored -> { });
+            assertEquals("before", queryJsonStateOrNull(tableName, 1));
+
+            Map<String, Object> updated = new LinkedHashMap<>();
+            updated.put("id", 1);
+            updated.put("attributes", Collections.singletonMap("state", "updated"));
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(before).after(updated)), table, ignored -> { });
+            assertEquals("updated", queryJsonStateOrNull(tableName, 1));
+
+            Map<String, Object> invalidNewKey = new LinkedHashMap<>();
+            invalidNewKey.put("id", 2);
+            invalidNewKey.put("attributes", "not-json");
+            AtomicReference<WriteListResult<TapRecordEvent>> failed = new AtomicReference<>();
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapUpdateRecordEvent.create().table(tableName)
+                            .before(updated).after(invalidNewKey)), table, failed::set);
+            assertNotNull(failed.get());
+            assertEquals(1, failed.get().getErrorMap().size());
+            assertEquals("updated", queryJsonStateOrNull(tableName, 1));
+            assertEquals(null, queryJsonStateOrNull(tableName, 2));
         } finally {
             connector.stop(context);
             dropTable(tableName);
@@ -767,20 +893,21 @@ class RisingWaveConnectionTestIT {
             connector.init(context);
             TapTable table = new TapTable(tableName)
                     .add(new TapField("id", "integer"))
-                    .add(new TapField("name", "varchar"));
+                    .add(new TapField("name", "varchar"))
+                    .add(new TapField("quantity", "integer"));
             connector.createTable(null, new TapCreateTableEvent().table(table));
             ConnectorFunctions functions = new ConnectorFunctions();
             connector.registerCapabilities(functions, new TapCodecsRegistry());
 
-            Map<String, Object> first = record(1, null);
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
-                    TapInsertRecordEvent.create().table(tableName).after(first)), table, ignored -> { });
+            Map<String, Object> first = recordWithQuantity(1, null, 9);
             Map<String, Object> updated = record(1, "updated");
-            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+            functions.getWriteRecordFunction().writeRecord(null, java.util.Arrays.asList(
+                    TapInsertRecordEvent.create().table(tableName).after(first),
                     TapUpdateRecordEvent.create().table(tableName)
                             .before(first).after(updated)), table, ignored -> { });
 
             awaitName(tableName, 1, "updated");
+            awaitQuantity(tableName, 1, 9);
             assertEquals(1, queryCount(tableName));
         } finally {
             connector.stop(context);
@@ -886,12 +1013,18 @@ class RisingWaveConnectionTestIT {
                     .add(new TapField("text_value", "varchar"))
                     .add(new TapField("date_value", "date"))
                     .add(new TapField("time_value", "time"))
-                    .add(new TapField("timestamp_value", "timestamp"))
-                    .add(new TapField("timestamptz_value", "timestamp with time zone"))
+                    .add(new TapField("timestamp_value", "timestamp without time zone")
+                            .tapType(new TapDateTime().withTimeZone(false)))
+                    .add(new TapField("timestamptz_value", "timestamp with time zone")
+                            .tapType(new TapDateTime().withTimeZone(true)))
                     .add(new TapField("binary_value", "bytea"))
                     .add(new TapField("json_value", "jsonb"))
                     .add(new TapField("nullable_value", "text"));
             connector.createTable(null, new TapCreateTableEvent().table(table));
+
+            ConnectorFunctions functions = new ConnectorFunctions();
+            TapCodecsRegistry codecs = new TapCodecsRegistry();
+            connector.registerCapabilities(functions, codecs);
 
             Map<String, Object> record = new LinkedHashMap<>();
             record.put("id", 7);
@@ -904,14 +1037,17 @@ class RisingWaveConnectionTestIT {
             record.put("text_value", "TapData 中文 🚀");
             record.put("date_value", "2026-07-14");
             record.put("time_value", "15:16:17.123456");
-            record.put("timestamp_value", "2026-07-14 15:16:17.123456");
-            record.put("timestamptz_value", "2026-07-14T15:16:17.123456+02:00");
+            record.put("timestamp_value", new DateTime(ZonedDateTime.of(
+                    2026, 7, 14, 15, 16, 17, 123_456_000, ZoneOffset.ofHours(2))));
+            DateTime zonedDateTime = new DateTime(ZonedDateTime.of(
+                    2026, 7, 14, 15, 16, 17, 123_456_000, ZoneOffset.ofHours(2)));
+            record.put("timestamptz_value",
+                    codecs.getCustomFromTapValueCodec(TapDateTimeValue.class)
+                            .fromTapValue(new TapDateTimeValue(zonedDateTime)));
             record.put("binary_value", new byte[]{0x00, 0x0f, (byte) 0xff});
             record.put("json_value", Collections.singletonMap("nested", java.util.Arrays.asList(1, "two")));
             record.put("nullable_value", null);
 
-            ConnectorFunctions functions = new ConnectorFunctions();
-            connector.registerCapabilities(functions, new TapCodecsRegistry());
             functions.getWriteRecordFunction().writeRecord(
                     null,
                     Collections.singletonList(TapInsertRecordEvent.create().table(tableName).after(record)),
@@ -1031,6 +1167,12 @@ class RisingWaveConnectionTestIT {
         return record;
     }
 
+    private static Map<String, Object> recordWithQuantity(int id, String name, Integer quantity) {
+        Map<String, Object> record = record(id, name);
+        record.put("quantity", quantity);
+        return record;
+    }
+
     private static void await(List<CompletableFuture<Void>> futures) throws Exception {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(10, TimeUnit.SECONDS);
     }
@@ -1139,6 +1281,17 @@ class RisingWaveConnectionTestIT {
         try (Connection connection = rootConnection();
              java.sql.PreparedStatement statement = connection.prepareStatement(
                      "SELECT name FROM public.\"" + tableName + "\" WHERE id = ?")) {
+            statement.setInt(1, id);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? resultSet.getString(1) : null;
+            }
+        }
+    }
+
+    private static String queryJsonStateOrNull(String tableName, int id) throws Exception {
+        try (Connection connection = rootConnection();
+             java.sql.PreparedStatement statement = connection.prepareStatement(
+                     "SELECT attributes->>'state' FROM public.\"" + tableName + "\" WHERE id = ?")) {
             statement.setInt(1, id);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() ? resultSet.getString(1) : null;

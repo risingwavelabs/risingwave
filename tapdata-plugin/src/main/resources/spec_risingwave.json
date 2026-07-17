@@ -354,12 +354,19 @@
       "pattern": "yyyy-MM-dd",
       "to": "TapDate"
     },
-    "timestamp": {
+    "timestamp without time zone": {
       "range": [
         "0001-01-01 00:00:00",
         "9999-12-31 23:59:59"
       ],
       "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": false,
+      "defaultFraction": 6,
+      "priority": 1,
       "to": "TapDateTime"
     },
     "timestamp with time zone": {
@@ -368,23 +375,34 @@
         "9999-12-31 23:59:59"
       ],
       "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": true,
+      "defaultFraction": 6,
+      "priority": 2,
       "to": "TapDateTime"
     },
-    "time": {
+    "time without time zone": {
       "range": [
         "00:00:00",
         "23:59:59"
       ],
       "pattern": "HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": false,
+      "defaultFraction": 6,
+      "priority": 1,
       "to": "TapTime"
     },
     "bytea": {
       "to": "TapBinary"
     },
     "jsonb": {
-      "to": "TapMap"
-    },
-    "json": {
       "to": "TapMap"
     }
   }

@@ -276,7 +276,7 @@ public class RisingWaveConnector implements TapConnector {
         registry.registerFromTapValue(TapTimeValue.class, value ->
                 value == null || value.getValue() == null ? null : value.getValue().toTime());
         registry.registerFromTapValue(TapDateTimeValue.class, value ->
-                value == null || value.getValue() == null ? null : value.getValue().toTimestamp());
+                value == null ? null : value.getValue());
         registry.registerFromTapValue(TapDateValue.class, value ->
                 value == null || value.getValue() == null ? null : value.getValue().toSqlDate());
     }
@@ -309,7 +309,7 @@ public class RisingWaveConnector implements TapConnector {
 
         debugLog("writeRecordStreaming start table=" + table.getId()
                 + " events=" + events.size()
-                + " pk=" + primaryKeysOf(table));
+                + " pk=" + RisingWaveCdcNormalizer.primaryKeys(table));
         List<WsIngestClient.DmlOperation> operations = new ArrayList<>(events.size());
 
         for (TapRecordEvent event : events) {
@@ -319,27 +319,29 @@ public class RisingWaveConnector implements TapConnector {
             try {
                 if (event instanceof TapInsertRecordEvent) {
                     TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
+                    RisingWaveCdcNormalizer.validateColumns(table, insert.getAfter());
                     Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
                             insert.getAfter(), table, true);
                     operations.add(new WsIngestClient.DmlOperation("insert", null, after));
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                    Map<String, Object> before = RisingWaveValueConverter.normalizeStreamingRecord(
-                            update.getBefore(), table, true);
-                    Map<String, Object> after = RisingWaveValueConverter.normalizeStreamingRecord(
-                            update.getAfter(), table, true);
-                    Map<String, Object> completeAfter = completeStreamingUpdate(
-                            table, before, after, update.getRemovedFields());
-                    if (requiresDeleteBeforeUpsert(table, before, completeAfter)) {
-                        operations.add(new WsIngestClient.DmlOperation("delete", before, null));
+                    TapUpdateRecordEvent updateEvent = (TapUpdateRecordEvent) event;
+                    RisingWaveCdcNormalizer.Update update =
+                            RisingWaveCdcNormalizer.normalizeUpdate(table, updateEvent);
+                    Map<String, Object> oldIdentity = RisingWaveValueConverter.normalizeStreamingRecord(
+                            update.oldFilter, table, true);
+                    Map<String, Object> rowAfter = RisingWaveValueConverter.normalizeStreamingRecord(
+                            update.rowAfter, table, true);
+                    if (update.keyChanged) {
+                        operations.add(new WsIngestClient.DmlOperation("delete", oldIdentity, null));
                     }
-                    operations.add(new WsIngestClient.DmlOperation("update", before, completeAfter));
+                    operations.add(new WsIngestClient.DmlOperation("update", oldIdentity, rowAfter));
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
                     Map<String, Object> before = RisingWaveValueConverter.normalizeStreamingRecord(
-                            delete.getBefore(), table, true);
+                            RisingWaveCdcNormalizer.deleteFilter(table, delete.getBefore()),
+                            table, true);
                     operations.add(new WsIngestClient.DmlOperation("delete", before, null));
                     deleted++;
                 } else {
@@ -410,144 +412,6 @@ public class RisingWaveConnector implements TapConnector {
                         + tableName + "; received " + event.getClass().getSimpleName());
             }
         }
-    }
-
-    static boolean requiresDeleteBeforeUpsert(TapTable table,
-                                              Map<String, Object> before,
-                                              Map<String, Object> after) {
-        if (before == null || after == null) {
-            return false;
-        }
-        Collection<String> primaryKeys = primaryKeysOf(table);
-        if (primaryKeys == null || primaryKeys.isEmpty()) {
-            // Follow the database connector fallback: without a declared key, use the full
-            // before image to retract the old row before inserting the new image.
-            return !before.equals(after);
-        }
-        // Some sources, notably MongoDB, use an empty before image while still providing a
-        // complete after image. Missing identity is not a primary-key change: sending delete {}
-        // would make the webhook decoder reject the whole batch before it reaches the upsert.
-        if (!before.keySet().containsAll(primaryKeys)
-                || !after.keySet().containsAll(primaryKeys)) {
-            return false;
-        }
-        for (String primaryKey : primaryKeys) {
-            if (!Objects.equals(before.get(primaryKey), after.get(primaryKey))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * WebSocket ingest upserts replace the entire row. TapData sources may instead emit a partial
-     * after image, so reconstruct a complete row from the before image when possible. A present
-     * null in {@code after} intentionally overwrites the old value; only absent keys are filled
-     * from {@code before}.
-     */
-    static Map<String, Object> completeStreamingUpdate(TapTable table,
-                                                        Map<String, Object> before,
-                                                        Map<String, Object> after) {
-        return completeStreamingUpdate(table, before, after, Collections.emptyList());
-    }
-
-    static Map<String, Object> completeStreamingUpdate(TapTable table,
-                                                        Map<String, Object> before,
-                                                        Map<String, Object> after,
-                                                        List<String> removedFields) {
-        if (after == null) {
-            throw new IllegalArgumentException("WebSocket streaming update for table "
-                    + tableName(table) + " is missing its after image");
-        }
-        if (table == null || table.getNameFieldMap() == null || table.getNameFieldMap().isEmpty()) {
-            throw new IllegalArgumentException("WebSocket streaming update for table "
-                    + tableName(table) + " requires a complete table schema");
-        }
-
-        LinkedHashMap<String, Object> combined = new LinkedHashMap<>();
-        if (before != null) {
-            combined.putAll(before);
-        }
-        // Map.putAll preserves the distinction between an absent key and an explicit null value.
-        combined.putAll(after);
-
-        rejectNestedPartialUpdates(table, after);
-        applyRemovedFields(table, after, combined, removedFields);
-
-        List<String> missingColumns = new ArrayList<>();
-        for (String column : table.getNameFieldMap().keySet()) {
-            if (!combined.containsKey(column)) {
-                missingColumns.add(column);
-            }
-        }
-        if (!missingColumns.isEmpty()) {
-            throw new IllegalArgumentException("WebSocket streaming update for table "
-                    + tableName(table) + " cannot form a complete row; missing columns "
-                    + missingColumns + " from both before and after images");
-        }
-
-        LinkedHashMap<String, Object> complete = new LinkedHashMap<>();
-        for (String column : table.getNameFieldMap().keySet()) {
-            complete.put(column, combined.get(column));
-        }
-        return complete;
-    }
-
-    private static void rejectNestedPartialUpdates(TapTable table, Map<String, Object> after) {
-        Map<String, TapField> targetFields = table.getNameFieldMap();
-        for (String sourceField : after.keySet()) {
-            if (targetFields.containsKey(sourceField)) {
-                continue;
-            }
-            int separator = sourceField == null ? -1 : sourceField.indexOf('.');
-            if (separator <= 0) {
-                continue;
-            }
-            String topLevelField = sourceField.substring(0, separator);
-            if (targetFields.containsKey(topLevelField) && !after.containsKey(topLevelField)) {
-                throw incompleteNestedPostImage(table, sourceField, topLevelField);
-            }
-        }
-    }
-
-    private static void applyRemovedFields(TapTable table,
-                                           Map<String, Object> after,
-                                           Map<String, Object> combined,
-                                           List<String> removedFields) {
-        if (removedFields == null || removedFields.isEmpty()) {
-            return;
-        }
-        Map<String, TapField> targetFields = table.getNameFieldMap();
-        for (String removedField : removedFields) {
-            if (removedField == null || removedField.isEmpty()) {
-                continue;
-            }
-            if (targetFields.containsKey(removedField)) {
-                // A removed top-level source field maps to SQL NULL in a relational target.
-                combined.put(removedField, null);
-                continue;
-            }
-
-            int separator = removedField.indexOf('.');
-            if (separator <= 0) {
-                continue;
-            }
-            String topLevelField = removedField.substring(0, separator);
-            if (targetFields.containsKey(topLevelField) && !after.containsKey(topLevelField)) {
-                throw incompleteNestedPostImage(table, removedField, topLevelField);
-            }
-        }
-    }
-
-    private static IllegalArgumentException incompleteNestedPostImage(
-            TapTable table, String nestedField, String topLevelField) {
-        return new IllegalArgumentException("WebSocket streaming update for table "
-                + tableName(table) + " changes nested field " + nestedField
-                + " but does not include a complete post-image for column " + topLevelField);
-    }
-
-    private static String tableName(TapTable table) {
-        return table == null || table.getId() == null ? "<unknown>" : table.getId();
     }
 
     /** Acquire a client until the caller has received the ACK for its batch. */
@@ -625,6 +489,7 @@ public class RisingWaveConnector implements TapConnector {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         long inserted = 0, updated = 0, deleted = 0;
         boolean dirty = false;
+        boolean keyless = RisingWaveCdcNormalizer.primaryKeys(table).isEmpty();
         Set<List<Object>> pendingInsertIdentities = new HashSet<>();
 
         debugLog("writeRecord called: " + events.size() + " events for table " + table.getId());
@@ -632,6 +497,7 @@ public class RisingWaveConnector implements TapConnector {
             try {
                 if (event instanceof TapInsertRecordEvent) {
                     TapInsertRecordEvent insert = (TapInsertRecordEvent) event;
+                    RisingWaveCdcNormalizer.validateColumns(table, insert.getAfter());
                     List<Object> identity = keyedIdentityOf(table, insert.getAfter());
                     if (dirty && identity != null && pendingInsertIdentities.contains(identity)) {
                         // RisingWave SQL DML is not guaranteed to be query-visible until FLUSH.
@@ -648,33 +514,39 @@ public class RisingWaveConnector implements TapConnector {
                     }
                     inserted++;
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    TapUpdateRecordEvent update = (TapUpdateRecordEvent) event;
-                    if (referencesPendingInsert(table, pendingInsertIdentities,
-                            update.getBefore(), update.getAfter())) {
+                    TapUpdateRecordEvent updateEvent = (TapUpdateRecordEvent) event;
+                    RisingWaveCdcNormalizer.Update update =
+                            RisingWaveCdcNormalizer.normalizeUpdate(table, updateEvent);
+                    if (dirty && (keyless || !pendingInsertIdentities.isEmpty())) {
                         flushJdbcWrites();
                         dirty = false;
                         pendingInsertIdentities.clear();
                     }
-                    if (requiresDeleteBeforeUpsert(table, update.getBefore(), update.getAfter())) {
-                        doDelete(table, update.getBefore());
-                        doInsertOrUpdate(table, update.getAfter());
+                    if (update.keyChanged) {
+                        doInsertOrUpdate(table, update.rowAfter);
+                        doDelete(table, update.oldFilter);
+                        trackPendingIdentity(table, pendingInsertIdentities, update.rowAfter);
                     } else {
-                        int rows = doUpdate(table, update.getBefore(), update.getAfter());
+                        int rows = doUpdate(table, update.oldFilter, update.rowAfter);
                         if (rows == 0) {
-                            // The before image no longer exists; apply the configured upsert fallback.
-                            doInsertOrUpdate(table, update.getAfter());
+                            // The normalized row is complete, so a missing keyed row can be recreated.
+                            doInsertOrUpdate(table, update.rowAfter);
+                            trackPendingIdentity(
+                                    table, pendingInsertIdentities, update.rowAfter);
                         }
                     }
                     dirty = true;
                     updated++;
                 } else if (event instanceof TapDeleteRecordEvent) {
                     TapDeleteRecordEvent delete = (TapDeleteRecordEvent) event;
-                    if (referencesPendingInsert(table, pendingInsertIdentities, delete.getBefore())) {
+                    Map<String, Object> deleteFilter =
+                            RisingWaveCdcNormalizer.deleteFilter(table, delete.getBefore());
+                    if (dirty && (keyless || !pendingInsertIdentities.isEmpty())) {
                         flushJdbcWrites();
                         dirty = false;
                         pendingInsertIdentities.clear();
                     }
-                    doDelete(table, delete.getBefore());
+                    doDelete(table, deleteFilter);
                     dirty = true;
                     deleted++;
                 }
@@ -695,37 +567,40 @@ public class RisingWaveConnector implements TapConnector {
     }
 
     private static List<Object> keyedIdentityOf(TapTable table, Map<String, Object> record) {
-        Collection<String> primaryKeys = primaryKeysOf(table);
+        Collection<String> primaryKeys = RisingWaveCdcNormalizer.primaryKeys(table);
         if (record == null || primaryKeys == null || primaryKeys.isEmpty()
                 || !record.keySet().containsAll(primaryKeys)) {
             return null;
         }
         List<Object> identity = new ArrayList<>(primaryKeys.size());
         for (String primaryKey : primaryKeys) {
-            identity.add(record.get(primaryKey));
+            Object value = record.get(primaryKey);
+            String type = RisingWaveSql.canonicalType(field(table, primaryKey).getDataType());
+            boolean numeric = "smallint".equals(type) || "integer".equals(type)
+                    || "bigint".equals(type) || "numeric".equals(type)
+                    || "real".equals(type) || "double precision".equals(type);
+            if (numeric && value instanceof Number) {
+                try {
+                    value = new java.math.BigDecimal(value.toString()).stripTrailingZeros();
+                } catch (NumberFormatException ignored) {
+                    // Keep uncommon non-decimal Number representations unchanged.
+                }
+            } else if ("bytea".equals(type) && value instanceof byte[]) {
+                value = Base64.getEncoder().encodeToString((byte[]) value);
+            }
+            identity.add(value);
         }
         return identity;
     }
 
-    /**
-     * RisingWave applies SQL inserts asynchronously. An update or delete that targets an inserted
-     * row cannot see it until a {@code FLUSH}; updates and deletes of rows that already existed do
-     * not require that barrier. Without a declared key we cannot establish that distinction, so
-     * retain the conservative behavior.
-     */
-    private static boolean referencesPendingInsert(TapTable table,
-                                                   Set<List<Object>> pendingInsertIdentities,
-                                                   Map<String, Object>... records) {
-        if (pendingInsertIdentities.isEmpty()) {
-            return false;
+    private static void trackPendingIdentity(
+            TapTable table,
+            Set<List<Object>> pendingInsertIdentities,
+            Map<String, Object> record) {
+        List<Object> identity = keyedIdentityOf(table, record);
+        if (identity != null) {
+            pendingInsertIdentities.add(identity);
         }
-        for (Map<String, Object> record : records) {
-            List<Object> identity = keyedIdentityOf(table, record);
-            if (identity == null || pendingInsertIdentities.contains(identity)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void doInsert(TapTable table, Map<String, Object> record) throws SQLException {
@@ -737,14 +612,16 @@ public class RisingWaveConnector implements TapConnector {
                 RisingWaveSql.placeholders(cols.size()) + ")";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             for (int i = 0; i < cols.size(); i++) {
-                RisingWaveValueConverter.setJdbcParameter(ps, i + 1, record.get(cols.get(i)));
+                String column = cols.get(i);
+                RisingWaveValueConverter.setJdbcParameter(
+                        ps, i + 1, record.get(column), field(table, column));
             }
             ps.executeUpdate();
         }
     }
 
     private int doUpdate(TapTable table, Map<String, Object> before, Map<String, Object> after) throws SQLException {
-        Collection<String> pks = primaryKeysOf(table);
+        Collection<String> pks = RisingWaveCdcNormalizer.primaryKeys(table);
         if (before == null || before.isEmpty() || after == null || after.isEmpty()) {
             return 0;
         }
@@ -754,7 +631,10 @@ public class RisingWaveConnector implements TapConnector {
                 setCols.add(column);
             }
         }
-        if (setCols.isEmpty()) return 1;
+        if (setCols.isEmpty()) {
+            return pks != null && !pks.isEmpty() && rowExistsByPrimaryKey(table, before, pks)
+                    ? 1 : 0;
+        }
         List<String> filterCols = pks != null && !pks.isEmpty()
                 ? new ArrayList<>(pks) : new ArrayList<>(before.keySet());
         if (filterCols.isEmpty()) return 0;
@@ -780,12 +660,14 @@ public class RisingWaveConnector implements TapConnector {
         try (PreparedStatement ps = connection.prepareStatement(sql.toString())) {
             int idx = 1;
             for (String col : setCols) {
-                RisingWaveValueConverter.setJdbcParameter(ps, idx++, after.get(col));
+                RisingWaveValueConverter.setJdbcParameter(
+                        ps, idx++, after.get(col), field(table, col));
             }
             for (String column : filterCols) {
                 Object value = before.get(column);
                 if (value != null) {
-                    RisingWaveValueConverter.setJdbcParameter(ps, idx++, value);
+                    RisingWaveValueConverter.setJdbcParameter(
+                            ps, idx++, value, field(table, column));
                 }
             }
             return ps.executeUpdate();
@@ -793,7 +675,7 @@ public class RisingWaveConnector implements TapConnector {
     }
 
     private void doInsertOrUpdate(TapTable table, Map<String, Object> record) throws SQLException {
-        Collection<String> pks = primaryKeysOf(table);
+        Collection<String> pks = RisingWaveCdcNormalizer.primaryKeys(table);
         if (pks == null || pks.isEmpty() || record == null) {
             doInsert(table, record);
             return;
@@ -834,7 +716,8 @@ public class RisingWaveConnector implements TapConnector {
             for (String column : columns) {
                 Object value = record.get(column);
                 if (value != null) {
-                    RisingWaveValueConverter.setJdbcParameter(statement, index++, value);
+                    RisingWaveValueConverter.setJdbcParameter(
+                            statement, index++, value, field(table, column));
                 }
             }
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -844,7 +727,7 @@ public class RisingWaveConnector implements TapConnector {
     }
 
     private void doDelete(TapTable table, Map<String, Object> record) throws SQLException {
-        Collection<String> pks = primaryKeysOf(table);
+        Collection<String> pks = RisingWaveCdcNormalizer.primaryKeys(table);
         if (record == null) return;
 
         String tableName = fullTableName(table.getId());
@@ -868,7 +751,8 @@ public class RisingWaveConnector implements TapConnector {
             for (String col : filterCols) {
                 Object val = record.get(col);
                 if (val != null) {
-                    RisingWaveValueConverter.setJdbcParameter(ps, idx++, val);
+                    RisingWaveValueConverter.setJdbcParameter(
+                            ps, idx++, val, field(table, col));
                 }
             }
             ps.executeUpdate();
@@ -879,6 +763,11 @@ public class RisingWaveConnector implements TapConnector {
         try (Statement statement = connection.createStatement()) {
             statement.execute("FLUSH");
         }
+    }
+
+    private static TapField field(TapTable table, String column) {
+        return table == null || table.getNameFieldMap() == null
+                ? null : table.getNameFieldMap().get(column);
     }
 
     // ---- DDL ----
@@ -951,7 +840,7 @@ public class RisingWaveConnector implements TapConnector {
             return opts;
         }
 
-        Collection<String> pks = primaryKeysOf(table);
+        Collection<String> pks = RisingWaveCdcNormalizer.primaryKeys(table);
         List<String> colDefs = new ArrayList<>();
         for (Map.Entry<String, TapField> entry : fields.entrySet()) {
             TapField f = entry.getValue();
@@ -1121,7 +1010,7 @@ public class RisingWaveConnector implements TapConnector {
         }
 
         Set<String> expectedPrimaryKeys = new LinkedHashSet<>();
-        expectedPrimaryKeys.addAll(primaryKeysOf(expectedTable));
+        expectedPrimaryKeys.addAll(RisingWaveCdcNormalizer.primaryKeys(expectedTable));
         Set<String> existingPrimaryKeys = loadPrimaryKeys(conn, table);
         if (!expectedPrimaryKeys.equals(existingPrimaryKeys)) {
             throw new SQLException("Existing target table " + table.qualifiedName()
@@ -1130,16 +1019,7 @@ public class RisingWaveConnector implements TapConnector {
         }
 
         if (isWebSocketMode(ingestMode)) {
-            try (Statement statement = conn.createStatement();
-                 ResultSet resultSet = statement.executeQuery("SHOW CREATE TABLE " + table.qualifiedName())) {
-                String ddl = resultSet.next() ? resultSet.getString(2) : "";
-                String normalizedDdl = ddl == null ? "" : ddl.toLowerCase(Locale.ROOT);
-                if (!normalizedDdl.contains("connector = 'webhook'")
-                        && !normalizedDdl.contains("connector='webhook'")) {
-                    throw new SQLException("Existing target table " + table.qualifiedName()
-                            + " is not webhook-backed and cannot receive WebSocket streaming writes");
-                }
-            }
+            validateWebhookBackedTable(conn, table);
         }
     }
 
@@ -1190,8 +1070,7 @@ public class RisingWaveConnector implements TapConnector {
                 String expectedSecret = wsWebhookSecretName == null || wsWebhookSecretName.isEmpty()
                         ? RisingWaveWebhookSecret.automaticName(table.schema, table.table)
                         : wsWebhookSecretName;
-                if (!normalizedDdl.contains("validate secret")
-                        || !normalizedDdl.contains(expectedSecret.toLowerCase(Locale.ROOT))) {
+                if (!RisingWaveSql.referencesWebhookSecret(ddl, expectedSecret)) {
                     throw new SQLException("Existing target table " + table.qualifiedName()
                             + " does not reference the configured protected RisingWave Secret \""
                             + expectedSecret + "\"; recreate the table or align Webhook Secret Name");
@@ -1223,32 +1102,12 @@ public class RisingWaveConnector implements TapConnector {
     }
 
     static void validateStreamingPrimaryKey(TapTable table) {
-        Collection<String> primaryKeys = primaryKeysOf(table);
+        Collection<String> primaryKeys = RisingWaveCdcNormalizer.primaryKeys(table);
         if (primaryKeys.isEmpty()) {
             String tableName = table == null ? "<unknown>" : table.getId();
             throw new IllegalArgumentException("WebSocket streaming requires a primary key for table "
                     + tableName + " so updates, deletes, and retries preserve row identity");
         }
-    }
-
-    private static List<String> primaryKeysOf(TapTable table) {
-        if (table == null || table.getNameFieldMap() == null) {
-            return Collections.emptyList();
-        }
-        List<TapField> fields = new ArrayList<>();
-        for (TapField field : table.getNameFieldMap().values()) {
-            if (Boolean.TRUE.equals(field.getPrimaryKey())) {
-                fields.add(field);
-            }
-        }
-        fields.sort(Comparator.comparing(
-                TapField::getPrimaryKeyPos,
-                Comparator.nullsLast(Comparator.naturalOrder())));
-        List<String> primaryKeys = new ArrayList<>(fields.size());
-        for (TapField field : fields) {
-            primaryKeys.add(field.getName());
-        }
-        return primaryKeys;
     }
 
     private static final class WsClientEntry {
