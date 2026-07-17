@@ -449,11 +449,14 @@ impl GlobalStreamManager {
                             );
 
                             let cancel_result: MetaResult<()> = async {
-                                let cancel_command = self.metadata_manager.catalog_controller
-                                    .build_cancel_command(&job_fragments)
-                                    .await?;
-                                let cleanup_state_table_ids =
-                                    job_fragments.all_table_ids().collect_vec();
+                                let Some((cancel_command, cleanup_state_table_ids)) = self
+                                    .metadata_manager
+                                    .catalog_controller
+                                    .build_cancel_command(job_id)
+                                    .await?
+                                else {
+                                    return Ok(());
+                                };
                                 let abort_result = self.metadata_manager.catalog_controller
                                     .try_abort_creating_streaming_job(job_id, true)
                                     .await?;
@@ -864,27 +867,14 @@ impl GlobalStreamManager {
         // NOTE(kwannoel): For background_job_ids stream jobs that not tracked in streaming manager,
         // we can directly cancel them by running the barrier command.
         let futures = background_job_ids.into_iter().map(|id| async move {
-            let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
-            if fragment.is_created() {
-                tracing::warn!(
-                    "streaming job {} is already created, ignore cancel request",
-                    id
-                );
-                return Ok(None);
-            }
-            if fragment.is_created() {
-                Err(MetaError::invalid_parameter(format!(
-                    "streaming job {} is already created",
-                    id
-                )))?;
-            }
-
-            let cancel_command = self
+            let Some((cancel_command, cleanup_state_table_ids)) = self
                 .metadata_manager
                 .catalog_controller
-                .build_cancel_command(&fragment)
-                .await?;
-            let cleanup_state_table_ids = fragment.all_table_ids().collect_vec();
+                .build_cancel_command(id)
+                .await?
+            else {
+                return Ok(None);
+            };
 
             let abort_result = self
                 .metadata_manager

@@ -65,6 +65,10 @@ impl Sink for ElasticSearchSink {
 
     const SINK_NAME: &'static str = ES_SINK;
 
+    fn validate_unknown_fields(&self) -> Result<()> {
+        crate::sink::validate_sink_unknown_fields(&self.config)
+    }
+
     fn support_schema_change() -> bool {
         true
     }

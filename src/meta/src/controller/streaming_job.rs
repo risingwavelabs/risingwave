@@ -857,39 +857,67 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Builds a cancel command for the streaming job. If the sink (with target table) needs to be dropped, additional
-    /// information is required to build barrier mutation.
+    /// Builds a cancel command from persisted fragment metadata without reading `SharedActorInfos`.
+    ///
+    /// Returns `None` if the job no longer exists or has already been created.
     pub async fn build_cancel_command(
         &self,
-        table_fragments: &StreamJobFragments,
-    ) -> MetaResult<Command> {
+        job_id: JobId,
+    ) -> MetaResult<Option<(Command, Vec<TableId>)>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let dropped_sink_fragment_with_target =
-            if let Some(sink_fragment) = table_fragments.sink_fragment() {
-                let sink_fragment_id = sink_fragment.fragment_id as FragmentId;
-                let sink_target_fragment = fetch_target_fragments(&txn, [sink_fragment_id]).await?;
-                sink_target_fragment
-                    .get(&sink_fragment_id)
-                    .map(|target_fragments| {
-                        let target_fragment_id = *target_fragments
-                            .first()
-                            .expect("sink should have at least one downstream fragment");
-                        (sink_fragment_id, target_fragment_id)
-                    })
-            } else {
-                None
-            };
+        let Some(streaming_job) = StreamingJobModel::find_by_id(job_id).one(&txn).await? else {
+            tracing::warn!(
+                %job_id,
+                "streaming job not found when building cancel command, might be cancelled already"
+            );
+            return Ok(None);
+        };
+        if streaming_job.job_status == JobStatus::Created {
+            tracing::warn!(
+                "streaming job {} is already created, ignore cancel request",
+                job_id
+            );
+            return Ok(None);
+        }
 
-        Ok(Command::DropStreamingJobs {
-            streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
-            dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
-                .into_iter()
-                .map(|(sink, target)| (target as _, vec![sink as _]))
-                .collect(),
-        })
+        let fragments = Fragment::find()
+            .filter(fragment::Column::JobId.eq(job_id))
+            .all(&txn)
+            .await?;
+
+        let state_table_ids = fragments
+            .iter()
+            .flat_map(|fragment| fragment.state_table_ids.inner_ref().iter().copied())
+            .collect_vec();
+        let sink_fragment_ids = fragments
+            .iter()
+            .filter_map(|fragment| {
+                FragmentTypeMask::from(fragment.fragment_type_mask)
+                    .contains(FragmentTypeFlag::Sink)
+                    .then_some(fragment.fragment_id)
+            })
+            .collect_vec();
+
+        let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
+        let dropped_sink_fragment_by_targets = sink_target_fragments
+            .into_iter()
+            .filter_map(|(sink_fragment, target_fragments)| {
+                target_fragments
+                    .first()
+                    .map(|target_fragment| (*target_fragment, vec![sink_fragment]))
+            })
+            .collect();
+
+        Ok(Some((
+            Command::DropStreamingJobs {
+                streaming_job_ids: HashSet::from_iter([job_id]),
+                unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
+                dropped_sink_fragment_by_targets,
+            },
+            state_table_ids,
+        )))
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.

@@ -343,7 +343,12 @@ pub struct ClickHouseConfig {
     pub common: ClickHouseCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(ClickHouseConfig);
 
 impl EnforceSecret for ClickHouseConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -543,6 +548,8 @@ impl Sink for ClickHouseSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.

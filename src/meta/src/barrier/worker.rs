@@ -562,9 +562,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
-                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
-                                    warn!("failed to may have snapshot backfill job");
+                            BarrierManagerRequest::MayHaveCreatingJob(tx) => {
+                                if tx.send(self.checkpoint_control.may_have_creating_jobs()).is_err() {
+                                    warn!("failed to check whether there may be creating jobs");
                                 }
                             }
                         }
@@ -1246,7 +1246,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     unreachable!("no barrier collected event on initializing")
                                 }
                                 PartialGraphEvent::Reset(_) => {
-                                    unreachable!("no partial graph reset on initializing")
+                                    // Reset responses only carry diagnostic root errors. Recovery
+                                    // itself only needs to track the partial graphs still resetting.
+                                    let (database_id, _) =
+                                        from_partial_graph_id(partial_graph_id);
+                                    let resetting_partial_graphs = failed_databases
+                                        .get_mut(&database_id)
+                                        .expect("reset partial graph should belong to a failed database");
+                                    assert!(
+                                        resetting_partial_graphs.remove(&partial_graph_id),
+                                        "partial graph {partial_graph_id} should be resetting"
+                                    );
                                 }
                                 PartialGraphEvent::Error(worker_id) => {
                                     let (database_id, _) = from_partial_graph_id(partial_graph_id);
@@ -1365,8 +1375,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
                         }
-                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                            // may recover snapshot backfill jobs
+                        BarrierManagerRequest::MayHaveCreatingJob(tx) => {
+                            // May recover creating jobs.
                             let _ = tx.send(true);
                         }
                     }

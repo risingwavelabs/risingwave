@@ -26,6 +26,7 @@ pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
     let sink = build_sink(param)?;
+    sink.validate_unknown_fields()?;
 
     dispatch_sink!(
         sink,

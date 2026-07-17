@@ -682,9 +682,13 @@ impl DdlController {
 
     /// Shared source is handled in [`Self::create_streaming_job`]
     async fn create_non_shared_source(&self, source: Source) -> MetaResult<NotificationVersion> {
-        let handle = create_source_worker(&source, self.source_manager.metrics.clone())
-            .await
-            .context("failed to create source worker")?;
+        let handle = create_source_worker(
+            &source,
+            self.source_manager.metrics.clone(),
+            self.env.await_tree_reg().clone(),
+        )
+        .await
+        .context("failed to create source worker")?;
 
         let (source_id, version) = self
             .metadata_manager
