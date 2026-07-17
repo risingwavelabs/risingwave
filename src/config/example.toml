@@ -202,6 +202,7 @@ auth_method = "password"
 
 [streaming]
 in_flight_barrier_nums = 10000
+snapshot_backfill_finish_max_lagged_barriers = 100
 actor_runtime_worker_threads_num = ""
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10

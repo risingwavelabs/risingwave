@@ -1273,7 +1273,7 @@ impl DatabaseCheckpointControl {
                     for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
                         let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
                             job;
-                        if creating_job.should_merge_to_upstream() {
+                        if creating_job.should_merge_to_upstream(partial_graph_manager) {
                             let info = creating_job
                                 .start_consume_upstream(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
