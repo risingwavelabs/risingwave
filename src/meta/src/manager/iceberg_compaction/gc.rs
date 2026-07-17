@@ -14,8 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use futures::TryStreamExt;
-use futures::stream::{self, StreamExt};
 use iceberg::actions::RemoveOrphanFilesAction;
 use iceberg::spec::{FormatVersion, ManifestContentType, ManifestFile};
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
@@ -32,13 +30,6 @@ use super::*;
 const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
 const ORPHAN_FILE_DELETE_CONCURRENCY: usize = 10;
 const ORPHAN_FILE_LOG_SAMPLE_SIZE: usize = 10;
-
-fn is_protected_orphan_file(path: &str) -> bool {
-    // RisingWave's storage catalog requires this file to locate the current
-    // metadata JSON. The pinned iceberg-rust orphan action does not include it
-    // in the reachable-file set, so deleting it would make the table unloadable.
-    path.ends_with("/metadata/version-hint.text")
-}
 
 #[derive(Debug, PartialEq, Eq)]
 struct ManifestRewritePlan {
@@ -173,8 +164,45 @@ impl IcebergCompactionManager {
         (join_handle, shutdown_tx)
     }
 
+    pub fn orphan_file_cleanup_loop(
+        manager: Arc<Self>,
+        interval_sec: u64,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        assert!(
+            interval_sec > 0,
+            "Iceberg orphan file cleanup interval must be greater than 0"
+        );
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            tracing::info!(interval_sec, "Starting Iceberg orphan file cleanup loop");
+            let period = std::time::Duration::from_secs(interval_sec);
+            let mut interval =
+                tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = manager.perform_orphan_file_cleanup().await {
+                            tracing::error!(
+                                error = ?e.as_report(),
+                                "Iceberg orphan file cleanup failed",
+                            );
+                        }
+                    },
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg orphan file cleanup loop is stopped");
+                        return;
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
     async fn perform_gc_operations(&self) -> MetaResult<()> {
-        let (snapshot_expiration_sink_ids, manifest_rewrite_sink_ids, orphan_file_cleanup_sink_ids) = {
+        let (snapshot_expiration_sink_ids, manifest_rewrite_sink_ids) = {
             let guard = self.inner.read();
             (
                 guard
@@ -187,18 +215,12 @@ impl IcebergCompactionManager {
                     .iter()
                     .copied()
                     .collect::<Vec<_>>(),
-                guard
-                    .orphan_file_cleanup_sink_ids
-                    .iter()
-                    .copied()
-                    .collect::<Vec<_>>(),
             )
         };
 
         tracing::info!(
             snapshot_expiration_sink_count = snapshot_expiration_sink_ids.len(),
             manifest_rewrite_sink_count = manifest_rewrite_sink_ids.len(),
-            orphan_file_cleanup_sink_count = orphan_file_cleanup_sink_ids.len(),
             "Starting Iceberg metadata maintenance operations",
         );
 
@@ -220,8 +242,25 @@ impl IcebergCompactionManager {
             }
         }
 
-        // Run orphan cleanup last so it observes metadata committed by rewrite
-        // and snapshot-expiration operations in the same maintenance tick.
+        tracing::info!("Iceberg metadata maintenance operations completed");
+        Ok(())
+    }
+
+    async fn perform_orphan_file_cleanup(&self) -> MetaResult<()> {
+        let orphan_file_cleanup_sink_ids = {
+            let guard = self.inner.read();
+            guard
+                .orphan_file_cleanup_sink_ids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+
+        tracing::info!(
+            orphan_file_cleanup_sink_count = orphan_file_cleanup_sink_ids.len(),
+            "Starting Iceberg orphan file cleanup operations",
+        );
+
         for sink_id in orphan_file_cleanup_sink_ids {
             if let Err(e) = self.check_and_remove_orphan_files(sink_id).await {
                 tracing::error!(
@@ -232,7 +271,7 @@ impl IcebergCompactionManager {
             }
         }
 
-        tracing::info!("Iceberg metadata maintenance operations completed");
+        tracing::info!("Iceberg orphan file cleanup operations completed");
         Ok(())
     }
 
@@ -382,6 +421,11 @@ impl IcebergCompactionManager {
         sink_id: SinkId,
         iceberg_config: IcebergConfig,
     ) -> MetaResult<u64> {
+        // Storage catalog relies on metadata/version-hint.text to load and
+        // commit the table, but that catalog-owned file is not tracked by
+        // Iceberg table metadata. Do not expose orphan cleanup for this catalog.
+        iceberg_config.ensure_orphan_file_cleanup_supported()?;
+
         // Serialize scheduled and manual cleanup for the same sink. Deleting
         // the same candidate concurrently can otherwise turn an idempotent
         // maintenance request into a partial failure.
@@ -406,28 +450,12 @@ impl IcebergCompactionManager {
             "Starting Iceberg orphan file cleanup",
         );
 
-        // Use the dependency action in dry-run mode so RisingWave can protect
-        // catalog-owned files before deleting the remaining candidates.
-        let mut orphan_files = RemoveOrphanFilesAction::new(table.clone())
+        let orphan_files = RemoveOrphanFilesAction::new(table)
             .older_than(std::time::Duration::from_millis(min_age_millis))
-            .dry_run(true)
+            .delete_concurrency(ORPHAN_FILE_DELETE_CONCURRENCY)
             .execute()
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-
-        let discovered_file_count = orphan_files.len();
-        orphan_files.retain(|path| !is_protected_orphan_file(path));
-        let protected_file_count = discovered_file_count - orphan_files.len();
-        if protected_file_count > 0 {
-            tracing::warn!(
-                iceberg_component = "orphan_file_maintenance",
-                iceberg_operation = "remove_orphan_files",
-                table = %table_ident,
-                %sink_id,
-                protected_file_count,
-                "Protected storage-catalog metadata files from orphan cleanup",
-            );
-        }
 
         let orphan_file_sample = orphan_files
             .iter()
@@ -435,17 +463,6 @@ impl IcebergCompactionManager {
             .cloned()
             .collect_vec();
         let orphan_file_count = orphan_files.len() as u64;
-
-        let file_io = table.file_io().clone();
-        stream::iter(orphan_files)
-            .map(|path| {
-                let file_io = file_io.clone();
-                async move { file_io.delete(&path).await }
-            })
-            .buffer_unordered(ORPHAN_FILE_DELETE_CONCURRENCY)
-            .try_collect::<Vec<_>>()
-            .await
-            .map_err(|e| SinkError::Iceberg(e.into()))?;
 
         tracing::info!(
             iceberg_component = "orphan_file_maintenance",
@@ -621,19 +638,6 @@ impl IcebergCompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_protects_storage_catalog_version_hint() {
-        assert!(is_protected_orphan_file(
-            "s3://bucket/db/table/metadata/version-hint.text"
-        ));
-        assert!(!is_protected_orphan_file(
-            "s3://bucket/db/table/metadata/v1.metadata.json"
-        ));
-        assert!(!is_protected_orphan_file(
-            "s3://bucket/db/table/data/version-hint.text"
-        ));
-    }
 
     fn manifest(
         path: &str,
