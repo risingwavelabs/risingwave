@@ -120,7 +120,7 @@ impl IndexSelectionRule {
         }
 
         let mut final_plan = None;
-        let mut min_cost = primary_cost.clone();
+        let mut min_cost = primary_cost;
 
         for index in indexes {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {

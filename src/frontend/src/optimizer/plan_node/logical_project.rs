@@ -249,12 +249,11 @@ impl ToBatch for LogicalProject {
             .session_ctx()
             .config()
             .enable_index_selection()
+            && let Some(project) = IndexSelectionRule::select_expression_index_for_project(self)
         {
-            if let Some(project) = IndexSelectionRule::select_expression_index_for_project(self) {
-                // The rewritten input is an index-table scan without its own indexes, so the
-                // recursive conversion cannot select another expression index.
-                return project.to_batch_with_order_required(required_order);
-            }
+            // The rewritten input is an index-table scan without its own indexes, so the
+            // recursive conversion cannot select another expression index.
+            return project.to_batch_with_order_required(required_order);
         }
 
         let input_order = self
