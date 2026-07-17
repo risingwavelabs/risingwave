@@ -42,7 +42,7 @@ select * from t
 
 # create a new version of schema that added a new optional nested field
 system ok
-sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"},{"name":"nested","type":["null",{"type":"record","name":"Nested","fields":[{"name":"baz","type":"int"}]}],"default":null}]}'
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"nan","type":"float","default":"NaN"},{"name":"foo","type":"string"},{"name":"nested","type":["null",{"type":"record","name":"Nested","fields":[{"name":"baz","type":"int"}]}],"default":null}]}'
 
 # Before refreshing schema, we create a `SINK INTO TABLE` which involves table replacement,
 # showing that this will NOT accidentally refresh the schema.
