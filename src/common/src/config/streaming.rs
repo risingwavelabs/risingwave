@@ -34,6 +34,11 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    /// The maximum number of lagged barriers allowed when merging a snapshot backfill job into
+    /// the database graph.
+    #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -374,6 +379,10 @@ pub mod default {
             // quick fix
             // TODO: remove this limitation from code
             10000
+        }
+
+        pub fn snapshot_backfill_finish_max_lagged_barriers() -> usize {
+            100
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
