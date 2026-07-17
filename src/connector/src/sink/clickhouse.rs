@@ -863,46 +863,110 @@ struct ClickhouseQueryEngine {
     create_table_query: String,
 }
 
+/// Extracts the top-level, comma-separated arguments of the `Distributed(...)`
+/// engine clause in a `ClickHouse` `CREATE TABLE` statement, if one is present.
+///
+/// A single quote- and paren-aware scan does the work: a `,`, `(` or `)` nested
+/// inside a quoted string (`'db(a,b)'`) or an inner function call
+/// (`currentDatabase()`, `cityHash64(a, b)`) is not mistaken for an argument
+/// separator or for the end of the clause.
+///
+/// `rfind` is used so that an earlier accidental `Distributed(` in a comment or a
+/// column `DEFAULT` expression cannot win — the `ENGINE` clause is always last in
+/// `ClickHouse` DDL. Returns `None` when there is no `Distributed(` clause or its
+/// parentheses are unbalanced.
+fn distributed_engine_args(create_table_query: &str) -> Option<Vec<&str>> {
+    let open = create_table_query.rfind("Distributed(")? + "Distributed(".len();
+    let rest = &create_table_query[open..];
+
+    let mut args = Vec::new();
+    let mut arg_start = 0usize;
+    let mut depth = 1i32; // the '(' of `Distributed(` is already consumed
+    let mut in_quote: Option<char> = None;
+    let mut chars = rest.char_indices();
+    while let Some((pos, c)) = chars.next() {
+        if let Some(q) = in_quote {
+            if c == '\\' {
+                chars.next();
+            } else if c == q {
+                in_quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' | '`' => in_quote = Some(c),
+            '(' => depth += 1,
+            ',' if depth == 1 => {
+                args.push(&rest[arg_start..pos]);
+                arg_start = pos + c.len_utf8();
+            }
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    args.push(&rest[arg_start..pos]);
+                    return Some(args);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Strips one matching pair of surrounding quotes (`'`, `"` or backtick) from a
+/// trimmed argument, leaving inner content — including any inner quotes — intact.
+fn strip_arg_quotes(s: &str) -> &str {
+    let s = s.trim();
+    for q in ['\'', '"', '`'] {
+        if let Some(inner) = s.strip_prefix(q).and_then(|rest| rest.strip_suffix(q)) {
+            return inner;
+        }
+    }
+    s
+}
+
+/// Returns true if `s` is (ignoring whitespace and case) the constant
+/// expression `currentDatabase()`, which `ClickHouse` accepts as the database
+/// argument of a Distributed engine to mean "the database the table itself
+/// lives in" — the same meaning as an empty string.
+fn is_current_database_call(s: &str) -> bool {
+    let normalized: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    normalized.eq_ignore_ascii_case("currentDatabase()")
+}
+
 /// Parse the inner `(database, table)` pair from a Distributed table's DDL.
 ///
 /// `ClickHouse` Distributed DDL looks like:
 /// `ENGINE = Distributed('cluster', 'inner_db', 'inner_table', [sharding_key])`
-/// The database may be an empty string `''`, meaning the same database as the Distributed table.
+/// `ENGINE = Distributed(logs, default, hits[, sharding_key[, policy_name]])`
+/// The database may be an empty string `''`, or a constant expression such as
+/// `currentDatabase()`, either of which mean the same database as the
+/// Distributed table. See
+/// <https://clickhouse.com/docs/engines/table-engines/special/distributed>.
 fn parse_distributed_inner_table(
     create_table_query: &str,
     default_db: &str,
 ) -> Option<(String, String)> {
-    // Locate the ENGINE = Distributed(...) clause.
-    // Use rfind so that any earlier accidental "Distributed(" in a comment or default
-    // value does not confuse the parser — the ENGINE clause is always last in ClickHouse DDL.
-    let after = create_table_query
-        .rfind("Distributed(")
-        .map(|i| &create_table_query[i + "Distributed(".len()..])?;
-    // Take everything up to the closing parenthesis
-    let args_str = after.split(')').next()?;
-    // Split on commas but only the first 3 we need: cluster, database, table
-    let args: Vec<&str> = args_str.splitn(4, ',').collect();
-    if args.len() < 3 {
+    // Distributed(cluster, database, table, [sharding_key, [policy_name]]) — we
+    // only need `database` and `table`; any trailing arguments are ignored.
+    let args = distributed_engine_args(create_table_query)?;
+    let [_cluster, database, table, ..] = args.as_slice() else {
         return None;
-    }
-    let strip_quotes = |s: &str| {
-        s.trim()
-            .trim_matches('\'')
-            .trim_matches('"')
-            .trim_matches('`')
-            .to_owned()
     };
-    let inner_db = strip_quotes(args[1]);
-    let inner_table = strip_quotes(args[2]);
+
+    let stripped_db = strip_arg_quotes(database);
+    // Both an empty string and `currentDatabase()` mean the Distributed table's
+    // own database, which the caller passes in as `default_db`.
+    let inner_db = if stripped_db.is_empty() || is_current_database_call(database) {
+        default_db.to_owned()
+    } else {
+        stripped_db.to_owned()
+    };
+    let inner_table = strip_arg_quotes(table);
     if inner_table.is_empty() {
         return None;
     }
-    let inner_db = if inner_db.is_empty() {
-        default_db.to_owned()
-    } else {
-        inner_db
-    };
-    Some((inner_db, inner_table))
+    Some((inner_db, inner_table.to_owned()))
 }
 
 async fn query_column_engine_from_ck(
@@ -1280,5 +1344,154 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
 impl From<::clickhouse::error::Error> for SinkError {
     fn from(value: ::clickhouse::error::Error) -> Self {
         SinkError::ClickHouse(value.to_report_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_distributed_inner_table;
+
+    #[test]
+    fn test_parse_distributed_inner_table_quoted_literals() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db', 'inner_table', rand())";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("inner_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_empty_database_means_default() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', '', 'inner_table')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_current_database_call() {
+        // Regression test: the database argument may be a constant expression like
+        // `currentDatabase()`, which contains its own parentheses. A naive parser
+        // that stops at the first `)` would wrongly truncate the argument list here.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed(logs, currentDatabase(), hits, rand())";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_nested_parens_and_commas_in_quotes() {
+        // A quoted argument containing a comma and parentheses must not be split
+        // or truncated early.
+        let ddl =
+            "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'db(a,b)', 'inner_table')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("db(a,b)".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_missing_table_returns_none() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db')";
+        assert_eq!(parse_distributed_inner_table(ddl, "default_db"), None);
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_unquoted_identifiers_no_sharding_key() {
+        // https://clickhouse.com/docs/engines/table-engines/special/distributed example:
+        // ENGINE = Distributed(logs, default, hits)
+        let ddl = "CREATE TABLE hits_all AS hits ENGINE = Distributed(logs, default, hits)";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_with_nested_comma() {
+        // sharding_key may be "any expression from constants and table columns", e.g.
+        // a multi-argument hash function containing its own top-level commas.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed(logs, default, hits, cityHash64(user_id, tenant_id))";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_settings_clause_after_engine() {
+        // A trailing SETTINGS clause (outside the Distributed(...) parens) must not
+        // confuse the matching-paren search.
+        let ddl = "CREATE TABLE hits_all AS hits ENGINE = Distributed(logs, default, hits) SETTINGS fsync_after_insert=0, fsync_directories=0";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_with_policy_name() {
+        // Distributed(cluster, database, table[, sharding_key[, policy_name]]) — the
+        // optional policy_name is a trailing string literal we don't need, but its
+        // presence (and its own quoting) must not break parsing of database/table.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db', 'inner_table', rand(), 'policy_name')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("inner_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_full_ddl_template_with_on_cluster() {
+        // Full documented template: ON CLUSTER, column defs with DEFAULT expressions
+        // containing their own parens/commas, and a trailing SETTINGS clause. None of
+        // that should confuse the search for the ENGINE = Distributed(...) clause,
+        // since we always locate the *last* "Distributed(" and match its own closing
+        // parenthesis.
+        let ddl = "CREATE TABLE IF NOT EXISTS db.hits_all ON CLUSTER logs \
+            (\
+                `EventDate` Date, \
+                `Cost` Decimal(10, 2) DEFAULT round(1.5, 2), \
+                `UserID` UInt64\
+            ) ENGINE = Distributed(logs, currentDatabase(), hits, cityHash64(UserID, EventDate)) \
+            SETTINGS fsync_after_insert=0, fsync_directories=0";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_plain_column() {
+        // ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id)
+        let ddl = "CREATE TABLE db.t (trip_id UInt64) ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id)";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("trip_local".to_owned(), "trips".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_and_policy_name() {
+        // ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id, 'policy_2s2r')
+        let ddl = "CREATE TABLE db.t (trip_id UInt64) ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id, 'policy_2s2r')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("trip_local".to_owned(), "trips".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_current_database_resolves_to_default() {
+        // `currentDatabase()` resolves to whatever database the caller passes in
+        // as the default (the database the Distributed table itself lives in).
+        let ddl = "CREATE TABLE lab_db.t (x Int32) ENGINE = Distributed('cluster', currentDatabase(), 'hits')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "lab_db"),
+            Some(("lab_db".to_owned(), "hits".to_owned()))
+        );
     }
 }
