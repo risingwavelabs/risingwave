@@ -9,6 +9,7 @@ level0_max_compact_file_number = 96
 
 [streaming]
 in_flight_barrier_nums = 10
+snapshot_backfill_finish_max_lagged_barriers = 5
 
 [streaming.developer]
 stream_exchange_concurrent_barriers = 10
