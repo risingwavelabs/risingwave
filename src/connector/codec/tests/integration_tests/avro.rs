@@ -608,9 +608,58 @@ fn test_union() {
         },
         // FIXME: why the struct type doesn't have field_descs? https://github.com/risingwavelabs/risingwave/issues/17128
         expect![[r#"
-            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "Email", namespace: None }, aliases: None, doc: None, fields: [RecordField { name: "inner", doc: None, aliases: None, default: None, schema: String, order: Ascending, position: 0, custom_attributes: {} }], lookup: {"inner": 0}, attributes: {} })
-            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632"#]],
-        expect![""],
+            [
+                unionType: Struct {
+                    int: Int32,
+                    string: Varchar,
+                },
+                unionTypeComplex: Struct {
+                    Email: Struct { inner: Varchar },
+                    Fax: Struct { inner: Int32 },
+                    Sms: Struct { inner: Int32 },
+                },
+                nullableString: Varchar,
+            ]"#]],
+        expect![[r#"
+            Owned(StructValue(
+                Int32(114514),
+                null,
+            ))
+            Owned(StructValue(
+                null,
+                null,
+                StructValue(Int32(6)),
+            ))
+            Owned(null)
+            ----
+            Owned(StructValue(
+                Int32(114514),
+                null,
+            ))
+            Owned(StructValue(
+                null,
+                StructValue(Int32(6)),
+                null,
+            ))
+            Owned(null)
+            ----
+            Owned(StructValue(
+                null,
+                Utf8("oops"),
+            ))
+            Owned(null)
+            Borrowed(Utf8("hello"))
+            ----
+            Owned(StructValue(
+                null,
+                Utf8("oops"),
+            ))
+            Owned(StructValue(
+                StructValue(Utf8("a@b.c")),
+                null,
+                null,
+            ))
+            Owned(null)"#]],
     );
 
     // logicalType is currently rejected
@@ -634,8 +683,12 @@ fn test_union() {
             data_encoding: TestDataEncoding::HexBinary,
         },
         expect![[r#"
-            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro logicalType used in Union type: Date
-            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17616"#]],
+            [
+                unionLogical: Struct {
+                    int: Int32,
+                    int: Date,
+                },
+            ]"#]],
         expect![""],
     );
 
@@ -703,9 +756,35 @@ fn test_union() {
             data_encoding: TestDataEncoding::HexBinary,
         },
         expect![[r#"
-            failed to convert Avro schema to RisingWave schema: failed to convert Avro union to struct: Feature is not yet implemented: Avro named type used in Union type: Record(RecordSchema { name: Name { name: "record", namespace: Some("my.name.spaced") }, aliases: None, doc: None, fields: [RecordField { name: "hello", doc: None, aliases: None, default: None, schema: Int, order: Ascending, position: 0, custom_attributes: {} }, RecordField { name: "world", doc: None, aliases: None, default: None, schema: Double, order: Ascending, position: 1, custom_attributes: {} }], lookup: {"hello": 0, "world": 1}, attributes: {} })
-            Tracking issue: https://github.com/risingwavelabs/risingwave/issues/17632"#]],
-        expect![""],
+            [
+                littleFieldToMakeNestingLooksBetter: Int32,
+                recordField: Struct {
+                    int: Int32,
+                    my.name.spaced.record: Struct {
+                        hello: Int32,
+                        world: Float64,
+                    },
+                },
+                enumField: Struct {
+                    int: Int32,
+                    my.namespace.myEnum: Varchar,
+                },
+                anotherEnumFieldUsingRootNamespace: Struct {
+                    int: Int32,
+                    RootNamespace.myEnum: Varchar,
+                },
+            ]"#]],
+        expect![[r#"
+            Owned(null)
+            Owned(null)
+            Owned(StructValue(
+                null,
+                Utf8("A"),
+            ))
+            Owned(StructValue(
+                null,
+                Utf8("D"),
+            ))"#]],
     );
 
     // This is provided by a user https://github.com/risingwavelabs/risingwave/issues/16273#issuecomment-2051480710

@@ -323,10 +323,10 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::Map(_) => "map".to_owned(),
         // Named Complex types
         Schema::Enum(_) | Schema::Ref { name: _ } | Schema::Fixed(_) | Schema::Record(_) => {
-            // schema.name().unwrap().fullname(None)
+            schema.name().unwrap().fullname(None)
             // See test_avro_lib_union_record_bug
             // https://github.com/risingwavelabs/risingwave/issues/17632
-            bail_not_implemented!(issue=17632, "Avro named type used in Union type: {:?}", schema)
+            // bail_not_implemented!(issue=17632, "Avro named type used in Union type: {:?}", schema)
 
         }
 
@@ -358,18 +358,17 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
         Schema::LocalTimestampMicros => "local_timestamp_micros".to_string(),
         Schema::Duration => "duration".to_string(),
 */
-        Schema::Uuid
-        | Schema::Decimal(_)
-        | Schema::BigDecimal
-        | Schema::Date
-        | Schema::TimeMillis
-        | Schema::TimeMicros
+        Schema::Decimal(inner) => avro_schema_to_struct_field_name(&inner.inner)?,
+        Schema::BigDecimal => avro_schema_to_struct_field_name(&Schema::Bytes)?,
+        Schema::Date | Schema::TimeMillis => avro_schema_to_struct_field_name(&Schema::Int)?,
+        Schema::TimeMicros
         | Schema::TimestampMillis
         | Schema::TimestampMicros
         | Schema::TimestampNanos
         | Schema::LocalTimestampMillis
         | Schema::LocalTimestampMicros
-        | Schema::LocalTimestampNanos
+        | Schema::LocalTimestampNanos => avro_schema_to_struct_field_name(&Schema::Long)?,
+        Schema::Uuid
         | Schema::Duration => {
             bail_not_implemented!(issue=17616, "Avro logicalType used in Union type: {:?}", schema)
         }
