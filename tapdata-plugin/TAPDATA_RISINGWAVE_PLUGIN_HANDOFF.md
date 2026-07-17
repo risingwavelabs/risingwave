@@ -2,7 +2,7 @@
 
 Status date: 2026-07-15 (historical handoff, superseded where noted below)
 Original date: 2026-06-17
-Workspace used for final validation: `/Users/adbean/work/risingwave`
+Workspace used for final validation: a clean checkout of this repository
 Branch: `wenym1/tapdata-plugin`
 
 This document preserves the chronological handoff and historical qualification evidence. It is not
@@ -14,8 +14,9 @@ routing, WebSocket batch splitting, reconnect fault injection, and JSONB binary 
 ## Current Status
 
 The Tapdata RisingWave plugin was smoke-tested and verified end-to-end against RisingWave Cloud
-(v3.0.1) via WebSocket ingest at the time of this handoff. That Cloud result is historical and
-must be rerun for the release artifact.
+(v3.0.1) via WebSocket ingest at the time of this handoff. That original result remains historical;
+the final canonical `1.0.0` JAR was subsequently rechecked over JDBC TLS and WSS on 2026-07-17.
+Use `TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md` for the exact checksum and current evidence.
 
 Validated path:
 
@@ -404,7 +405,7 @@ Plugin deploy command used:
 
 ```bash
 mvn -f tapdata-plugin/pom.xml -DskipTests package
-docker cp tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar tapdata-clean:/tmp/risingwave-connector-new.jar
+docker cp tapdata-plugin/target/risingwave-connector-1.0.0.jar tapdata-clean:/tmp/risingwave-connector-new.jar
 docker exec tapdata-clean java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
   -a <your-access-code> \
@@ -684,6 +685,15 @@ Reason: the changes are in the Java Tapdata plugin and Python helper script, not
    The scalar type matrix, exact NUMERIC/BYTEA handling, local TLS, and RisingWave Cloud TLS/WSS
    paths are covered by the production-readiness record.
 
+8. The legacy Kafka source connector used in the source-matrix qualification required
+   `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED` when TapData ran on Java 17.
+   It also inferred arrays as `STRING`; the RisingWave JSONB target preserved that source-emitted
+   value. Both are Kafka source/runtime caveats, not RisingWave target transformations.
+
+9. SQL Server remains unqualified. A meaningful qualification run requires the supported TapData
+   SQL Server connector and an x86-64 environment; this is an external source-matrix gap, not a
+   reproduced RisingWave connector failure.
+
 ## Recommended Next Workspace Steps
 
 1. Re-apply or port the changes in the three touched files.
@@ -709,7 +719,7 @@ mvn -f tapdata-plugin/pom.xml -DskipTests package
 5. Deploy to Tapdata:
 
 ```bash
-docker cp tapdata-plugin/target/risingwave-connector-1.0-SNAPSHOT.jar tapdata-clean:/tmp/risingwave-connector-new.jar
+docker cp tapdata-plugin/target/risingwave-connector-1.0.0.jar tapdata-clean:/tmp/risingwave-connector-new.jar
 docker exec tapdata-clean java -jar /tapdata/apps/lib/pdk-deploy.jar register \
   -t http://localhost:3030 \
   -a <your-access-code> \
@@ -719,7 +729,7 @@ docker restart tapdata-clean
 
 6. Repeat the `tapdata_ws_smoke_v14` validation with a fresh suffix, for example `tapdata_ws_smoke_v15`.
 
-7. Run the committed unit and live integration suites before preparing the immutable release version.
+7. Run the committed unit and live integration suites against the immutable release artifact.
 
 ## Final Known Good Smoke Result
 

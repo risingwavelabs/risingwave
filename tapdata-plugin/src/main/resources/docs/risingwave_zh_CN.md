@@ -104,16 +104,25 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
 5. **仅作为目标**：此连接器只能作为目标（sink）使用，不能作为源。
 6. **JSONB 精确数值使用字符串**：JSONB 仅追加模式会把任意精度十进制和整数保存为
    JSON 字符串，因为 RisingWave JSON number 可能发生舍入。
-7. **流式更新需要完整行**：RisingWave WebSocket upsert 会替换整行。source 若发送部分
-   update image，connector 会用 `before` 和 `after` 还原完整行；两者仍无法补齐全部目标列时，
-   更新会失败，而不会静默把缺失列写成 `NULL`。source 的 `removedFields` 若删除顶层列，
-   connector 会将该列写成 SQL `NULL`；删除 `profile.name` 这类嵌套字段时，source 必须提供
-   父列 `profile` 的完整 post-image。MySQL source 必须使用 `binlog_row_image=FULL`；TapData
-   的 MySQL CDC reader 会在事件到达此 target connector 之前拒绝 `MINIMAL` row image。
+7. **typed 更新需要完整行**：connector 只做一次规范化：用事件中可用的 `before`、`after`
+   和顶层 `removedFields` 形成完整 post-image，再把同一行交给 WebSocket 或 JDBC。无法安全
+   补齐全部目标列时会明确失败，不会猜测。replace event 把 `after` 当作最终结果，省略的已知
+   列写为 SQL `NULL`。唯一主键为 `_id` 且没有 `before` 的 MongoDB event 使用相同规则，并要求在
+   source task node 上显式启用 TapData 的完整文档补全 `enableFillingModifiedData=true`。删除
+   `profile.name` 等嵌套字段时必须提供 `profile` 的完整
+   post-image。MySQL 必须使用 `binlog_row_image=FULL`；TapData 会在事件到达 connector 前拒绝
+   `MINIMAL`。若 PostgreSQL 的 TOAST 值在可用 image 中无法还原，更新会明确失败。
 8. **大记录存在 frame 限制**：connector 会把 batch 拆成小于 8 MiB 的有序 WebSocket
    payload。单条 source record 本身超过该大小时无法安全拆分，会返回明确错误。
 9. **JDBC 可见性屏障**：RisingWave 的 JDBC insert 是异步可见的。connector 只会在后续
-   update/delete 依赖未刷新的 insert 时，以及一个写入 batch 结束时执行 `FLUSH`；相互独立的
-   update/delete 可以保留在同一个 batch 中。
+   update/delete 到来且当前 batch 仍有未刷新的带主键 insert 时保守执行 `FLUSH`，并在 batch
+   结束时再次执行。没有 insert 等待变为 query-visible 时，update/delete 可以保留在同一 batch。
 10. **JSONB 模式中的二进制值**：`byte[]` 会以 PostgreSQL bytea hex 文本（`\\x<hex>`）存为
     JSON string。JSONB 没有原生 binary scalar；需要原始字节的消费者应按此表示解码。
+11. **CDC identity 与 schema 安全性**：带主键 update/delete 必须提供旧主键 identity。
+    只有唯一主键为 `_id` 时允许 after-only update，因为 MongoDB `_id` 不可变；其他缺失旧
+    identity 的事件会明确失败。自动 schema evolution 未支持时，未知的关系型字段也会明确
+    失败，不会被静默丢弃。
+12. **Source 验证状态**：精确的 `1.0.0` 发布产物已通过 PostgreSQL、使用
+    `binlog_row_image=FULL` 的 MySQL 8.4、显式启用 `enableFillingModifiedData=true` 的
+    MongoDB 7，以及通过 JSONB 仅追加模式写入的 Kafka 3.9.1 验证。SQL Server 尚未完成验证。

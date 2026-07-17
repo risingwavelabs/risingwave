@@ -13,12 +13,15 @@ RisingWave. Supports three write modes:
 Historical handoff and qualification logs are kept in
 [`TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md`](TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md) and
 [`TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md`](TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md).
-They are not release certificates for the current snapshot; use this README, CI, and an exact
+They are not release certificates for the current artifact; use this README, CI, and an exact
 release artifact for the final decision.
 
 ## What it does
 
-- Replicates tables from any Tapdata source (e.g. PostgreSQL, MySQL, Mock Source) into RisingWave
+- A recorded `1.0.0` source-matrix qualification artifact passed PostgreSQL, MySQL 8.4 with
+  `binlog_row_image=FULL`, MongoDB 7 with `enableFillingModifiedData=true`, and Kafka 3.9.1
+  through JSONB append-only mode. SQL Server has not yet been qualified; the final canonical JAR
+  must be identified by its release checksum rather than inferred from the version alone
 - Supports batch snapshot sync and CDC (change-data-capture) streaming
 - In streaming mode, auto-creates webhook-backed tables (`WITH (connector = 'webhook')`)
 - Handles RisingWave SQL dialect differences from PostgreSQL automatically
@@ -41,7 +44,7 @@ The connector depends on Tapdata PDK API published to Tapdata's Nexus snapshot r
 ```bash
 cd tapdata-plugin
 mvn package -DskipTests
-# Produces: target/risingwave-connector-1.0-SNAPSHOT.jar
+# Produces: target/risingwave-connector-1.0.0.jar
 ```
 
 > **Note:** The `pom.xml` uses `io.tapdata:tapdata-pdk-api:2.0.8-SNAPSHOT` and
@@ -96,12 +99,18 @@ mvn -Drisingwave.it=true -Drisingwave.benchmark=true \
 ### 1. Start Tapdata
 
 ```bash
+TAPDATA_IMAGE='ghcr.io/tapdata/tapdata:REPLACE_WITH_APPROVED_VERSION'
+
 docker run -d --name tapdata \
   --add-host=host.docker.internal:host-gateway \
   -p 3030:3030 \
   -e app_type=DAAS \
-  ghcr.io/tapdata/tapdata:latest
+  "$TAPDATA_IMAGE"
 ```
+
+For production qualification and deployment, use an internally approved TapData version or pin
+the image by digest (`ghcr.io/tapdata/tapdata@sha256:...`). Do not use the mutable `latest` tag:
+the TapData UI, Agent, and connector APIs must come from a compatible release set.
 
 Wait ~3 minutes for startup, then open http://localhost:3030.
 Default login: `admin@admin.com` / `admin`.
@@ -110,7 +119,7 @@ Default login: `admin@admin.com` / `admin`.
 
 ```bash
 # Copy JAR into the container
-docker cp target/risingwave-connector-1.0-SNAPSHOT.jar tapdata:/tmp/rw-connector.jar
+docker cp target/risingwave-connector-1.0.0.jar tapdata:/tmp/rw-connector.jar
 
 # Register via pdk-deploy (use -l to replace latest version)
 docker exec tapdata java -jar /tapdata/apps/lib/pdk-deploy.jar register \
@@ -189,12 +198,22 @@ python3 setup_pipeline.py
 
 ## Architecture
 
-WebSocket streaming requires every replicated table to have a primary key. Inserts and
-same-primary-key updates are sent as upserts. If an
-update changes any primary-key column, the connector sends a delete for the before image followed
-by an upsert for the after image in the same WebSocket batch. Deletes use the before image. Partial
-updates are completed from the before image. Removed top-level fields become SQL `NULL`; nested
-field removal requires a complete post-image for the parent column.
+WebSocket streaming requires every replicated table to have a primary key. Each update is adapted
+once into a complete target row: normal events combine the available `before` and `after` images,
+and top-level `removedFields` become SQL `NULL`. The update fails if those images cannot safely
+form every target column. Replace events treat `after` as authoritative, so omitted target columns
+become `NULL`. An after-only MongoDB event with a sole `_id` key uses the same authoritative rule
+and therefore requires TapData's full-document filling to be explicitly enabled with
+`enableFillingModifiedData=true`.
+
+WebSocket and JDBC consume that same complete row. WebSocket sends an upsert; JDBC updates all
+non-key columns. If a primary key changes, both modes write the new row and retract the old
+identity. Nested document changes must include the complete parent column.
+
+Keyed updates and deletes must carry the old primary-key identity. The sole `_id` primary-key case
+accepts an after-only update because MongoDB `_id` is immutable. Other missing old identities fail
+closed instead of leaving an unretracted row. Unknown relational fields also fail explicitly while
+automatic schema evolution is unsupported.
 
 WebSocket JSONB append-only mode creates each target as `data JSONB` without a primary key and
 stores the complete source record as the JSON document. It accepts insert events only. Update and
@@ -207,6 +226,8 @@ webhook secrets, signatures, and generated DDL are not logged by the connector.
 
 ```
 RisingWaveConnector.java    - PDK connector (init, DDL, DML, three write modes)
+RisingWaveCdcNormalizer.java - small adapter from TapData updates to complete target rows
+RisingWaveValueConverter.java - field-aware JDBC and WebSocket value conversion
 WsIngestClient.java         - WebSocket client (init, batch, ACK, HMAC signing)
 spec_risingwave.json        - Tapdata connector spec (form schema, i18n, data types)
 icons/risingwave.png        - Connector icon
@@ -216,17 +237,28 @@ docs/risingwave_zh_CN.md    - Chinese documentation
 
 ## Known limitations
 
-- JDBC keyed upsert requires a primary key and uses an explicit update-then-insert fallback because
-  RisingWave does not support PostgreSQL `ON CONFLICT`
+- JDBC keyed upsert uses an explicit update-then-insert compatibility path
 - WebSocket streaming rejects source models without a primary key; use JDBC mode for keyless tables
 - WebSocket JSONB append-only supports keyless inserts but not updates, deletes, or deduplicated retries
 - WebSocket JSONB append-only stores arbitrary-precision decimal/integer values as JSON strings
   so their exact value is preserved
 - JDBC updates on keyless tables use the full before image; retries remain at-least-once because
   a keyless row has no stable deduplication identity
+- Typed updates require a complete post-image. PostgreSQL/MySQL images must form the whole row;
+  MongoDB requires `enableFillingModifiedData=true` on the source task node
+- The legacy Kafka source connector used in qualification required
+  `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED` when TapData ran on Java 17;
+  this is a Kafka source/runtime requirement, not a RisingWave target requirement
+- That legacy Kafka source inferred arrays as `STRING`. JSONB mode preserved the source-emitted
+  value; native array typing still requires qualification with TapData's current Kafka connector
+- SQL Server remains unqualified and requires a supported TapData connector on an x86-64 test
+  environment; this is a source-matrix gap, not a reproduced RisingWave target failure
+- PostgreSQL updates with unavailable TOAST values fail if `before` and `after` cannot reconstruct
+  the column; the connector never guesses the missing value
+- Unknown relational fields fail explicitly because DDL/schema changes are not propagated
+  automatically; JSONB append-only documents may add nested document fields without target DDL
 - Array and composite PostgreSQL types are not mapped; they fall back to `text`
 - Webhook tables reject `NOT NULL`; streaming mode omits it in DDL
 - Existing plain tables cannot be upgraded to webhook tables in-place
-- DDL/schema changes are not propagated automatically
 - `varchar(N)` and `numeric(p,s)` are simplified for RisingWave compatibility
 - Target-only (cannot be used as a source)

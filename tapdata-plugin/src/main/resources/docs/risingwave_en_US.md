@@ -108,20 +108,30 @@ ingest route, signature configuration, and required target-table DDL privileges 
 5. **Target-only**: This connector can only be used as a target (sink), not as a source.
 6. **JSONB exact numbers use strings**: In JSONB append-only mode, arbitrary-precision decimal and
    integer values are stored as JSON strings because RisingWave JSON numbers can round them.
-7. **Streaming updates require a complete row**: RisingWave WebSocket upserts replace the full
-   row. When a source emits a partial update image, the connector reconstructs the complete row
-   from its `before` and `after` images. If neither image contains all target columns, the update
-   fails rather than silently converting absent columns to `NULL`. A source `removedFields` entry
-   for a top-level column is written as SQL `NULL`. Removing a nested field such as `profile.name`
-   requires the source to provide a complete post-image for the parent `profile` column. MySQL
-   sources must use `binlog_row_image=FULL`; TapData's MySQL CDC reader rejects `MINIMAL` row
-   images before they reach this target connector.
+7. **Typed updates require a complete row**: The connector creates one complete post-image from
+   the event's available `before`, `after`, and top-level `removedFields`, then gives that same row
+   to WebSocket or JDBC. If the event cannot safely form every target column, it fails rather than
+   guessing. Replace events treat `after` as authoritative, so omitted known columns become SQL
+   `NULL`. An after-only MongoDB event with a sole `_id` key uses the same rule and requires
+   TapData's full-document filling to be explicitly enabled with
+   `enableFillingModifiedData=true`. A nested removal such as `profile.name` must
+   include the complete post-image for `profile`. MySQL must use `binlog_row_image=FULL`; TapData
+   rejects `MINIMAL` images before they reach this connector. PostgreSQL updates with unavailable
+   TOAST values fail if the available images cannot reconstruct that column.
 8. **Large records have a frame limit**: The connector splits batches into ordered WebSocket
    payloads below 8 MiB. A single source record larger than that cannot be split safely and fails
    with an explicit error.
 9. **JDBC visibility barriers**: RisingWave applies JDBC inserts asynchronously. The connector
-   issues `FLUSH` only before an update or delete that depends on an unflushed insert, and at the
-   end of a write batch; independent updates and deletes can remain in the same batch.
+   conservatively issues `FLUSH` before a later update or delete while the current write batch has
+   an unflushed keyed insert, and at the end of the batch. Updates and deletes can remain in the
+   same batch when no insert is waiting to become query-visible.
 10. **Binary values in JSONB mode**: `byte[]` values are stored as JSON strings using PostgreSQL
     bytea hex text (`\\x<hex>`). JSONB has no native binary scalar, so consumers should decode this
     representation when they need the original bytes.
+11. **CDC identity and schema safety**: Keyed updates and deletes require the old primary-key
+    identity. An after-only update is accepted only for a sole `_id` primary key because MongoDB
+    `_id` is immutable; other missing old identities fail explicitly. Unknown relational fields
+    also fail while automatic schema evolution is unsupported, instead of being silently dropped.
+12. **Source qualification**: The exact `1.0.0` artifact has passed PostgreSQL, MySQL 8.4 with
+    `binlog_row_image=FULL`, MongoDB 7 with `enableFillingModifiedData=true`, and Kafka 3.9.1
+    through JSONB append-only mode. SQL Server has not yet been qualified.

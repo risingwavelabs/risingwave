@@ -1,19 +1,19 @@
 # TapData RisingWave Connector Historical Production Qualification
 
-Status date: 2026-07-15 (historical record)
+Status date: 2026-07-17 (active release qualification)
 Branch: `wenym1/tapdata-plugin`
-Baseline commit: `987970037a`
-Historical release artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`
+Baseline commit: `0d6491ac4a24` (release preparation remains uncommitted in the worktree)
+Release candidate: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`
 
-This document is the durable chronological execution record for an earlier production
-qualification. It records commands, observations, failures, fixes, and remaining risks. It does
-not certify the current branch or an unreleased artifact. The current development artifact is
-`target/risingwave-connector-1.0-SNAPSHOT.jar`; before release, rerun Cloud and CI qualification
-against the exact immutable artifact. Secrets and record payloads containing sensitive data must
-not be recorded here.
+This document is the durable chronological execution record for the connector's production
+qualification. It records commands, observations, failures, fixes, and remaining risks. Earlier
+dated sections remain historical evidence. The final release decision must be based on one exact,
+immutable `1.0.0` artifact recorded after the final build; the latest source-matrix artifact below
+is qualification evidence, not a substitute for recording the final canonical JAR. Secrets and
+record payloads containing sensitive data must not be recorded here.
 
 Later local hardening, not fully reflected in the historical entries below, includes named
-RisingWave Secret references, partial-update completion, qualified-schema WebSocket routing,
+RisingWave Secret references, a shared full-row CDC adapter, qualified-schema WebSocket routing,
 8 MiB WebSocket batch splitting, repeated reconnect fault injection, reduced JDBC `FLUSH` usage,
 and JSONB binary normalization. See `README.md` and the localized connector docs for current
 behavior and limitations.
@@ -27,8 +27,9 @@ behavior and limitations.
 | Data type compatibility matrix | Core scalar matrix passed after two fixes | P0 |
 | WebSocket versus JDBC benchmark | Passed locally; batch-size caveat documented in results | P0 |
 | TapData negative-task behavior | Passed for keyless and connection pre-check cases | P0 |
-| TLS and RisingWave Cloud | Passed against a current dev Cloud cluster over JDBC TLS and WSS | P0 |
-| Final code review and release packaging | Passed locally and on Cloud with the exact final artifact | P0 |
+| TLS and RisingWave Cloud | Passed against the dev Cloud cluster with the final canonical JAR over JDBC TLS and WSS | P0 |
+| Exact `1.0.0` source black-box matrix | Passed for PostgreSQL, MySQL `FULL`, MongoDB full-document filling, and Kafka JSONB; SQL Server remains unqualified | P0 |
+| Final code review and release packaging | Final canonical build and focused review passed; CI and official publication remain | P0 |
 
 ## Test Environment
 
@@ -105,14 +106,15 @@ Finding `BUILD-001`:
 
 ### 2026-07-16 - Source Update Images and WebSocket Payload Boundary
 
-Status: Passed for PostgreSQL, MySQL `FULL`, default MongoDB, and Kafka-to-JSONB;
+Status: Passed for PostgreSQL, MySQL `FULL`, MongoDB with explicit full-document filling, and
+Kafka-to-JSONB;
 SQL Server remains untested.
 
 Source matrix results:
 
 - PostgreSQL real CDC: insert, update of selected SQL columns, primary-key change, and delete
   previously passed against keyed WebSocket streaming. Unchanged target columns were preserved.
-- MongoDB default `enableFillingModifiedData=true`: a real TapData replication task passed
+- MongoDB with explicit `enableFillingModifiedData=true`: a real TapData replication task passed
   top-level update, nested update, top-level `$unset`, nested `$unset`, and delete. The connector
   fix treats an empty MongoDB `before` image as unavailable identity rather than a primary-key
   change; otherwise it would send `delete {}` before the valid upsert and RisingWave would reject
@@ -132,8 +134,8 @@ Source matrix results:
   deprecated Kafka connector required the test-only JVM option
   `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED` under Java 17; without it the
   source failed before target invocation with `IllegalAccessError` in `KafkaExceptionCollector`.
-  The source connector also converted nested JSON objects and arrays to JSON strings, so preserving
-  nested JSON structure requires qualification with TapData's current enhanced Kafka connector.
+  The installed source connector preserved nested JSON objects but inferred arrays as `STRING`, so
+  array typing requires separate qualification with TapData's current enhanced Kafka connector.
 - Keyed Kafka WebSocket streaming was rejected during target validation because the inferred Kafka
   model had no primary key. This is the expected behavior. Plain Kafka records should use JSONB
   append-only unless the source model supplies a real primary key and full-row update images.
@@ -154,21 +156,73 @@ Native WebSocket payload results:
   over 8 MiB fails locally with an explicit error because it cannot be split into independent DML
   records.
 
-Verification for the final local code in this pass:
+Cloud verification (2026-07-16, an isolated RisingWave Cloud dev cluster running v3.0.1,
+WSS via the managed RWProxy ingest path):
 
-- `mvn test`: 36 passed.
-- `mvn -Drisingwave.it=true -Dtest=RisingWaveConnectionTestIT test`: 32 passed with Java 17 and
+- The managed Cloud path enforces a smaller **10 MiB (10,485,760 byte)** single-frame read limit,
+  not the 16 MiB self-hosted default. A 10,485,837-byte frame closed with WebSocket code 1009 and
+  reason `read limited at 10485761 bytes`; a frame just under the limit (10,484,813 bytes) closed
+  with code 1006. The connector's 8 MiB safety limit stays safely below both boundaries.
+- ACK latency grows with frame size on Cloud: a ~10 MiB batch took ~18-23 seconds to ACK. Large
+  frames need a generous client ACK timeout (at least 30 seconds).
+- Repeated reconnect (5 fresh connections, one batch each) all ACKed normally.
+- ACK-loss replay idempotency holds on Cloud: a keyed upsert sent, then abandoned before its ACK,
+  then replayed on a fresh connection, left exactly one target row per primary key (6 rows, 6
+  distinct ids after five basic reconnects plus one replayed key). This matches the local
+  keyed-streaming idempotency result.
+
+Verification for this pre-canonical local artifact:
+
+- `mvn -o clean test`: 40 passed, including eight contract-level CDC adapter tests and
+  field-aware JSONB/timestamp conversion tests.
+- `mvn -o -Drisingwave.it=true -Dtest=RisingWaveConnectionTestIT test`: 33 passed with
   `-DsocksNonProxyHosts='localhost|127.*'` to bypass the host's configured SOCKS proxy.
-- `mvn package -DskipTests`: passed.
-- TapData source-matrix tasks and temporary source/target databases were removed after the run.
+- The CDC adapter now has one output contract: a complete target row, the old row filter, and
+  whether the primary key changed. WebSocket and JDBC consume the same row. The live cases cover
+  authoritative replace in both modes, keyed and keyless JDBC updates, primary-key changes, JDBC
+  JSONB binding, invalid-new-key preservation, and timezone-bearing `TapDateTime`.
+- `mvn -o clean test package`: passed; the 3,860,075-byte shaded JAR SHA-256 is
+  `c75ad18270b9f2e00688e90ab9239fce94947466c5beee7017e7e04b4e169975`.
+- This `c75ad...` artifact preceded the later source-matrix build and is retained only as
+  historical qualification evidence; it is not the final canonical release JAR.
+- Post-suite cleanup verification found zero `public.tapdata_%` temporary tables.
+- Registered that exact 3,860,075-byte JAR in the local TapData container, restarted the Agent, and
+  confirmed the target connection was pinned to the registered PDK hash. A PostgreSQL-to-RisingWave
+  WebSocket Data Replication task passed initial snapshot and incremental CDC with this artifact.
+- The exact-artifact CDC sequence updated only `title` for id 1 while retaining `quantity = 11`,
+  inserted id 33, changed the primary key from 22 to 23 while retaining `quantity = 22`, and deleted
+  id 33. RisingWave ended with exactly `(1, final-artifact-cdc, 11)` and
+  `(23, moved-final, 22)`. The task log recorded successful initial sync and incremental startup;
+  TapData remained in `CDC` with zero recorded error events and then reached `stop` through the
+  normal batch Stop API while retaining those target rows for inspection.
+- The first exact-artifact start failed before connector write execution because the configured
+  target schema had been removed by test-environment cleanup. Recreating the required schema and
+  performing reset-then-start made the same task pass; target schema auto-creation is not a
+  connector capability.
+- The MySQL/MongoDB/Kafka matrix was subsequently rerun against the source-matrix `1.0.0` JAR; see the
+  final 2026-07-16 section. SQL Server remains an external x86-64 qualification item.
 
 Release observations:
 
 - Re-registering changed Java code under the same connector metadata hash can leave TapData Agent
   using a cached old JAR. Release artifacts must use an immutable, non-SNAPSHOT version; upgrade
   testing must verify the loaded artifact checksum after Agent restart.
-- The current `1.0-SNAPSHOT` connector and `2.0.8-SNAPSHOT` PDK dependencies still require an
-  explicit release-version and CI decision before publication.
+- The first external connector version is confirmed as `1.0.0`; no earlier `1.0.0` artifact was
+  published. Publication/approval is still required for Create Connection visibility.
+- The current TapData runtime and official connector sources use `2.0.8-SNAPSHOT` PDK/API
+  dependencies. The local build resolved both direct APIs to unique build
+  `2.0.8-20260624.021218-4`; their SHA-256 values are
+  `02aae136b83b0a5105cdc9a9e7b923081a011d2f3a47a27a2ea0519151177bc4` for `tapdata-pdk-api`
+  and `6a6a4c9ff6f92c3a610303cf17b299951c1f129b5cbb6bdc223f75f26f9bb399` for `tapdata-api`.
+  Pinning only those two timestamped artifacts is not a complete immutable graph because their
+  parent/transitive PDK artifacts still use SNAPSHOT coordinates.
+- Release policy is to retain TapData's runtime-compatible `2.0.8-SNAPSHOT` convention while
+  recording the resolved timestamped dependency set and checksums together with the final connector
+  JAR checksum. The POM now uses one `tapdata.version` property for dependencies and manifest
+  metadata. This does not make the upstream transitive graph intrinsically immutable; the recorded
+  resolution is the reproducibility boundary for this release.
+- The ARM64 MySQL 8.4, MongoDB 7, and Kafka 3.9.1 black-box matrix completed against the source-matrix
+  `1.0.0` artifact. SQL Server remains an external x86-64 qualification item.
 
 ### 2026-07-14 - TapData Runtime Restart
 
@@ -531,9 +585,10 @@ TapData registration and black-box result:
    connection also became `ready`, reported `definitionVersion=1.0.0`, and completed schema loading.
 7. Deleted both temporary connections and dropped the temporary Cloud schema.
 8. A later documentation-only change reordered the displayed write modes to streaming, JSONB, and
-   JDBC. A clean build and all 17 unit tests passed afterward, producing the current artifact hash
-   above. Connector code and runtime behavior did not change, so the Cloud pre-check was not
-   repeated for this wording-only rebuild.
+   JDBC. A clean build and all 17 unit tests passed afterward, producing the then-current artifact
+   hash above. Connector code and runtime behavior did not change, so the Cloud pre-check was not
+   repeated for this wording-only rebuild. This remains historical Cloud evidence rather than a
+   run of the final canonical JAR.
 
 Earlier registered-`1.0.0` checkpoint replication task:
 
@@ -616,9 +671,9 @@ Review findings and fixes:
   immediately. A deterministic unit test covers the close boundary.
 - `JDBC-DML-001`: the fallback used PostgreSQL `ON CONFLICT`, which RisingWave does not support,
   and update/delete behavior was incorrect for primary-key changes and keyless before images. JDBC
-  now performs manual keyed upsert, uses delete-before-upsert for identity changes, filters keyless
-  updates by the full before image including `IS NULL`, and establishes `FLUSH` visibility
-  boundaries.
+  now performs manual keyed upsert, writes the new row before deleting the old identity for key
+  changes, filters keyless updates by the full before image including `IS NULL`, and establishes
+  `FLUSH` visibility boundaries.
 - `JDBC-BATCH-001`: two inserts for the same primary key in one TapData batch could both observe the
   row as absent before RisingWave made the first DML visible. The connector now tracks pending keyed
   identities and flushes only when a key repeats, retaining normal batch throughput. A live test
@@ -641,8 +696,9 @@ Final verification on the exact source tree:
 - `git diff --check` and JSON parsing of both source and embedded `spec_risingwave.json` passed.
 - JAR audit found the PostgreSQL driver, 1,175 relocated Jackson entries, zero unrelocated Jackson
   classes, and no bundled TapData PDK/entity API classes.
-- The exact final JAR passed local and RisingWave Cloud TapData connection pre-checks as described
-  above.
+- The then-current qualification JAR passed local and RisingWave Cloud TapData connection
+  pre-checks as described above. Later connector changes mean this is not evidence that the final
+  canonical JAR itself passed Cloud.
 
 ### 2026-07-14 - Local Qualification Environment Cleanup
 
@@ -731,17 +787,21 @@ Deferred or external:
 - CI integration remains deferred pending Wenym's confirmation.
 - No commit, push, PR, version bump, or connector publication was performed in this pass.
 
-## Release Decision
+## Historical Release Decision (Superseded)
 
-Connector-controlled production qualification passed. The `1.0.0` artifact is ready for a
-controlled production pilot and the normal code review, CI, and TapData connector
-publication/approval process.
+This checkpoint was the decision at the end of the 2026-07-14 qualification pass. Later CDC,
+packaging, and release-preparation changes supersede it; use the latest dated section and the final
+canonical artifact record for the current decision.
 
-All P0 connector gates passed locally and against RisingWave Cloud, including connection pre-check,
-TLS, WSS, full sync, incremental insert, primary-key update, delete, exact scalar serialization,
-restart/recovery, ACK-loss behavior, and clean task shutdown. `LIFECYCLE-001` remains a P1 TapData
-operational observation because earlier tasks occasionally needed force-stop, but both final
-`1.0.0` local and Cloud tasks stopped normally.
+At this checkpoint, connector-controlled production qualification had passed and the then-current
+`1.0.0` artifact was considered ready for a controlled production pilot and the normal code review,
+CI, and TapData connector publication/approval process.
+
+The checkpoint covered local and RisingWave Cloud connection pre-check, TLS, WSS, full sync,
+incremental insert, primary-key update, delete, exact scalar serialization, restart/recovery,
+ACK-loss behavior, and clean task shutdown. `LIFECYCLE-001` remained a P1 TapData operational
+observation because earlier tasks occasionally needed force-stop, although the checkpoint's local
+and Cloud tasks both stopped normally.
 
 The qualification pass itself preceded the conventional commits. No CI submission or release
 publication has been performed.
@@ -836,4 +896,159 @@ Status: Implemented and verified locally; final package/review gate pending.
 - Verified that `SHOW CREATE TABLE` contains the Secret reference but not its value, managed Secret
   rotation works across connector restart, a user-managed Secret is not dropped, and all test-created
   Secrets are cleaned up.
-- Current automated results: 28 unit tests passed and 27 live RisingWave integration tests passed.
+- Automated results at this historical checkpoint: 28 unit tests passed and 27 live RisingWave
+  integration tests passed.
+
+### 2026-07-16 - Source-matrix 1.0.0 Build and Exact-artifact Qualification
+
+Status: Passed for the connector-controlled release gates. SQL Server, CI, and official TapData
+publication remain external follow-up items.
+
+Source-matrix artifact (superseded as the final distributable by the 2026-07-17 artifact below):
+
+- Source baseline before the uncommitted release changes: `0d6491ac4a24047d8998a93518e64e7e51d93735`.
+- Built with Maven 3.9.16 and OpenJDK 17.0.19 using
+  `mvn -o clean test package`; all 40 unit tests passed.
+- Artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`.
+- Size: 3,860,008 bytes.
+- SHA-256: `bb3b0b6ca48e808de863c53c24704a56fa68731a94244afca4632a082323b8d3`.
+- Manifest: Java release 11, build JDK 17, `Implementation-Version: 1.0.0`, and TapData PDK/API
+  version `2.0.8-SNAPSHOT`.
+- JAR audit: PostgreSQL driver present, 1,175 relocated Jackson entries, zero original Jackson
+  entries, and zero packaged TapData PDK/API classes.
+- The 13 resolved TapData dependency JAR/POM checksums in `release/` all verified successfully.
+- Local live pre-check suite passed 33/33 with the same JDK 17 toolchain.
+
+Registration and orchestration:
+
+- Registered this exact file in `tapdata-clean`. TapData stored connector version `1.0.0`, PDK hash
+  `dac3848e10c8e497d703fe2db082a0b57103f77ce9bf9dca0eb471ed95beef30`, and the exact
+  3,860,008-byte GridFS payload.
+- Local private registration initially left `latest=false`; setting only this release definition
+  to `latest=true` was acceptance-test setup, not the production publication procedure.
+- An existing UI-created target had previously been upgraded in place from `1.0-SNAPSHOT` to
+  `1.0.0`. TapData includes the connector version in database metadata qualified names, so the
+  test harness added one reversible matching `1_0_0` database-metadata row before reusing that
+  target. This repaired local orchestration only and did not change connector code or test data.
+- New source and JSONB target connections used the supported `submit=true` path and reached
+  `status=ready`, `loadFieldsStatus=finished`, and a non-empty `schemaVersion` before task creation.
+  Tasks were copied and confirmed through TapData APIs; no task status was manually forced.
+
+Exact-artifact black-box results:
+
+- PostgreSQL keyed streaming: the initial snapshot matched the two-row source. A temporary row was
+  inserted, updated from `(rc100-insert, 10)` to `(rc100-updated, 11)`, and deleted; RisingWave
+  observed each state and ended with zero rows for that temporary identity.
+- MySQL 8.4 keyed streaming: the server used `ROW` binlogs with
+  `binlog_row_image=FULL`. The two-row snapshot matched. Updating only `quantity` from 30 to 31
+  preserved `name=mysql-insert` and `note=keep-me`; delete propagated to zero rows.
+- MongoDB 7 keyed streaming: a replica-set source task explicitly used
+  `enableFillingModifiedData=true`. The two-document snapshot matched. A partial `$set` preserved
+  untouched fields, `$unset` mapped the removed top-level field to SQL `NULL`, a replace event
+  omitted the previous field without retaining stale data, and delete propagated to zero rows.
+- Kafka 3.9.1 JSONB append-only: the target was created with exactly one `data JSONB` column. Two
+  existing topic records were loaded and a third record produced during incremental sync raised
+  the count to three. The nested object was preserved. The installed Kafka source inferred the
+  array field as `STRING`, and the target preserved that source-emitted value unchanged.
+- The Kafka source connector on Java 17 required
+  `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED`; without it the source fails
+  before invoking the RisingWave target. This is a TapData Kafka connector/runtime requirement.
+- All four exact-artifact tasks reached `running`, performed the expected writes, recorded no task
+  error event during the accepted run, and stopped through the normal TapData Stop API.
+
+Historical next steps from this checkpoint:
+
+- Build and record the final canonical `1.0.0` JAR after all release edits, then rerun the Cloud
+  connection pre-check with that exact file before claiming final-artifact Cloud qualification.
+- Run normal repository review and CI once Wenym confirms the CI lane.
+- Publish/approve `1.0.0` through TapData's official connector distribution process; do not ship
+  the local `latest=true` database override.
+- Qualify SQL Server on a supported x86-64 environment when available. This is an external source
+  matrix gap, not a reproduced RisingWave target failure.
+
+### 2026-07-17 - Final Canonical 1.0.0 Release Candidate
+
+Status: Passed all locally executable connector-controlled release gates. The candidate is ready
+for conventional commits and code review. Repository CI, official TapData publication/approval,
+and SQL Server source qualification remain external gates.
+
+Canonical artifact:
+
+- Source baseline before the uncommitted release worktree: `0d6491ac4a24047d8998a93518e64e7e51d93735`.
+- Built with Maven 3.9.16 and OpenJDK 17.0.19 using `mvn -o clean test package`.
+- Artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`.
+- Size: 3,860,286 bytes.
+- SHA-256: `a03a9128436e9584f745a3390aecb9e94e18b78b5196571133c4bb81c81f2d84`.
+- GridFS/local MD5: `26adbd61feda1754a7bc475c358d8e4d`.
+- Manifest build time: `2026-07-17T04:13:01+0000`; Java release 11; build JDK 17;
+  `Implementation-Version: 1.0.0`; TapData PDK/API `2.0.8-SNAPSHOT`.
+- `release/risingwave-connector-1.0.0.sha256` records this exact distributable. Rebuilding changes
+  the embedded timestamp and requires a new checksum and qualification record.
+
+Final fixes after the source matrix:
+
+- Existing typed WebSocket tables now use the same validation as JSONB tables: the connector
+  rejects unsigned tables when a secret is configured, rejects a different Secret reference, and
+  accepts and rotates the value only when the configured Secret name matches.
+- Secret reference matching follows SQL identifier rules. Quoted identifiers remain
+  case-sensitive; unquoted identifiers use lowercase folding; prefix and `$` continuation names
+  cannot produce false matches.
+- PDK target type expressions now distinguish `TapDateTime.withTimeZone(false)` from
+  `withTimeZone(true)`. The real PDK generator maps them to `timestamp without time zone` and
+  `timestamp with time zone` respectively. PostgreSQL-style precision suffixes such as
+  `timestamp(6)` are intentionally not generated because RisingWave does not accept them.
+- WebSocket and JDBC conversion now preserve a civil value for plain `timestamp` and emit an
+  ISO-8601 offset only for `timestamptz` (or an untyped JSONB document).
+
+Final verification:
+
+- A focused pre-freeze live test rejected the first timestamp-mapping candidate because it
+  generated PostgreSQL-style `timestamp(6)` DDL, which RisingWave does not parse. That candidate
+  was withdrawn before publication. The spec now generates the supported no-precision forms, the
+  focused scalar round trip passed, and the complete unit/live/package sequence was rerun.
+- Clean unit/package run: 43 tests, 0 failures, 0 errors, 0 skipped.
+- Live local RisingWave suite: 36 tests, 0 failures, 0 errors, 0 skipped. This includes the three
+  existing-table Secret cases and a real plain-timestamp/timestamptz WebSocket round trip.
+- `spec_risingwave.json` parsed successfully and the unit suite exercised its actual PDK target
+  type mapping rather than a connector-local approximation.
+- JAR audit: 534 PostgreSQL entries, 1,175 relocated Jackson entries, zero original Jackson
+  entries, zero packaged TapData PDK/API classes, zero signature files, and zero `module-info`
+  classes.
+- All 13 frozen TapData dependency JAR/POM checksums for timestamped build
+  `2.0.8-20260624.021218-4` verified successfully.
+- The known payload-size implementation remains intentionally unchanged: its repeated size
+  calculation is quadratic in operation count, but normal TapData batches are small and the
+  correctness-preserving 8 MiB split is already covered. Optimize only with benchmark evidence.
+
+Exact-artifact TapData verification:
+
+1. TapData correctly rejected overwriting the existing local non-SNAPSHOT `1.0.0`. Because no
+   `1.0.0` was ever published externally, only the stale local test definition was removed and the
+   final file was registered as the first release candidate.
+2. TapData stored version `1.0.0`, the same connector metadata hash
+   `dac3848e10c8e497d703fe2db082a0b57103f77ce9bf9dca0eb471ed95beef30`, and an exact
+   3,860,286-byte GridFS payload whose MD5 matches the canonical local file. The PDK hash is a
+   definition hash, not a JAR-byte checksum; the SHA-256 above is the artifact identity.
+3. `pdk-deploy register` uploaded the original bytes but instrumented its `/tmp` input copy after
+   upload. The canonical repo artifact and GridFS payload remained byte-identical; checksum the
+   canonical JAR, not the post-deploy temporary copy.
+4. The Agent's old same-hash cache was removed in the local harness, and the dist-cache file was
+   verified at 3,860,286 bytes with the canonical SHA-256 before restart. This cache operation is
+   local acceptance setup, not a production publication procedure.
+5. Using the official TapFlow SDK and the user-provided access code, a temporary local connection
+   reached `status=ready`, `loadFieldsStatus=finished`, `definitionVersion=1.0.0`, and a non-empty
+   `schemaVersion`; it was then deleted.
+6. The same final loaded JAR passed a temporary RisingWave Cloud dev-cluster pre-check over JDBC
+   `sslmode=require` and WSS. The connection reached the same ready/finished/version/schema state.
+   The temporary connection and isolated Cloud schema were deleted afterward.
+
+Release decision:
+
+- Proceed with the three planned conventional commits and reviewer handoff.
+- Require repository CI before merge/public distribution.
+- Publish/approve `1.0.0` through TapData's official connector channel; never distribute the local
+  `latest=true` database override or depend on same-version replacement.
+- Archive the frozen TapData dependency subset with the canonical JAR in an immutable internal
+  artifact store.
+- Keep SQL Server outside the qualified `1.0.0` source matrix until the planned x86-64 test is run;
+  this is an explicit coverage gap, not a reproduced target-connector defect.
