@@ -31,7 +31,6 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::BarrierManagerRequest::MayHaveCreatingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
@@ -152,14 +151,6 @@ impl GlobalBarrierManager {
             .context("failed to send update database barrier request")?;
         rx.await.context("failed to wait update database barrier")?;
         Ok(())
-    }
-
-    pub async fn may_have_creating_job(&self) -> MetaResult<bool> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx
-            .send(MayHaveCreatingJob(tx))
-            .context("failed to send has creating job request")?;
-        Ok(rx.await.context("failed to wait has creating job")?)
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
