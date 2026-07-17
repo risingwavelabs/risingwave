@@ -84,6 +84,11 @@ impl JsonbArrayBuilder {
         JsonbWriter::new(self)
     }
 
+    /// Appends the standalone jsonbb encoding of `value`.
+    ///
+    /// A jsonbb value is encoded as its data followed by a four-byte root entry. `to_raw_parts`
+    /// rebuilds that entry relative to the returned data slice, which also makes a nested
+    /// `JsonbRef` independent from the value it was extracted from.
     fn append_value(&mut self, value: JsonbRef<'_>) {
         let (entry, data) = value.0.to_raw_parts();
         let mut writer = self.bytes.writer();
@@ -242,7 +247,7 @@ impl JsonbWriter<'_> {
             builder,
         } = self;
         let value = builder.finish();
-        array_builder.append_encoded(value.as_bytes());
+        array_builder.append_value(JsonbRef(value.as_ref()));
     }
 
     /// Discards the partially built value.
@@ -285,6 +290,26 @@ mod tests {
 
         let decoded = JsonbArray::from_protobuf(&protobuf, array.len()).unwrap();
         assert_eq!(decoded.as_jsonb(), &array);
+    }
+
+    #[test]
+    fn test_append_value_matches_jsonbb_encoding() {
+        let values = [
+            json("null"),
+            json("true"),
+            json("42"),
+            json(r#""text""#),
+            json("[1, 2, 3]"),
+            json(r#"{"a": [1, true]}"#),
+        ];
+        let expected = values
+            .iter()
+            .flat_map(|value| value.0.as_bytes())
+            .copied()
+            .collect::<Vec<_>>();
+
+        let array = JsonbArray::from_iter(values);
+        assert_eq!(array.to_protobuf().values[1].body, expected);
     }
 
     #[test]
