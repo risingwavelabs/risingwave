@@ -52,7 +52,6 @@ enum CompactionTrackState {
     /// Task has been selected locally but not yet accepted by a compactor.
     PendingDispatch {
         task_type: TaskType,
-        next_compaction_time_on_failure: Instant,
         pending_commit_count_at_dispatch: usize,
         gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
     },
@@ -199,13 +198,12 @@ impl CompactionTrack {
     fn start_processing(&mut self) -> TaskType {
         match &mut self.state {
             CompactionTrackState::Idle {
-                next_compaction_time,
                 next_task_type_override,
+                ..
             } => {
                 let task_type = next_task_type_override.take().unwrap_or(self.task_type);
                 self.state = CompactionTrackState::PendingDispatch {
                     task_type,
-                    next_compaction_time_on_failure: *next_compaction_time,
                     pending_commit_count_at_dispatch: self.pending_commit_count,
                     gc_watermark_snapshot: self.latest_observed_snapshot.clone(),
                 };
@@ -353,19 +351,22 @@ impl CompactionTrack {
         }
     }
 
-    /// Restore the idle scheduling state after a pre-dispatch failure.
+    /// Re-queue the track as idle after a pre-dispatch failure.
     ///
     /// `pending_commit_count` is intentionally preserved so commits that arrive
     /// while the track is pending dispatch are not lost if task dispatch fails
     /// before the compactor accepts the task.
-    fn revert_pre_dispatch_failure(&mut self) -> CompactionTrackFinishAction {
+    ///
+    /// `next_compaction_time` is reset to `now` (like `finish_failed`) rather
+    /// than restored: candidates are dispatched in ascending order of this
+    /// field, so restoring a stale timestamp would let a repeatedly-failing
+    /// track sort ahead of every healthy sink and permanently monopolize
+    /// dispatch slots.
+    fn revert_pre_dispatch_failure(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
-            CompactionTrackState::PendingDispatch {
-                next_compaction_time_on_failure,
-                ..
-            } => {
+            CompactionTrackState::PendingDispatch { .. } => {
                 self.state = CompactionTrackState::Idle {
-                    next_compaction_time: *next_compaction_time_on_failure,
+                    next_compaction_time: now,
                     next_task_type_override: None,
                 };
                 self.finish_action
@@ -509,7 +510,7 @@ impl Drop for IcebergCompactionHandle {
                 && let Some(track) = guard.sink_schedules.get_mut(&self.sink_id)
                 && track.is_pending_dispatch()
             {
-                let finish_action = track.revert_pre_dispatch_failure();
+                let finish_action = track.revert_pre_dispatch_failure(Instant::now());
                 let waiter = guard.manual_compaction_waiters.remove(&self.sink_id);
                 IcebergCompactionManager::apply_track_finish_action(
                     &mut guard,
