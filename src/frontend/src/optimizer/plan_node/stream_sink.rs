@@ -34,7 +34,7 @@ use risingwave_connector::sink::{
     SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     SINK_USER_IGNORE_DELETE_OPTION, SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
 };
-use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::SinkLogStoreType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -605,6 +605,7 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink_desc.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
+                            sink_desc.properties.remove(AUTO_SCHEMA_CHANGE_KEY);
                             SinkType::set_default_commit_checkpoint_interval(
                                 &mut sink_desc,
                                 &input.ctx().session_ctx().config().sink_decouple(),

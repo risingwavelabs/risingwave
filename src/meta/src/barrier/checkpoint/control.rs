@@ -231,10 +231,10 @@ impl CheckpointControl {
             .map(|database| &database.database_info)
     }
 
-    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+    pub(crate) fn may_have_creating_jobs(&self) -> bool {
         self.databases
             .values()
-            .any(|database| database.may_have_snapshot_backfilling_jobs())
+            .any(|database| database.may_have_creating_jobs())
     }
 
     /// return Some(failed `database_id` -> `err`)
@@ -706,13 +706,14 @@ impl DatabaseCheckpointControlStatus {
         }
     }
 
-    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
+    fn may_have_creating_jobs(&self) -> bool {
         self.running_state()
             .map(|database| {
-                database
-                    .independent_checkpoint_job_controls
-                    .values()
-                    .any(|job| job.is_snapshot_backfilling())
+                database.database_info.has_creating_jobs()
+                    || database
+                        .independent_checkpoint_job_controls
+                        .values()
+                        .any(|job| job.is_snapshot_backfilling())
             })
             .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }

@@ -54,6 +54,8 @@ impl UnknownFields for FsConfig {
     }
 }
 
+crate::impl_sink_unknown_fields!(FsConfig);
+
 pub const FS_SINK: &str = "fs";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
