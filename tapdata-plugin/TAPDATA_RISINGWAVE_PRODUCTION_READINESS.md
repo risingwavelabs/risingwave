@@ -977,10 +977,10 @@ Canonical artifact:
 - Source baseline before the uncommitted release worktree: `0d6491ac4a24047d8998a93518e64e7e51d93735`.
 - Built with Maven 3.9.16 and OpenJDK 17.0.19 using `mvn -o clean test package`.
 - Artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`.
-- Size: 3,860,286 bytes.
-- SHA-256: `a03a9128436e9584f745a3390aecb9e94e18b78b5196571133c4bb81c81f2d84`.
-- GridFS/local MD5: `26adbd61feda1754a7bc475c358d8e4d`.
-- Manifest build time: `2026-07-17T04:13:01+0000`; Java release 11; build JDK 17;
+- Size: 3,860,987 bytes.
+- SHA-256: `45b2e599cb14f7a371afb0a6f7562e39645248635dd51275be572098404111e9`.
+- GridFS/local MD5: `5c500aed8c41ba9f0d116e91d0d034ac`.
+- Manifest build time: `2026-07-17T08:26:13+0000`; Java release 11; build JDK 17;
   `Implementation-Version: 1.0.0`; TapData PDK/API `2.0.8-SNAPSHOT`.
 - `release/risingwave-connector-1.0.0.sha256` records this exact distributable. Rebuilding changes
   the embedded timestamp and requires a new checksum and qualification record.
@@ -999,6 +999,13 @@ Final fixes after the source matrix:
   `timestamp(6)` are intentionally not generated because RisingWave does not accept them.
 - WebSocket and JDBC conversion now preserve a civil value for plain `timestamp` and emit an
   ISO-8601 offset only for `timestamptz` (or an untyped JSONB document).
+- Connector configuration rejects unknown write modes and accepts integral numeric port values
+  such as `4566.0`, while still rejecting fractional or out-of-range ports.
+- CDC identity resolution now honors PDK model-level default primary keys when a source does not
+  mark the corresponding field objects individually.
+- The advertised DML policies now contain only implemented behavior. WebSocket payload splitting
+  calculates each operation's UTF-8 size once, preserving the exact 8 MiB limit without quadratic
+  re-serialization cost.
 
 Final verification:
 
@@ -1006,8 +1013,8 @@ Final verification:
   generated PostgreSQL-style `timestamp(6)` DDL, which RisingWave does not parse. That candidate
   was withdrawn before publication. The spec now generates the supported no-precision forms, the
   focused scalar round trip passed, and the complete unit/live/package sequence was rerun.
-- Clean unit/package run: 43 tests, 0 failures, 0 errors, 0 skipped.
-- Live local RisingWave suite: 36 tests, 0 failures, 0 errors, 0 skipped. This includes the three
+- Clean unit/package run: 48 tests, 0 failures, 0 errors, 0 skipped.
+- Live local RisingWave suite: 37 tests, 0 failures, 0 errors, 0 skipped. This includes the three
   existing-table Secret cases and a real plain-timestamp/timestamptz WebSocket round trip.
 - `spec_risingwave.json` parsed successfully and the unit suite exercised its actual PDK target
   type mapping rather than a connector-local approximation.
@@ -1016,9 +1023,9 @@ Final verification:
   classes.
 - All 13 frozen TapData dependency JAR/POM checksums for timestamped build
   `2.0.8-20260624.021218-4` verified successfully.
-- The known payload-size implementation remains intentionally unchanged: its repeated size
-  calculation is quadratic in operation count, but normal TapData batches are small and the
-  correctness-preserving 8 MiB split is already covered. Optimize only with benchmark evidence.
+- A 2,000-operation, approximately 1 KiB/operation payload split benchmark fell from about
+  1.7-1.8 seconds to an 8.2 ms median after removing repeated prefix serialization. Unit tests
+  cover exact UTF-8 boundaries, multibyte data, single-operation overflow, and ordering.
 
 Exact-artifact TapData verification:
 
@@ -1027,24 +1034,40 @@ Exact-artifact TapData verification:
    final file was registered as the first release candidate.
 2. TapData stored version `1.0.0`, the same connector metadata hash
    `dac3848e10c8e497d703fe2db082a0b57103f77ce9bf9dca0eb471ed95beef30`, and an exact
-   3,860,286-byte GridFS payload whose MD5 matches the canonical local file. The PDK hash is a
+   3,860,987-byte GridFS payload whose MD5 matches the canonical local file. The PDK hash is a
    definition hash, not a JAR-byte checksum; the SHA-256 above is the artifact identity.
 3. `pdk-deploy register` uploaded the original bytes but instrumented its `/tmp` input copy after
    upload. The canonical repo artifact and GridFS payload remained byte-identical; checksum the
    canonical JAR, not the post-deploy temporary copy.
-4. The Agent's old same-hash cache was removed in the local harness, and the dist-cache file was
-   verified at 3,860,286 bytes with the canonical SHA-256 before restart. This cache operation is
+4. The Agent's old same-hash cache and all temporary review JARs were removed in the local harness.
+   The only remaining connector cache file was verified at 3,860,987 bytes with the canonical
+   SHA-256 before restart. This cache operation is
    local acceptance setup, not a production publication procedure.
-5. Using the official TapFlow SDK and the user-provided access code, a temporary local connection
-   reached `status=ready`, `loadFieldsStatus=finished`, `definitionVersion=1.0.0`, and a non-empty
-   `schemaVersion`; it was then deleted.
+5. A fresh local connection reached `status=ready`, `loadFieldsStatus=finished`,
+   `definitionVersion=1.0.0`, and a non-empty `schemaVersion`. Connection, version, schema,
+   webhook-table create/drop, signed WebSocket init, DML, and ACK checks all passed using the
+   Agent-downloaded JAR whose SHA-256 matched the canonical artifact.
 6. The same final loaded JAR passed a temporary RisingWave Cloud dev-cluster pre-check over JDBC
    `sslmode=require` and WSS. The connection reached the same ready/finished/version/schema state.
    The temporary connection and isolated Cloud schema were deleted afterward.
 
+Final exact-artifact replication black box:
+
+- The local TapData version uses `POST /Task` for creation. The checked-in TapShell still uses the
+  obsolete `PATCH /Task` create path, which fails before scheduling with a null task-id permission
+  check; the test used TapShell's generated DAG with the current POST/confirm/start APIs.
+- PostgreSQL to RisingWave WebSocket streaming reached `running`. Table initialization, snapshot,
+  and CDC milestones completed without a task error. The two-row snapshot matched exactly.
+- A keyed insert became query-visible in about 2 seconds, an update of two non-key columns became
+  visible in about 2 seconds, and the delete became visible in about 3 seconds.
+- The normal Stop API completed with no task error. Target connector shutdown and resource release
+  took 14 ms; the longer overall stop was PostgreSQL CDC/Hazelcast task finalization.
+- The temporary task and generated RisingWave table were deleted after verification so the local
+  harness contains no stale release-acceptance task.
+
 Release decision:
 
-- Proceed with the three planned conventional commits and reviewer handoff.
+- Proceed with conventional commits and reviewer handoff.
 - Require repository CI before merge/public distribution.
 - Publish/approve `1.0.0` through TapData's official connector channel; never distribute the local
   `latest=true` database override or depend on same-version replacement.
