@@ -7,6 +7,10 @@ fn decode_bytes(s: &str) -> Option<Vec<u8>> {
     s.chars().map(|c| c.try_into().ok()).collect()
 }
 
+fn from_str<T: std::str::FromStr>(j: &J) -> Option<T> {
+    j.as_str().and_then(|s| s.parse::<T>().ok())
+}
+
 pub fn decode_default(s: &Schema, names: &NamesRef<'_>, j: &J) -> Option<Value> {
     use serde::Deserialize as D;
 
@@ -25,8 +29,12 @@ pub fn decode_default(s: &Schema, names: &NamesRef<'_>, j: &J) -> Option<Value> 
         | Schema::LocalTimestampMillis
         | Schema::LocalTimestampMicros
         | Schema::LocalTimestampNanos => Some(Value::Long(D::deserialize(j).ok()?)),
-        Schema::Float => Some(Value::Float(D::deserialize(j).ok()?)),
-        Schema::Double => Some(Value::Double(D::deserialize(j).ok()?)),
+        Schema::Float => Some(Value::Float(
+            D::deserialize(j).ok().or_else(|| from_str(j))?,
+        )),
+        Schema::Double => Some(Value::Double(
+            D::deserialize(j).ok().or_else(|| from_str(j))?,
+        )),
         Schema::Bytes | Schema::Decimal(_) | Schema::BigDecimal => {
             j.as_str().and_then(decode_bytes).map(Value::Bytes)
         }

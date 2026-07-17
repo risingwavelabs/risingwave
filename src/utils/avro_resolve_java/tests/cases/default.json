@@ -27,7 +27,7 @@
             {
                 "name": "f3",
                 "type": "float",
-                "default": 0.1
+                "default": "-Infinity"
             },
             {
                 "name": "f4",
