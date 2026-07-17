@@ -135,7 +135,7 @@ impl CreatingStreamingJobControl {
             &fragment_infos,
             backfill_order_state,
             version_stat,
-        )?;
+        );
 
         let actors_to_create = Command::create_streaming_job_actors_to_create(
             &info,
@@ -533,7 +533,7 @@ impl CreatingStreamingJobControl {
             &info.fragment_infos,
             backfill_order_state,
             version_stat,
-        )?;
+        );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
@@ -768,19 +768,6 @@ impl CreatingStreamingJobControl {
             max(self.max_committed_epoch.unwrap_or(0), self.snapshot_epoch),
             self.snapshot_backfill_upstream_tables.clone(),
         )
-    }
-
-    pub(super) fn pinned_snapshot_epochs(&self) -> Option<&HashMap<TableId, HashSet<u64>>> {
-        match &self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                ..
-            } => Some(create_mview_tracker.pinned_snapshot_epochs()),
-            CreatingStreamingJobStatus::ConsumingLogStore { .. }
-            | CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..)
-            | CreatingStreamingJobStatus::PlaceHolder => None,
-        }
     }
 
     fn inject_barrier(

@@ -231,30 +231,6 @@ impl CheckpointControl {
             .map(|database| &database.database_info)
     }
 
-    pub(crate) fn pinned_snapshot_epochs(&self) -> Option<HashMap<TableId, HashSet<u64>>> {
-        let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
-        for database in self.databases.values() {
-            let database = database.running_state()?;
-            for (&table_id, epochs) in database.database_info.pinned_snapshot_epochs() {
-                pinned_snapshot_epochs
-                    .entry(table_id)
-                    .or_default()
-                    .extend(epochs);
-            }
-            for job in database.independent_checkpoint_job_controls.values() {
-                if let Some(job_pins) = job.pinned_snapshot_epochs() {
-                    for (&table_id, epochs) in job_pins {
-                        pinned_snapshot_epochs
-                            .entry(table_id)
-                            .or_default()
-                            .extend(epochs);
-                    }
-                }
-            }
-        }
-        Some(pinned_snapshot_epochs)
-    }
-
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,

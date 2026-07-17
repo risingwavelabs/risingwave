@@ -134,7 +134,6 @@ pub(crate) enum BarrierManagerRequest {
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
-    GetPinnedSnapshotEpochs(Sender<Option<HashMap<TableId, HashSet<u64>>>>),
 }
 
 #[derive(Debug)]

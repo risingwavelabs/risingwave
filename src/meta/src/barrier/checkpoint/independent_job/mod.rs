@@ -107,13 +107,6 @@ impl IndependentCheckpointJobControl {
         }
     }
 
-    pub(crate) fn pinned_snapshot_epochs(&self) -> Option<&HashMap<TableId, HashSet<u64>>> {
-        match self {
-            Self::CreatingStreamingJob(j) => j.pinned_snapshot_epochs(),
-            Self::BatchRefresh(j) => j.pinned_snapshot_epochs(),
-        }
-    }
-
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match self {
             Self::CreatingStreamingJob(j) => j.fragment_infos(),

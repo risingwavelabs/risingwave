@@ -904,7 +904,7 @@ impl PartialGraphRecoverer<'_> {
                                 &fragment_infos,
                                 backfill_order_state,
                                 hummock_version_stats,
-                            )?,
+                            ),
                         }
                     } else {
                         CreateStreamingJobStatus::Created

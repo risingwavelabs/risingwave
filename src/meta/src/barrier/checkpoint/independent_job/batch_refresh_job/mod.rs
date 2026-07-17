@@ -521,7 +521,7 @@ impl BatchRefreshJobCheckpointControl {
             &render_result.fragment_infos,
             backfill_order_state,
             version_stat,
-        )?;
+        );
 
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
@@ -643,7 +643,7 @@ impl BatchRefreshJobCheckpointControl {
             &render_result.fragment_infos,
             backfill_order_state,
             version_stat,
-        )?;
+        );
         let first_barrier_info = super::new_fake_barrier(
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
@@ -1124,20 +1124,6 @@ impl BatchRefreshJobCheckpointControl {
                 self.snapshot_backfill_upstream_tables.clone(),
             ),
             BatchRefreshJobStatus::Resetting { .. } => (0, HashSet::new()),
-        }
-    }
-
-    pub(super) fn pinned_snapshot_epochs(&self) -> Option<&HashMap<TableId, HashSet<u64>>> {
-        match &self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                ..
-            } => Some(create_mview_tracker.pinned_snapshot_epochs()),
-            BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::Idle { .. }
-            | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::ConsumingLogStore { .. }
-            | BatchRefreshJobStatus::Resetting { .. } => None,
         }
     }
 

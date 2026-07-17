@@ -562,11 +562,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
-                            BarrierManagerRequest::GetPinnedSnapshotEpochs(tx) => {
-                                if tx.send(self.checkpoint_control.pinned_snapshot_epochs()).is_err() {
-                                    warn!("failed to send pinned snapshot epochs");
-                                }
-                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -1374,10 +1369,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
-                        }
-                        BarrierManagerRequest::GetPinnedSnapshotEpochs(tx) => {
-                            // Snapshot-backfill jobs may be recovered.
-                            let _ = tx.send(None);
                         }
                     }
                 }

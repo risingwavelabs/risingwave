@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::take;
 
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
@@ -29,7 +29,7 @@ use crate::barrier::{CreateStreamingJobCommandInfo, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
-use crate::stream::{SourceChange, SourceManagerRef, StreamFragmentGraph};
+use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
 type BufferedRows = u64;
@@ -427,7 +427,6 @@ pub(super) enum UpdateProgressResult {
 pub(super) struct CreateMviewProgressTracker {
     tracking_job: TrackingJob,
     status: CreateMviewStatus,
-    pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>>,
 }
 
 #[derive(Debug)]
@@ -454,82 +453,45 @@ impl CreateMviewProgressTracker {
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         backfill_order_state: BackfillOrderState,
         version_stats: &HummockVersionStats,
-    ) -> MetaResult<Self> {
-        {
-            let pinned_snapshot_epochs =
-                Self::pinned_snapshot_epochs_from_fragment_infos(fragment_infos)?;
-            let tracking_job = TrackingJob::recovered(creating_job_id, fragment_infos);
-            let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
-            let status = if actors.is_empty() {
-                CreateMviewStatus::Finished {
-                    table_ids_to_truncate: vec![],
-                }
-            } else {
-                let mut states = HashMap::new();
-                let mut backfill_upstream_types = HashMap::new();
-
-                for (actor, backfill_upstream_type) in actors {
-                    states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
-                    backfill_upstream_types.insert(actor, backfill_upstream_type);
-                }
-
-                let progress = Self::recover_progress(
-                    creating_job_id,
-                    states,
-                    backfill_upstream_types,
-                    StreamJobFragments::upstream_table_counts_impl(
-                        fragment_infos.values().map(|fragment| &fragment.nodes),
-                    ),
-                    version_stats,
-                    backfill_order_state,
-                );
-                let pending_backfill_nodes = progress
-                    .backfill_order_state
-                    .current_backfill_node_fragment_ids();
-                CreateMviewStatus::Backfilling {
-                    progress,
-                    pending_backfill_nodes,
-                    table_ids_to_truncate: vec![],
-                }
-            };
-            Ok(Self {
-                tracking_job,
-                status,
-                pinned_snapshot_epochs,
-            })
-        }
-    }
-
-    fn pinned_snapshot_epochs_from_fragment_infos(
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
-        let (snapshot_backfill_info, cross_db_snapshot_backfill_info) =
-            StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-                fragment_infos
-                    .values()
-                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
-            )?;
-        let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
-        for snapshot_backfill_info in snapshot_backfill_info
-            .iter()
-            .chain([&cross_db_snapshot_backfill_info])
-        {
-            for (&table_id, &epoch) in
-                &snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
-            {
-                let epoch = epoch.ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "snapshot backfill epoch of upstream table {} has not been set",
-                        table_id
-                    )
-                })?;
-                pinned_snapshot_epochs
-                    .entry(table_id)
-                    .or_default()
-                    .insert(epoch);
+    ) -> Self {
+        let tracking_job = TrackingJob::recovered(creating_job_id, fragment_infos);
+        let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
+        let status = if actors.is_empty() {
+            CreateMviewStatus::Finished {
+                table_ids_to_truncate: vec![],
             }
+        } else {
+            let mut states = HashMap::new();
+            let mut backfill_upstream_types = HashMap::new();
+
+            for (actor, backfill_upstream_type) in actors {
+                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
+                backfill_upstream_types.insert(actor, backfill_upstream_type);
+            }
+
+            let progress = Self::recover_progress(
+                creating_job_id,
+                states,
+                backfill_upstream_types,
+                StreamJobFragments::upstream_table_counts_impl(
+                    fragment_infos.values().map(|fragment| &fragment.nodes),
+                ),
+                version_stats,
+                backfill_order_state,
+            );
+            let pending_backfill_nodes = progress
+                .backfill_order_state
+                .current_backfill_node_fragment_ids();
+            CreateMviewStatus::Backfilling {
+                progress,
+                pending_backfill_nodes,
+                table_ids_to_truncate: vec![],
+            }
+        };
+        Self {
+            tracking_job,
+            status,
         }
-        Ok(pinned_snapshot_epochs)
     }
 
     /// ## How recovery works
@@ -567,10 +529,6 @@ impl CreateMviewProgressTracker {
             CreateMviewStatus::CdcSourceInit => "Initializing CDC source...".to_owned(),
             CreateMviewStatus::Finished { .. } => "100%".to_owned(),
         }
-    }
-
-    pub(super) fn pinned_snapshot_epochs(&self) -> &HashMap<TableId, HashSet<u64>> {
-        &self.pinned_snapshot_epochs
     }
 
     pub(crate) fn actor_progresses(&self) -> Vec<ActorBackfillProgress> {
@@ -785,9 +743,6 @@ impl CreateMviewProgressTracker {
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Self {
         tracing::trace!(?info, "add job to track");
-        let pinned_snapshot_epochs =
-            Self::pinned_snapshot_epochs_from_fragment_infos(fragment_infos)
-                .expect("snapshot backfill epochs should be resolved");
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
             fragment_backfill_ordering,
@@ -815,7 +770,6 @@ impl CreateMviewProgressTracker {
                 return Self {
                     tracking_job,
                     status: CreateMviewStatus::CdcSourceInit,
-                    pinned_snapshot_epochs,
                 };
             }
             // The command can be finished immediately.
@@ -824,7 +778,6 @@ impl CreateMviewProgressTracker {
                 status: CreateMviewStatus::Finished {
                     table_ids_to_truncate: vec![],
                 },
-                pinned_snapshot_epochs,
             };
         }
 
@@ -854,7 +807,6 @@ impl CreateMviewProgressTracker {
                 pending_backfill_nodes,
                 table_ids_to_truncate: vec![],
             },
-            pinned_snapshot_epochs,
         }
     }
 }
@@ -1010,8 +962,7 @@ mod tests {
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::id::WorkerId;
     use risingwave_meta_model::fragment::DistributionType;
-    use risingwave_pb::stream_plan::stream_node::NodeBody;
-    use risingwave_pb::stream_plan::{StreamNode as PbStreamNode, StreamScanNode, StreamScanType};
+    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
     use super::*;
     use crate::controller::fragment::InflightActorInfo;
@@ -1107,7 +1058,6 @@ mod tests {
                 pending_backfill_nodes: vec![],
                 table_ids_to_truncate: vec![],
             },
-            pinned_snapshot_epochs: HashMap::new(),
         };
 
         let fragment_infos = HashMap::from([(
@@ -1218,7 +1168,6 @@ mod tests {
                 source_change: None,
             },
             status: CreateMviewStatus::CdcSourceInit,
-            pinned_snapshot_epochs: HashMap::new(),
         };
 
         // Initially in CdcSourceInit state
@@ -1231,75 +1180,6 @@ mod tests {
         // Should now be in Finished state
         assert!(matches!(tracker.status, CreateMviewStatus::Finished { .. }));
         assert!(tracker.is_finished());
-    }
-
-    #[test]
-    fn create_mview_tracker_resolves_pinned_snapshot_epochs_from_fragments() {
-        let mut cross_db_fragment = sample_inflight_fragment(
-            FragmentId::new(1),
-            &[],
-            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
-        );
-        cross_db_fragment.nodes = PbStreamNode {
-            node_body: Some(NodeBody::StreamScan(Box::new(StreamScanNode {
-                table_id: 1.into(),
-                stream_scan_type: StreamScanType::CrossDbSnapshotBackfill as i32,
-                snapshot_backfill_epoch: Some(100),
-                ..Default::default()
-            }))),
-            ..Default::default()
-        };
-        let mut snapshot_fragment = sample_inflight_fragment(
-            FragmentId::new(2),
-            &[],
-            FragmentTypeFlag::SnapshotBackfillStreamScan,
-        );
-        snapshot_fragment.nodes = PbStreamNode {
-            node_body: Some(NodeBody::StreamScan(Box::new(StreamScanNode {
-                table_id: 1.into(),
-                stream_scan_type: StreamScanType::SnapshotBackfill as i32,
-                snapshot_backfill_epoch: Some(200),
-                ..Default::default()
-            }))),
-            ..Default::default()
-        };
-        let fragment_infos = HashMap::from([
-            (cross_db_fragment.fragment_id, cross_db_fragment),
-            (snapshot_fragment.fragment_id, snapshot_fragment),
-        ]);
-
-        let pinned_snapshot_epochs =
-            CreateMviewProgressTracker::pinned_snapshot_epochs_from_fragment_infos(&fragment_infos)
-                .unwrap();
-
-        assert_eq!(
-            pinned_snapshot_epochs,
-            HashMap::from([(TableId::new(1), HashSet::from([100, 200]))])
-        );
-    }
-
-    #[test]
-    fn create_mview_tracker_rejects_unresolved_pinned_snapshot_epoch() {
-        let mut fragment = sample_inflight_fragment(
-            FragmentId::new(1),
-            &[],
-            FragmentTypeFlag::SnapshotBackfillStreamScan,
-        );
-        fragment.nodes = PbStreamNode {
-            node_body: Some(NodeBody::StreamScan(Box::new(StreamScanNode {
-                table_id: 1.into(),
-                stream_scan_type: StreamScanType::SnapshotBackfill as i32,
-                snapshot_backfill_epoch: None,
-                ..Default::default()
-            }))),
-            ..Default::default()
-        };
-        let fragment_infos = HashMap::from([(fragment.fragment_id, fragment)]);
-
-        assert!(
-            CreateMviewProgressTracker::pinned_snapshot_epochs_from_fragment_infos(&fragment_infos)
-                .is_err()
-        );
     }
 
     #[test]

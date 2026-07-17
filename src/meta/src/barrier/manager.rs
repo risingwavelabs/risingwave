@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use risingwave_common::bail;
 use risingwave_common::cast::datetime_to_timestamp_millis;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::DatabaseId;
 use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
@@ -32,7 +31,6 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::BarrierManagerRequest::GetPinnedSnapshotEpochs;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
@@ -153,18 +151,6 @@ impl GlobalBarrierManager {
             .context("failed to send update database barrier request")?;
         rx.await.context("failed to wait update database barrier")?;
         Ok(())
-    }
-
-    pub async fn get_pinned_snapshot_epochs(
-        &self,
-    ) -> MetaResult<Option<HashMap<TableId, HashSet<u64>>>> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx
-            .send(GetPinnedSnapshotEpochs(tx))
-            .context("failed to send get pinned snapshot epochs request")?;
-        Ok(rx
-            .await
-            .context("failed to wait for pinned snapshot epochs")?)
     }
 
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
