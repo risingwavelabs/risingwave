@@ -146,6 +146,8 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         let catalog_kind = self.config.catalog_kind()?;
         if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {

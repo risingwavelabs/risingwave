@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::HummockStateStoreMetrics;
 
 type InflightResult = Shared<Pin<Box<dyn Future<Output = HummockResult<TableChangeLogs>> + Send>>>;
 
@@ -40,14 +41,20 @@ struct CacheKey {
 pub struct TableChangeLogManager {
     cache: Cache<CacheKey, InflightResult>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    metrics: Arc<HummockStateStoreMetrics>,
 }
 
 impl TableChangeLogManager {
-    pub fn new(capacity: u64, hummock_meta_client: Arc<dyn HummockMetaClient>) -> Self {
+    pub fn new(
+        capacity: u64,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        metrics: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
         let cache = Cache::builder().max_capacity(capacity).build();
         Self {
             cache,
             hummock_meta_client,
+            metrics,
         }
     }
 
@@ -59,7 +66,8 @@ impl TableChangeLogManager {
         limit: Option<u32>,
         fetch: impl Future<Output = HummockResult<TableChangeLogs>> + Send + 'static,
     ) -> HummockResult<TableChangeLogs> {
-        self.cache
+        let entry = self
+            .cache
             .entry(CacheKey {
                 table_id,
                 epoch_range,
@@ -74,10 +82,13 @@ impl TableChangeLogManager {
                     }
                     false
                 },
-            )
-            .value()
-            .clone()
-            .await
+            );
+        if entry.is_fresh() {
+            self.metrics.table_change_log_cache_miss.inc();
+        } else {
+            self.metrics.table_change_log_cache_hit.inc();
+        }
+        entry.value().clone().await
     }
 
     fn filter_table_change_logs(
@@ -147,10 +158,12 @@ impl TableChangeLogManager {
         include_epoch_only: bool,
         limit: Option<u32>,
     ) -> HummockResult<TableChangeLogs> {
+        let _timer = self.metrics.table_change_log_fetch_latency.start_timer();
         if epoch_range.1 != u64::MAX
             && let Some(inflight) =
                 self.get_cached_covering_range(table_id, epoch_range, include_epoch_only, limit)
         {
+            self.metrics.table_change_log_cache_hit.inc();
             return inflight.await.map(|table_change_logs| {
                 Self::filter_table_change_logs(table_change_logs, table_id, epoch_range)
             });
@@ -334,7 +347,11 @@ mod tests {
     async fn test_fetch_uses_cached_covering_range() {
         let table_id = TableId::new(1);
         let meta_client = Arc::new(TestHummockMetaClient::new(table_id));
-        let manager = TableChangeLogManager::new(10, meta_client.clone());
+        let manager = TableChangeLogManager::new(
+            10,
+            meta_client.clone(),
+            Arc::new(HummockStateStoreMetrics::unused()),
+        );
 
         manager
             .prefetch_table_change_logs(table_id, (1, 3))
