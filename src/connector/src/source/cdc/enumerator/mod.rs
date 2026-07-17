@@ -26,6 +26,7 @@ use mysql_async::prelude::*;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::id::SourceId;
+use risingwave_common::metrics::{LabelGuardedIntGauge, LabelGuardedIntGaugeVec};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -54,9 +55,23 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     source_id: SourceId,
     worker_node_addrs: Vec<HostAddr>,
     metrics: Arc<EnumeratorMetrics>,
+    pg_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
+    pg_cdc_confirmed_flush_lsn: Option<LabelGuardedIntGauge>,
+    mysql_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
+    mysql_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
+    sqlserver_cdc_upstream_min_lsn: Option<LabelGuardedIntGauge>,
+    sqlserver_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     /// Properties specified in the WITH clause by user for database connection
     properties: Arc<BTreeMap<String, String>>,
     _phantom: PhantomData<T>,
+}
+
+fn get_or_create_guarded_int_gauge<'a>(
+    metric: &'a mut Option<LabelGuardedIntGauge>,
+    metric_vec: &LabelGuardedIntGaugeVec,
+    labels: &[String],
+) -> &'a LabelGuardedIntGauge {
+    metric.get_or_insert_with(|| metric_vec.with_guarded_label_values(labels))
 }
 
 #[async_trait]
@@ -143,6 +158,12 @@ where
             source_id,
             worker_node_addrs: server_addrs,
             metrics: context.metrics.clone(),
+            pg_cdc_upstream_max_lsn: None,
+            pg_cdc_confirmed_flush_lsn: None,
+            mysql_cdc_binlog_file_seq_min: None,
+            mysql_cdc_binlog_file_seq_max: None,
+            sqlserver_cdc_upstream_min_lsn: None,
+            sqlserver_cdc_upstream_max_lsn: None,
             properties: properties_arc,
             _phantom: PhantomData,
         })
@@ -162,22 +183,30 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
         parse_sql_server_lsn_str(lsn).map(|v| v.min(i64::MAX as u128) as i64)
     }
 
+    fn pg_cdc_lsn_metric_labels(&self, slot_name: &str) -> Vec<String> {
+        vec![self.source_id.to_string(), slot_name.to_owned()]
+    }
+
     async fn monitor_postgres_confirmed_flush_lsn(&mut self) -> ConnectorResult<()> {
         // Query upstream LSNs and update metrics.
         match self.query_postgres_lsns().await {
             Ok(Some((confirmed_flush_lsn, upstream_max_lsn, slot_name))) => {
-                let labels = [&self.source_id.to_string(), &slot_name.to_owned()];
+                let labels = self.pg_cdc_lsn_metric_labels(&slot_name);
 
-                self.metrics
-                    .pg_cdc_upstream_max_lsn
-                    .with_guarded_label_values(&labels)
-                    .set(upstream_max_lsn as i64);
+                get_or_create_guarded_int_gauge(
+                    &mut self.pg_cdc_upstream_max_lsn,
+                    &self.metrics.pg_cdc_upstream_max_lsn,
+                    &labels,
+                )
+                .set(upstream_max_lsn as i64);
 
                 if let Some(lsn) = confirmed_flush_lsn {
-                    self.metrics
-                        .pg_cdc_confirmed_flush_lsn
-                        .with_guarded_label_values(&labels)
-                        .set(lsn as i64);
+                    get_or_create_guarded_int_gauge(
+                        &mut self.pg_cdc_confirmed_flush_lsn,
+                        &self.metrics.pg_cdc_confirmed_flush_lsn,
+                        &labels,
+                    )
+                    .set(lsn as i64);
                     tracing::debug!(
                         "Updated confirmed_flush_lsn for source {} slot {}: {}",
                         self.source_id,
@@ -210,7 +239,7 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
     }
 
     /// Query LSNs from PostgreSQL, return (`confirmed_flush_lsn`, `upstream_max_lsn`, `slot_name`).
-    async fn query_postgres_lsns(&self) -> ConnectorResult<Option<(Option<u64>, u64, &str)>> {
+    async fn query_postgres_lsns(&self) -> ConnectorResult<Option<(Option<u64>, u64, String)>> {
         // Extract connection parameters from CDC properties
         let hostname = self
             .properties
@@ -273,7 +302,7 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
                 Ok(Some((
                     confirmed_flush_lsn.map(Into::into),
                     upstream_max_lsn.into(),
-                    slot_name.as_str(),
+                    slot_name.clone(),
                 )))
             }
             None => {
@@ -369,20 +398,24 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
     async fn monitor_sql_server_lsns(&mut self) -> ConnectorResult<()> {
         match self.query_sql_server_lsns().await {
             Ok(Some((min_lsn, max_lsn))) => {
-                let source_id = self.source_id.to_string();
+                let labels = vec![self.source_id.to_string()];
 
                 if let Some(value) = Self::sql_server_lsn_to_i64(&min_lsn) {
-                    self.metrics
-                        .sqlserver_cdc_upstream_min_lsn
-                        .with_guarded_label_values(&[&source_id])
-                        .set(value);
+                    get_or_create_guarded_int_gauge(
+                        &mut self.sqlserver_cdc_upstream_min_lsn,
+                        &self.metrics.sqlserver_cdc_upstream_min_lsn,
+                        &labels,
+                    )
+                    .set(value);
                 }
 
                 if let Some(value) = Self::sql_server_lsn_to_i64(&max_lsn) {
-                    self.metrics
-                        .sqlserver_cdc_upstream_max_lsn
-                        .with_guarded_label_values(&[&source_id])
-                        .set(value);
+                    get_or_create_guarded_int_gauge(
+                        &mut self.sqlserver_cdc_upstream_max_lsn,
+                        &self.metrics.sqlserver_cdc_upstream_max_lsn,
+                        &labels,
+                    )
+                    .set(value);
                 }
             }
             Ok(None) => {}
@@ -442,10 +475,13 @@ impl DebeziumSplitEnumerator<Mysql> {
                 if let Some((oldest_file, oldest_size)) = binlog_files.first() {
                     // Extract sequence number from filename (e.g., "binlog.000001" -> 1)
                     if let Some(seq) = Self::extract_binlog_seq(oldest_file) {
-                        self.metrics
-                            .mysql_cdc_binlog_file_seq_min
-                            .with_guarded_label_values(&[hostname, port])
-                            .set(seq as i64);
+                        let labels = vec![hostname.to_owned(), port.to_owned()];
+                        get_or_create_guarded_int_gauge(
+                            &mut self.mysql_cdc_binlog_file_seq_min,
+                            &self.metrics.mysql_cdc_binlog_file_seq_min,
+                            &labels,
+                        )
+                        .set(seq as i64);
                         tracing::debug!(
                             "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
                             self.source_id,
@@ -460,10 +496,13 @@ impl DebeziumSplitEnumerator<Mysql> {
                 if let Some((newest_file, newest_size)) = binlog_files.last() {
                     // Extract sequence number from filename
                     if let Some(seq) = Self::extract_binlog_seq(newest_file) {
-                        self.metrics
-                            .mysql_cdc_binlog_file_seq_max
-                            .with_guarded_label_values(&[hostname, port])
-                            .set(seq as i64);
+                        let labels = vec![hostname.to_owned(), port.to_owned()];
+                        get_or_create_guarded_int_gauge(
+                            &mut self.mysql_cdc_binlog_file_seq_max,
+                            &self.metrics.mysql_cdc_binlog_file_seq_max,
+                            &labels,
+                        )
+                        .set(seq as i64);
                         tracing::debug!(
                             "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
                             self.source_id,
@@ -665,5 +704,29 @@ impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
 impl CdcMonitor for DebeziumSplitEnumerator<SqlServer> {
     async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
         self.monitor_sql_server_lsns().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prometheus::core::Collector;
+    use risingwave_common::metrics::LabelGuardedIntGaugeVec;
+
+    use super::get_or_create_guarded_int_gauge;
+
+    #[test]
+    fn cached_guarded_metric_survives_repeated_collections() {
+        let metric_vec = LabelGuardedIntGaugeVec::test_int_gauge_vec::<2>();
+        let labels = vec!["source_id".to_owned(), "slot_name".to_owned()];
+        let mut metric = None;
+
+        get_or_create_guarded_int_gauge(&mut metric, &metric_vec, &labels).set(1);
+
+        assert_eq!(1, metric_vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, metric_vec.collect().pop().unwrap().get_metric().len());
+
+        drop(metric);
+        assert_eq!(1, metric_vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(0, metric_vec.collect().pop().unwrap().get_metric().len());
     }
 }
