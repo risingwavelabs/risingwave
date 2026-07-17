@@ -755,7 +755,8 @@ fn test_parse_compaction_config() {
         ("s3.access.key", "test"),
         ("s3.secret.key", "test"),
         ("s3.region", "us-east-1"),
-        ("catalog.type", "storage"),
+        ("catalog.type", "rest"),
+        ("catalog.uri", "http://127.0.0.1:8181"),
         ("catalog.name", "demo"),
         ("database.name", "test_db"),
         ("table.name", "test_table"),
@@ -942,6 +943,35 @@ fn test_reject_unsafe_orphan_file_cleanup_min_age() {
         err.to_string()
             .contains("`orphan_file_cleanup_min_age_millis` must be at least 86400000")
     );
+}
+
+#[test]
+fn test_reject_orphan_file_cleanup_for_storage_catalog() {
+    for (option, value) in [
+        ("enable_orphan_file_cleanup", "true"),
+        ("orphan_file_cleanup_min_age_millis", "172800000"),
+    ] {
+        let mut values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        values.insert(option.to_owned(), value.to_owned());
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("orphan file cleanup is not supported for `catalog.type = 'storage'`")
+        );
+    }
 }
 
 #[test]

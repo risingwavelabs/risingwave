@@ -429,7 +429,7 @@ pub struct IcebergConfig {
     pub manifest_rewrite_min_count_to_merge: Option<usize>,
 
     /// Whether to periodically remove files that are unreachable from Iceberg metadata.
-    /// Cleanup runs on the global Iceberg maintenance interval.
+    /// Cleanup runs on the global Iceberg orphan-file cleanup interval.
     #[serde(
         rename = "enable_orphan_file_cleanup",
         default,
@@ -666,6 +666,11 @@ impl IcebergConfig {
             )));
         }
 
+        if config.enable_orphan_file_cleanup || config.orphan_file_cleanup_min_age_millis.is_some()
+        {
+            config.ensure_orphan_file_cleanup_supported()?;
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table
@@ -689,6 +694,16 @@ impl IcebergConfig {
         self.common
             .resolve_catalog_kind()
             .map_err(|err| SinkError::Config(anyhow!(err)))
+    }
+
+    pub fn ensure_orphan_file_cleanup_supported(&self) -> Result<()> {
+        if matches!(self.catalog_kind()?, IcebergCatalogKind::Storage) {
+            return Err(SinkError::Config(anyhow!(
+                "Iceberg orphan file cleanup is not supported for `catalog.type = 'storage'`"
+            )));
+        }
+
+        Ok(())
     }
 
     fn resolved_catalog_config(&self) -> Result<ResolvedIcebergCatalogConfig<'_>> {
