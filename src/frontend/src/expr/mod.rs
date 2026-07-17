@@ -932,12 +932,10 @@ impl ExprImpl {
                 ExprImpl::InputRef(i) => *i,
                 _ => return None,
             };
-            let list: Vec<_> = inputs
-                .inspect(|expr| {
-                    // Non constant IN will be bound to OR
-                    assert!(expr.is_const());
-                })
-                .collect();
+            let list: Vec<_> = inputs.collect();
+            if !list.iter().all(ExprImpl::is_const) {
+                return None;
+            }
 
             Some((input_ref, list))
         } else {
