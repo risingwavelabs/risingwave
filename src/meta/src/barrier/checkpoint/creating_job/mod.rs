@@ -79,6 +79,7 @@ pub(crate) struct CreatingStreamingJobControl {
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
+    max_lagged_barrier_num: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -232,6 +233,11 @@ impl CreatingStreamingJobControl {
                 .collect(),
         };
 
+        let max_lagged_barrier_num = control_stream_manager
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
+
         let status = if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
             let upstream_lag = log_store_barriers_to_inject
                 .last()
@@ -267,6 +273,7 @@ impl CreatingStreamingJobControl {
             barrier_control,
             snapshot_epoch,
             status,
+            max_lagged_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -670,6 +677,11 @@ impl CreatingStreamingJobControl {
         };
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
 
+        let max_lagged_barrier_num = control_stream_manager
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
+
         Self::inject_barrier(
             database_id,
             job_id,
@@ -692,6 +704,7 @@ impl CreatingStreamingJobControl {
             state_table_ids,
             barrier_control,
             status,
+            max_lagged_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -910,6 +923,7 @@ impl CreatingStreamingJobControl {
         } = &self.status
             && barriers_to_inject.is_none()
             && log_store_progress_tracker.is_finished()
+            && self.barrier_control.pending_barrier_count() <= self.max_lagged_barrier_num
         {
             true
         } else {
