@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RisingWaveConfigTest {
 
@@ -101,6 +102,31 @@ class RisingWaveConfigTest {
         IllegalArgumentException rangeError = assertThrows(IllegalArgumentException.class,
                 () -> RisingWaveConfig.from(outOfRange));
         assertEquals("Port must be between 1 and 65535", rangeError.getMessage());
+    }
+
+    @Test
+    void acceptsIntegralJsonNumbersForPortAndRejectsFractions() {
+        DataMap integral = baseValues();
+        integral.put("port", 4566.0d);
+        assertEquals(4566, RisingWaveConfig.from(integral).port());
+
+        DataMap fractional = baseValues();
+        fractional.put("port", 4566.5d);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveConfig.from(fractional));
+        assertEquals("Port must be a whole number between 1 and 65535", error.getMessage());
+    }
+
+    @Test
+    void rejectsUnknownWriteModesInsteadOfFallingBackToJdbc() {
+        DataMap values = baseValues();
+        values.put("ingest_mode", "streamng");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> RisingWaveConfig.from(values));
+
+        assertTrue(error.getMessage().contains("Unsupported Write Mode"));
+        assertTrue(error.getMessage().contains("streamng"));
     }
 
     private static DataMap baseValues() {

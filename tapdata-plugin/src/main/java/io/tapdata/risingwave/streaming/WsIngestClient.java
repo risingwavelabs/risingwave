@@ -307,27 +307,32 @@ public class WsIngestClient implements AutoCloseable {
         }
         List<List<DmlOperation>> batches = new ArrayList<>();
         List<DmlOperation> current = new ArrayList<>();
+        int emptyPayloadBytes = payloadByteLength(Collections.emptyList());
+        int currentBytes = emptyPayloadBytes;
         for (DmlOperation operation : operations) {
-            current.add(operation);
-            int bytes = payloadByteLength(current);
-            if (bytes <= maxPayloadBytes) {
+            int operationBytes = dmlOperationByteLength(operation);
+            int candidateBytes = currentBytes + operationBytes + (current.isEmpty() ? 0 : 1);
+            if (candidateBytes <= maxPayloadBytes) {
+                current.add(operation);
+                currentBytes = candidateBytes;
                 continue;
             }
-            current.remove(current.size() - 1);
             if (current.isEmpty()) {
-                throw new IllegalArgumentException("A single WebSocket DML operation is " + bytes
+                throw new IllegalArgumentException("A single WebSocket DML operation is "
+                        + candidateBytes
                         + " bytes, exceeding the " + maxPayloadBytes
                         + " byte frame safety limit; split the source record before replication");
             }
             batches.add(current);
             current = new ArrayList<>();
             current.add(operation);
-            int singleOperationBytes = payloadByteLength(current);
+            int singleOperationBytes = emptyPayloadBytes + operationBytes;
             if (singleOperationBytes > maxPayloadBytes) {
                 throw new IllegalArgumentException("A single WebSocket DML operation is "
                         + singleOperationBytes + " bytes, exceeding the " + maxPayloadBytes
                         + " byte frame safety limit; split the source record before replication");
             }
+            currentBytes = singleOperationBytes;
         }
         if (!current.isEmpty()) {
             batches.add(current);
@@ -339,6 +344,16 @@ public class WsIngestClient implements AutoCloseable {
         // Size with the longest possible batch ID so every generated payload remains
         // within the safety limit, even after the sequence grows.
         return buildBatchPayloadJson(Long.MAX_VALUE, operations).getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static int dmlOperationByteLength(DmlOperation operation) {
+        try {
+            return JSON_MAPPER.writeValueAsString(
+                            buildDml(operation.op, operation.before, operation.after))
+                    .getBytes(StandardCharsets.UTF_8).length;
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Unable to serialize WebSocket ingest operation", e);
+        }
     }
 
     private String signPayload(String payloadJson) throws Exception {

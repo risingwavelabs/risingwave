@@ -158,10 +158,39 @@ class WsIngestClientTest {
         assertTrue(error.getMessage().contains("8388608 byte frame safety limit"));
     }
 
+    @Test
+    void countsUtf8AndEscapedJsonBytesExactlyWhenSplitting() {
+        List<WsIngestClient.DmlOperation> operations = Arrays.asList(
+                textInsert(1, "你好\n\"one\""),
+                textInsert(2, "🙂\\two"),
+                textInsert(3, "最後"));
+        int firstTwoBytes = WsIngestClient.buildBatchPayloadJson(
+                        Long.MAX_VALUE, operations.subList(0, 2))
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+
+        List<List<WsIngestClient.DmlOperation>> batches =
+                WsIngestClient.splitBatches(operations, firstTwoBytes);
+
+        assertEquals(2, batches.size());
+        assertEquals(2, batches.get(0).size());
+        for (List<WsIngestClient.DmlOperation> batch : batches) {
+            int actualBytes = WsIngestClient.buildBatchPayloadJson(Long.MAX_VALUE, batch)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            assertTrue(actualBytes <= firstTwoBytes);
+        }
+    }
+
     private static WsIngestClient.DmlOperation largeInsert(int id, int payloadLength) {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("id", id);
         record.put("payload", "x".repeat(payloadLength));
+        return new WsIngestClient.DmlOperation("insert", null, record);
+    }
+
+    private static WsIngestClient.DmlOperation textInsert(int id, String payload) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", id);
+        record.put("payload", payload);
         return new WsIngestClient.DmlOperation("insert", null, record);
     }
 }

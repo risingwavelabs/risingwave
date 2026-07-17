@@ -134,6 +134,17 @@ final class RisingWaveCdcNormalizer {
         for (TapField field : fields) {
             primaryKeys.add(field.getName());
         }
+        if (primaryKeys.isEmpty() && table.getDefaultPrimaryKeys() != null) {
+            for (String primaryKey : table.getDefaultPrimaryKeys()) {
+                if (primaryKey == null || !table.getNameFieldMap().containsKey(primaryKey)) {
+                    throw new IllegalArgumentException("Default primary key " + primaryKey
+                            + " is not a field in table " + tableName(table));
+                }
+                if (!primaryKeys.contains(primaryKey)) {
+                    primaryKeys.add(primaryKey);
+                }
+            }
+        }
         return primaryKeys;
     }
 

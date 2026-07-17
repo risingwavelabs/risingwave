@@ -15,14 +15,12 @@
       {
         "id": "dml_insert_policy",
         "alternatives": [
-          "update_on_exists",
-          "just_insert"
+          "update_on_exists"
         ]
       },
       {
         "id": "dml_update_policy",
         "alternatives": [
-          "ignore_on_nonexists",
           "insert_on_nonexists"
         ]
       },

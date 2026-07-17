@@ -158,6 +158,19 @@ class RisingWaveCdcNormalizerTest {
                 map("id", new BigDecimal("1.00"), "name", "after")).keyChanged);
     }
 
+    @Test
+    void usesTapdataDefaultPrimaryKeysWhenFieldsAreNotMarked() {
+        TapTable table = new TapTable("documents")
+                .add(new TapField("_id", "text"))
+                .add(new TapField("name", "text"))
+                .defaultPrimaryKeys("_id");
+
+        assertEquals(Collections.singletonList("_id"),
+                RisingWaveCdcNormalizer.primaryKeys(table));
+        assertEquals(Collections.singletonMap("_id", "a"),
+                RisingWaveCdcNormalizer.deleteFilter(table, map("_id", "a")));
+    }
+
     private static RisingWaveCdcNormalizer.Update normalize(
             TapTable table, Map<String, Object> before, Map<String, Object> after) {
         return RisingWaveCdcNormalizer.normalizeUpdate(table, event(before, after));

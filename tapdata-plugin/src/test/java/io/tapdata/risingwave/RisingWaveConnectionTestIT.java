@@ -532,6 +532,32 @@ class RisingWaveConnectionTestIT {
     }
 
     @Test
+    void websocketUsesTapdataDefaultPrimaryKeyMetadata() throws Throwable {
+        String tableName = "tapdata_default_pk_" + shortSuffix();
+        RisingWaveConnector connector = new RisingWaveConnector();
+        TapConnectionContext context = connectionContext("public", "streaming", "root", "",
+                "ws://127.0.0.1:4560", "");
+        TapTable table = new TapTable(tableName)
+                .add(new TapField("id", "integer"))
+                .add(new TapField("name", "varchar"))
+                .defaultPrimaryKeys("id");
+        try {
+            connector.init(context);
+            connector.createTable(null, new TapCreateTableEvent().table(table));
+            ConnectorFunctions functions = new ConnectorFunctions();
+            connector.registerCapabilities(functions, new TapCodecsRegistry());
+            functions.getWriteRecordFunction().writeRecord(null, Collections.singletonList(
+                    TapInsertRecordEvent.create().table(tableName)
+                            .after(record(1, "default-primary-key"))), table, ignored -> { });
+
+            awaitName(tableName, 1, "default-primary-key");
+        } finally {
+            connector.stop(context);
+            dropTable(tableName);
+        }
+    }
+
+    @Test
     void websocketSupportsSameKeyUpdatePrimaryKeyChangeAndDelete() throws Exception {
         String tableName = "tapdata_ws_dml_" + shortSuffix();
         try (Connection connection = rootConnection(); Statement statement = connection.createStatement()) {

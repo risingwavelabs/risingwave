@@ -33,6 +33,7 @@ import java.io.InputStream;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -44,6 +45,31 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RisingWaveConnectorTest {
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void advertisesOnlyTheDmlPoliciesImplementedByTheConnector() throws Exception {
+        Map<String, Object> spec;
+        try (InputStream input = getClass().getResourceAsStream("/spec_risingwave.json")) {
+            spec = new ObjectMapper().readValue(
+                    input, new TypeReference<LinkedHashMap<String, Object>>() { });
+        }
+        Map<String, Object> options = (Map<String, Object>) spec.get("configOptions");
+        List<Map<String, Object>> capabilities =
+                (List<Map<String, Object>>) options.get("capabilities");
+        Map<String, List<String>> alternatives = new LinkedHashMap<>();
+        for (Map<String, Object> capability : capabilities) {
+            alternatives.put((String) capability.get("id"),
+                    (List<String>) capability.get("alternatives"));
+        }
+
+        assertEquals(java.util.Collections.singletonList("update_on_exists"),
+                alternatives.get("dml_insert_policy"));
+        assertEquals(java.util.Collections.singletonList("insert_on_nonexists"),
+                alternatives.get("dml_update_policy"));
+        assertEquals(java.util.Collections.singletonList("ignore_on_nonexists"),
+                alternatives.get("dml_delete_policy"));
+    }
 
     @Test
     void recognizesBothWebSocketModes() {

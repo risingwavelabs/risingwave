@@ -2,6 +2,7 @@ package io.tapdata.risingwave;
 
 import io.tapdata.entity.utils.DataMap;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,8 +40,7 @@ final class RisingWaveConfig {
         this.schema = defaultIfBlank(config.getString("schema"), "public");
         this.user = defaultIfBlank(config.getString("user"), "root");
         this.password = defaultIfNull(config.getString("password"), "");
-        this.ingestMode = defaultIfBlank(config.getString("ingest_mode"),
-                RisingWaveConnector.MODE_STREAMING);
+        this.ingestMode = writeMode(config.getString("ingest_mode"));
         this.ingestEndpoint = config.getString("ingestEndpoint");
         this.webhookSecret = config.getString("webhookSecret");
         this.webhookSecretName = trimToNull(config.getString("webhookSecretName"));
@@ -129,15 +129,30 @@ final class RisingWaveConfig {
         if (value == null) {
             return defaultValue;
         }
+        final int parsed;
         try {
-            int parsed = Integer.parseInt(value.toString().trim());
-            if (parsed < 1 || parsed > 65535) {
-                throw new IllegalArgumentException("Port must be between 1 and 65535");
-            }
-            return parsed;
+            parsed = new BigDecimal(value.toString().trim()).intValueExact();
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Port must be a number between 1 and 65535", e);
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException(
+                    "Port must be a whole number between 1 and 65535", e);
         }
+        if (parsed < 1 || parsed > 65535) {
+            throw new IllegalArgumentException("Port must be between 1 and 65535");
+        }
+        return parsed;
+    }
+
+    private static String writeMode(String value) {
+        String mode = defaultIfBlank(value, RisingWaveConnector.MODE_STREAMING);
+        if (RisingWaveConnector.MODE_STREAMING.equals(mode)
+                || RisingWaveConnector.MODE_STREAMING_JSONB.equals(mode)
+                || RisingWaveConnector.MODE_JDBC.equals(mode)) {
+            return mode;
+        }
+        throw new IllegalArgumentException("Unsupported Write Mode \"" + mode
+                + "\"; expected streaming, streaming_jsonb, or jdbc");
     }
 
     private static String defaultIfBlank(String value, String defaultValue) {
