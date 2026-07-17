@@ -1,0 +1,13 @@
+02aae136b83b0a5105cdc9a9e7b923081a011d2f3a47a27a2ea0519151177bc4  tapdata-pdk-api/2.0.8-SNAPSHOT/tapdata-pdk-api-2.0.8-SNAPSHOT.jar
+f259fdd987c38f360f2d5008be9e2dba719fda33d35c1673a0d97a785a4e458a  tapdata-pdk-api/2.0.8-SNAPSHOT/tapdata-pdk-api-2.0.8-SNAPSHOT.pom
+6a6a4c9ff6f92c3a610303cf17b299951c1f129b5cbb6bdc223f75f26f9bb399  tapdata-api/2.0.8-SNAPSHOT/tapdata-api-2.0.8-SNAPSHOT.jar
+b1eb38f9f7f994e63ae300195518f91f60399814bd5776431c6ad551888e13b1  tapdata-api/2.0.8-SNAPSHOT/tapdata-api-2.0.8-SNAPSHOT.pom
+2fdfba413774a62f73747bf5fe11df1cf2cce48c9e1e2ae9db8978947462d993  plugin-kit/2.8-SNAPSHOT/plugin-kit-2.8-SNAPSHOT.pom
+7d459c16722c3bdc244d4e64ad4e3ed73ca16c1c5d45911ad865ea62a2d8ccb8  tapdata-common-lib/2.8-SNAPSHOT/tapdata-common-lib-2.8-SNAPSHOT.pom
+9c3fac345e9503c70bf1e8b7cbd5fb1705370ac0e33b1b5f68850cded740b2f3  error-code-scanner/2.8-SNAPSHOT/error-code-scanner-2.8-SNAPSHOT.jar
+971c2eae04384439b2a7d64506c957b3fdacec7d67865f0e0d81c8c60e70261d  error-code-scanner/2.8-SNAPSHOT/error-code-scanner-2.8-SNAPSHOT.pom
+bd3f4adcf3e44015ee5181eba424412c66e5f756c519862b59d0873e78197e9c  error-code-core/2.8-SNAPSHOT/error-code-core-2.8-SNAPSHOT.jar
+8d0fe99eea459087ad1c7a81277837dede7840a7dac1d0207f0ab82db1a7cc52  error-code-core/2.8-SNAPSHOT/error-code-core-2.8-SNAPSHOT.pom
+1ad51470ce18a969d42f11d2d8f5e09f6a2329c2c9b34c5dd4d57edb8cc0b380  error-code-parent/2.8-SNAPSHOT/error-code-parent-2.8-SNAPSHOT.pom
+da591c3013bec69cad8a458d94f58921fc94eddcfe792d53834dba80a551b835  error-code-root/2.8-SNAPSHOT/error-code-root-2.8-SNAPSHOT.pom
+03d695b033d1a284f3b51a6d5f569489a35af3f19ef35296ba93cde637d5b0f0  error-code-bom/2.8-SNAPSHOT/error-code-bom-2.8-SNAPSHOT.pom

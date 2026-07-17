@@ -6,7 +6,7 @@
 
     <groupId>io.tapdata</groupId>
     <artifactId>risingwave-connector</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>jar</packaging>
 
     <name>RisingWave Tapdata Connector</name>
@@ -16,6 +16,7 @@
         <maven.compiler.release>11</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ssZ</maven.build.timestamp.format>
+        <tapdata.version>2.0.8-SNAPSHOT</tapdata.version>
         <postgresql.version>42.7.3</postgresql.version>
         <jackson.version>2.17.2</jackson.version>
         <junit.version>5.10.2</junit.version>
@@ -26,13 +27,13 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
-            <version>2.0.8-SNAPSHOT</version>
+            <version>${tapdata.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-api</artifactId>
-            <version>2.0.8-SNAPSHOT</version>
+            <version>${tapdata.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -137,8 +138,8 @@
                                         <Implementation-Vendor>io.tapdata</Implementation-Vendor>
                                         <Implementation-Version>${project.version}</Implementation-Version>
                                         <Git-Build-Time>${maven.build.timestamp}</Git-Build-Time>
-                                        <PDK-API-Version>2.0.8-SNAPSHOT</PDK-API-Version>
-                                        <Tapdata-API-Version>2.0.8-SNAPSHOT</Tapdata-API-Version>
+                                        <PDK-API-Version>${tapdata.version}</PDK-API-Version>
+                                        <Tapdata-API-Version>${tapdata.version}</Tapdata-API-Version>
                                     </manifestEntries>
                                 </transformer>
                             </transformers>
