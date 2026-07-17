@@ -110,6 +110,7 @@ fn empty_inner() -> IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
         snapshot_expiration_sink_ids: HashSet::new(),
         manifest_rewrite_sink_ids: HashSet::new(),
+        orphan_file_cleanup_sink_ids: HashSet::new(),
         manual_compaction_waiters: HashMap::new(),
     }
 }
@@ -722,6 +723,7 @@ async fn test_apply_sink_update_tracks_metadata_maintenance_without_compaction()
     config.enable_compaction = false;
     config.enable_snapshot_expiration = true;
     config.enable_manifest_rewrite = true;
+    config.enable_orphan_file_cleanup = true;
     let mut guard = empty_inner();
 
     manager.apply_sink_update(
@@ -738,6 +740,7 @@ async fn test_apply_sink_update_tracks_metadata_maintenance_without_compaction()
     assert!(!guard.sink_schedules.contains_key(&sink_id));
     assert!(guard.snapshot_expiration_sink_ids.contains(&sink_id));
     assert!(guard.manifest_rewrite_sink_ids.contains(&sink_id));
+    assert!(guard.orphan_file_cleanup_sink_ids.contains(&sink_id));
 }
 
 #[tokio::test]
@@ -1028,6 +1031,7 @@ async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
         guard.sink_schedules.insert(sink_id, track);
         guard.snapshot_expiration_sink_ids.insert(sink_id);
         guard.manifest_rewrite_sink_ids.insert(sink_id);
+        guard.orphan_file_cleanup_sink_ids.insert(sink_id);
     }
 
     manager.clear_iceberg_maintenance_by_sink_id(sink_id);
@@ -1037,6 +1041,7 @@ async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
         assert!(!guard.sink_schedules.contains_key(&sink_id));
         assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
         assert!(!guard.manifest_rewrite_sink_ids.contains(&sink_id));
+        assert!(!guard.orphan_file_cleanup_sink_ids.contains(&sink_id));
     }
 
     let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
