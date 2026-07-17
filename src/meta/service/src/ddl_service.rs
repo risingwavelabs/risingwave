@@ -449,6 +449,10 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -456,7 +460,7 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             dependencies,
-            resource_type: Self::default_streaming_job_resource_type(),
+            resource_type,
             if_not_exists: req.if_not_exists,
         };
 
@@ -596,6 +600,10 @@ impl DdlService for DdlServiceImpl {
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
 
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
@@ -604,7 +612,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                resource_type: Self::default_streaming_job_resource_type(),
+                resource_type,
                 if_not_exists: req.if_not_exists,
             })
             .await?;
@@ -1537,19 +1545,40 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterResourceGroupResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_job_id();
         let deferred = req.get_deferred();
         let resource_group = req.resource_group;
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.as_job_id(),
+                job_id,
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        request: Request<AlterDatabaseResourceGroupRequest>,
+    ) -> Result<Response<AlterDatabaseResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseResourceGroup(
+                req.database_id,
+                req.resource_group,
+                req.deferred,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterDatabaseResourceGroupResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_database_param(

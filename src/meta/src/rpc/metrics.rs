@@ -225,6 +225,8 @@ pub struct MetaMetrics {
     pub database_info: IntGaugeVec,
     /// Backfill progress per fragment
     pub backfill_fragment_progress: IntGaugeVec,
+    /// Max subscription retention configured for the table's changelog.
+    pub streaming_table_change_log_retention_seconds: IntGaugeVec,
 
     // ********************************** System Params ************************************
     /// A dummy gauge metric with labels carrying system parameter info.
@@ -591,21 +593,23 @@ impl MetaMetrics {
         );
         let version_checkpoint_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let hummock_manager_lock_time = register_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
-            &["lock_name", "lock_type"],
-            registry
-        )
-        .unwrap();
+            exponential_buckets(0.02, 2.5, 10).unwrap() // max 76s
+        );
+        let hummock_manager_lock_time =
+            register_histogram_vec_with_registry!(opts, &["lock_name", "lock_type"], registry)
+                .unwrap();
 
-        let hummock_manager_real_process_time = register_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "meta_hummock_manager_real_process_time",
             "latency for hummock manager to really process the request",
-            &["method"],
-            registry
-        )
-        .unwrap();
+            exponential_buckets(0.02, 2.5, 10).unwrap() // max 76s
+        );
+        let hummock_manager_real_process_time =
+            register_histogram_vec_with_registry!(opts, &["method", "lock_name"], registry)
+                .unwrap();
 
         let worker_num = register_int_gauge_vec_with_registry!(
             "worker_num",
@@ -755,6 +759,14 @@ impl MetaMetrics {
             "relation_info",
             "Information of the database relation (table/source/sink/materialized view/index/internal)",
             &["id", "database", "schema", "name", "resource_group", "type"],
+            registry
+        )
+        .unwrap();
+
+        let streaming_table_change_log_retention_seconds = register_int_gauge_vec_with_registry!(
+            "streaming_table_change_log_retention_seconds",
+            "Max subscription retention configured for the table change log in seconds",
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -1024,6 +1036,7 @@ impl MetaMetrics {
             relation_info,
             database_info,
             backfill_fragment_progress,
+            streaming_table_change_log_retention_seconds,
             system_param_info,
             l0_compact_level_count,
             compact_task_size,
@@ -1285,8 +1298,18 @@ pub async fn refresh_relation_info_metrics(
             return;
         }
     };
+    let subscriptions = match catalog_controller.list_subscriptions().await {
+        Ok(subscriptions) => subscriptions,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get subscription objects");
+            return;
+        }
+    };
 
     meta_metrics.relation_info.reset();
+    meta_metrics
+        .streaming_table_change_log_retention_seconds
+        .reset();
 
     for (id, db, schema, name, resource_group, table_type) in table_objects {
         let relation_type = match table_type {
@@ -1334,6 +1357,22 @@ pub async fn refresh_relation_info_metrics(
                 &"sink".to_owned(),
             ])
             .set(1);
+    }
+
+    let mut max_retention_by_table = HashMap::new();
+    for subscription in subscriptions {
+        max_retention_by_table
+            .entry(subscription.dependent_table_id)
+            .and_modify(|retention: &mut u64| {
+                *retention = (*retention).max(subscription.retention_seconds);
+            })
+            .or_insert(subscription.retention_seconds);
+    }
+    for (table_id, retention_seconds) in max_retention_by_table {
+        meta_metrics
+            .streaming_table_change_log_retention_seconds
+            .with_label_values(&[&table_id.to_string()])
+            .set(retention_seconds as _);
     }
 }
 

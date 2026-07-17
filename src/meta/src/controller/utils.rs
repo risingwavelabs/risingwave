@@ -1743,7 +1743,6 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
 /// For the given streaming jobs, returns
 /// - All source fragments
 /// - All sink fragments
-/// - All actors
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,

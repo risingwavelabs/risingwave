@@ -197,6 +197,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -296,6 +297,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
         struct UnregisterGroupChange {

@@ -47,6 +47,7 @@ md5 = { package = "md-5", version = "0.10.6" }
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = { workspace = true }
+prometheus = "0.14"
 rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }

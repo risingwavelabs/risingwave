@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -44,6 +45,8 @@ pub enum Error {
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
+    #[error("time-travel version expired: table {table_id}, epoch {epoch}")]
+    TimeTravelVersionExpired { table_id: TableId, epoch: u64 },
     #[error("time travel")]
     TimeTravel(
         #[source]
@@ -78,6 +81,10 @@ impl From<sea_orm::DbErr> for Error {
 
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        err.to_status(tonic::Code::Internal, "hummock")
+        let code = match &err {
+            Error::TimeTravelVersionExpired { .. } => tonic::Code::OutOfRange,
+            _ => tonic::Code::Internal,
+        };
+        err.to_status(code, "hummock")
     }
 }

@@ -33,6 +33,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist, StreamKind};
+use crate::session::current;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
@@ -258,8 +259,22 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
 
+        let unsafe_allow_unmaterialized_impure_expr = current::config()
+            .map(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
+            .unwrap_or_else(|| {
+                self.base
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .streaming_unsafe_allow_unmaterialized_impure_expr()
+            });
         let should_materialize_expr = match new_input.stream_kind() {
             StreamKind::AppendOnly => None,
+            StreamKind::Retract | StreamKind::Upsert if unsafe_allow_unmaterialized_impure_expr => {
+                // This deliberately leaves impure expressions in `StreamProject` on retract/upsert
+                // streams. The behavior is unsafe and only enabled by the explicit session option.
+                None
+            }
             kind @ (StreamKind::Retract | StreamKind::Upsert) => {
                 // Extract impure functions to `MaterializedExprs` operator
                 let mut impure_field_names = BTreeMap::new();

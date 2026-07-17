@@ -65,7 +65,9 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
-use crate::handler::create_mv::parse_column_names;
+use crate::handler::create_mv::{
+    extract_streaming_job_resource_options, parse_column_names, resolve_streaming_job_resource_type,
+};
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
@@ -125,6 +127,9 @@ pub async fn gen_sink_plan(
         Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
+    // These are frontend-level streaming job options. They must not be passed to connector
+    // property validation.
+    extract_streaming_job_resource_options(&mut with_options);
 
     if session
         .env()
@@ -604,7 +609,7 @@ async fn get_partition_compute_info_for_iceberg(
 }
 
 pub async fn handle_create_sink(
-    handle_args: HandlerArgs,
+    mut handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
     is_iceberg_engine_internal: bool,
 ) -> Result<RwPgResponse> {
@@ -627,6 +632,10 @@ pub async fn handle_create_sink(
             ICEBERG_SINK_PREFIX
         ))));
     }
+
+    let resource_type =
+        resolve_streaming_job_resource_type(session.as_ref(), &mut handle_args.with_options)
+            .await?;
 
     let (mut sink, graph, target_table_catalog, dependencies) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
@@ -673,7 +682,13 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        catalog_writer.create_sink(
+            sink.to_proto(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+        ),
         &session,
         "CREATE SINK",
         LongRunningNotificationAction::MonitorBackfillJob,
