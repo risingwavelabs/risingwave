@@ -227,7 +227,7 @@ impl CatalogController {
                             job_id = %fragment.job_id,
                             fragment_id = %fragment.fragment_id,
                             stream_scan_type = stream_scan.stream_scan_type,
-                            error = %err,
+                            error = %err.as_report(),
                             "invalid persisted stream scan type, skip collecting snapshot pin"
                         );
                         return;
