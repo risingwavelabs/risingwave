@@ -78,6 +78,7 @@ pub(crate) struct CreatingStreamingJobControl {
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
+    max_lagged_barrier_num: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -210,6 +211,12 @@ impl CreatingStreamingJobControl {
                 .collect(),
         };
 
+        let max_lagged_barrier_num =
+            control_stream_manager
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
+
         Ok(Self {
             database_id,
             job_id,
@@ -226,6 +233,7 @@ impl CreatingStreamingJobControl {
                 info: job_info,
                 pending_non_checkpoint_barriers,
             },
+            max_lagged_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -491,6 +499,12 @@ impl CreatingStreamingJobControl {
         };
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
 
+        let max_lagged_barrier_num =
+            control_stream_manager
+            .env
+            .opts
+            .snapshot_backfill_finish_max_lagged_barriers;
+
         Self::inject_barrier(
             database_id,
             job_id,
@@ -513,6 +527,7 @@ impl CreatingStreamingJobControl {
             state_table_ids,
             barrier_control,
             status,
+            max_lagged_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -724,6 +739,7 @@ impl CreatingStreamingJobControl {
     }
 
     pub(super) fn should_merge_to_upstream(&self) -> bool {
+        let todo = 0;
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
             barriers_to_inject,
