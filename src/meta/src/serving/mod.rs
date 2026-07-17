@@ -211,8 +211,19 @@ pub fn start_serving_vnode_mapping_worker(
                     match notification {
                         Some(notification) => {
                             match notification {
-                                LocalNotification::WorkerNodeActivated(w) | LocalNotification::WorkerNodeDeleted(w) =>  {
-                                    if w.r#type() != WorkerType::ComputeNode || !w.property.as_ref().is_some_and(|p| p.is_serving) {
+                                LocalNotification::WorkerNodeActivated(w) => {
+                                    // An activation can update an existing worker from serving to
+                                    // non-serving, so the new property alone cannot determine whether
+                                    // the serving worker set changed.
+                                    if w.r#type() != WorkerType::ComputeNode {
+                                        continue;
+                                    }
+                                    reset().await;
+                                }
+                                LocalNotification::WorkerNodeDeleted(w) => {
+                                    if w.r#type() != WorkerType::ComputeNode
+                                        || !w.property.as_ref().is_some_and(|p| p.is_serving)
+                                    {
                                         continue;
                                     }
                                     reset().await;
@@ -272,4 +283,104 @@ pub fn start_serving_vnode_mapping_worker(
         }
     });
     (join_handle, shutdown_tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::common::worker_node::{PbProperty, PbResource};
+    use risingwave_pb::meta::SubscribeType;
+    use tokio::time::timeout;
+
+    use super::*;
+    use crate::controller::catalog::CatalogController;
+    use crate::controller::cluster::ClusterController;
+    use crate::error::MetaResult;
+    use crate::manager::{MetaSrvEnv, WorkerKey};
+
+    #[tokio::test]
+    async fn test_reset_serving_vnode_mapping_when_worker_stops_serving() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_controller =
+            Arc::new(ClusterController::new(env.clone(), Duration::from_secs(1)).await?);
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5001,
+        };
+        let property = PbProperty {
+            parallelism: 1,
+            is_streaming: true,
+            is_serving: true,
+            ..Default::default()
+        };
+        let worker_id = cluster_controller
+            .add_worker(
+                WorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                PbResource::default(),
+            )
+            .await?;
+        cluster_controller.activate_worker(worker_id).await?;
+
+        let notification_manager = env.notification_manager_ref();
+        let (join_handle, shutdown_tx) = start_serving_vnode_mapping_worker(
+            notification_manager.clone(),
+            MetadataManager::new(
+                cluster_controller.clone(),
+                Arc::new(CatalogController::new(env.clone()).await?),
+            ),
+            Arc::new(ServingVnodeMapping::default()),
+            env.session_params_manager_impl_ref(),
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        notification_manager.insert_sender(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress::default()),
+            tx,
+        );
+
+        let mut property = property;
+        property.is_serving = false;
+        let reregistered_worker_id = cluster_controller
+            .add_worker(
+                WorkerType::ComputeNode,
+                host,
+                property,
+                PbResource::default(),
+            )
+            .await?;
+        assert_eq!(reregistered_worker_id, worker_id);
+        assert!(
+            cluster_controller
+                .list_active_serving_workers()
+                .await?
+                .is_empty()
+        );
+        cluster_controller
+            .activate_worker(reregistered_worker_id)
+            .await?;
+
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let notification = rx
+                    .recv()
+                    .await
+                    .expect("notification channel closed")
+                    .expect("failed to receive frontend notification");
+                if matches!(notification.info, Some(Info::ServingWorkerSlotMappings(_))) {
+                    assert_eq!(notification.operation, Operation::Snapshot as i32);
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("serving mapping was not refreshed after worker role demotion");
+
+        shutdown_tx.send(()).unwrap();
+        join_handle.await.unwrap();
+        Ok(())
+    }
 }
