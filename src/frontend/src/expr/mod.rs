@@ -927,9 +927,7 @@ impl ExprImpl {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.func_type() == ExprType::In
         {
-            let Some((input, list)) = function_call.inputs().split_first() else {
-                return None;
-            };
+            let (input, list) = function_call.inputs().split_first()?;
             let input_ref = match input {
                 ExprImpl::InputRef(i) => i.as_ref().clone(),
                 _ => return None,
