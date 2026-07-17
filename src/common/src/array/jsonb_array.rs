@@ -80,10 +80,6 @@ impl ArrayBuilder for JsonbArrayBuilder {
 }
 
 impl JsonbArrayBuilder {
-    pub fn writer(&mut self) -> JsonbWriter<'_> {
-        JsonbWriter::new(self)
-    }
-
     /// Appends the standalone jsonbb encoding of `value`.
     ///
     /// A jsonbb value is encoded as its data followed by a four-byte root entry. `to_raw_parts`
@@ -221,39 +217,6 @@ impl FromIterator<JsonbVal> for JsonbArray {
     }
 }
 
-/// Builds one independent JSONB value for a row. Dropping or rolling back an unfinished writer
-/// simply discards that value and cannot affect previously appended rows.
-pub struct JsonbWriter<'a> {
-    array_builder: &'a mut JsonbArrayBuilder,
-    builder: jsonbb::Builder,
-}
-
-impl JsonbWriter<'_> {
-    pub fn new(array_builder: &mut JsonbArrayBuilder) -> JsonbWriter<'_> {
-        JsonbWriter {
-            array_builder,
-            builder: jsonbb::Builder::<Vec<u8>>::new(),
-        }
-    }
-
-    pub fn inner(&mut self) -> &mut jsonbb::Builder {
-        &mut self.builder
-    }
-
-    /// Commits the completed value as one row.
-    pub fn finish(self) {
-        let JsonbWriter {
-            array_builder,
-            builder,
-        } = self;
-        let value = builder.finish();
-        array_builder.append_value(JsonbRef(value.as_ref()));
-    }
-
-    /// Discards the partially built value.
-    pub fn rollback(self) {}
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,33 +273,5 @@ mod tests {
 
         let array = JsonbArray::from_iter(values);
         assert_eq!(array.to_protobuf().values[1].body, expected);
-    }
-
-    #[test]
-    fn test_writer_commit_and_rollback_are_isolated() {
-        let mut builder = JsonbArrayBuilder::new(3);
-        {
-            let mut writer = builder.writer();
-            writer.inner().add_string("committed");
-            writer.finish();
-        }
-        {
-            let mut writer = builder.writer();
-            writer.inner().add_string("rolled back");
-            writer.rollback();
-        }
-        builder.append_null();
-        {
-            let mut writer = builder.writer();
-            writer.inner().add_string("dropped");
-        }
-
-        let array = builder.finish();
-        assert_eq!(array.len(), 2);
-        assert_eq!(
-            array.value_at(0).unwrap(),
-            json(r#""committed""#).as_scalar_ref()
-        );
-        assert!(array.value_at(1).is_none());
     }
 }
