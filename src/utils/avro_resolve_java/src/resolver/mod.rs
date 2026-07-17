@@ -31,8 +31,7 @@ enum SchemaType {
 
 impl SchemaType {
     fn from_schema(s: &Schema, names: &NamesRef<'_>) -> Self {
-        use Schema as S;
-        use SchemaType as T;
+        use {Schema as S, SchemaType as T};
 
         match s {
             S::Null => T::Null,
