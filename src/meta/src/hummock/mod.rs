@@ -26,24 +26,29 @@ mod metrics_utils;
 pub mod mock_hummock_meta_client;
 pub mod model;
 pub mod test_utils;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 pub use compactor_manager::*;
 use futures::future::BoxFuture;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
+use risingwave_common::catalog::TableId;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::MetaOpts;
 use crate::backup_restore::BackupManagerRef;
 
+type PinnedSnapshotEpochsFetcher =
+    Box<dyn Fn() -> BoxFuture<'static, Option<HashMap<TableId, HashSet<u64>>>> + Send>;
+
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
-    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
+    get_pinned_snapshot_epochs: PinnedSnapshotEpochsFetcher,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
@@ -61,7 +66,7 @@ pub fn start_hummock_workers(
         start_vacuum_time_travel_metadata_loop(
             hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
-            should_pause_vacuum_time_travel,
+            get_pinned_snapshot_epochs,
         ),
     ];
     workers
@@ -97,7 +102,7 @@ pub fn start_vacuum_metadata_loop(
 pub fn start_vacuum_time_travel_metadata_loop(
     hummock_manager: HummockManagerRef,
     interval: Duration,
-    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
+    get_pinned_snapshot_epochs: PinnedSnapshotEpochsFetcher,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
@@ -113,11 +118,16 @@ pub fn start_vacuum_time_travel_metadata_loop(
                     return;
                 }
             }
-            if should_pause_vacuum_time_travel().await {
-                tracing::warn!("time travel vacuum paused");
+            let Some(pinned_snapshot_epochs) = get_pinned_snapshot_epochs().await else {
+                tracing::warn!(
+                    "time travel vacuum paused because pinned snapshots are unavailable"
+                );
                 continue;
-            }
-            if let Err(err) = hummock_manager.delete_time_travel_metadata().await {
+            };
+            if let Err(err) = hummock_manager
+                .delete_time_travel_metadata(pinned_snapshot_epochs)
+                .await
+            {
                 tracing::warn!(error = %err.as_report(), "Vacuum time travel metadata error");
             }
         }

@@ -562,11 +562,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
-                            BarrierManagerRequest::MayHaveCreatingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_creating_jobs()).is_err() {
-                                    warn!("failed to check whether there may be creating jobs");
-                                }
-                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -1374,10 +1369,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
-                        }
-                        BarrierManagerRequest::MayHaveCreatingJob(tx) => {
-                            // May recover creating jobs.
-                            let _ = tx.send(true);
                         }
                     }
                 }
