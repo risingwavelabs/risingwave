@@ -4964,6 +4964,11 @@ impl Parser<'_> {
 
     /// Parse a CTE (`alias [( col1, col2, ... )] AS (subquery)`)
     fn parse_cte(&mut self) -> ModalResult<Cte> {
+        let token = self.peek_token();
+        if matches!(token.token, Token::Word(ref word) if word.keyword == Keyword::WITH) {
+            parser_err!("syntax error at or near {token}");
+        }
+
         let name = self.parse_identifier_non_reserved()?;
         let cte = if self.parse_keyword(Keyword::AS) {
             let cte_inner = self.parse_cte_inner()?;
