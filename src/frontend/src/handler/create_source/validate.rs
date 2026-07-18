@@ -123,6 +123,25 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn uses_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
+    match (&format_encode.format, &format_encode.row_encode) {
+        (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
+            let mut options = WithOptions::try_from(format_encode.row_options())?;
+            let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+            Ok(use_schema_registry)
+        }
+        (Format::Debezium, Encode::Avro) => Ok(true),
+        (_, _) => Ok(false),
+    }
+}
+
+fn uses_pulsar_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
+    let options = WithOptions::try_from(format_encode.row_options())?;
+    Ok(options
+        .get(SCHEMA_REGISTRY_TYPE_KEY)
+        .is_some_and(|value| value.eq_ignore_ascii_case("pulsar")))
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -157,19 +176,10 @@ pub fn validate_compatibility(
         })?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
-        let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
-                let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
-            }
-            (Format::Debezium, Encode::Avro) => true,
-            (_, _) => false,
-        };
-        if res {
+    if connector != KAFKA_CONNECTOR && uses_schema_registry(format_encode)? {
+        if !(connector == PULSAR_CONNECTOR && uses_pulsar_schema_registry(format_encode)?) {
             return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used",
+                "The {} must be kafka when schema registry is used, or pulsar when schema.registry.type is 'pulsar'",
                 UPSTREAM_SOURCE_KEY
             ))));
         }

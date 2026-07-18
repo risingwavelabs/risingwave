@@ -24,13 +24,14 @@ use risingwave_connector_codec::decoder::avro::{
     AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
 };
 
-use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
+use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl, PulsarSchemaCache};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
 use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
+use crate::schema::pulsar::pulsar_schema_version_to_i64;
 use crate::schema::schema_registry::{
     Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
@@ -96,7 +97,7 @@ impl AvroAccessBuilder {
     async fn parse_avro_value(
         &self,
         payload: &[u8],
-        _source_meta: &SourceMeta,
+        source_meta: &SourceMeta,
     ) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -118,6 +119,26 @@ impl AvroAccessBuilder {
                     Some(Err(e)) => Err(e)?,
                     None => bail!("avro parse unexpected eof"),
                 }
+            }
+            WriterSchemaCache::Pulsar(resolver) => {
+                let schema_version = match source_meta {
+                    SourceMeta::Pulsar(meta) => meta.schema_version.as_deref(),
+                    _ => None,
+                };
+                let writer_schema = match schema_version
+                    .map(pulsar_schema_version_to_i64)
+                    .transpose()?
+                    .flatten()
+                {
+                    Some(version) => resolver.get_by_version(version).await?,
+                    None => resolver.get_latest().await?,
+                };
+                let mut raw_payload = payload;
+                Ok(Some(from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    Some(&self.schema.original_schema),
+                )?))
             }
             WriterSchemaCache::Glue(resolver) => {
                 // <https://github.com/awslabs/aws-glue-schema-registry/blob/v1.1.20/common/src/main/java/com/amazonaws/services/schemaregistry/utils/AWSSchemaRegistryConstants.java#L59-L61>
@@ -164,6 +185,7 @@ pub struct AvroParserConfig {
 enum WriterSchemaCache {
     Confluent(Arc<ConfluentSchemaCache>),
     Glue(Arc<GlueSchemaCacheImpl>),
+    Pulsar(Arc<PulsarSchemaCache>),
     File,
 }
 
@@ -231,6 +253,15 @@ impl AvroParserConfig {
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
+                    map_handling,
+                })
+            }
+            SchemaLocation::Pulsar(config) => {
+                let resolver = PulsarSchemaCache::new(config)?;
+                let schema = resolver.get_latest().await?;
+                Ok(Self {
+                    schema: Arc::new(ResolvedAvroSchema::create(schema)?),
+                    writer_schema_cache: WriterSchemaCache::Pulsar(Arc::new(resolver)),
                     map_handling,
                 })
             }
