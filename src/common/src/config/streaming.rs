@@ -34,6 +34,11 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    /// The maximum number of lagged barriers allowed when merging a snapshot backfill job into
+    /// the database graph.
+    #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -110,6 +115,23 @@ pub struct StreamingDeveloperConfig {
     /// - `0` means unlimited concurrency.
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
+
+    /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
+    ///
+    /// - `1` means no chunk-level concurrency.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_project_expr_concurrency")]
+    pub project_expr_concurrency: usize,
+
+    /// The maximum number of in-flight projection evaluation requests in `ProjectExecutor`.
+    ///
+    /// An in-flight request has started projection evaluation but has not finished yet. A finished
+    /// request no longer counts against this limit even if its result is still waiting to be emitted
+    /// in order.
+    ///
+    /// - `0` means unlimited in-flight requests.
+    #[serde(default = "default::developer::stream_project_expr_inflight_request_concurrency")]
+    pub project_expr_inflight_request_concurrency: usize,
 
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
@@ -357,6 +379,10 @@ pub mod default {
             // quick fix
             // TODO: remove this limitation from code
             10000
+        }
+
+        pub fn snapshot_backfill_finish_max_lagged_barriers() -> usize {
+            100
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {

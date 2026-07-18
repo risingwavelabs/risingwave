@@ -230,6 +230,14 @@ pub mod default {
             0
         }
 
+        pub fn stream_project_expr_concurrency() -> usize {
+            1
+        }
+
+        pub fn stream_project_expr_inflight_request_concurrency() -> usize {
+            0
+        }
+
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }

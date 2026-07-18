@@ -15,6 +15,7 @@
 use std::cmp;
 use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog, TableChangeLogs};
@@ -59,7 +60,7 @@ pub struct Versioning {
     /// Don't persist compaction version delta to meta store
     pub disable_commit_epochs: bool,
     /// Latest hummock version
-    pub current_version: HummockVersion,
+    pub current_version: Arc<HummockVersion>,
     pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
@@ -165,7 +166,7 @@ impl HummockManager {
     }
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
-        f(&self.versioning.read().await.current_version)
+        f(self.versioning.read().await.current_version.as_ref())
     }
 
     pub async fn on_current_version_and_table_change_log<T>(
@@ -287,6 +288,7 @@ impl HummockManager {
                 None,
                 &self.metrics,
                 &self.env.opts,
+                &self.version_stat_tx,
             );
             let mut new_version_delta = version.new_delta();
             new_version_delta.with_latest_version(|version, delta| {
@@ -299,9 +301,6 @@ impl HummockManager {
     }
 
     pub async fn may_fill_backward_table_change_logs(&self) -> Result<()> {
-        let mut versioning = self.versioning.write().await;
-        let version = &mut versioning.current_version;
-
         let is_nonempty_meta_store =
             risingwave_meta_model::hummock_table_change_log::Entity::find()
                 .select_only()
@@ -313,30 +312,33 @@ impl HummockManager {
                 .one(&self.env.meta_store_ref().conn)
                 .await?
                 .is_some();
-        #[expect(deprecated)]
-        if version.table_change_log.is_empty() || is_nonempty_meta_store {
-            if version.table_change_log.is_empty() {
+
+        let table_change_logs = {
+            let mut versioning = self.versioning.write().await;
+            #[expect(deprecated)]
+            if versioning.current_version.table_change_log.is_empty() {
                 tracing::info!("No legacy table change log to migrate.");
+                return Ok(());
             }
+            let version = Arc::make_mut(&mut versioning.current_version);
             if is_nonempty_meta_store {
                 tracing::info!("meta store table change log is non-empty.");
+                // Clear legacy in-mem state.
+                #[expect(deprecated)]
+                version.table_change_log = HashMap::default();
+                // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
+                return Ok(());
             }
-            // Clear legacy in-mem state.
-            version.table_change_log = HashMap::default();
-            // Either there are no table change logs to commit to the metastore, or the operation has already been completed.
-            return Ok(());
-        }
 
-        // Remove table change log from version.
-        #[expect(deprecated)]
-        let table_change_logs = {
             // Clear legacy in-mem state.
+            #[expect(deprecated)]
             let logs = std::mem::take(&mut version.table_change_log);
             if logs.values().all(|t| t.is_empty()) {
                 return Ok(());
             }
             logs
         };
+
         // Store table change log in meta store.
         let insert_batch_size = self.env.opts.table_change_log_insert_batch_size as usize;
         let count = {
@@ -372,6 +374,7 @@ impl HummockManager {
         };
         tracing::info!("Migrated {count} table change log to meta store.");
         // Initialize new in-mem state.
+        let mut versioning = self.versioning.write().await;
         versioning.table_change_log = table_change_logs;
         Ok(())
     }

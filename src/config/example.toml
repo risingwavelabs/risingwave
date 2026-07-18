@@ -202,6 +202,7 @@ auth_method = "password"
 
 [streaming]
 in_flight_barrier_nums = 10000
+snapshot_backfill_finish_max_lagged_barriers = 100
 actor_runtime_worker_threads_num = ""
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
@@ -217,6 +218,8 @@ exchange_initial_permits = 2048
 exchange_batched_permits = 256
 exchange_concurrent_barriers = 1
 exchange_concurrent_dispatchers = 0
+project_expr_concurrency = 1
+project_expr_inflight_request_concurrency = 0
 dml_channel_initial_permits = 32768
 hash_agg_max_dirty_groups_heap_size = 67108864
 memory_controller_threshold_aggressive = 0.9

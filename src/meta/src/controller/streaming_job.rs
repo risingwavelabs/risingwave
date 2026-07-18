@@ -30,7 +30,7 @@ use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_body, visit_stream_node_mut,
+    visit_stream_node_body, visit_stream_node_mut, visit_stream_node_stream_scan,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
@@ -66,7 +66,7 @@ use risingwave_pb::plan_common::source_refresh_mode::{
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
+use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode, StreamScanType};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -179,6 +179,64 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
+    pub async fn get_pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
+        // Hold the catalog read lock across both queries so a job cannot transition out of
+        // `Creating` while its fragments are being inspected.
+        let inner = self.inner.read().await;
+        let creating_job_ids = StreamingJobModel::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .into_tuple::<JobId>()
+            .all(&inner.db)
+            .await?;
+        if creating_job_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let fragments = Fragment::find()
+            .filter(fragment::Column::JobId.is_in(creating_job_ids))
+            .all(&inner.db)
+            .await?;
+        let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
+        for fragment in fragments {
+            visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                    Ok(scan_type) => scan_type,
+                    Err(err) => {
+                        tracing::warn!(
+                            job_id = %fragment.job_id,
+                            fragment_id = %fragment.fragment_id,
+                            stream_scan_type = stream_scan.stream_scan_type,
+                            error = %err.as_report(),
+                            "invalid persisted stream scan type, skip collecting snapshot pin"
+                        );
+                        return;
+                    }
+                };
+                if !matches!(
+                    scan_type,
+                    StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill
+                ) {
+                    return;
+                }
+                let Some(epoch) = stream_scan.snapshot_backfill_epoch else {
+                    tracing::warn!(
+                        job_id = %fragment.job_id,
+                        fragment_id = %fragment.fragment_id,
+                        table_id = %stream_scan.table_id,
+                        "persisted snapshot backfill epoch is not set, skip collecting snapshot pin"
+                    );
+                    return;
+                };
+                pinned_snapshot_epochs
+                    .entry(stream_scan.table_id)
+                    .or_default()
+                    .insert(epoch);
+            });
+        }
+        Ok(pinned_snapshot_epochs)
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
@@ -743,39 +801,67 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Builds a cancel command for the streaming job. If the sink (with target table) needs to be dropped, additional
-    /// information is required to build barrier mutation.
+    /// Builds a cancel command from persisted fragment metadata without reading `SharedActorInfos`.
+    ///
+    /// Returns `None` if the job no longer exists or has already been created.
     pub async fn build_cancel_command(
         &self,
-        table_fragments: &StreamJobFragments,
-    ) -> MetaResult<Command> {
+        job_id: JobId,
+    ) -> MetaResult<Option<(Command, Vec<TableId>)>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let dropped_sink_fragment_with_target =
-            if let Some(sink_fragment) = table_fragments.sink_fragment() {
-                let sink_fragment_id = sink_fragment.fragment_id as FragmentId;
-                let sink_target_fragment = fetch_target_fragments(&txn, [sink_fragment_id]).await?;
-                sink_target_fragment
-                    .get(&sink_fragment_id)
-                    .map(|target_fragments| {
-                        let target_fragment_id = *target_fragments
-                            .first()
-                            .expect("sink should have at least one downstream fragment");
-                        (sink_fragment_id, target_fragment_id)
-                    })
-            } else {
-                None
-            };
+        let Some(streaming_job) = StreamingJobModel::find_by_id(job_id).one(&txn).await? else {
+            tracing::warn!(
+                %job_id,
+                "streaming job not found when building cancel command, might be cancelled already"
+            );
+            return Ok(None);
+        };
+        if streaming_job.job_status == JobStatus::Created {
+            tracing::warn!(
+                "streaming job {} is already created, ignore cancel request",
+                job_id
+            );
+            return Ok(None);
+        }
 
-        Ok(Command::DropStreamingJobs {
-            streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
-            dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
-                .into_iter()
-                .map(|(sink, target)| (target as _, vec![sink as _]))
-                .collect(),
-        })
+        let fragments = Fragment::find()
+            .filter(fragment::Column::JobId.eq(job_id))
+            .all(&txn)
+            .await?;
+
+        let state_table_ids = fragments
+            .iter()
+            .flat_map(|fragment| fragment.state_table_ids.inner_ref().iter().copied())
+            .collect_vec();
+        let sink_fragment_ids = fragments
+            .iter()
+            .filter_map(|fragment| {
+                FragmentTypeMask::from(fragment.fragment_type_mask)
+                    .contains(FragmentTypeFlag::Sink)
+                    .then_some(fragment.fragment_id)
+            })
+            .collect_vec();
+
+        let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
+        let dropped_sink_fragment_by_targets = sink_target_fragments
+            .into_iter()
+            .filter_map(|(sink_fragment, target_fragments)| {
+                target_fragments
+                    .first()
+                    .map(|target_fragment| (*target_fragment, vec![sink_fragment]))
+            })
+            .collect();
+
+        Ok(Some((
+            Command::DropStreamingJobs {
+                streaming_job_ids: HashSet::from_iter([job_id]),
+                unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
+                dropped_sink_fragment_by_targets,
+            },
+            state_table_ids,
+        )))
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.

@@ -228,12 +228,6 @@ impl CheckpointControl {
             .map(|database| &database.database_info)
     }
 
-    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
-        self.databases
-            .values()
-            .any(|database| database.may_have_snapshot_backfilling_jobs())
-    }
-
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
@@ -592,17 +586,6 @@ impl DatabaseCheckpointControlStatus {
             DatabaseCheckpointControlStatus::Running(state) => Some(state),
             DatabaseCheckpointControlStatus::Recovering(_) => None,
         }
-    }
-
-    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
-        self.running_state()
-            .map(|database| {
-                database
-                    .independent_checkpoint_job_controls
-                    .values()
-                    .any(|job| job.is_snapshot_backfilling())
-            })
-            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
     fn expect_running(&mut self, reason: &'static str) -> &mut DatabaseCheckpointControl {

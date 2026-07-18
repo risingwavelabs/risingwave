@@ -121,6 +121,100 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "OpenAI Embedding Requests",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_success_count')}[$__rate_interval])) by (model, api_base)",
+                            "success - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_failure_count')}[$__rate_interval])) by (model, api_base)",
+                            "failure - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "OpenAI Embedding Latency",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.50, sum(rate({metric('openai_embedding_latency_bucket')}[$__rate_interval])) by (le, model, api_base))",
+                            "p50 - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.90, sum(rate({metric('openai_embedding_latency_bucket')}[$__rate_interval])) by (le, model, api_base))",
+                            "p90 - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(rate({metric('openai_embedding_latency_bucket')}[$__rate_interval])) by (le, model, api_base))",
+                            "p99 - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_latency_sum')}[$__rate_interval])) by (model, api_base) / sum(rate({metric('openai_embedding_latency_count')}[$__rate_interval])) by (model, api_base) > 0",
+                            "avg - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "OpenAI Embedding Error Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_failure_count')}[$__rate_interval])) by (model, api_base) / (sum(rate({metric('openai_embedding_success_count')}[$__rate_interval])) by (model, api_base) + sum(rate({metric('openai_embedding_failure_count')}[$__rate_interval])) by (model, api_base)) > 0",
+                            "error rate - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "OpenAI Embedding Row Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_input_rows')}[$__rate_interval])) by (model, api_base)",
+                            "rows - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "OpenAI Embedding Inflight Requests",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('openai_embedding_inflight_requests')}) by (model, api_base)",
+                            "requests - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "OpenAI Embedding Inflight Rows",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('openai_embedding_inflight_rows')}) by (model, api_base)",
+                            "rows - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "OpenAI Embedding Input Row Word Count",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.50, sum(rate({metric('openai_embedding_input_row_word_count_bucket')}[$__rate_interval])) by (le, model, api_base))",
+                            "p50 - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(rate({metric('openai_embedding_input_row_word_count_bucket')}[$__rate_interval])) by (le, model, api_base))",
+                            "p99 - {{model}} {{api_base}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('openai_embedding_input_row_word_count_sum')}[$__rate_interval])) by (model, api_base) / sum(rate({metric('openai_embedding_input_row_word_count_count')}[$__rate_interval])) by (model, api_base) > 0",
+                            "avg - {{model}} {{api_base}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
