@@ -44,13 +44,13 @@ use risingwave_connector::parser::{
     SchemaLocation, SpecificParserConfig, TimestamptzHandling,
     fetch_json_schema_and_map_to_columns,
 };
-use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
     SCHEMA_REGISTRY_CA_PEM_PATH, SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD,
     SCHEMA_REGISTRY_RETRIES_MAX_KEY, SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig,
     name_strategy_from_str,
 };
+use risingwave_connector::schema::{AWS_GLUE_SCHEMA_ARN_KEY, SCHEMA_REGISTRY_TYPE_KEY};
 use risingwave_connector::source::cdc::{
     CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
     CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
@@ -151,6 +151,7 @@ fn try_consume_schema_registry_config_from_options(
         SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
         SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
         SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+        SCHEMA_REGISTRY_TYPE_KEY,
     ]
     .iter()
     .for_each(|key| {
