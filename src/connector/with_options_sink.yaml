@@ -342,12 +342,15 @@ ElasticSearchConfig:
   - name: batch_num_messages
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: batch_size_kb
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: concurrent_requests
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: false
@@ -1321,12 +1324,15 @@ OpenSearchConfig:
   - name: batch_num_messages
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: batch_size_kb
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: concurrent_requests
     field_type: usize
     required: true
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: false
