@@ -137,9 +137,10 @@ fn uses_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
 
 fn uses_pulsar_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
     let options = WithOptions::try_from(format_encode.row_options())?;
+    // Pulsar sources default `schema.registry` to the Pulsar admin schema API.
     Ok(options
         .get(SCHEMA_REGISTRY_TYPE_KEY)
-        .is_some_and(|value| value.eq_ignore_ascii_case("pulsar")))
+        .is_none_or(|value| value.eq_ignore_ascii_case("pulsar")))
 }
 
 pub fn validate_compatibility(
@@ -179,7 +180,7 @@ pub fn validate_compatibility(
     if connector != KAFKA_CONNECTOR && uses_schema_registry(format_encode)? {
         if !(connector == PULSAR_CONNECTOR && uses_pulsar_schema_registry(format_encode)?) {
             return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used, or pulsar when schema.registry.type is 'pulsar'",
+                "The {} must be kafka when schema registry is used, or pulsar when using the Pulsar schema registry",
                 UPSTREAM_SOURCE_KEY
             ))));
         }

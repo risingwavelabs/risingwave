@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{Client, Method, Url};
+use risingwave_common::bail;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -33,7 +34,7 @@ pub struct PulsarSchemaRegistryConfig {
 pub struct PulsarSchemaClient {
     inner: Client,
     admin_url: Url,
-    topic_path: Vec<String>,
+    schema_path: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,10 +51,9 @@ impl PulsarSchemaClient {
             .into_iter()
             .next()
             .context("pulsar schema registry URL is empty")?;
-        ensure!(
-            !admin_url.cannot_be_a_base(),
-            "Pulsar admin URL must be a base URL"
-        );
+        if admin_url.cannot_be_a_base() {
+            bail!("Pulsar admin URL must be a base URL");
+        }
         let topic = parse_topic(&config.topic)?;
         let mut headers = HeaderMap::new();
         if let Some(token) = config.auth_token {
@@ -71,7 +71,7 @@ impl PulsarSchemaClient {
         Ok(Self {
             inner,
             admin_url,
-            topic_path: vec![topic.domain, topic.tenant, topic.namespace, topic_name],
+            schema_path: vec![topic.tenant, topic.namespace, topic_name],
         })
     }
 
@@ -89,7 +89,7 @@ impl PulsarSchemaClient {
         url.path_segments_mut()
             .expect("constructor validates Pulsar admin URL can be a base")
             .extend(["admin", "v2", "schemas"])
-            .extend(self.topic_path.iter().map(String::as_str))
+            .extend(self.schema_path.iter().map(String::as_str))
             .extend(suffix);
         url
     }
@@ -145,11 +145,11 @@ mod tests {
 
         assert_eq!(
             client.schema_url(&["schema"]).as_str(),
-            "http://localhost:8080/admin/v2/schemas/persistent/tenant/ns/events/schema"
+            "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
         );
         assert_eq!(
             client.schema_url(&["schema", "42"]).as_str(),
-            "http://localhost:8080/admin/v2/schemas/persistent/tenant/ns/events/schema/42"
+            "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema/42"
         );
     }
 
@@ -159,7 +159,7 @@ mod tests {
 
         assert_eq!(
             client.schema_url(&["schema"]).as_str(),
-            "http://localhost:8080/admin/v2/schemas/persistent/public/default/events/schema"
+            "http://localhost:8080/admin/v2/schemas/public/default/events/schema"
         );
     }
 
@@ -171,7 +171,7 @@ mod tests {
 
         assert_eq!(
             client.schema_url(&["schema"]).as_str(),
-            "http://localhost:8080/admin/v2/schemas/persistent/tenant/ns/events/schema"
+            "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
         );
     }
 

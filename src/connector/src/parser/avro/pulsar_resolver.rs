@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
+use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
 use crate::schema::pulsar::{PulsarSchema, PulsarSchemaClient, PulsarSchemaRegistryConfig};
@@ -39,11 +40,12 @@ impl PulsarSchemaCache {
         &self,
         raw_schema: PulsarSchema,
     ) -> ConnectorResult<Arc<Schema>> {
-        ensure!(
-            raw_schema.schema_type.eq_ignore_ascii_case("AVRO"),
-            "expected Pulsar AVRO schema, got {}",
-            raw_schema.schema_type
-        );
+        if !raw_schema.schema_type.eq_ignore_ascii_case("AVRO") {
+            bail!(
+                "expected Pulsar AVRO schema, got {}",
+                raw_schema.schema_type
+            );
+        }
         let schema =
             Schema::parse_str(&raw_schema.data).context("failed to parse Pulsar avro schema")?;
         let schema = Arc::new(schema);

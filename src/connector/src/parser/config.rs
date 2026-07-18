@@ -61,10 +61,17 @@ fn parse_parquet_case_insensitive_option(
     Ok(parsed)
 }
 
-fn use_pulsar_schema_registry(options: &BTreeMap<String, String>) -> bool {
-    options
-        .get(SCHEMA_REGISTRY_TYPE_KEY)
-        .is_some_and(|value| value.eq_ignore_ascii_case(SCHEMA_REGISTRY_TYPE_PULSAR))
+fn use_pulsar_schema_registry(
+    format_options: &BTreeMap<String, String>,
+    source_options: &BTreeMap<String, String>,
+) -> bool {
+    // `schema.registry.type` selects the registry backend, not the payload encoding.
+    // Pulsar sources default to the Pulsar admin schema API so users only need
+    // to specify `ENCODE AVRO` plus `schema.registry = '<pulsar-admin-url>'`.
+    match format_options.get(SCHEMA_REGISTRY_TYPE_KEY) {
+        Some(value) => value.eq_ignore_ascii_case(SCHEMA_REGISTRY_TYPE_PULSAR),
+        None => source_options.is_pulsar_connector(),
+    }
 }
 
 fn validate_schema_registry_type(
@@ -253,7 +260,10 @@ impl SpecificParserConfig {
                             .cloned(),
                     }
                 } else if info.use_schema_registry
-                    && use_pulsar_schema_registry(&format_encode_options_with_secret)
+                    && use_pulsar_schema_registry(
+                        &format_encode_options_with_secret,
+                        &options_with_secret,
+                    )
                 {
                     SchemaLocation::Pulsar(get_pulsar_schema_registry_config(
                         info.row_schema_location.clone(),
@@ -303,8 +313,10 @@ impl SpecificParserConfig {
                     ..Default::default()
                 };
                 config.schema_location = if info.use_schema_registry
-                    && use_pulsar_schema_registry(&format_encode_options_with_secret)
-                {
+                    && use_pulsar_schema_registry(
+                        &format_encode_options_with_secret,
+                        &options_with_secret,
+                    ) {
                     SchemaLocation::Pulsar(get_pulsar_schema_registry_config(
                         info.row_schema_location.clone(),
                         &options_with_secret,
@@ -420,7 +432,8 @@ pub enum SchemaLocation {
         // When `Some(_)`, ignore AWS and load schemas from provided config
         mock_config: Option<String>,
     },
-    /// Pulsar admin schema endpoint.
+    /// Pulsar admin schema endpoint. The URL still comes from `schema.registry`, but the API and
+    /// payload framing are Pulsar-specific rather than Confluent-compatible.
     Pulsar(PulsarSchemaRegistryConfig),
 }
 
@@ -485,5 +498,36 @@ impl From<&BTreeMap<String, String>> for MongoProperties {
             .get(CDC_MONGODB_STRONG_SCHEMA_KEY)
             .is_some_and(|k| k.eq_ignore_ascii_case("true"));
         Self { strong_schema }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn options(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn pulsar_schema_registry_is_default_for_pulsar_sources() {
+        let pulsar_source_options = options(&[("connector", "pulsar")]);
+        let kafka_source_options = options(&[("connector", "kafka")]);
+
+        assert!(use_pulsar_schema_registry(
+            &BTreeMap::new(),
+            &pulsar_source_options
+        ));
+        assert!(!use_pulsar_schema_registry(
+            &BTreeMap::new(),
+            &kafka_source_options
+        ));
+        assert!(!use_pulsar_schema_registry(
+            &options(&[(SCHEMA_REGISTRY_TYPE_KEY, SCHEMA_REGISTRY_TYPE_CONFLUENT)]),
+            &pulsar_source_options
+        ));
     }
 }

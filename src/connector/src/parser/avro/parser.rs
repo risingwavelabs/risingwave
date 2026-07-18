@@ -99,8 +99,8 @@ impl AvroAccessBuilder {
         payload: &[u8],
         source_meta: &SourceMeta,
     ) -> ConnectorResult<Option<Value>> {
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
+        // Parse payload to an Avro value. Each schema backend has its own wire-format contract,
+        // so keep the payload framing logic close to the writer-schema lookup.
         match &self.writer_schema_cache {
             WriterSchemaCache::Confluent(resolver) => {
                 let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
@@ -121,6 +121,8 @@ impl AvroAccessBuilder {
                 }
             }
             WriterSchemaCache::Pulsar(resolver) => {
+                // Pulsar Avro payloads are raw Avro datum bytes. The writer schema version is
+                // carried by Pulsar message metadata instead of a Confluent-style payload header.
                 let schema_version = match source_meta {
                     SourceMeta::Pulsar(meta) => meta.schema_version.as_deref(),
                     _ => None,
