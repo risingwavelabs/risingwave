@@ -43,6 +43,26 @@ The connector JAR embeds a build timestamp, so this process freezes dependency i
 than making the JAR byte-for-byte reproducible. Distribute one canonical JAR and record its SHA-256,
 Maven version, JDK version, and Git commit in the production-readiness record.
 
+The build also writes `Git-Commit` and `Git-Dirty` into the shaded JAR manifest. Build a release
+only from a clean committed worktree, and reject any candidate whose manifest reports
+`Git-Dirty: true` or whose `Git-Commit` differs from the reviewed source revision:
+
+```bash
+test -z "$(git status --porcelain)"
+
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 \
+PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH \
+mvn -B -o -f tapdata-plugin/pom.xml clean package
+
+unzip -p tapdata-plugin/target/risingwave-connector-1.0.0.jar META-INF/MANIFEST.MF \
+  | grep -E '^(Git-Commit|Git-Dirty):'
+git rev-parse HEAD
+```
+
+The JDK path remains an environment-specific example. The release sequence is: commit source,
+build and qualify the JAR from that clean commit, then commit only its checksum and qualification
+record. The later documentation commit does not change the source revision embedded in the JAR.
+
 For the qualified `1.0.0` release candidate built on 2026-07-17, verify the canonical JAR from the
 module directory before distribution:
 
