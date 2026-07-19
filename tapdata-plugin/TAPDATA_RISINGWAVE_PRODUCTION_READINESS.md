@@ -1102,3 +1102,24 @@ data-correctness failure and remains outside the supported source configuration.
 - Production support therefore requires MongoDB source tasks to keep TapData Update Field
   Completion enabled (the default). The README and connection help document this prerequisite;
   disabling it is an explicit unsupported source configuration.
+
+### 2026-07-19 - Post-review Canonical Source Build
+
+Status: Passed the locally executable source-build and RisingWave integration gates. This build
+supersedes the earlier `45b2e599...` local candidate and is the artifact represented by the tracked
+release checksum.
+
+- Connector source commit: `cffc85181632c913c81ab8e59890c4e9bc508906`.
+- Artifact: `tapdata-plugin/target/risingwave-connector-1.0.0.jar`.
+- Size: 3,861,453 bytes.
+- SHA-256: `3506e1bca2b31782897618b89a071a85370c1dd17fae4e5d32d5574bfb45ff36`.
+- Manifest: `Git-Commit: cffc85181632c913c81ab8e59890c4e9bc508906`,
+  `Git-Dirty: false`, `Implementation-Version: 1.0.0`, and TapData PDK/API
+  `2.0.8-SNAPSHOT`.
+- Clean offline package build: 48 tests, 0 failures, 0 errors, 0 skipped.
+- Local RisingWave live integration suite: 37 tests, 0 failures, 0 errors, 0 skipped.
+- The target-side Mongo trust switch proposed during review was removed before either source
+  commit. The resulting runtime CDC behavior is the already-qualified behavior; the two source
+  commits add artifact provenance and document the source-side Update Field Completion requirement.
+- The checksum/readiness commit intentionally follows the clean artifact build. It changes no JAR
+  input, so the reviewed connector source revision remains the commit embedded in the manifest.

@@ -63,8 +63,8 @@ The JDK path remains an environment-specific example. The release sequence is: c
 build and qualify the JAR from that clean commit, then commit only its checksum and qualification
 record. The later documentation commit does not change the source revision embedded in the JAR.
 
-For the qualified `1.0.0` release candidate built on 2026-07-17, verify the canonical JAR from the
-module directory before distribution:
+For the qualified `1.0.0` release candidate represented by the tracked checksum, verify the
+canonical JAR from the module directory before distribution:
 
 ```bash
 cd tapdata-plugin
