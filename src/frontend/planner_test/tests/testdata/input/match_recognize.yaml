@@ -99,6 +99,104 @@
     );
   expected_outputs:
     - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects COUNT(DISTINCT ...) (would silently evaluate as plain COUNT)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(distinct a.v) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects an aggregate FILTER clause (would silently evaluate unfiltered)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures sum(a.v) filter (where a.v > 10) as s
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects an aggregate ORDER BY clause
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures min(a.v order by a.v) as lo
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects an OVER clause on an aggregate
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures max(a.v) over () as hi
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects WITHIN GROUP on an aggregate
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(a.v) within group (order by a.v) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects FILTER on FIRST/LAST navigation
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures first(a.v) filter (where a.v > 0) as f
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects an OVER clause on CLASSIFIER()
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures classifier() over () as cls
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
 - name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;

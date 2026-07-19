@@ -352,6 +352,39 @@ impl Binder {
         })
     }
 
+    /// Rejects function-call modifiers on the specially-lowered `MEASURES` functions (aggregates,
+    /// `FIRST`/`LAST`, `CLASSIFIER`). The lowering matches these by name and would otherwise drop
+    /// the modifier, evaluating the plain call and silently producing wrong results.
+    fn reject_measure_func_modifiers(func: &Function) -> RwResult<()> {
+        let offending = if func.arg_list.distinct {
+            Some("DISTINCT")
+        } else if !func.arg_list.order_by.is_empty() {
+            Some("ORDER BY")
+        } else if func.arg_list.ignore_nulls {
+            Some("IGNORE NULLS")
+        } else if func.arg_list.variadic {
+            Some("VARIADIC")
+        } else if func.filter.is_some() {
+            Some("FILTER")
+        } else if func.over.is_some() {
+            Some("OVER")
+        } else if func.within_group.is_some() {
+            Some("WITHIN GROUP")
+        } else if func.scalar_as_agg {
+            Some("AGGREGATE:")
+        } else {
+            None
+        };
+        if let Some(modifier) = offending {
+            bail_not_implemented!(
+                "{} on {}() in MATCH_RECOGNIZE MEASURES",
+                modifier,
+                func.name.0[0].real_value().to_uppercase()
+            );
+        }
+        Ok(())
+    }
+
     /// Lowers one `MEASURES` item to an expression over a synthetic per-match row plus the slots
     /// that produce that row. Pattern-variable column references become navigation slots: bare
     /// `var.col` and arithmetic over such references resolve to `LAST(var.col)` (FINAL semantics
@@ -368,6 +401,7 @@ impl Binder {
                 .real_value()
                 .eq_ignore_ascii_case("classifier")
         {
+            Self::reject_measure_func_modifiers(func)?;
             if !func.arg_list.args.is_empty() {
                 bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
             }
@@ -392,6 +426,7 @@ impl Binder {
                 "count" | "min" | "max" | "sum" | "avg"
             )
         {
+            Self::reject_measure_func_modifiers(func)?;
             let agg = func.name.0[0].real_value().to_ascii_lowercase();
             if func.arg_list.args.len() != 1 {
                 bail_not_implemented!("{}() expects exactly one argument", agg.to_uppercase());
@@ -528,6 +563,7 @@ impl Binder {
                 "first" | "last"
             )
         {
+            Self::reject_measure_func_modifiers(func)?;
             let kind = if func.name.0[0].real_value().eq_ignore_ascii_case("first") {
                 MeasureSlotKind::First
             } else {
