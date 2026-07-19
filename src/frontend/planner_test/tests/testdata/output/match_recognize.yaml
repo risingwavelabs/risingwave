@@ -78,6 +78,54 @@
       define a as a.v > 0, b as b.v < 0
     );
   eowc_stream_error: MATCH_RECOGNIZE requires a watermark on the leading ORDER BY column for streaming
+- name: MATCH_RECOGNIZE WITHIN accepts a constant bound
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within 3
+      define a as a.v > 0, b as b.v < 0
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, dip, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, dip, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["dip"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE WITHIN rejects an input column reference (would evaluate against a synthetic order-key row and crash)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within v
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Feature is not yet implemented: MATCH_RECOGNIZE WITHIN bound must be a constant expression; input column references are not supported
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE WITHIN rejects a non-constant expression over an input column
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within v + 1
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Feature is not yet implemented: MATCH_RECOGNIZE WITHIN bound must be a constant expression; input column references are not supported
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;

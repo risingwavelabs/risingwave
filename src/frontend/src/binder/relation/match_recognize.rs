@@ -196,6 +196,15 @@ impl Binder {
         let (within, within_deadline) = match within {
             Some(e) => {
                 let bound = self.bind_expr(e)?;
+                // The lowered predicate/deadline are evaluated over synthetic order-key rows, where
+                // any reference into the original input row is out of bounds. Only a constant bound
+                // is meaningful there, so reject everything else at bind time.
+                if !bound.is_const() {
+                    bail_not_implemented!(
+                        "MATCH_RECOGNIZE WITHIN bound must be a constant expression; \
+                         input column references are not supported"
+                    );
+                }
                 let Some(order_key) = order_by.first() else {
                     bail_not_implemented!("WITHIN requires an ORDER BY column");
                 };

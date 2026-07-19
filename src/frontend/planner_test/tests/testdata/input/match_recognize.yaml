@@ -57,6 +57,48 @@
     );
   expected_outputs:
     - eowc_stream_error
+- name: MATCH_RECOGNIZE WITHIN accepts a constant bound
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within 3
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - eowc_stream_plan
+- name: MATCH_RECOGNIZE WITHIN rejects an input column reference (would evaluate against a synthetic order-key row and crash)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within v
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE WITHIN rejects a non-constant expression over an input column
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within v + 1
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
 - name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
