@@ -3050,7 +3050,14 @@ async fn validate_sink_props(
     sink: &sink::Model,
     props: &BTreeMap<String, String>,
 ) -> MetaResult<()> {
-    let (mut new_props, mut new_secret_refs) = if let Some(connection_id) = sink.connection_id {
+    let mut new_props = sink.properties.0.clone();
+    let mut new_secret_refs = sink
+        .secret_ref
+        .as_ref()
+        .map(|secret_refs| secret_refs.to_protobuf())
+        .unwrap_or_default();
+
+    if let Some(connection_id) = sink.connection_id {
         let connection = Connection::find_by_id(connection_id)
             .one(txn)
             .await?
@@ -3062,26 +3069,14 @@ async fn validate_sink_props(
             connection_pb.properties.into_iter().collect();
         let mut effective_secret_refs: BTreeMap<String, PbSecretRef> =
             connection_pb.secret_refs.into_iter().collect();
-        effective_props.extend(sink.properties.0.clone());
-        effective_secret_refs.extend(
-            sink.secret_ref
-                .as_ref()
-                .map(|secret_refs| secret_refs.to_protobuf())
-                .unwrap_or_default(),
-        );
-        (effective_props, effective_secret_refs)
-    } else {
-        (
-            sink.properties.0.clone(),
-            sink.secret_ref
-                .as_ref()
-                .map(|secret_refs| secret_refs.to_protobuf())
-                .unwrap_or_default(),
-        )
-    };
+        effective_props.extend(new_props);
+        effective_secret_refs.extend(new_secret_refs);
+        new_props = effective_props;
+        new_secret_refs = effective_secret_refs;
+    }
     new_props.extend(props.clone());
     let new_props = LocalSecretManager::global()
-        .fill_secrets(new_props, std::mem::take(&mut new_secret_refs))
+        .fill_secrets(new_props, new_secret_refs)
         .map_err(MetaError::from)?;
 
     // Validate that props can be altered
