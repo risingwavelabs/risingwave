@@ -27,20 +27,12 @@ pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE: u64 = 1;
 pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL: u64 = 60;
 pub const COMMIT_CHECKPOINT_INTERVAL: &str = "commit_checkpoint_interval";
 
-/// 512 MiB default balances Iceberg's recommended on-disk file size (128-512 MiB)
-/// against the ~3-10x in-memory-to-columnar-compressed ratio.
-pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 512;
-
 pub fn default_commit_checkpoint_interval() -> u64 {
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
 }
 
 pub fn iceberg_default_commit_checkpoint_interval() -> u64 {
     ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
-}
-
-pub fn default_commit_checkpoint_size_threshold_mb() -> u64 {
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB
 }
 
 /// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).

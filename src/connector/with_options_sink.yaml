@@ -697,10 +697,10 @@ IcebergConfig:
     comments: |-
       Commit on the next checkpoint barrier after total buffered write size across all
       writers exceeds this threshold in MiB. The coordinator sums per-writer byte reports
-      and broadcasts the same commit decision to all writers. Default 512 MiB.
-      Set to 0 to disable size-based early commits.
+      and broadcasts the same commit decision to all writers. Size-based commits are
+      opt-in: leaving this unset (or setting it to 0) disables them.
     required: false
-    default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB
+    default: Default::default
     allow_alter_on_fly: true
     iceberg_engine: true
   - name: create_table_if_not_exists

@@ -34,10 +34,7 @@ use crate::connector_common::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
-use crate::sink::decouple_checkpoint_log_sink::{
-    iceberg_default_commit_checkpoint_interval,
-    default_commit_checkpoint_size_threshold_mb,
-};
+use crate::sink::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
@@ -335,14 +332,15 @@ pub struct IcebergConfig {
     /// byte reports and broadcasts the same commit decision to all writers, ensuring
     /// vnode-aligned commits at the same epoch.
     ///
-    /// Default 512 MiB balances Iceberg's recommended file size (128-512 MiB on disk)
-    /// against the ~3-10x in-memory-to-columnar-compressed ratio. At 512 MiB in
-    /// memory, each commit produces ~50-170 MiB Parquet files — within the healthy
-    /// range for analytical queries.
-    #[serde(default = "default_commit_checkpoint_size_threshold_mb")]
-    #[serde_as(as = "DisplayFromStr")]
+    /// Size-based commits are opt-in: leaving this unset (or setting it to `0`)
+    /// disables them, and commits are driven solely by `commit_checkpoint_interval`.
+    /// A value around 512 MiB is a good starting point, balancing Iceberg's
+    /// recommended on-disk file size (128-512 MiB) against the ~3-10x
+    /// in-memory-to-columnar-compressed ratio.
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
-    pub commit_checkpoint_size_threshold_mb: u64,
+    pub commit_checkpoint_size_threshold_mb: Option<u64>,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,

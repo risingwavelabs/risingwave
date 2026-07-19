@@ -268,36 +268,36 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                             log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                         } else if self.commit_checkpoint_size_threshold_bytes.is_some() {
                             let buffered_bytes = sink_writer.buffered_bytes();
-                            // Skip the RPC round-trip when there is no buffered data
-                            if buffered_bytes == 0 {
-                                sink_writer.barrier(false).await?;
-                            } else {
-                                let should_commit = coordinator_stream_handle
-                                    .report_bytes(epoch, buffered_bytes)
+                            // Always report, even when there is no buffered data: the
+                            // coordinator responds to an epoch only after every writer has
+                            // reported for it, so skipping the report would leave the epoch
+                            // unaligned forever and deadlock all other writers awaiting the
+                            // response.
+                            let should_commit = coordinator_stream_handle
+                                .report_bytes(epoch, buffered_bytes)
+                                .await?;
+
+                            if should_commit {
+                                let start_time = Instant::now();
+                                let metadata = sink_writer.barrier(true).await?;
+                                let metadata = metadata.ok_or_else(|| {
+                                    SinkError::Coordinator(anyhow!(
+                                        "should get metadata on checkpoint barrier"
+                                    ))
+                                })?;
+                                coordinator_stream_handle
+                                    .commit(epoch, metadata, None)
                                     .await?;
+                                sink_writer_metrics
+                                    .sink_commit_duration
+                                    .observe(start_time.elapsed().as_secs_f64());
 
-                                if should_commit {
-                                    let start_time = Instant::now();
-                                    let metadata = sink_writer.barrier(true).await?;
-                                    let metadata = metadata.ok_or_else(|| {
-                                        SinkError::Coordinator(anyhow!(
-                                            "should get metadata on checkpoint barrier"
-                                        ))
-                                    })?;
-                                    coordinator_stream_handle
-                                        .commit(epoch, metadata, None)
-                                        .await?;
-                                    sink_writer_metrics
-                                        .sink_commit_duration
-                                        .observe(start_time.elapsed().as_secs_f64());
-
-                                    current_checkpoint = 0;
-                                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
-                                } else {
-                                    let metadata = sink_writer.barrier(false).await?;
-                                    if let Some(metadata) = metadata {
-                                        warn!(?metadata, "get metadata on non-checkpoint barrier");
-                                    }
+                                current_checkpoint = 0;
+                                log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                            } else {
+                                let metadata = sink_writer.barrier(false).await?;
+                                if let Some(metadata) = metadata {
+                                    warn!(?metadata, "get metadata on non-checkpoint barrier");
                                 }
                             }
                         } else {

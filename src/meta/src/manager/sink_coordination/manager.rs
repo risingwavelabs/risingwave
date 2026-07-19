@@ -1215,6 +1215,206 @@ mod tests {
         }
     }
 
+    /// Regression test: a writer with an empty buffer must still report zero bytes,
+    /// and the coordinator must align the epoch with such zero-byte reports included.
+    /// Skipping the report on the writer side used to leave the epoch unaligned
+    /// forever, head-of-line-blocking all subsequent epochs and deadlocking the sink.
+    #[tokio::test]
+    async fn test_size_based_commit_with_zero_byte_report() {
+        let db = prepare_db_backend().await;
+
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
+            "1".to_owned(),
+        );
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties,
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let epoch2 = 234;
+
+        let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        all_vnode.shuffle(&mut rand::rng());
+        let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode1 = build_bitmap(first);
+        let vnode2 = build_bitmap(second);
+
+        // client1 has no buffered data and commits empty metadata
+        let metadata = [vec![], vec![1u8, 2u8]];
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let metadata = metadata.clone();
+                let db = db.clone();
+                move |param, new_writer_rx| {
+                    let metadata = metadata.clone();
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                MockSinglePhaseCoordinator::new_coordinator(
+                                    0,
+                                    move |epoch, metadata_list, count: &mut usize| {
+                                        *count += 1;
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|m| match m {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        match *count {
+                                            1 => {
+                                                assert_eq!(epoch, epoch2);
+                                                assert_eq!(2, metadata_list.len());
+                                                assert_eq!(metadata[0], metadata_list[0]);
+                                                assert_eq!(metadata[1], metadata_list[1]);
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap()
+            .0
+        };
+
+        let (mut client1, mut client2) =
+            join(build_client(vnode1), pin!(build_client(vnode2))).await;
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch1),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
+
+        // client1 has an empty buffer and reports 0 bytes. The epoch must still
+        // align, and total 500KB < 1MB → should_commit=false for both writers.
+        {
+            let mut report_future1 = pin!(client1.report_bytes(epoch1, 0));
+            assert!(
+                poll_fn(|cx| Poll::Ready(report_future1.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            let (result1, result2) = join(
+                report_future1,
+                client2.report_bytes(epoch1, 512000),
+            )
+            .await;
+            assert!(!result1.unwrap());
+            assert!(!result2.unwrap());
+        }
+
+        // client1 still has an empty buffer, but client2 alone exceeds the
+        // threshold → should_commit=true for both writers.
+        {
+            let (result1, result2) = join(
+                client1.report_bytes(epoch2, 0),
+                client2.report_bytes(epoch2, 2_000_000),
+            )
+            .await;
+            assert!(result1.unwrap());
+            assert!(result2.unwrap());
+        }
+
+        // Both writers commit at epoch2; client1 commits empty metadata.
+        {
+            let (result1, result2) = join(
+                client1.commit(
+                    epoch2,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[0].clone(),
+                        })),
+                    },
+                    None,
+                ),
+                client2.commit(
+                    epoch2,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1].clone(),
+                        })),
+                    },
+                    None,
+                ),
+            )
+            .await;
+            result1.unwrap();
+            result2.unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn test_fail_commit() {
         let db = prepare_db_backend().await;
