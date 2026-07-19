@@ -202,9 +202,10 @@ WebSocket streaming requires every replicated table to have a primary key. Each 
 once into a complete target row: normal events combine the available `before` and `after` images,
 and top-level `removedFields` become SQL `NULL`. The update fails if those images cannot safely
 form every target column. Replace events treat `after` as authoritative, so omitted target columns
-become `NULL`. An after-only MongoDB event with a sole `_id` key uses the same authoritative rule
-and therefore requires TapData's full-document filling to be explicitly enabled with
-`enableFillingModifiedData=true`.
+become `NULL`. An after-only MongoDB event with a sole `_id` key uses the same authoritative rule.
+TapData's **Update Field Completion** (`enableFillingModifiedData`) must remain enabled for MongoDB
+source tasks; TapData enables it by default. If it is disabled, a partial patch is indistinguishable
+from a complete sparse document at the target and omitted columns may become `NULL`.
 
 WebSocket and JDBC consume that same complete row. WebSocket sends an upsert; JDBC updates all
 non-key columns. If a primary key changes, both modes write the new row and retract the old
@@ -245,7 +246,8 @@ docs/risingwave_zh_CN.md    - Chinese documentation
 - JDBC updates on keyless tables use the full before image; retries remain at-least-once because
   a keyless row has no stable deduplication identity
 - Typed updates require a complete post-image. PostgreSQL/MySQL images must form the whole row;
-  MongoDB requires `enableFillingModifiedData=true` on the source task node
+  MongoDB requires **Update Field Completion** (`enableFillingModifiedData=true`) on the source task
+  node; this is TapData's default and must not be disabled
 - The legacy Kafka source connector used in qualification required
   `--add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED` when TapData ran on Java 17;
   this is a Kafka source/runtime requirement, not a RisingWave target requirement

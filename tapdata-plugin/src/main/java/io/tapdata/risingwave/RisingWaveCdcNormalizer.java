@@ -17,7 +17,7 @@ import java.util.Set;
 
 /**
  * Adapts TapData updates to complete RisingWave rows. Relational images must reconstruct the row;
- * after-only {@code _id} events require TapData full-document filling to be explicitly enabled.
+ * after-only {@code _id} events require TapData full-document filling to remain enabled.
  */
 final class RisingWaveCdcNormalizer {
     private RisingWaveCdcNormalizer() {

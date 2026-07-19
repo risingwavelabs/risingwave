@@ -106,9 +106,11 @@ RisingWave ACK，最后删除临时表。这样可以同时验证 endpoint、ing
    JSON 字符串，因为 RisingWave JSON number 可能发生舍入。
 7. **typed 更新需要完整行**：connector 只做一次规范化：用事件中可用的 `before`、`after`
    和顶层 `removedFields` 形成完整 post-image，再把同一行交给 WebSocket 或 JDBC。无法安全
-   补齐全部目标列时会明确失败，不会猜测。replace event 把 `after` 当作最终结果，省略的已知
-   列写为 SQL `NULL`。唯一主键为 `_id` 且没有 `before` 的 MongoDB event 使用相同规则，并要求在
-   source task node 上显式启用 TapData 的完整文档补全 `enableFillingModifiedData=true`。删除
+   补齐全部目标列时会明确失败。replace event 把 `after` 当作最终结果，省略的已知
+   列写为 SQL `NULL`。唯一主键为 `_id` 且没有 `before` 的 MongoDB event 使用相同的权威
+   文档规则。MongoDB source 必须保持启用 TapData 的**更新字段补全**
+   (`enableFillingModifiedData=true`)；TapData 默认启用该功能。若关闭，target 无法区分 partial
+   patch 与完整的稀疏文档，省略列可能被写成 `NULL`。删除
    `profile.name` 等嵌套字段时必须提供 `profile` 的完整
    post-image。MySQL 必须使用 `binlog_row_image=FULL`；TapData 会在事件到达 connector 前拒绝
    `MINIMAL`。若 PostgreSQL 的 TOAST 值在可用 image 中无法还原，更新会明确失败。

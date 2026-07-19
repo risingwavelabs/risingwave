@@ -112,9 +112,11 @@ ingest route, signature configuration, and required target-table DDL privileges 
    the event's available `before`, `after`, and top-level `removedFields`, then gives that same row
    to WebSocket or JDBC. If the event cannot safely form every target column, it fails rather than
    guessing. Replace events treat `after` as authoritative, so omitted known columns become SQL
-   `NULL`. An after-only MongoDB event with a sole `_id` key uses the same rule and requires
-   TapData's full-document filling to be explicitly enabled with
-   `enableFillingModifiedData=true`. A nested removal such as `profile.name` must
+   `NULL`. An after-only MongoDB event with a sole `_id` key uses the same authoritative rule.
+   TapData's **Update Field Completion** (`enableFillingModifiedData=true`) must remain enabled for
+   MongoDB sources; TapData enables it by default. If disabled, the target cannot distinguish a
+   partial patch from a complete sparse document and omitted columns may become `NULL`. A nested
+   removal such as `profile.name` must
    include the complete post-image for `profile`. MySQL must use `binlog_row_image=FULL`; TapData
    rejects `MINIMAL` images before they reach this connector. PostgreSQL updates with unavailable
    TOAST values fail if the available images cannot reconstruct that column.

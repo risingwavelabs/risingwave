@@ -1075,3 +1075,30 @@ Release decision:
   artifact store.
 - Keep SQL Server outside the qualified `1.0.0` source matrix until the planned x86-64 test is run;
   this is an explicit coverage gap, not a reproduced target-connector defect.
+
+### 2026-07-17 - MongoDB Update Field Completion Boundary
+
+Status: Default TapData MongoDB usage passed. Disabling Update Field Completion reproduced a real
+data-correctness failure and remains outside the supported source configuration.
+
+- TapData's official Data Flow API documentation states that Update Field Completion is enabled by
+  default and exposes `disable_filling_modified_data()` as the explicit opt-out.
+- The installed MongoDB connector's bytecode confirmed the transport behavior: with
+  `enableFillingModifiedData=true` it requests MongoDB Change Stream `FullDocument.UPDATE_LOOKUP`;
+  without it, the connector uses `FullDocument.DEFAULT` and emits the update patch.
+- A real MongoDB 7 replica-set task with `enableFillingModifiedData=false` reproduced the failure.
+  Source document `{_id:1,name:"mongo-one",quantity:10,note:"keep-one"}` received only
+  `$set:{name:"partial-after"}`. MongoDB retained `quantity=10,note="keep-one"`, while the target
+  became `quantity=NULL,note=NULL` because an after-only patch is indistinguishable from a complete
+  sparse document at the target.
+- The same real task with `enableFillingModifiedData=true` preserved `quantity=10,note="keep-one"`
+  after an update that changed only `name`; a subsequent `$unset:{note:""}` alone mapped `note` to
+  SQL `NULL`. This is the expected complete-post-image behavior.
+- A proposed RisingWave target-side trust switch was removed before commit. It would have rejected
+  the normal default MongoDB event shape because both a safe filled document and an unsafe partial
+  patch arrive with an empty `before` image and an `_id`-keyed `after` image. The target cannot
+  inspect the source node's task configuration, so that switch added configuration burden without
+  proving safety.
+- Production support therefore requires MongoDB source tasks to keep TapData Update Field
+  Completion enabled (the default). The README and connection help document this prerequisite;
+  disabling it is an explicit unsupported source configuration.
