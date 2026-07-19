@@ -2317,7 +2317,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&txn, &sink, &props).await?;
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
             .map_err(|e| SinkError::Config(anyhow!(e)))?
@@ -2386,7 +2386,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+        validate_sink_props(&txn, &sink, &props).await?;
 
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -3045,9 +3045,47 @@ impl CatalogController {
     }
 }
 
-fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
+async fn validate_sink_props(
+    txn: &DatabaseTransaction,
+    sink: &sink::Model,
+    props: &BTreeMap<String, String>,
+) -> MetaResult<()> {
+    let (mut new_props, mut new_secret_refs) = if let Some(connection_id) = sink.connection_id {
+        let connection = Connection::find_by_id(connection_id)
+            .one(txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+        let connection_pb = connection.params.to_protobuf();
+        let mut effective_props: BTreeMap<String, String> =
+            connection_pb.properties.into_iter().collect();
+        let mut effective_secret_refs: BTreeMap<String, PbSecretRef> =
+            connection_pb.secret_refs.into_iter().collect();
+        effective_props.extend(sink.properties.0.clone());
+        effective_secret_refs.extend(
+            sink.secret_ref
+                .as_ref()
+                .map(|secret_refs| secret_refs.to_protobuf())
+                .unwrap_or_default(),
+        );
+        (effective_props, effective_secret_refs)
+    } else {
+        (
+            sink.properties.0.clone(),
+            sink.secret_ref
+                .as_ref()
+                .map(|secret_refs| secret_refs.to_protobuf())
+                .unwrap_or_default(),
+        )
+    };
+    new_props.extend(props.clone());
+    let new_props = LocalSecretManager::global()
+        .fill_secrets(new_props, std::mem::take(&mut new_secret_refs))
+        .map_err(MetaError::from)?;
+
     // Validate that props can be altered
-    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+    match new_props.get(CONNECTOR_TYPE_KEY) {
         Some(connector) => {
             let connector_type = connector.to_lowercase();
             let field_names: Vec<String> = props.keys().cloned().collect();
@@ -3057,11 +3095,7 @@ fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> 
             match_sink_name_str!(
                 connector_type.as_str(),
                 SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(props.clone());
-                    SinkType::validate_alter_config(&new_props)
-                },
+                SinkType::validate_alter_config(&new_props),
                 |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
             )?
         }
