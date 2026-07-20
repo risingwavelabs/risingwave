@@ -282,6 +282,25 @@ with (
     match_pattern = '*.json'
 ) format plain encode json;
 
+# ALTER SOURCE ADD COLUMN must be gated the same way as CREATE.
+
+statement ok
+create source variant_alter_source_t (id int)
+with (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp',
+    match_pattern = '*.json'
+) format plain encode json;
+
+statement error is not supported for this source encoding yet
+alter source variant_alter_source_t add column v variant;
+
+statement error is not supported for this source encoding yet
+alter source variant_alter_source_t add column s struct<v variant>;
+
+statement ok
+drop source variant_alter_source_t;
+
 # VARIANT is rejected in non-SQL UDF signatures (both argument and return types).
 
 statement error VARIANT is not supported in UDFs yet
