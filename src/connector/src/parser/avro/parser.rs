@@ -31,7 +31,7 @@ use crate::parser::utils::bytes_from_url;
 use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
-use crate::schema::pulsar::pulsar_schema_version_to_i64;
+use crate::schema::pulsar_schema_registry::PulsarSchemaVersion;
 use crate::schema::schema_registry::{
     Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
@@ -94,6 +94,11 @@ impl AvroAccessBuilder {
     ///
     /// - In Kafka ([Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)):
     ///   starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
+    ///
+    /// ## Pulsar schema registry
+    ///
+    /// - In Pulsar, the payload is raw Avro binary encoding without a schema-registry header.
+    ///   The writer schema version is carried in Pulsar message metadata.
     async fn parse_avro_value(
         &self,
         payload: &[u8],
@@ -124,15 +129,17 @@ impl AvroAccessBuilder {
                 // Pulsar Avro payloads are raw Avro datum bytes. The writer schema version is
                 // carried by Pulsar message metadata instead of a Confluent-style payload header.
                 let schema_version = match source_meta {
-                    SourceMeta::Pulsar(meta) => meta.schema_version.as_deref(),
+                    SourceMeta::Pulsar(meta) => meta
+                        .schema_version
+                        .as_deref()
+                        .filter(|version| !version.is_empty()),
                     _ => None,
                 };
                 let writer_schema = match schema_version
-                    .map(pulsar_schema_version_to_i64)
+                    .map(PulsarSchemaVersion::try_from)
                     .transpose()?
-                    .flatten()
                 {
-                    Some(version) => resolver.get_by_version(version).await?,
+                    Some(version) => resolver.get_by_version(version.0).await?,
                     None => resolver.get_latest().await?,
                 };
                 let mut raw_payload = payload;

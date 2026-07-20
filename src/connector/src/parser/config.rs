@@ -25,7 +25,7 @@ use super::{DebeziumProps, TimeHandling, TimestampHandling, TimestamptzHandling}
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
-use crate::schema::pulsar::PulsarSchemaRegistryConfig;
+use crate::schema::pulsar_schema_registry::PulsarSchemaRegistryConfig;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::schema::{AWS_GLUE_SCHEMA_ARN_KEY, SCHEMA_REGISTRY_TYPE_KEY};
 use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
@@ -96,29 +96,6 @@ fn validate_schema_registry_type(
         SCHEMA_REGISTRY_TYPE_CONFLUENT,
         SCHEMA_REGISTRY_TYPE_PULSAR
     );
-}
-
-fn get_pulsar_auth_token(options: &BTreeMap<String, String>) -> Option<String> {
-    options
-        .get("auth.token")
-        .or_else(|| options.get("pulsar.auth.token"))
-        .cloned()
-}
-
-fn get_pulsar_schema_registry_config(
-    admin_url: String,
-    options: &BTreeMap<String, String>,
-) -> ConnectorResult<PulsarSchemaRegistryConfig> {
-    let topic = options
-        .get("pulsar.topic")
-        .or_else(|| options.get("topic"))
-        .ok_or_else(|| anyhow::anyhow!("Must specify 'pulsar.topic' or 'topic'"))?
-        .clone();
-    Ok(PulsarSchemaRegistryConfig {
-        admin_url,
-        topic,
-        auth_token: get_pulsar_auth_token(options),
-    })
 }
 
 impl ParserConfig {
@@ -265,8 +242,9 @@ impl SpecificParserConfig {
                         &options_with_secret,
                     )
                 {
-                    SchemaLocation::Pulsar(get_pulsar_schema_registry_config(
+                    SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
                         info.row_schema_location.clone(),
+                        &format_encode_options_with_secret,
                         &options_with_secret,
                     )?)
                 } else if info.use_schema_registry {
@@ -317,8 +295,9 @@ impl SpecificParserConfig {
                         &format_encode_options_with_secret,
                         &options_with_secret,
                     ) {
-                    SchemaLocation::Pulsar(get_pulsar_schema_registry_config(
+                    SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
                         info.row_schema_location.clone(),
+                        &format_encode_options_with_secret,
                         &options_with_secret,
                     )?)
                 } else if info.use_schema_registry {

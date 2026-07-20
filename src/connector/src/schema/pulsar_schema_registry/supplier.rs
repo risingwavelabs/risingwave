@@ -14,38 +14,22 @@
 
 use anyhow::Context;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
-use reqwest::{Client, Method, Url};
+use reqwest::{Client, Url};
 use risingwave_common::bail;
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
 
+use super::{PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN, PulsarSchema, PulsarSchemaRegistryConfig};
 use crate::error::ConnectorResult;
 use crate::schema::schema_registry::handle_sr_list;
 use crate::source::pulsar::topic::parse_topic;
 
 #[derive(Debug, Clone)]
-pub struct PulsarSchemaRegistryConfig {
-    pub admin_url: String,
-    pub topic: String,
-    pub auth_token: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PulsarSchemaClient {
-    inner: Client,
+pub struct PulsarSchemaSupplier {
+    http_client: Client,
     admin_url: Url,
     schema_path: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PulsarSchema {
-    pub version: i64,
-    #[serde(rename = "type")]
-    pub schema_type: String,
-    pub data: String,
-}
-
-impl PulsarSchemaClient {
+impl PulsarSchemaSupplier {
     pub fn new(config: PulsarSchemaRegistryConfig) -> ConnectorResult<Self> {
         let admin_url = handle_sr_list(&config.admin_url)?
             .into_iter()
@@ -56,35 +40,38 @@ impl PulsarSchemaClient {
         }
         let topic = parse_topic(&config.topic)?;
         let mut headers = HeaderMap::new();
-        if let Some(token) = config.auth_token {
+        if let Some(auth_type) = config.username {
+            if !auth_type.eq_ignore_ascii_case(PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN) {
+                bail!(
+                    "unsupported Pulsar schema registry auth type `{}`, expected `{}`",
+                    auth_type,
+                    PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN
+                );
+            }
+            let token = config.password.ok_or_else(|| {
+                anyhow::anyhow!("Pulsar schema registry token auth requires password")
+            })?;
             let token = token.strip_prefix("token:").unwrap_or(&token);
             let value = HeaderValue::from_str(&format!("Bearer {token}"))
                 .context("invalid Pulsar auth token header")?;
             headers.insert(AUTHORIZATION, value);
+        } else if config.password.is_some() {
+            bail!("Pulsar schema registry password requires username");
         }
-        let inner = Client::builder()
+        let http_client = Client::builder()
             .default_headers(headers)
             .build()
-            .context("failed to build Pulsar schema client")?;
+            .context("failed to build Pulsar schema supplier")?;
         let topic_name = topic.topic_str_without_partition()?;
 
         Ok(Self {
-            inner,
+            http_client,
             admin_url,
             schema_path: vec![topic.tenant, topic.namespace, topic_name],
         })
     }
 
-    pub async fn get_latest_schema(&self) -> ConnectorResult<PulsarSchema> {
-        self.request(&["schema"]).await
-    }
-
-    pub async fn get_schema_by_version(&self, version: i64) -> ConnectorResult<PulsarSchema> {
-        let version = version.to_string();
-        self.request(&["schema", version.as_str()]).await
-    }
-
-    fn schema_url(&self, suffix: &[&str]) -> Url {
+    fn build_schema_url(&self, suffix: &[&str]) -> Url {
         let mut url = self.admin_url.clone();
         url.path_segments_mut()
             .expect("constructor validates Pulsar admin URL can be a base")
@@ -94,14 +81,28 @@ impl PulsarSchemaClient {
         url
     }
 
-    async fn request<T>(&self, suffix: &[&str]) -> ConnectorResult<T>
-    where
-        T: DeserializeOwned,
-    {
-        let url = self.schema_url(suffix);
+    pub async fn get_latest_schema(&self) -> ConnectorResult<PulsarSchema> {
+        let url = self.build_schema_url(&["schema"]);
         let response = self
-            .inner
-            .request(Method::GET, url.clone())
+            .http_client
+            .get(url.clone())
+            .send()
+            .await
+            .with_context(|| format!("failed to fetch Pulsar schema from {url}"))?
+            .error_for_status()
+            .with_context(|| format!("Pulsar schema request failed for {url}"))?;
+        Ok(response
+            .json()
+            .await
+            .with_context(|| format!("failed to parse Pulsar schema response from {url}"))?)
+    }
+
+    pub async fn get_schema_by_version(&self, version: i64) -> ConnectorResult<PulsarSchema> {
+        let version = version.to_string();
+        let url = self.build_schema_url(&["schema", version.as_str()]);
+        let response = self
+            .http_client
+            .get(url.clone())
             .send()
             .await
             .with_context(|| format!("failed to fetch Pulsar schema from {url}"))?
@@ -114,19 +115,6 @@ impl PulsarSchemaClient {
     }
 }
 
-pub fn pulsar_schema_version_to_i64(version: &[u8]) -> ConnectorResult<Option<i64>> {
-    if version.is_empty() {
-        return Ok(None);
-    }
-    let bytes: [u8; 8] = version.try_into().with_context(|| {
-        format!(
-            "expected 8-byte Pulsar LongSchemaVersion, got {} bytes",
-            version.len()
-        )
-    })?;
-    Ok(Some(i64::from_be_bytes(bytes)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,57 +123,45 @@ mod tests {
         PulsarSchemaRegistryConfig {
             admin_url: "http://localhost:8080".to_owned(),
             topic: topic.to_owned(),
-            auth_token: Some("token:test-token".to_owned()),
+            username: Some("token".to_owned()),
+            password: Some("test-token".to_owned()),
         }
     }
 
     #[test]
     fn test_pulsar_schema_url_from_full_topic() {
-        let client = PulsarSchemaClient::new(test_config("persistent://tenant/ns/events")).unwrap();
+        let supplier =
+            PulsarSchemaSupplier::new(test_config("persistent://tenant/ns/events")).unwrap();
 
         assert_eq!(
-            client.schema_url(&["schema"]).as_str(),
+            supplier.build_schema_url(&["schema"]).as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
         );
         assert_eq!(
-            client.schema_url(&["schema", "42"]).as_str(),
+            supplier.build_schema_url(&["schema", "42"]).as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema/42"
         );
     }
 
     #[test]
     fn test_pulsar_schema_url_from_short_topic() {
-        let client = PulsarSchemaClient::new(test_config("events")).unwrap();
+        let supplier = PulsarSchemaSupplier::new(test_config("events")).unwrap();
 
         assert_eq!(
-            client.schema_url(&["schema"]).as_str(),
+            supplier.build_schema_url(&["schema"]).as_str(),
             "http://localhost:8080/admin/v2/schemas/public/default/events/schema"
         );
     }
 
     #[test]
     fn test_pulsar_schema_url_from_partition_topic() {
-        let client =
-            PulsarSchemaClient::new(test_config("persistent://tenant/ns/events-partition-1"))
+        let supplier =
+            PulsarSchemaSupplier::new(test_config("persistent://tenant/ns/events-partition-1"))
                 .unwrap();
 
         assert_eq!(
-            client.schema_url(&["schema"]).as_str(),
+            supplier.build_schema_url(&["schema"]).as_str(),
             "http://localhost:8080/admin/v2/schemas/tenant/ns/events/schema"
         );
-    }
-
-    #[test]
-    fn test_pulsar_schema_version_to_i64() {
-        assert_eq!(pulsar_schema_version_to_i64(&[]).unwrap(), None);
-        assert_eq!(
-            pulsar_schema_version_to_i64(&1_i64.to_be_bytes()).unwrap(),
-            Some(1)
-        );
-        assert_eq!(
-            pulsar_schema_version_to_i64(&(-1_i64).to_be_bytes()).unwrap(),
-            Some(-1)
-        );
-        assert!(pulsar_schema_version_to_i64(&[1, 2, 3]).is_err());
     }
 }

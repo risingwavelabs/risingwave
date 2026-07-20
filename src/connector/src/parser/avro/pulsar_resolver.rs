@@ -20,19 +20,21 @@ use moka::future::Cache;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult;
-use crate::schema::pulsar::{PulsarSchema, PulsarSchemaClient, PulsarSchemaRegistryConfig};
+use crate::schema::pulsar_schema_registry::{
+    PulsarSchema, PulsarSchemaRegistryConfig, PulsarSchemaSupplier,
+};
 
 #[derive(Debug)]
 pub struct PulsarSchemaCache {
-    writer_schemas: Cache<i64, Arc<Schema>>,
-    pulsar_client: PulsarSchemaClient,
+    schema_cache: Cache<i64, Arc<Schema>>,
+    schema_supplier: PulsarSchemaSupplier,
 }
 
 impl PulsarSchemaCache {
     pub fn new(config: PulsarSchemaRegistryConfig) -> ConnectorResult<Self> {
         Ok(Self {
-            writer_schemas: Cache::new(u64::MAX),
-            pulsar_client: PulsarSchemaClient::new(config)?,
+            schema_cache: Cache::new(u64::MAX),
+            schema_supplier: PulsarSchemaSupplier::new(config)?,
         })
     }
 
@@ -40,31 +42,28 @@ impl PulsarSchemaCache {
         &self,
         raw_schema: PulsarSchema,
     ) -> ConnectorResult<Arc<Schema>> {
-        if !raw_schema.schema_type.eq_ignore_ascii_case("AVRO") {
-            bail!(
-                "expected Pulsar AVRO schema, got {}",
-                raw_schema.schema_type
-            );
+        if !raw_schema.r#type.eq_ignore_ascii_case("AVRO") {
+            bail!("expected Pulsar AVRO schema, got {}", raw_schema.r#type);
         }
         let schema =
             Schema::parse_str(&raw_schema.data).context("failed to parse Pulsar avro schema")?;
         let schema = Arc::new(schema);
-        self.writer_schemas
+        self.schema_cache
             .insert(raw_schema.version, Arc::clone(&schema))
             .await;
         Ok(schema)
     }
 
     pub async fn get_latest(&self) -> ConnectorResult<Arc<Schema>> {
-        self.parse_and_cache_schema(self.pulsar_client.get_latest_schema().await?)
+        self.parse_and_cache_schema(self.schema_supplier.get_latest_schema().await?)
             .await
     }
 
     pub async fn get_by_version(&self, version: i64) -> ConnectorResult<Arc<Schema>> {
-        if let Some(schema) = self.writer_schemas.get(&version).await {
+        if let Some(schema) = self.schema_cache.get(&version).await {
             return Ok(schema);
         }
-        self.parse_and_cache_schema(self.pulsar_client.get_schema_by_version(version).await?)
+        self.parse_and_cache_schema(self.schema_supplier.get_schema_by_version(version).await?)
             .await
     }
 }
