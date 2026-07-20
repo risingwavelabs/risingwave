@@ -20,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
       - name: Analyze documentation follow-up
         id: analyze
         run: python3 .github/scripts/doc_issue_tracker.py analyze --event-path "$GITHUB_EVENT_PATH"
@@ -34,6 +36,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Generate GitHub App token
         id: app-token
@@ -60,6 +64,7 @@ jobs:
 
       - name: Print result
         run: |
+          echo "Analysis reason: ${{ needs.analyze.outputs.reason }}"
           echo "Canonical source PR: #${{ steps.track.outputs.canonical_pr_number }}"
           echo "Documentation issue action: ${{ steps.track.outputs.action }}"
           echo "Documentation issue: ${{ steps.track.outputs.issue_url }}"

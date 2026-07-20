@@ -244,7 +244,16 @@ def find_tracking_issues(
                 if len(issues) < 100:
                     break
                 page += 1
-        return sorted(matches_by_number.values(), key=lambda issue: issue["number"])
+        matches = sorted(
+            matches_by_number.values(), key=lambda issue: issue["number"]
+        )
+        if matches:
+            return matches
+        print(
+            "warning: issue search returned no matches; "
+            "confirming with repository scan",
+            file=sys.stderr,
+        )
     except RuntimeError as error:
         print(
             f"warning: issue search failed ({error}); falling back to repository scan",

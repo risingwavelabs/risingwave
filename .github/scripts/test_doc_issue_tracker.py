@@ -223,6 +223,31 @@ class FindTrackingIssuesTest(unittest.TestCase):
 
         self.assertEqual(matches, [matching_issue])
 
+    def test_repository_scan_confirms_empty_search_result(self):
+        marker = tracking_marker("risingwavelabs/risingwave", 100)
+        canonical_url = "https://github.com/risingwavelabs/risingwave/pull/100"
+        matching_issue = {"number": 1, "body": marker}
+
+        class StaleSearchApi:
+            def __init__(self):
+                self.scan_calls = 0
+
+            def request(self, method, path):
+                if path.startswith("/search/issues?"):
+                    return {"items": [], "incomplete_results": False}
+                if path.startswith("/repos/risingwavelabs/risingwave-docs/issues?"):
+                    self.scan_calls += 1
+                    return [matching_issue]
+                raise AssertionError((method, path))
+
+        api = StaleSearchApi()
+        matches = find_tracking_issues(
+            api, "risingwavelabs/risingwave-docs", marker, canonical_url
+        )
+
+        self.assertEqual(matches, [matching_issue])
+        self.assertEqual(api.scan_calls, 1)
+
     def test_repository_scan_is_used_when_search_fails(self):
         marker = tracking_marker("risingwavelabs/risingwave", 100)
         canonical_url = "https://github.com/risingwavelabs/risingwave/pull/100"
