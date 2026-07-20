@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use anyhow::anyhow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
@@ -77,6 +79,11 @@ impl Sink for OpenSearchSink {
         self.config.validate_config(&self.schema)?;
         let client = self.config.build_client(Self::SINK_NAME)?;
         client.ping().await?;
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        OpenSearchConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
