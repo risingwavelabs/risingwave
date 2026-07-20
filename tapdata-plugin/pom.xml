@@ -17,8 +17,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ssZ</maven.build.timestamp.format>
         <tapdata.version>2.0.8-SNAPSHOT</tapdata.version>
-        <postgresql.version>42.7.3</postgresql.version>
-        <jackson.version>2.17.2</jackson.version>
+        <postgresql.version>42.7.12</postgresql.version>
+        <jackson.version>2.18.9</jackson.version>
         <junit.version>5.10.2</junit.version>
         <git-commit-id-plugin.version>9.2.0</git-commit-id-plugin.version>
     </properties>
