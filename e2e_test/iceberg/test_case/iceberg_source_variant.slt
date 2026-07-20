@@ -143,6 +143,17 @@ where id = 1;
 ----
 t boolean t
 
+# A variant nested inside list<struct> decodes with its siblings on the iceberg path.
+query ITT
+select
+    (evolved[1]).a,
+    (evolved[1]).v::jsonb = to_jsonb(cast(7 as smallint)),
+    variant_typeof((evolved[1]).v)
+from iceberg_variant_source
+where id = 1;
+----
+5 t int8
+
 query II
 select count(*), max(id) from iceberg_variant_source;
 ----
@@ -157,7 +168,7 @@ where id = 2
   and v_decimal4 is null and v_decimal8 is null and v_decimal16 is null
   and v_date is null and v_timestamp is null and v_timestamp_ntz is null
   and v_binary is null and v_short_string is null and v_long_string is null
-  and v_object is null and v_array is null and nested is null;
+  and v_object is null and v_array is null and nested is null and evolved is null;
 ----
 1
 
@@ -301,6 +312,38 @@ from parquet_variant_as_struct;
 statement ok
 drop table parquet_variant_as_struct;
 
+# Declared `struct<a int>[]` while the file element struct also carries an extension-tagged
+# variant child: below the list boundary the decode cannot drop the extra child, so the
+# schema match rejects the column and it NULL-fills instead of diverging from the catalog.
+statement ok
+drop table if exists parquet_variant_evolved;
+
+statement ok
+create table parquet_variant_evolved (
+    id int,
+    evolved struct<a int>[]
+) with (
+    connector = 's3',
+    match_pattern = 'demo/demo_db/test_variant_source/data/*.parquet',
+    s3.region_name = 'us-east-1',
+    s3.bucket_name = 'icebergdata',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://127.0.0.1:9301',
+    refresh.interval.sec = 1
+) format plain encode parquet;
+
+query II retry 11 backoff 1s
+select
+    count(*) filter (where id is not null),
+    count(*) filter (where evolved is not null)
+from parquet_variant_evolved;
+----
+3 0
+
+statement ok
+drop table parquet_variant_evolved;
+
 statement ok
 DROP SOURCE iceberg_variant_source;
 
@@ -426,7 +469,7 @@ where id = 2
   and v_decimal4 is null and v_decimal8 is null and v_decimal16 is null
   and v_date is null and v_timestamp is null and v_timestamp_ntz is null
   and v_binary is null and v_short_string is null and v_long_string is null
-  and v_object is null and v_array is null and nested is null;
+  and v_object is null and v_array is null and nested is null and evolved is null;
 ----
 1
 

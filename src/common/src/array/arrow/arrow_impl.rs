@@ -1665,6 +1665,22 @@ pub fn is_parquet_field_match_source_schema(
     is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_data_type)
 }
 
+/// Whether any field in the subtree rooted at `field` (inclusive) carries an extension type.
+fn field_subtree_has_extension(field: &arrow_schema::Field) -> bool {
+    if field.extension_type_name().is_some() {
+        return true;
+    }
+    match field.data_type() {
+        arrow_schema::DataType::Struct(children) => {
+            children.iter().any(|f| field_subtree_has_extension(f))
+        }
+        arrow_schema::DataType::List(inner)
+        | arrow_schema::DataType::LargeList(inner)
+        | arrow_schema::DataType::Map(inner, _) => field_subtree_has_extension(inner),
+        _ => false,
+    }
+}
+
 /// This function checks whether the schema of a Parquet file matches the user-defined schema in RisingWave.
 /// It handles the following special cases:
 /// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `Timestamp` type.
@@ -1717,6 +1733,17 @@ pub fn is_parquet_schema_match_source_schema(
         // match recursively. Extra Arrow fields are allowed and field order is ignored.
         (ArrowType::Struct(arrow_fields), RwType::Struct(rw_struct)) => {
             if arrow_fields.len() < rw_struct.len() {
+                return false;
+            }
+            // Below a list/map boundary the decode follows the file-side layout, so an
+            // extension anywhere under an undeclared extra child would decode into a type the
+            // declared schema cannot account for; reject the match so the column NULL-fills.
+            if strict_ext
+                && arrow_fields.iter().any(|f| {
+                    rw_struct.iter().all(|(name, _)| name != f.name())
+                        && field_subtree_has_extension(f)
+                })
+            {
                 return false;
             }
             for (rw_name, rw_ty) in rw_struct.iter() {
@@ -1943,6 +1970,59 @@ mod tests {
             &list_field,
             &RwType::list(elem_variant)
         ));
+    }
+
+    #[test]
+    fn test_undeclared_extension_extra_under_list_rejects_match() {
+        // `list<struct<a, v: variant-ext>>` vs declared `list<struct<a>>`: below the list
+        // boundary the extra child would be decoded by the file-side layout into a struct
+        // diverging from the catalog, so the match must be rejected (column NULL-fills).
+        let make_list = |extra: ArrowField| {
+            ArrowField::new(
+                "l",
+                ArrowType::List(Arc::new(ArrowField::new(
+                    "element",
+                    ArrowType::Struct(
+                        vec![ArrowField::new("a", ArrowType::Int32, true), extra].into(),
+                    ),
+                    true,
+                ))),
+                true,
+            )
+        };
+        let declared = RwType::list(RwType::Struct(StructType::new(vec![(
+            "a".to_owned(),
+            RwType::Int32,
+        )])));
+
+        assert!(!is_parquet_field_match_source_schema(
+            &make_list(variant_field("v")),
+            &declared
+        ));
+        // Also when the extension sits deeper, under an undeclared plain struct child.
+        assert!(!is_parquet_field_match_source_schema(
+            &make_list(ArrowField::new(
+                "nested",
+                ArrowType::Struct(vec![variant_field("v")].into()),
+                true,
+            )),
+            &declared
+        ));
+        // An extension-free extra child still matches (pre-existing leniency).
+        assert!(is_parquet_field_match_source_schema(
+            &make_list(ArrowField::new("extra", ArrowType::Int32, true)),
+            &declared
+        ));
+    }
+
+    #[test]
+    fn test_variant_ext_declared_as_scalar_rejects_match() {
+        // The variant extension binds exclusively to `Variant`; a scalar declared type must
+        // not match even outside a list/map boundary.
+        let v = variant_field("v");
+        assert!(!is_parquet_field_match_source_schema(&v, &RwType::Varchar));
+        assert!(!is_parquet_field_match_source_schema(&v, &RwType::Bytea));
+        assert!(is_parquet_field_match_source_schema(&v, &RwType::Variant));
     }
 
     #[test]
