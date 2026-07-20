@@ -121,6 +121,8 @@ impl FromArrow for UdfArrowConvert {
 #[cfg(test)]
 mod tests {
 
+    use arrow_array::Array as _;
+
     use super::*;
     use crate::array::*;
 
@@ -141,9 +143,10 @@ mod tests {
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::new_empty_fields(0, None);
+        let test_arr_2_field = arrow_schema::Field::new("", test_arr_2.data_type().clone(), true);
         assert_eq!(
             UdfArrowConvert::default()
-                .from_struct_array(&test_arr_2)
+                .from_struct_array(&test_arr_2_field, &test_arr_2)
                 .unwrap()
                 .len(),
             0
@@ -171,8 +174,10 @@ mod tests {
             ),
         ])
         .unwrap();
+        let struct_field =
+            arrow_schema::Field::new("", test_arrow_struct_array.data_type().clone(), true);
         let actual_risingwave_struct_array = UdfArrowConvert::default()
-            .from_struct_array(&test_arrow_struct_array)
+            .from_struct_array(&struct_field, &test_arrow_struct_array)
             .unwrap()
             .into_struct();
         let expected_risingwave_struct_array = StructArray::new(
@@ -196,8 +201,9 @@ mod tests {
         let arrow = UdfArrowConvert::default()
             .list_to_arrow(&data_type, &array)
             .unwrap();
+        let list_field = arrow_schema::Field::new("", arrow.data_type().clone(), true);
         let rw_array = UdfArrowConvert::default()
-            .from_list_array(arrow.as_any().downcast_ref().unwrap())
+            .from_list_array(&list_field, arrow.as_any().downcast_ref().unwrap())
             .unwrap();
         assert_eq!(rw_array.as_list(), &array);
     }
@@ -316,8 +322,9 @@ mod tests {
                 .join("\n"),
         );
 
+        let map_field = arrow_schema::Field::new("", arrow.data_type().clone(), true);
         let rw_array_new = UdfArrowConvert::default()
-            .from_map_array(arrow.as_any().downcast_ref().unwrap())
+            .from_map_array(&map_field, arrow.as_any().downcast_ref().unwrap())
             .unwrap();
         assert_eq!(&rw_array, rw_array_new.as_map());
     }
