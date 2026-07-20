@@ -3,10 +3,12 @@
 import unittest
 
 from doc_issue_tracker import (
+    GitHubApiError,
     analyze_event,
     canonical_pr_number,
     find_tracking_issues,
     merge_tracking_body,
+    resolve_canonical_pr,
     tracking_marker,
 )
 
@@ -54,10 +56,28 @@ class CanonicalPullRequestTest(unittest.TestCase):
         pr = pull_request(
             number=200,
             base_ref="release-3.0",
-            title="fix: public bug (#100)",
+            title="cherry-pick fix: public bug (#100)",
             body="",
         )
         self.assertEqual(canonical_pr_number(pr), 100)
+
+    def test_common_cherry_picks_body_identifies_original_pr(self):
+        pr = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            title="fix: public bug (#100)",
+            body="Cherry-picks #100 to `release-3.0`.",
+        )
+        self.assertEqual(canonical_pr_number(pr), 100)
+
+    def test_release_pr_issue_suffix_is_not_enough_to_identify_backport(self):
+        pr = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            title="fix: public bug (#100)",
+            body="",
+        )
+        self.assertEqual(canonical_pr_number(pr), 200)
 
     def test_main_pr_title_reference_is_not_treated_as_backport(self):
         pr = pull_request(title="fix: public bug (#99)")
@@ -97,6 +117,37 @@ class AnalyzeEventTest(unittest.TestCase):
             {"action": "closed", "pull_request": pull_request(merged=False)}
         )
         self.assertFalse(result.should_process)
+
+
+class ResolveCanonicalPullRequestTest(unittest.TestCase):
+    def test_missing_candidate_falls_back_to_trigger_pr(self):
+        trigger_pr = {"number": 200}
+
+        class SourceApi:
+            def request(self, method, path):
+                if path.endswith("/pulls/100"):
+                    raise GitHubApiError(method, path, 404, "not found")
+                if path.endswith("/pulls/200"):
+                    return trigger_pr
+                raise AssertionError((method, path))
+
+        resolved = resolve_canonical_pr(
+            SourceApi(), "risingwavelabs/risingwave", 100, trigger_pr
+        )
+
+        self.assertEqual(resolved, trigger_pr)
+
+    def test_non_404_candidate_failure_is_not_hidden(self):
+        trigger_pr = {"number": 200}
+
+        class SourceApi:
+            def request(self, method, path):
+                raise GitHubApiError(method, path, 500, "server error")
+
+        with self.assertRaises(GitHubApiError):
+            resolve_canonical_pr(
+                SourceApi(), "risingwavelabs/risingwave", 100, trigger_pr
+            )
 
 
 class TrackingBodyTest(unittest.TestCase):

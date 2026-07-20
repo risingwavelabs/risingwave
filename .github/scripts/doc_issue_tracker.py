@@ -25,10 +25,18 @@ CHERRY_PICK_BODY_RES = (
         r"Original-PR:\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(\d+)",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"Original PR:\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(\d+)",
+        re.IGNORECASE,
+    ),
     re.compile(r"Cherry picking #(\d+) onto branch release-[^\s]+", re.IGNORECASE),
-    re.compile(r"Cherry-pick of (?:\[#)?(\d+)", re.IGNORECASE),
+    re.compile(r"\bCherry[- ]pick(?:s|ed)?(?:\s+of)?\s+#(\d+)\b", re.IGNORECASE),
+    re.compile(r"\bBackport(?:ed)?(?:\s+of)?\s+#(\d+)\b", re.IGNORECASE),
 )
-BACKPORT_TITLE_RE = re.compile(r"\(#(\d+)\)\s*$")
+CHERRY_PICK_TITLE_RE = re.compile(
+    r"\bcherry[- ]pick\b.*\(#(\d+)\)(?:\s+to\s+release-[^\s]+)?\s*$",
+    re.IGNORECASE,
+)
 DOC_LABELS = {"user-facing-changes", "breaking-change"}
 
 
@@ -59,7 +67,7 @@ def canonical_pr_number(pr: dict[str, Any]) -> int:
             if candidate != number:
                 return candidate
 
-    if match := BACKPORT_TITLE_RE.search(pr.get("title") or ""):
+    if match := CHERRY_PICK_TITLE_RE.search(pr.get("title") or ""):
         candidate = int(match.group(1))
         if candidate != number:
             return candidate
@@ -147,6 +155,14 @@ def merge_tracking_body(
     return updated_body.rstrip() + "\n"
 
 
+class GitHubApiError(RuntimeError):
+    def __init__(self, method: str, path: str, status: int, response_body: str):
+        self.status = status
+        super().__init__(
+            f"GitHub API {method} {path} failed: {status} {response_body}"
+        )
+
+
 class GitHubApi:
     def __init__(self, token: str):
         self.token = token
@@ -171,9 +187,29 @@ class GitHubApi:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             response_body = error.read().decode(errors="replace")
-            raise RuntimeError(
-                f"GitHub API {method} {path} failed: {error.code} {response_body}"
+            raise GitHubApiError(
+                method, path, error.code, response_body
             ) from error
+
+
+def resolve_canonical_pr(
+    api: GitHubApi,
+    source_repo: str,
+    requested_number: int,
+    trigger_pr: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        return api.request("GET", f"/repos/{source_repo}/pulls/{requested_number}")
+    except GitHubApiError as error:
+        trigger_number = int(trigger_pr["number"])
+        if error.status != 404 or requested_number == trigger_number:
+            raise
+        print(
+            f"warning: canonical PR #{requested_number} was not found; "
+            f"falling back to triggering PR #{trigger_number}",
+            file=sys.stderr,
+        )
+        return api.request("GET", f"/repos/{source_repo}/pulls/{trigger_number}")
 
 
 def find_tracking_issues(
@@ -262,11 +298,15 @@ def track_command(args: argparse.Namespace) -> None:
     source_api = GitHubApi(args.source_token)
     docs_api = GitHubApi(args.docs_token)
 
-    canonical_pr = source_api.request(
-        "GET", f"/repos/{args.source_repo}/pulls/{args.canonical_pr_number}"
+    canonical_pr = resolve_canonical_pr(
+        source_api,
+        args.source_repo,
+        args.canonical_pr_number,
+        trigger_pr,
     )
+    canonical_number = int(canonical_pr["number"])
     canonical_url = canonical_pr["html_url"]
-    marker = tracking_marker(args.source_repo, args.canonical_pr_number)
+    marker = tracking_marker(args.source_repo, canonical_number)
     related_prs = [canonical_pr]
     if trigger_pr["number"] != canonical_pr["number"]:
         related_prs.append(trigger_pr)
@@ -294,7 +334,7 @@ def track_command(args: argparse.Namespace) -> None:
     else:
         issue_body = (
             f"This issue tracks the documentation update needed for the merged PR "
-            f"#{args.canonical_pr_number}.\n\n"
+            f"#{canonical_number}.\n\n"
             f"Source PR URL: {canonical_url}\n"
             f"Source PR Merged At: {canonical_pr.get('merged_at') or 'unknown'}\n\n"
             "If it is a major improvement that deserves a new page or a new section "
@@ -313,6 +353,7 @@ def track_command(args: argparse.Namespace) -> None:
         action = "created"
 
     write_output("action", action)
+    write_output("canonical_pr_number", canonical_number)
     write_output("issue_number", issue["number"])
     write_output("issue_url", issue["html_url"])
     print(f"Documentation issue {action}: {issue['html_url']}")

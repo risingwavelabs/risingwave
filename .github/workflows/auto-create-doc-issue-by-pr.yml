@@ -60,6 +60,6 @@ jobs:
 
       - name: Print result
         run: |
-          echo "Canonical source PR: #${{ needs.analyze.outputs.canonical_pr_number }}"
+          echo "Canonical source PR: #${{ steps.track.outputs.canonical_pr_number }}"
           echo "Documentation issue action: ${{ steps.track.outputs.action }}"
           echo "Documentation issue: ${{ steps.track.outputs.issue_url }}"
