@@ -447,9 +447,7 @@ async fn wait_for_refill_state(
                         )
                     {
                         let observed = stats.state_for(table_id);
-                        let matches = expected_policy
-                            .as_ref()
-                            .is_none_or(|policy| observed.policy.as_ref() == Some(policy))
+                        let matches = observed.policy == expected_policy
                             && expected_streaming
                                 .as_ref()
                                 .is_none_or(|vnodes| &observed.streaming == vnodes)

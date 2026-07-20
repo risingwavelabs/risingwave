@@ -225,7 +225,9 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::config::Role;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common_service::ObserverState;
     use risingwave_pb::backup_service::MetaBackupManifestId;
     use risingwave_pb::hummock::{PbHummockVersion, WriteLimits};
@@ -246,6 +248,10 @@ mod tests {
     use crate::hummock::event_handler::{HummockObserverEvent, HummockVersionUpdate};
     use crate::hummock::write_limiter::WriteLimiter;
 
+    fn serving_vnodes() -> Bitmap {
+        Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3])
+    }
+
     fn runtime_config(table_id: u32, version: u64) -> PbTableRefillRuntimeConfig {
         PbTableRefillRuntimeConfig {
             table_cache_refill_policies: Some(TableCacheRefillPolicies {
@@ -261,7 +267,7 @@ mod tests {
             serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                 mappings: vec![PbServingTableVnodeMapping {
                     table_id,
-                    bitmap: None,
+                    bitmap: Some(serving_vnodes().to_protobuf()),
                 }],
             }),
             version,
@@ -326,9 +332,11 @@ mod tests {
             let policies = config.table_cache_refill_policies.unwrap();
             assert_eq!(policies.table_policies[0].table_id, table_id);
             assert_eq!(policies.internal_table_policies[0].table_id, table_id + 1);
+            let mapping = &config.serving_table_vnode_mappings.unwrap().mappings[0];
+            assert_eq!(mapping.table_id, table_id);
             assert_eq!(
-                config.serving_table_vnode_mappings.unwrap().mappings[0].table_id,
-                table_id
+                Bitmap::from(mapping.bitmap.clone().unwrap()),
+                serving_vnodes()
             );
         }
     }

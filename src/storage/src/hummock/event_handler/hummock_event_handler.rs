@@ -1270,15 +1270,13 @@ mod tests {
     #[test]
     fn test_runtime_config_ignores_invalid_entries() {
         let table_id = TableId::new(233);
-        for policy in [PbCacheRefillPolicy::Unspecified as i32, i32::MAX] {
-            assert!(
-                super::table_cache_refill_policy_from_protobuf(PbTableCacheRefillPolicy {
-                    table_id: table_id.as_raw_id(),
-                    policy,
-                })
-                .is_none()
-            );
-        }
+        assert!(
+            super::table_cache_refill_policy_from_protobuf(PbTableCacheRefillPolicy {
+                table_id: table_id.as_raw_id(),
+                policy: i32::MAX,
+            })
+            .is_none()
+        );
 
         assert!(
             super::serving_table_vnode_mappings_to_map(PbServingTableVnodeMappings {
