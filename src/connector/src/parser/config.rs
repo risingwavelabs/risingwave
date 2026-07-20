@@ -243,7 +243,7 @@ impl SpecificParserConfig {
                     )
                 {
                     SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
-                        info.row_schema_location.clone(),
+                        info.row_schema_location,
                         &format_encode_options_with_secret,
                         &options_with_secret,
                     )?)
@@ -296,7 +296,7 @@ impl SpecificParserConfig {
                         &options_with_secret,
                     ) {
                     SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
-                        info.row_schema_location.clone(),
+                        info.row_schema_location,
                         &format_encode_options_with_secret,
                         &options_with_secret,
                     )?)

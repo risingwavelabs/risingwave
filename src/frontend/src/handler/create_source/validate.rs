@@ -177,13 +177,14 @@ pub fn validate_compatibility(
         })?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR && uses_schema_registry(format_encode)? {
-        if !(connector == PULSAR_CONNECTOR && uses_pulsar_schema_registry(format_encode)?) {
-            return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used, or pulsar when using the Pulsar schema registry",
-                UPSTREAM_SOURCE_KEY
-            ))));
-        }
+    if connector != KAFKA_CONNECTOR
+        && uses_schema_registry(format_encode)?
+        && !(connector == PULSAR_CONNECTOR && uses_pulsar_schema_registry(format_encode)?)
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used, or pulsar when using the Pulsar schema registry",
+            UPSTREAM_SOURCE_KEY
+        ))));
     }
 
     let compatible_encodes = compatible_formats
