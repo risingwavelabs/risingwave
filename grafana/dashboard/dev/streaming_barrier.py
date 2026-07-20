@@ -82,7 +82,16 @@ def _(outer_panels: Panels):
                             f"rate({metric('meta_barrier_wait_commit_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_wait_commit_duration_seconds_count')}[$__rate_interval]) > 0",
                             "barrier_wait_commit_avg",
                         ),
-                    ],
+                    ]
+                    # Retain this query for compatibility with pre-v3.0 clusters, where the metric
+                    # is still produced.
+                    + quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_wait_commit_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id))",
+                            f"snapshot_backfill_barrier_wait_commit_latency_p{legend} table_id[{{{{table_id}}}}]",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    ),
                 ),
                 panels.timeseries_ops(
                     "Earliest In-Flight Barrier Progress",
