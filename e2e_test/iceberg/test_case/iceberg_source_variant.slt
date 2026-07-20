@@ -326,7 +326,8 @@ statement ok
 drop table parquet_variant_as_struct;
 
 # Declared `struct<a int>[]` while the file element struct also carries a variant child:
-# the undeclared extension-tagged extra rejects the match and the column NULL-fills.
+# decode follows the declared fields, so the undeclared variant extra is dropped and the
+# subset decodes.
 statement ok
 drop table if exists parquet_variant_evolved;
 
@@ -351,7 +352,12 @@ select
     count(*) filter (where evolved is not null)
 from parquet_variant_evolved;
 ----
-3 0
+3 1
+
+query I
+select (evolved[1]).a from parquet_variant_evolved where id = 1;
+----
+5
 
 statement ok
 drop table parquet_variant_evolved;
