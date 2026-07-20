@@ -14,12 +14,15 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_meta_model::FragmentId;
+    use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
-    use tokio::sync::oneshot;
+    use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
+    use crate::manager::LocalNotification;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
@@ -511,6 +514,116 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_notifies_serving_mapping_fragment_delete()
+    -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let mv_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let job_id = mv_obj.oid.as_job_id();
+        let mv_table_id = job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            mv_table_id,
+            "mv_dirty_serving_mapping",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_dirty_serving_mapping AS SELECT 1",
+        )
+        .await?;
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        let fragment_id = FragmentId::new(3);
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(DistributionType::Hash),
+            stream_node: Set(StreamNode::default()),
+            state_table_ids: Set(Vec::<TableId>::new().into()),
+            upstream_fragment_id: Set(Vec::<i32>::new().into()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        assert!(
+            mgr.fragment_parallelisms()
+                .await?
+                .contains_key(&fragment_id)
+        );
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert_eq!(cleaned.streaming_job_ids, vec![job_id]);
+
+        let inner = mgr.inner.read().await;
+        assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_none());
+        assert!(
+            StreamingJob::find_by_id(job_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Table::find_by_id(mv_table_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        drop(inner);
+        assert!(
+            !mgr.fragment_parallelisms()
+                .await?
+                .contains_key(&fragment_id)
+        );
+
+        let notification = local_notification_rx.try_recv().expect(
+            "dirty-job cleanup must notify the serving mapping worker about deleted fragments",
+        );
+        match notification {
+            LocalNotification::ServingFragmentMappingsDelete(fragment_ids) => {
+                assert_eq!(fragment_ids, vec![fragment_id]);
+            }
+            notification => panic!("unexpected local notification: {notification:?}"),
+        }
 
         Ok(())
     }
