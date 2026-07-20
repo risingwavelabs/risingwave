@@ -267,6 +267,28 @@ class FindTrackingIssuesTest(unittest.TestCase):
 
         self.assertEqual(matches, [matching_issue])
 
+    def test_repository_scan_is_used_when_search_returns_http_error(self):
+        marker = tracking_marker("risingwavelabs/risingwave", 100)
+        canonical_url = "https://github.com/risingwavelabs/risingwave/pull/100"
+        matching_issue = {"number": 1, "body": marker}
+
+        class RateLimitedSearchApi:
+            def request(self, method, path):
+                if path.startswith("/search/issues?"):
+                    raise GitHubApiError(method, path, 403, "rate limited")
+                if path.startswith("/repos/risingwavelabs/risingwave-docs/issues?"):
+                    return [matching_issue]
+                raise AssertionError((method, path))
+
+        matches = find_tracking_issues(
+            RateLimitedSearchApi(),
+            "risingwavelabs/risingwave-docs",
+            marker,
+            canonical_url,
+        )
+
+        self.assertEqual(matches, [matching_issue])
+
 
 if __name__ == "__main__":
     unittest.main()

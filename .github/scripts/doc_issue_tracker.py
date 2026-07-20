@@ -255,6 +255,8 @@ def find_tracking_issues(
             file=sys.stderr,
         )
     except RuntimeError as error:
+        # GitHubApiError derives from RuntimeError, so HTTP failures such as
+        # search rate limits and validation errors also use the exact scan.
         print(
             f"warning: issue search failed ({error}); falling back to repository scan",
             file=sys.stderr,
