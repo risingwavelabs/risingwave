@@ -833,9 +833,23 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
-/// Reject user-declared `VARIANT` columns (including nested) when the `FORMAT ... ENCODE ...` is
-/// handled by a row-encode parser or native generator, none of which can produce variant values
-/// (a JSON-encoded variant column would otherwise be silently NULL-padded at ingest).
+/// Reject user-declared `VARIANT` columns (including nested) on binding paths whose ingest
+/// pipeline cannot produce variant values. `context` names the path in the error message.
+pub(crate) fn reject_variant_columns(columns: &[ColumnCatalog], context: &str) -> Result<()> {
+    if let Some(col) = columns.iter().find(|c| c.data_type().contains_variant()) {
+        return Err(RwError::from(NotSupported(
+            format!(
+                "VARIANT column \"{}\" is not supported {context} yet",
+                col.name()
+            ),
+            format!("VARIANT columns are not supported {context} yet"),
+        )));
+    }
+    Ok(())
+}
+
+/// Reject user-declared `VARIANT` columns when the `FORMAT ... ENCODE ...` is handled by a
+/// row-encode parser or native generator, none of which can produce variant values.
 ///
 /// Not gated: connector-native schemas (`ENCODE NONE`, e.g. iceberg) infer their own schema.
 fn reject_variant_columns_for_unsupported_encoding(
@@ -848,20 +862,7 @@ fn reject_variant_columns_for_unsupported_encoding(
     ) {
         return Ok(());
     }
-
-    if let Some(col) = columns_from_sql
-        .iter()
-        .find(|c| c.data_type().contains_variant())
-    {
-        return Err(RwError::from(NotSupported(
-            format!(
-                "VARIANT column \"{}\" is not supported for this source encoding yet",
-                col.name()
-            ),
-            "VARIANT columns are not supported for this source encoding yet".to_owned(),
-        )));
-    }
-    Ok(())
+    reject_variant_columns(columns_from_sql, "for this source encoding")
 }
 
 /// Entrypoint for binding source connector.
