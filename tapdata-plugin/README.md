@@ -10,11 +10,10 @@ RisingWave. Supports three write modes:
 - **JDBC mode**: compatible fallback using standard SQL `INSERT`/`UPDATE`/`DELETE` via the
   PostgreSQL wire protocol
 
-Historical handoff and qualification logs are kept in
+Maintainer architecture and release requirements are summarized in
 [`TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md`](TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md) and
 [`TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md`](TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md).
-They are not release certificates for the current artifact; use this README, CI, and an exact
-release artifact for the final decision.
+The final release decision must use CI and one exact, checksummed artifact.
 
 ## What it does
 
