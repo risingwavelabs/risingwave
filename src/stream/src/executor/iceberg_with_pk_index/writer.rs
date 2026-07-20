@@ -257,6 +257,8 @@ where
                     }
                 }
                 Message::Barrier(barrier) => {
+                    barrier.assume_no_update_vnode_bitmap(self.ctx.id)?;
+
                     let mut metadata = None;
                     if barrier.is_checkpoint() {
                         if let Some(chunk) = self
@@ -269,16 +271,16 @@ where
                         metadata = self.writer.flush().await?;
                     }
 
-                    let epoch = barrier.epoch;
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
-                    let post_commit = self.pk_index_state_table.commit(epoch).await?;
+                    self.pk_index_state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
 
                     if let Some(metadata) = metadata
                         && metadata.metadata.is_some()
                     {
                         self.local_barrier_manager
                             .report_iceberg_pk_index_sink_metadata(
-                                epoch,
+                                barrier.epoch,
                                 self.sink_id,
                                 self.ctx.id,
                                 PbIcebergPkIndexSinkRole::Writer,
@@ -287,8 +289,6 @@ where
                     }
 
                     yield Message::Barrier(barrier);
-
-                    post_commit.post_yield_barrier(update_vnode_bitmap).await?;
                 }
                 Message::Watermark(w) => {
                     yield Message::Watermark(w);

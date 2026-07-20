@@ -725,6 +725,17 @@ message AlterStreamingJobConfigRequest {
 
 message AlterStreamingJobConfigResponse {}
 
+message WaitIcebergPkIndexSinkEpochRequest {
+  uint32 sink_id = 1;
+  uint64 epoch = 2;
+}
+
+message WaitIcebergPkIndexSinkEpochResponse {
+  // The coordinator's committed iceberg snapshot id at/after `epoch`.
+  // Absent when the table has no committed snapshot yet.
+  optional int64 snapshot_id = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -779,4 +790,6 @@ service DdlService {
   rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
   rpc AlterStreamingJobConfig(AlterStreamingJobConfigRequest) returns (AlterStreamingJobConfigResponse);
+  rpc WaitIcebergPkIndexSinkEpoch(WaitIcebergPkIndexSinkEpochRequest)
+      returns (WaitIcebergPkIndexSinkEpochResponse);
 }

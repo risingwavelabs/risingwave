@@ -811,6 +811,7 @@ impl ScheduledBarriers {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
+    use risingwave_meta_model::PartialGraphId;
 
     use super::*;
 
@@ -968,6 +969,13 @@ mod tests {
             &self,
             _sink_ids: Vec<risingwave_meta_model::SinkId>,
         ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        fn advance_iceberg_pk_index_sink_committed_epochs(
+            &self,
+            _epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+        ) {
             unimplemented!()
         }
     }

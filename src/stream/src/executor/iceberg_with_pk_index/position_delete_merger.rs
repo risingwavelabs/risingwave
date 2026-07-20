@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::id::SinkId;
 use risingwave_connector::sink::Result as SinkResult;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -30,11 +29,11 @@ use crate::task::LocalBarrierManager;
 /// returning the commit metadata for the current barrier.
 #[async_trait::async_trait]
 pub trait PositionDeleteHandler: Send + 'static {
+    fn start_seed(&mut self, wait_epoch: u64);
+
     fn write(&mut self, path: &str, pos: i64) -> SinkResult<()>;
 
     async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>>;
-
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> SinkResult<()>;
 }
 
 /// Position-delete merger executor for iceberg pk-index sink without Equality Delete.
@@ -84,8 +83,10 @@ where
     async fn execute_inner(mut self) {
         let mut input = self.input.take().unwrap().execute();
 
-        // Consume the first barrier.
+        // Consume the first barrier. Its `prev` epoch is the point the previous actors (if this is a
+        // scale) committed up to; seed only from a snapshot that includes it.
         let barrier = expect_first_barrier(&mut input).await?;
+        self.handler.start_seed(barrier.epoch.prev);
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -108,6 +109,8 @@ where
                     }
                 }
                 Message::Barrier(barrier) => {
+                    barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+
                     let mut metadata = None;
                     if barrier.is_checkpoint() {
                         metadata = self
@@ -128,13 +131,6 @@ where
                                 PbIcebergPkIndexSinkRole::PositionDeleteMerger,
                                 Some(metadata),
                             );
-                    }
-
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
-                        self.handler
-                            .update_vnode_bitmap(vnode_bitmap.as_ref().clone())
-                            .await
-                            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
                     }
 
                     yield Message::Barrier(barrier);
@@ -163,14 +159,12 @@ mod tests {
 
     use hashbrown::HashMap;
     use risingwave_common::array::{Array, ArrayBuilder, I64ArrayBuilder, Op, Utf8ArrayBuilder};
-    use risingwave_common::bitmap::BitmapBuilder;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::id::SinkId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::executor::UpdateMutation;
     use crate::executor::test_utils::MockSource;
     use crate::task::LocalBarrierManager;
 
@@ -201,7 +195,6 @@ mod tests {
         existing_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
         pending_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
         written_dvs: Arc<Mutex<HashMap<String, BTreeSet<i64>>>>,
-        update_bitmap_calls: Arc<Mutex<Vec<Bitmap>>>,
     }
 
     impl PositionDeleteHandlerMock {
@@ -210,7 +203,6 @@ mod tests {
                 existing_dvs: Arc::new(Mutex::new(HashMap::new())),
                 pending_dvs: Arc::new(Mutex::new(HashMap::new())),
                 written_dvs: Arc::new(Mutex::new(HashMap::new())),
-                update_bitmap_calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -225,6 +217,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PositionDeleteHandler for PositionDeleteHandlerMock {
+        fn start_seed(&mut self, _wait_epoch: u64) {}
+
         fn write(&mut self, path: &str, pos: i64) -> SinkResult<()> {
             self.pending_dvs
                 .lock()
@@ -258,11 +252,6 @@ mod tests {
             // TODO: add unit test for report-on-barrier path once test infra is
             // available to capture `LocalBarrierEvent`s on the receiver side.
             Ok(None)
-        }
-
-        async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> SinkResult<()> {
-            self.update_bitmap_calls.lock().unwrap().push(vnode_bitmap);
-            Ok(())
         }
     }
 
@@ -394,48 +383,5 @@ mod tests {
             written_dvs.lock().unwrap().get("file1.parquet").unwrap(),
             &BTreeSet::from([0, 2])
         );
-    }
-
-    #[tokio::test]
-    async fn test_position_delete_merger_reseeds_on_vnode_update() {
-        let handler = PositionDeleteHandlerMock::new();
-        let update_calls = handler.update_bitmap_calls.clone();
-
-        let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema(), vec![]);
-        let lbm = LocalBarrierManager::for_test();
-        let actor_id = 123u32;
-        let mut executor = PositionDeleteMergerExecutor::new(
-            actor_id.into(),
-            SinkId::new(0),
-            lbm,
-            source,
-            handler,
-        )
-        .boxed()
-        .execute();
-
-        tx.push_barrier(test_epoch(1), false);
-        assert!(executor.next().await.unwrap().unwrap().is_barrier());
-
-        // Build a checkpoint barrier carrying an update-vnode-bitmap for this actor.
-        let mut builder = BitmapBuilder::zeroed(256);
-        builder.set(7, true);
-        let new_bitmap = builder.finish();
-        let barrier = Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Update(
-            UpdateMutation {
-                vnode_bitmaps: std::collections::HashMap::from([(
-                    actor_id.into(),
-                    Arc::new(new_bitmap.clone()),
-                )]),
-                ..Default::default()
-            },
-        ));
-        tx.send_barrier(barrier);
-        assert!(executor.next().await.unwrap().unwrap().is_barrier());
-
-        let calls = update_calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0], new_bitmap);
     }
 }

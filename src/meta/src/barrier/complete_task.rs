@@ -110,6 +110,7 @@ impl CompleteBarrierTask {
             //   1. pre_commit: persist pending rows under `pending_sink_state` (no iceberg I/O).
             //   2. commit_epoch: advance hummock.
             //   3. commit: drive iceberg overwrite_files for queued epochs.
+            //   4. advance_committed_epochs: advance the per-partial-graph committed epoch cursor.
             let mut iceberg_pk_index_commit_sink_ids = Vec::new();
             if !self.iceberg_pk_index_sink_metadata.is_empty() {
                 let res = context
@@ -125,6 +126,11 @@ impl CompleteBarrierTask {
                     .commit_iceberg_pk_index_sink_metadata(iceberg_pk_index_commit_sink_ids)
                     .await?;
             }
+            let epochs = self
+                .epoch_infos
+                .iter()
+                .map(|(id, info)| (*id, info.barrier_info.prev_epoch()));
+            context.advance_iceberg_pk_index_sink_committed_epochs(epochs);
 
             // Handle list finished source IDs for refreshable batch sources
             // Spawn this asynchronously to avoid deadlock during barrier collection

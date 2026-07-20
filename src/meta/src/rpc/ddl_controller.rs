@@ -1346,7 +1346,11 @@ impl DdlController {
                     let iceberg_config =
                         crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
                     self.iceberg_pk_index_sink_manager
-                        .register_sink(sink.id, iceberg_config)
+                        .register_sink(
+                            sink.id,
+                            crate::barrier::to_partial_graph_id(sink.database_id, None),
+                            iceberg_config,
+                        )
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
                 }

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap as StdHashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
@@ -42,6 +43,7 @@ use risingwave_common::array::arrow::arrow_array_iceberg::{
 };
 use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef as ArrowSchemaRef;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::id::SinkId;
 use risingwave_connector::sink::iceberg::{
     IcebergConfig, IcebergPositionDeleteMergerCommitResult, PARQUET_CREATED_BY,
     resolve_partition_type, serialize_data_files_default_spec,
@@ -50,6 +52,7 @@ use risingwave_connector::sink::{Result as SinkResult, SinkError};
 use risingwave_connector::source::iceberg::parquet_file_handler::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::ActorId;
+use risingwave_rpc_client::MetaClient;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -63,12 +66,28 @@ const DELETION_VECTOR_PROPERTY_REFERENCED_DATA_FILE: &str = "referenced-data-fil
 
 /// Real implementation of [`PositionDeleteHandler`] using the iceberg-rust crate.
 ///
-/// Loads the iceberg table once at init and keeps the handle for object-store I/O
-/// and cached metadata; never reloads through the catalog. The per-shard delete
-/// state lives in [`StagingVersion`], seeded once from the delete manifests and
-/// appended to on every flush.
+/// The iceberg table is NOT loaded at construction. `start_seed` (called right
+/// after the executor's first barrier) spawns a background task that first waits
+/// for meta to have committed through the first barrier's `prev` epoch, then
+/// loads the table from the catalog (retrying until it reflects the committed
+/// snapshot) and seeds the per-shard delete state in [`StagingVersion`] from the
+/// delete manifests. The seeded state is awaited lazily at the first flush; the
+/// table handle is kept for object-store I/O and cached metadata and never
+/// reloaded afterwards.
 pub struct PositionDeleteHandlerImpl {
     config: IcebergConfig,
+    actor_id: ActorId,
+    vnode_bitmap: Option<Bitmap>,
+    sink_id: SinkId,
+    meta_client: MetaClient,
+    inner: HandlerInner,
+    /// New positions accumulated since the last flush, keyed by data file path. Buffered regardless
+    /// of seed state — `write` never touches the table.
+    pending: HashMap<String, DeleteVector>,
+}
+
+/// Everything that only exists once the table has been loaded and staging seeded.
+struct SeededState {
     table: Table,
     location_generator: DefaultLocationGenerator,
     /// File-name generator for V3 Puffin deletion vector files.
@@ -78,54 +97,68 @@ pub struct PositionDeleteHandlerImpl {
     schema_id: i32,
     partition_spec_id: i32,
     format_version: FormatVersion,
-    staging: StagingState,
-    /// New positions accumulated since the last flush, keyed by data file path.
-    pending: HashMap<String, DeleteVector>,
+    staging: StagingVersion,
+}
+
+enum HandlerInner {
+    /// Before `start_seed`.
+    Unseeded,
+    /// Background task: wait for the commit epoch, load the table, seed staging.
+    Seeding(JoinHandle<SinkResult<SeededState>>),
+    Ready(SeededState),
+}
+
+impl Drop for PositionDeleteHandlerImpl {
+    fn drop(&mut self) {
+        // Abort the background seed task if it is still running, so a merger actor dropped mid-seed
+        // does not leave a detached task pinning the meta wait RPC + catalog-reload retries.
+        if let HandlerInner::Seeding(handle) = &self.inner {
+            handle.abort();
+        }
+    }
 }
 
 impl PositionDeleteHandlerImpl {
-    pub async fn new(
+    pub fn new(
         config: IcebergConfig,
         actor_id: ActorId,
         vnode_bitmap: Option<Bitmap>,
-    ) -> SinkResult<Self> {
-        let table = config.load_table().await?;
-        let location_generator = DefaultLocationGenerator::new(table.metadata().clone())?;
-        let uuid_suffix = Uuid::now_v7();
-        let file_name_generator = DefaultFileNameGenerator::new(
-            actor_id.to_string(),
-            Some(format!("delvec-{}", uuid_suffix)),
-            DataFileFormat::Puffin,
-        );
-        let parquet_file_name_generator = DefaultFileNameGenerator::new(
-            actor_id.to_string(),
-            Some(format!("pos-del-{}", uuid_suffix)),
-            DataFileFormat::Parquet,
-        );
-
-        let schema_id = table.metadata().current_schema_id();
-        let partition_spec_id = table.metadata().default_partition_spec_id();
-        let format_version = table.metadata().format_version();
-
-        let table_for_seed = table.clone();
-        let staging = StagingState::Loading(tokio::spawn(async move {
-            let mut res = StagingVersion::new(vnode_bitmap);
-            seed_from_delete_manifests(&table_for_seed, &mut res).await?;
-            Ok(res)
-        }));
-
-        Ok(Self {
+        sink_id: SinkId,
+        meta_client: MetaClient,
+    ) -> Self {
+        Self {
             config,
-            table,
-            location_generator,
-            file_name_generator,
-            parquet_file_name_generator,
-            schema_id,
-            partition_spec_id,
-            format_version,
-            staging,
+            actor_id,
+            vnode_bitmap,
+            sink_id,
+            meta_client,
+            inner: HandlerInner::Unseeded,
             pending: HashMap::new(),
-        })
+        }
+    }
+
+    /// Await the background seed, transitioning `Seeding -> Ready`. Errors if called before
+    /// `start_seed`.
+    async fn await_ready(&mut self) -> SinkResult<&mut SeededState> {
+        if matches!(self.inner, HandlerInner::Seeding(_)) {
+            // Take the handle out before awaiting so an errored seed leaves `Unseeded` (a clean error
+            // on any later flush) rather than a `Seeding` holding a consumed `JoinHandle` that would
+            // panic if re-polled.
+            let HandlerInner::Seeding(handle) =
+                std::mem::replace(&mut self.inner, HandlerInner::Unseeded)
+            else {
+                unreachable!("guarded by matches! above");
+            };
+            let state = handle.await.map_err(|e| SinkError::Iceberg(anyhow!(e)))??;
+            self.inner = HandlerInner::Ready(state);
+        }
+        match &mut self.inner {
+            HandlerInner::Ready(state) => Ok(state),
+            HandlerInner::Unseeded => Err(SinkError::Iceberg(anyhow!(
+                "pk-index merger flush before start_seed"
+            ))),
+            HandlerInner::Seeding(_) => unreachable!("just transitioned out of Seeding"),
+        }
     }
 
     async fn flush_inner(&mut self) -> SinkResult<Option<SinkMetadata>> {
@@ -133,36 +166,38 @@ impl PositionDeleteHandlerImpl {
             return Ok(None);
         }
 
-        let staging = self.staging.await_loaded().await?;
+        let config = self.config.clone();
+        let pending = std::mem::take(&mut self.pending);
+        let state = self.await_ready().await?;
 
         // V3 tables use Puffin deletion vectors; V2 tables use file-scoped Parquet
         // position-delete files. The internal representation is a roaring bitmap
         // (`DeleteVector`) in both cases; only the on-disk format differs.
-        let use_puffin = self.format_version >= FormatVersion::V3;
-        let pending = std::mem::take(&mut self.pending);
+        let use_puffin = state.format_version >= FormatVersion::V3;
 
         let mut delete_files = Vec::with_capacity(pending.len());
         let mut overwrite_files = Vec::new();
 
         for (data_file_path, new_positions) in pending {
             // Merge the new positions with the resident delete vector, lazily loading
-            // it on first touch of this path. Scoped so the staging borrow ends before
-            // the `&self` write below; `self.table` is a disjoint field from
-            // `self.staging`, so the lazy read can still borrow it here.
+            // it on first touch of this path.
             let plan = {
-                let entry = staging.entry_mut(&data_file_path);
+                let entry = state.staging.entry_mut(&data_file_path);
                 if entry.needs_load() {
                     let existing_file = entry
                         .current_file()
                         .expect("needs_load implies current_file is Some");
                     let dv = match existing_file.file_format() {
                         DataFileFormat::Puffin => {
-                            read_dv_positions_from_data_file(self.table.file_io(), &existing_file)
+                            read_dv_positions_from_data_file(state.table.file_io(), &existing_file)
                                 .await?
                         }
                         DataFileFormat::Parquet => {
-                            read_v2_positions_from_delete_file(self.table.file_io(), &existing_file)
-                                .await?
+                            read_v2_positions_from_delete_file(
+                                state.table.file_io(),
+                                &existing_file,
+                            )
+                            .await?
                         }
                         other => {
                             return Err(SinkError::Iceberg(anyhow!(
@@ -181,26 +216,27 @@ impl PositionDeleteHandlerImpl {
 
             let new_file = if use_puffin {
                 write_dv_puffin_file(
-                    &self.file_name_generator,
-                    &self.location_generator,
-                    &self.table,
+                    &state.file_name_generator,
+                    &state.location_generator,
+                    &state.table,
                     data_file_path.clone(),
                     &plan.merged,
                 )
                 .await?
             } else {
                 write_parquet_position_delete_file(
-                    &self.parquet_file_name_generator,
-                    &self.location_generator,
-                    &self.table,
-                    &self.config,
+                    &state.parquet_file_name_generator,
+                    &state.location_generator,
+                    &state.table,
+                    &config,
                     data_file_path.clone(),
                     &plan.merged,
                 )
                 .await?
             };
 
-            staging
+            state
+                .staging
                 .entry_mut(&data_file_path)
                 .record_written(new_file.clone(), plan.merged);
             delete_files.push(new_file);
@@ -210,12 +246,12 @@ impl PositionDeleteHandlerImpl {
             return Ok(None);
         }
 
-        let delete_files = serialize_delete_files(&self.table, delete_files)?;
-        let overwrite_files = serialize_overwrite_files(&self.table, overwrite_files)?;
+        let delete_files = serialize_delete_files(&state.table, delete_files)?;
+        let overwrite_files = serialize_overwrite_files(&state.table, overwrite_files)?;
 
         let sink_metadata = SinkMetadata::try_from(&IcebergPositionDeleteMergerCommitResult {
-            schema_id: self.schema_id,
-            partition_spec_id: self.partition_spec_id,
+            schema_id: state.schema_id,
+            partition_spec_id: state.partition_spec_id,
             delete_files,
             overwrite_files,
         })?;
@@ -372,6 +408,69 @@ async fn write_position_delete_chunk(
 
 #[async_trait::async_trait]
 impl PositionDeleteHandler for PositionDeleteHandlerImpl {
+    fn start_seed(&mut self, wait_epoch: u64) {
+        let config = self.config.clone();
+        let actor_id = self.actor_id;
+        let vnode_bitmap = self.vnode_bitmap.clone();
+        let sink_id = self.sink_id;
+        let meta_client = self.meta_client.clone();
+        self.inner = HandlerInner::Seeding(tokio::spawn(async move {
+            let result: SinkResult<SeededState> = async move {
+                // 1. Block until meta has committed through `wait_epoch`; get the committed snapshot
+                //    lower bound.
+                let expected_snapshot = meta_client
+                    .wait_iceberg_pk_index_sink_epoch(sink_id, wait_epoch)
+                    .await
+                    .map_err(|e| {
+                        SinkError::Iceberg(anyhow!(e).context(
+                            "wait for pk-index sink commit epoch before seeding merger staging",
+                        ))
+                    })?;
+
+                // 2. Load the table, retrying until the catalog reflects at least `expected_snapshot`.
+                let table = load_table_at_least(&config, expected_snapshot).await?;
+
+                // 3. Derive per-table state + seed staging (shard-filtered).
+                let location_generator = DefaultLocationGenerator::new(table.metadata().clone())?;
+                let uuid_suffix = Uuid::now_v7();
+                let file_name_generator = DefaultFileNameGenerator::new(
+                    actor_id.to_string(),
+                    Some(format!("delvec-{}", uuid_suffix)),
+                    DataFileFormat::Puffin,
+                );
+                let parquet_file_name_generator = DefaultFileNameGenerator::new(
+                    actor_id.to_string(),
+                    Some(format!("pos-del-{}", uuid_suffix)),
+                    DataFileFormat::Parquet,
+                );
+                let schema_id = table.metadata().current_schema_id();
+                let partition_spec_id = table.metadata().default_partition_spec_id();
+                let format_version = table.metadata().format_version();
+
+                let mut staging = StagingVersion::new(vnode_bitmap);
+                seed_from_delete_manifests(&table, &mut staging).await?;
+
+                Ok(SeededState {
+                    table,
+                    location_generator,
+                    file_name_generator,
+                    parquet_file_name_generator,
+                    schema_id,
+                    partition_spec_id,
+                    format_version,
+                    staging,
+                })
+            }
+            .await;
+            if let Err(e) = &result {
+                // The handle is only awaited at the first flush with pending deletes, which may be far
+                // in the future (or never on an idle shard); log here so a failed seed is visible.
+                tracing::warn!(%sink_id, error = ?e, "iceberg pk-index merger background seed failed; will surface at next flush");
+            }
+            result
+        }));
+    }
+
     fn write(&mut self, path: &str, pos: i64) -> SinkResult<()> {
         let pos: u64 = pos.try_into().context("position should be non-negative")?;
         self.pending.entry_ref(path).or_default().insert(pos);
@@ -381,38 +480,34 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
     async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>> {
         self.flush_inner().await
     }
-
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> SinkResult<()> {
-        self.table = self.config.load_table().await?;
-        let table = self.table.clone();
-        self.staging = StagingState::Loading(tokio::spawn(async move {
-            let mut res = StagingVersion::new(Some(vnode_bitmap));
-            seed_from_delete_manifests(&table, &mut res).await?;
-            Ok(res)
-        }));
-        Ok(())
-    }
 }
 
-enum StagingState {
-    Loading(JoinHandle<SinkResult<StagingVersion>>),
-    Loaded(StagingVersion),
-}
-
-impl StagingState {
-    async fn await_loaded(&mut self) -> SinkResult<&mut StagingVersion> {
-        match self {
-            StagingState::Loading(handle) => {
-                let staging = handle.await.map_err(|e| SinkError::Iceberg(anyhow!(e)))??;
-                *self = StagingState::Loaded(staging);
-                let StagingState::Loaded(staging) = self else {
-                    unreachable!("staging should be loaded after join");
-                };
-                Ok(staging)
-            }
-            StagingState::Loaded(staging) => Ok(staging),
+/// Load the table, retrying until its snapshot set contains `expected`
+async fn load_table_at_least(config: &IcebergConfig, expected: Option<i64>) -> SinkResult<Table> {
+    const MAX_ATTEMPTS: usize = 10;
+    const BACKOFF: Duration = Duration::from_millis(500);
+    let mut last = None;
+    for _ in 0..MAX_ATTEMPTS {
+        let table = config.load_table().await?;
+        let Some(expected) = expected else {
+            return Ok(table);
+        };
+        if table
+            .metadata()
+            .snapshots()
+            .any(|s| s.snapshot_id() == expected)
+        {
+            return Ok(table);
         }
+        last = Some(table.metadata().current_snapshot_id());
+        tokio::time::sleep(BACKOFF).await;
     }
+    Err(SinkError::Iceberg(anyhow!(
+        "iceberg catalog did not reflect committed pk-index snapshot {:?} after {} attempts (last current_snapshot_id={:?})",
+        expected,
+        MAX_ATTEMPTS,
+        last,
+    )))
 }
 
 /// Scan the table's current-snapshot delete manifests once and seed `staging` with
