@@ -221,6 +221,14 @@ select count(distinct v_object) from iceberg_variant_source;
 ----
 2
 
+# A variant-typed subexpression over a variant-free plan schema: no node schema contains
+# variant, so the plan passes the DataFusion schema gate, but the RwScalarFunction wrapper
+# refuses the variant-returning cast and the query falls back at plan time.
+query I
+select id from iceberg_variant_source where (id::varchar::variant) is not null and id = 1;
+----
+1
+
 # file_scan the Spark-written data files directly: the generic parquet path must
 # infer variant columns via the extension metadata and decode them.
 query I
