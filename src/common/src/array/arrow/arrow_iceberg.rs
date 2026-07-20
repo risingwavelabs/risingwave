@@ -22,6 +22,7 @@ use arrow_array::cast::AsArray;
 use arrow_schema::extension::ExtensionType;
 use num_traits::abs;
 use parquet_variant_compute::{VariantArray, VariantType};
+use risingwave_common_log::LogSuppressor;
 use thiserror_ext::AsReport;
 
 pub use super::arrow_58::{
@@ -234,6 +235,9 @@ impl FromArrow for IcebergArrowConvert {
     ) -> Result<DataType, ArrayError> {
         match (type_name, physical_type) {
             (VariantType::NAME, arrow_schema::DataType::Struct(_)) => Ok(DataType::Variant),
+            (VariantType::NAME, _) => Err(ArrayError::from_arrow(format!(
+                "variant extension type requires a struct physical type, got: {physical_type}"
+            ))),
             _ => DefaultIcebergFromArrow.from_extension_type(type_name, physical_type),
         }
     }
@@ -309,11 +313,17 @@ fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, 
         match variant_result {
             Ok(variant) => builder.append(Some(variant.as_scalar_ref())),
             Err(err) => {
-                tracing::warn!(
-                    error = %err.as_report(),
-                    "failed to decode iceberg variant value at index {}. It will be replaced with null.",
-                    idx,
-                );
+                // A systematically corrupt file would otherwise warn once per row.
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    tracing::warn!(
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "failed to decode iceberg variant value at index {}. It will be replaced with null.",
+                        idx,
+                    );
+                }
                 builder.append_null();
             }
         }
@@ -965,6 +975,14 @@ mod test {
         assert_eq!(
             converted.data_type(),
             DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
+        );
+        let ArrayImpl::Struct(struct_array) = &converted else {
+            panic!("expected struct array");
+        };
+        let values = struct_array.field_at(0).as_variant();
+        assert_eq!(
+            values.iter().next().unwrap().map(|v| v.to_text()),
+            Some("7".to_owned())
         );
     }
 }
