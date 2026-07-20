@@ -1,0 +1,80 @@
+control substitution on
+
+# Verify that each record is decoded with its writer schema ID and message indexes.
+
+statement ok
+drop source if exists pb_writer_schema_source;
+
+system ok
+rpk topic delete 'test-pb-writer-schema' || true; \
+(rpk sr subject delete 'test-pb-writer-schema-value' && rpk sr subject delete 'test-pb-writer-schema-value' --permanent) || true;
+
+system ok
+rpk topic create 'test-pb-writer-schema'
+
+# Event is deliberately the second top-level message, so its Confluent index array is [1].
+system ok
+sr_register test-pb-writer-schema-value PROTOBUF << EOF
+syntax = "proto3";
+package test;
+message Metadata { string source = 1; }
+message Event {
+  int32 id = 1;
+  Status status = 2;
+}
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STARTED = 1;
+}
+EOF
+
+statement ok
+create source pb_writer_schema_source with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-writer-schema',
+  scan.startup.mode = 'earliest')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Event');
+
+system ok
+echo '{"id":1,"status":"STARTED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id=topic --schema-type='test.Event'
+
+query IT retry 10 backoff 1s
+select id, status from pb_writer_schema_source order by id;
+----
+1 STARTED
+
+# Add a writer-only enum value after the source decoder has already consumed version 1.
+system ok
+sr_register test-pb-writer-schema-value PROTOBUF << EOF
+syntax = "proto3";
+package test;
+message Metadata { string source = 1; }
+message Event {
+  int32 id = 1;
+  Status status = 2;
+}
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STARTED = 1;
+  FINISHED = 2;
+}
+EOF
+
+system ok
+echo '{"id":2,"status":"FINISHED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id=topic --schema-type='test.Event'
+
+query IT retry 10 backoff 1s
+select id, status from pb_writer_schema_source order by id;
+----
+1 STARTED
+2 FINISHED
+
+statement ok
+drop source pb_writer_schema_source;
+
+system ok
+rpk topic delete 'test-pb-writer-schema'; \
+rpk sr subject delete 'test-pb-writer-schema-value'; \
+rpk sr subject delete 'test-pb-writer-schema-value' --permanent;

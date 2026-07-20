@@ -31,6 +31,7 @@ pub enum SchemaLoader {
     Glue(GlueSchemaLoader),
 }
 
+#[derive(Debug)]
 pub struct ConfluentSchemaLoader {
     pub client: Client,
     pub name_strategy: PbSchemaRegistryNameStrategy,
@@ -56,6 +57,20 @@ pub enum SchemaVersion {
 }
 
 impl ConfluentSchemaLoader {
+    fn subject<const IS_KEY: bool>(&self) -> Result<String, SchemaFetchError> {
+        let record = if IS_KEY {
+            self.key_record_name.as_deref()
+        } else {
+            self.val_record_name.as_deref()
+        };
+        Ok(get_subject_by_strategy(
+            &self.name_strategy,
+            &self.topic,
+            record,
+            IS_KEY,
+        )?)
+    }
+
     pub fn from_format_options(
         topic: &str,
         format_options: &BTreeMap<String, String>,
@@ -90,16 +105,54 @@ impl ConfluentSchemaLoader {
     async fn load_schema<Out: LoadedSchema, const IS_KEY: bool>(
         &self,
     ) -> Result<(SchemaVersion, Out), SchemaFetchError> {
-        let record = match IS_KEY {
-            true => self.key_record_name.as_deref(),
-            false => self.val_record_name.as_deref(),
-        };
-        let subject = get_subject_by_strategy(&self.name_strategy, &self.topic, record, IS_KEY)?;
+        let subject = self.subject::<IS_KEY>()?;
         let (primary_subject, dependency_subjects) =
             self.client.get_subject_and_references(&subject).await?;
         let schema_id = primary_subject.schema.id;
         let out = Out::compile(primary_subject, dependency_subjects)?;
         Ok((SchemaVersion::Confluent(schema_id), out))
+    }
+
+    async fn load_schema_by_id<Out: LoadedSchema, const IS_KEY: bool>(
+        &self,
+        schema_id: i32,
+    ) -> Result<Out, SchemaFetchError> {
+        let subject = self.subject::<IS_KEY>()?;
+        let versions = self.client.get_schema_versions_by_id(schema_id).await?;
+        let version = versions
+            .into_iter()
+            .find(|candidate| candidate.subject == subject)
+            .ok_or_else(|| {
+                malformed_response_error!(
+                    "schema ID {schema_id} is not registered under subject `{subject}`"
+                )
+            })?
+            .version;
+        let (primary, references) = self
+            .client
+            .get_subject_and_references_by_version(&subject, version)
+            .await?;
+        if primary.schema.id != schema_id {
+            return Err(malformed_response_error!(
+                "subject `{subject}` version {version} returned schema ID {}, expected {schema_id}",
+                primary.schema.id
+            )
+            .into());
+        }
+        Out::compile(primary, references)
+    }
+
+    pub async fn load_val_schema_by_id<Out: LoadedSchema>(
+        &self,
+        schema_id: i32,
+    ) -> Result<Out, SchemaFetchError> {
+        self.load_schema_by_id::<Out, false>(schema_id).await
+    }
+
+    pub async fn load_val_schema<Out: LoadedSchema>(
+        &self,
+    ) -> Result<(SchemaVersion, Out), SchemaFetchError> {
+        self.load_schema::<Out, false>().await
     }
 }
 
