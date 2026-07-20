@@ -637,25 +637,6 @@ pub trait FromArrow {
             return self.from_extension_array(type_name, array);
         }
 
-        // Struct projection for file source (Parquet): allow Arrow struct to be a superset of the
-        // expected struct fields. We align fields by name and ignore extra fields.
-        //
-        // Only use projection when Arrow struct differs from expected (superset, reordered, or
-        // different field names). If they match exactly, fall through to the normal path to
-        // avoid unnecessary overhead and potential issues with UDF/other paths.
-        if let (
-            arrow_schema::DataType::Struct(expected_fields),
-            arrow_schema::DataType::Struct(actual_fields),
-        ) = (field.data_type(), array.data_type())
-        {
-            let dominated = Self::struct_fields_dominated(expected_fields, actual_fields);
-            if dominated {
-                let struct_array: &arrow_array::StructArray =
-                    array.as_any().downcast_ref().unwrap();
-                return self.from_struct_array_projected(expected_fields, struct_array);
-            }
-            // else: fields match exactly, fall through to normal Struct(_) path below
-        }
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
             Int8 => self.from_int8_array(array.as_any().downcast_ref().unwrap()),
@@ -712,9 +693,9 @@ pub trait FromArrow {
             }
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
-            List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
-            Struct(_) => self.from_struct_array(array.as_any().downcast_ref().unwrap()),
-            Map(_, _) => self.from_map_array(array.as_any().downcast_ref().unwrap()),
+            List(_) => self.from_list_array(field, array.as_any().downcast_ref().unwrap()),
+            Struct(_) => self.from_struct_array(field, array.as_any().downcast_ref().unwrap()),
+            Map(_, _) => self.from_map_array(field, array.as_any().downcast_ref().unwrap()),
             t => Err(ArrayError::from_arrow(format!(
                 "unsupported arrow data type: {t:?}",
             ))),
@@ -953,13 +934,26 @@ pub trait FromArrow {
         Ok(ArrayImpl::Bytea(array.iter().collect()))
     }
 
-    fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
+    /// Converts an Arrow `ListArray`, decoding elements by the expected element field so that
+    /// nested decode keeps following the declared schema. Falls back to the array's own element
+    /// field when the expected field does not describe a list.
+    fn from_list_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::ListArray,
+    ) -> Result<ArrayImpl, ArrayError> {
         use arrow_array::Array;
-        let arrow_schema::DataType::List(field) = array.data_type() else {
-            panic!("nested field types cannot be determined.");
+        let elem_field = match field.data_type() {
+            arrow_schema::DataType::List(elem) => elem,
+            _ => {
+                let arrow_schema::DataType::List(elem) = array.data_type() else {
+                    panic!("nested field types cannot be determined.");
+                };
+                elem
+            }
         };
         Ok(ArrayImpl::List(ListArray {
-            value: Box::new(self.from_array(field, array.values())?),
+            value: Box::new(self.from_array(elem_field, array.values())?),
             bitmap: match array.nulls() {
                 Some(nulls) => nulls.iter().collect(),
                 None => Bitmap::ones(array.len()),
@@ -968,58 +962,14 @@ pub trait FromArrow {
         }))
     }
 
-    fn from_struct_array(&self, array: &arrow_array::StructArray) -> Result<ArrayImpl, ArrayError> {
-        use arrow_array::Array;
-        let arrow_schema::DataType::Struct(fields) = array.data_type() else {
-            panic!("nested field types cannot be determined.");
-        };
-        Ok(ArrayImpl::Struct(StructArray::new(
-            self.from_fields(fields)?,
-            array
-                .columns()
-                .iter()
-                .zip_eq_fast(fields)
-                .map(|(array, field)| self.from_array(field, array).map(Arc::new))
-                .try_collect()?,
-            (0..array.len()).map(|i| array.is_valid(i)).collect(),
-        )))
-    }
-
-    /// Returns `true` if all expected fields are present in `actual_fields`, and `actual_fields`
-    /// has more fields or has them in a different order.
-    ///
-    /// This is used to decide whether to use `from_struct_array_projected` (projection needed)
-    /// or fall back to the normal `from_struct_array` path (exact match).
-    fn struct_fields_dominated(
-        expected_fields: &arrow_schema::Fields,
-        actual_fields: &arrow_schema::Fields,
-    ) -> bool {
-        // Fast path: if lengths are equal and names match in order, no projection needed
-        if expected_fields.len() == actual_fields.len() {
-            let all_match = expected_fields
-                .iter()
-                .zip_eq_fast(actual_fields.iter())
-                .all(|(e, a)| e.name() == a.name());
-            if all_match {
-                return false; // exact match, use normal path
-            }
-        }
-        // Check that all expected fields exist in actual (by name)
-        let actual_names: std::collections::HashSet<&str> =
-            actual_fields.iter().map(|f| f.name().as_str()).collect();
-        expected_fields
-            .iter()
-            .all(|e| actual_names.contains(e.name().as_str()))
-    }
-
-    /// Converts Arrow `StructArray` to RisingWave `StructArray` according to the expected fields.
-    ///
-    /// This is mainly used for Parquet file source, where the upstream struct may contain extra
-    /// fields. The conversion aligns fields by name, ignores extra fields, and keeps the expected
-    /// field order.
-    fn from_struct_array_projected(
+    /// Converts an Arrow `StructArray` by the expected struct field: children are aligned by
+    /// name, extra Arrow children are dropped, and missing ones are filled with NULL, so the
+    /// result always carries the expected struct type (extensions on file-side children cannot
+    /// override the declared type). Falls back to the array's own fields when the expected
+    /// field does not describe a struct.
+    fn from_struct_array(
         &self,
-        expected_fields: &arrow_schema::Fields,
+        field: &arrow_schema::Field,
         array: &arrow_array::StructArray,
     ) -> Result<ArrayImpl, ArrayError> {
         use std::collections::HashMap;
@@ -1029,40 +979,66 @@ pub trait FromArrow {
         let arrow_schema::DataType::Struct(actual_fields) = array.data_type() else {
             panic!("nested field types cannot be determined.");
         };
-
-        let actual_name_to_index: HashMap<&str, usize> = actual_fields
-            .iter()
-            .enumerate()
-            .map(|(idx, f)| (f.name().as_str(), idx))
-            .collect();
+        let expected_fields = match field.data_type() {
+            arrow_schema::DataType::Struct(fields) => fields,
+            _ => actual_fields,
+        };
 
         let len = array.len();
-        let projected_columns = expected_fields
-            .iter()
-            .map(|expected_field| {
-                if let Some(&idx) = actual_name_to_index.get(expected_field.name().as_str()) {
-                    let child = array.columns()[idx].clone();
-                    self.from_array(expected_field, &child).map(Arc::new)
-                } else {
-                    // Field missing in Arrow struct. Fill SQL NULL with the expected RW type.
-                    let rw_ty = self.from_field(expected_field)?;
-                    let mut builder = ArrayBuilderImpl::with_type(len, rw_ty);
-                    builder.append_n(len, Datum::None);
-                    Ok(Arc::new(builder.finish()))
-                }
-            })
-            .try_collect()?;
+        let columns = if expected_fields == actual_fields {
+            // Exact match (including all nested fields and metadata): zip in order.
+            array
+                .columns()
+                .iter()
+                .zip_eq_fast(expected_fields)
+                .map(|(column, field)| self.from_array(field, column).map(Arc::new))
+                .try_collect()?
+        } else {
+            let actual_name_to_index: HashMap<&str, usize> = actual_fields
+                .iter()
+                .enumerate()
+                .map(|(idx, f)| (f.name().as_str(), idx))
+                .collect();
+            expected_fields
+                .iter()
+                .map(|expected_field| {
+                    if let Some(&idx) = actual_name_to_index.get(expected_field.name().as_str()) {
+                        self.from_array(expected_field, &array.columns()[idx])
+                            .map(Arc::new)
+                    } else {
+                        // Field missing in Arrow struct. Fill SQL NULL with the expected RW type.
+                        let rw_ty = self.from_field(expected_field)?;
+                        let mut builder = ArrayBuilderImpl::with_type(len, rw_ty);
+                        builder.append_n(len, Datum::None);
+                        Ok(Arc::new(builder.finish()))
+                    }
+                })
+                .try_collect()?
+        };
 
         Ok(ArrayImpl::Struct(StructArray::new(
             self.from_fields(expected_fields)?,
-            projected_columns,
+            columns,
             (0..len).map(|i| array.is_valid(i)).collect(),
         )))
     }
 
-    fn from_map_array(&self, array: &arrow_array::MapArray) -> Result<ArrayImpl, ArrayError> {
+    /// Converts an Arrow `MapArray`, decoding entries by the expected entries field.
+    fn from_map_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::MapArray,
+    ) -> Result<ArrayImpl, ArrayError> {
         use arrow_array::Array;
-        let struct_array = self.from_struct_array(array.entries())?;
+        let expected_entries: arrow_schema::FieldRef = match field.data_type() {
+            arrow_schema::DataType::Map(entries, _) => entries.clone(),
+            _ => Arc::new(arrow_schema::Field::new(
+                "entries",
+                array.entries().data_type().clone(),
+                false,
+            )),
+        };
+        let struct_array = self.from_struct_array(&expected_entries, array.entries())?;
         let list_array = ListArray {
             value: Box::new(struct_array),
             bitmap: match array.nulls() {
@@ -1967,6 +1943,271 @@ mod tests {
             StructValue::new(vec![
                 Some(ScalarImpl::Int32(20)),
                 Some(ScalarImpl::Utf8("b".into()))
+            ])
+        );
+    }
+
+    /// Builds a two-element `list<struct>` array from the given element fields and columns.
+    fn build_list_of_struct(
+        elem_fields: arrow_schema::Fields,
+        columns: Vec<arrow_array::ArrayRef>,
+    ) -> arrow_array::ArrayRef {
+        use std::sync::Arc;
+        let elem_struct = arrow_array::StructArray::new(elem_fields.clone(), columns, None);
+        Arc::new(arrow_array::ListArray::new(
+            Arc::new(ArrowField::new(
+                "element",
+                ArrowType::Struct(elem_fields),
+                true,
+            )),
+            arrow_buffer::OffsetBuffer::new(vec![0, 2].into()),
+            Arc::new(elem_struct),
+            None,
+        ))
+    }
+
+    #[test]
+    fn test_list_element_struct_decodes_by_declared_field() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        // File: list<struct<b utf8, a int32, extra int32>> — reordered and a superset of the
+        // declared element struct.
+        let file_array = build_list_of_struct(
+            vec![
+                ArrowField::new("b", ArrowType::Utf8, true),
+                ArrowField::new("a", ArrowType::Int32, true),
+                ArrowField::new("extra", ArrowType::Int32, true),
+            ]
+            .into(),
+            vec![
+                Arc::new(arrow_array::StringArray::from(vec![Some("x"), Some("y")])),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(1), Some(2)])),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(9), Some(8)])),
+            ],
+        );
+        // Declared: list<struct<a int, b varchar>>.
+        let declared_elem: arrow_schema::Fields = vec![
+            ArrowField::new("a", ArrowType::Int32, true),
+            ArrowField::new("b", ArrowType::Utf8, true),
+        ]
+        .into();
+        let declared_field = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(ArrowField::new(
+                "element",
+                ArrowType::Struct(declared_elem),
+                true,
+            ))),
+            true,
+        );
+
+        let converted = Dummy.from_array(&declared_field, &file_array).unwrap();
+        assert_eq!(
+            converted.data_type(),
+            RwType::list(RwType::Struct(StructType::new(vec![
+                ("a", RwType::Int32),
+                ("b", RwType::Varchar),
+            ])))
+        );
+        let ArrayImpl::List(list) = &converted else {
+            panic!("expected list array");
+        };
+        let ArrayImpl::Struct(elems) = list.values() else {
+            panic!("expected struct elements");
+        };
+        assert_eq!(
+            elems.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Utf8("x".into())),
+            ])
+        );
+        assert_eq!(
+            elems.value_at(1).unwrap().to_owned_scalar(),
+            StructValue::new(vec![
+                Some(ScalarImpl::Int32(2)),
+                Some(ScalarImpl::Utf8("y".into())),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_list_element_struct_missing_child_null_fills() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        // File element struct lacks the declared child `b`.
+        let file_array = build_list_of_struct(
+            vec![ArrowField::new("a", ArrowType::Int32, true)].into(),
+            vec![Arc::new(arrow_array::Int32Array::from(vec![
+                Some(1),
+                Some(2),
+            ]))],
+        );
+        let declared_field = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(ArrowField::new(
+                "element",
+                ArrowType::Struct(
+                    vec![
+                        ArrowField::new("a", ArrowType::Int32, true),
+                        ArrowField::new("b", ArrowType::Utf8, true),
+                    ]
+                    .into(),
+                ),
+                true,
+            ))),
+            true,
+        );
+
+        let converted = Dummy.from_array(&declared_field, &file_array).unwrap();
+        let ArrayImpl::List(list) = &converted else {
+            panic!("expected list array");
+        };
+        let ArrayImpl::Struct(elems) = list.values() else {
+            panic!("expected struct elements");
+        };
+        assert_eq!(
+            elems.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![Some(ScalarImpl::Int32(1)), None])
+        );
+    }
+
+    #[test]
+    fn test_extension_decode_follows_declared_field_under_list() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        let json_meta: std::collections::HashMap<String, String> = [(
+            "ARROW:extension:name".to_owned(),
+            "arrowudf.json".to_owned(),
+        )]
+        .into();
+        let strings: arrow_array::ArrayRef = Arc::new(arrow_array::StringArray::from(vec![
+            Some(r#"{"k":1}"#),
+            Some("2"),
+        ]));
+        let make_list = |elem_field: ArrowField, values: arrow_array::ArrayRef| {
+            Arc::new(arrow_array::ListArray::new(
+                Arc::new(elem_field),
+                arrow_buffer::OffsetBuffer::new(vec![0, 2].into()),
+                values,
+                None,
+            )) as arrow_array::ArrayRef
+        };
+        let plain_elem = ArrowField::new("element", ArrowType::Utf8, true);
+        let json_elem = plain_elem.clone().with_metadata(json_meta);
+
+        // A file-side extension is ignored when the declared element is plain varchar.
+        let file_json = make_list(json_elem.clone(), strings.clone());
+        let declared_plain =
+            ArrowField::new("l", ArrowType::List(Arc::new(plain_elem.clone())), true);
+        let converted = Dummy.from_array(&declared_plain, &file_json).unwrap();
+        assert_eq!(converted.data_type(), RwType::list(RwType::Varchar));
+
+        // A declared-side extension drives the decode even when the file element is plain.
+        let file_plain = make_list(plain_elem, strings);
+        let declared_json = ArrowField::new("l", ArrowType::List(Arc::new(json_elem)), true);
+        let converted = Dummy.from_array(&declared_json, &file_plain).unwrap();
+        assert_eq!(converted.data_type(), RwType::list(RwType::Jsonb));
+    }
+
+    #[test]
+    fn test_map_value_struct_decodes_by_declared_field() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        // File: map<utf8, struct<y int32, x int32>>; declared value struct is the subset
+        // struct<x int32>.
+        let value_fields: arrow_schema::Fields = vec![
+            ArrowField::new("y", ArrowType::Int32, true),
+            ArrowField::new("x", ArrowType::Int32, true),
+        ]
+        .into();
+        let entries_fields: arrow_schema::Fields = vec![
+            ArrowField::new("key", ArrowType::Utf8, false),
+            ArrowField::new("value", ArrowType::Struct(value_fields.clone()), true),
+        ]
+        .into();
+        let value_struct = arrow_array::StructArray::new(
+            value_fields,
+            vec![
+                Arc::new(arrow_array::Int32Array::from(vec![Some(7)])),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(42)])),
+            ],
+            None,
+        );
+        let entries = arrow_array::StructArray::new(
+            entries_fields.clone(),
+            vec![
+                Arc::new(arrow_array::StringArray::from(vec![Some("k")])),
+                Arc::new(value_struct),
+            ],
+            None,
+        );
+        let file_map: arrow_array::ArrayRef = Arc::new(arrow_array::MapArray::new(
+            Arc::new(ArrowField::new(
+                "entries",
+                ArrowType::Struct(entries_fields),
+                false,
+            )),
+            arrow_buffer::OffsetBuffer::new(vec![0, 1].into()),
+            entries,
+            None,
+            false,
+        ));
+
+        let declared_value =
+            ArrowType::Struct(vec![ArrowField::new("x", ArrowType::Int32, true)].into());
+        let declared_field = ArrowField::new(
+            "m",
+            ArrowType::Map(
+                Arc::new(ArrowField::new(
+                    "entries",
+                    ArrowType::Struct(
+                        vec![
+                            ArrowField::new("key", ArrowType::Utf8, false),
+                            ArrowField::new("value", declared_value, true),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                )),
+                false,
+            ),
+            true,
+        );
+
+        let converted = Dummy.from_array(&declared_field, &file_map).unwrap();
+        assert_eq!(
+            converted.data_type(),
+            RwType::Map(MapType::from_kv(
+                RwType::Varchar,
+                RwType::Struct(StructType::new(vec![("x", RwType::Int32)])),
+            ))
+        );
+        let ArrayImpl::Map(map) = &converted else {
+            panic!("expected map array");
+        };
+        let ArrayImpl::Struct(entries) = map.inner.values() else {
+            panic!("expected struct entries");
+        };
+        assert_eq!(
+            entries.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![
+                Some(ScalarImpl::Utf8("k".into())),
+                Some(ScalarImpl::Struct(StructValue::new(vec![Some(
+                    ScalarImpl::Int32(42)
+                )]))),
             ])
         );
     }
