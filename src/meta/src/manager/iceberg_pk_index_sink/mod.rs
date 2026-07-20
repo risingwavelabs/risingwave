@@ -20,6 +20,7 @@
 //! (which serves V1/V2 sinks via gRPC). Future responsibilities such as
 //! per-sink compaction will live alongside the per-sink commit coordinator here.
 
+mod committed_epoch;
 mod coordinator;
 mod manager;
 

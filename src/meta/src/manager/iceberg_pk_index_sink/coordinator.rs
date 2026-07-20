@@ -225,6 +225,10 @@ impl IcebergPkIndexSinkCoordinator {
         Ok(())
     }
 
+    pub fn current_snapshot_id(&self) -> Option<i64> {
+        self.table.metadata().current_snapshot_id()
+    }
+
     /// Backfills missing partition values on the delete files (partitioned tables only) from the
     /// referenced data files. Each delete file's partition is resolved from this epoch's
     /// not-yet-committed writer data files and the current committed snapshot's data files, built

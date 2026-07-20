@@ -509,7 +509,18 @@ impl GlobalBarrierWorkerContextImpl {
                     )
                 })?;
             let manager = &self.iceberg_pk_index_sink_manager;
-            futs.push(async move { (pb_sink.id, manager.register_sink(pb_sink.id, config).await) });
+            futs.push(async move {
+                (
+                    pb_sink.id,
+                    manager
+                        .register_sink(
+                            pb_sink.id,
+                            to_partial_graph_id(pb_sink.database_id, None),
+                            config,
+                        )
+                        .await,
+                )
+            });
         }
 
         while let Some((id, res)) = futs.next().await {

@@ -19,7 +19,7 @@ use anyhow::Context;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::id::{JobId, SinkId};
+use risingwave_common::id::{JobId, PartialGraphId, SinkId};
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
@@ -495,6 +495,14 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         } else {
             Err(aggregate_sink_errors("commit", errs).into())
         }
+    }
+
+    fn advance_iceberg_pk_index_sink_committed_epochs(
+        &self,
+        epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+    ) {
+        self.iceberg_pk_index_sink_manager
+            .advance_committed_epochs(epochs);
     }
 }
 
