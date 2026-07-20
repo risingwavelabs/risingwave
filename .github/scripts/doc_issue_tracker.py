@@ -107,19 +107,44 @@ def merge_tracking_body(
     marker: str,
     related_prs: list[dict[str, Any]],
 ) -> str:
-    additions: list[str] = []
-    if marker not in body:
-        additions.append(marker)
-
     missing_lines = [
         related_pr_line(pr) for pr in related_prs if pr["html_url"] not in body
     ]
-    if missing_lines:
-        additions.append("## Related merged PRs\n\n" + "\n".join(missing_lines))
+    updated_body = body
+    changed = False
+    if marker not in updated_body:
+        updated_body = updated_body.rstrip() + "\n\n" + marker
+        changed = True
 
-    if not additions:
+    if missing_lines:
+        header_match = re.search(
+            r"^## Related merged PRs\s*$", updated_body, re.MULTILINE
+        )
+        if header_match:
+            next_header = re.search(
+                r"^##\s+", updated_body[header_match.end() :], re.MULTILINE
+            )
+            insert_at = (
+                header_match.end() + next_header.start()
+                if next_header
+                else len(updated_body)
+            )
+            prefix = updated_body[:insert_at].rstrip()
+            suffix = updated_body[insert_at:].lstrip("\n")
+            updated_body = prefix + "\n" + "\n".join(missing_lines)
+            if suffix:
+                updated_body += "\n\n" + suffix
+        else:
+            updated_body = (
+                updated_body.rstrip()
+                + "\n\n## Related merged PRs\n\n"
+                + "\n".join(missing_lines)
+            )
+        changed = True
+
+    if not changed:
         return body
-    return body.rstrip() + "\n\n" + "\n\n".join(additions) + "\n"
+    return updated_body.rstrip() + "\n"
 
 
 class GitHubApi:
@@ -157,6 +182,39 @@ def find_tracking_issues(
     marker: str,
     canonical_url: str,
 ) -> list[dict[str, Any]]:
+    needles = (marker, f"Source PR URL: {canonical_url}")
+    try:
+        matches_by_number: dict[int, dict[str, Any]] = {}
+        for needle in needles:
+            page = 1
+            while True:
+                query = urllib.parse.urlencode(
+                    {
+                        "q": f'"{needle}" in:body repo:{docs_repo} is:issue',
+                        "per_page": 100,
+                        "page": page,
+                        "sort": "created",
+                        "order": "asc",
+                    }
+                )
+                result = api.request("GET", f"/search/issues?{query}")
+                if result.get("incomplete_results", False):
+                    raise RuntimeError("issue search returned incomplete results")
+                issues = result.get("items", [])
+                for issue in issues:
+                    body = issue.get("body") or ""
+                    if marker in body or f"Source PR URL: {canonical_url}" in body:
+                        matches_by_number[issue["number"]] = issue
+                if len(issues) < 100:
+                    break
+                page += 1
+        return sorted(matches_by_number.values(), key=lambda issue: issue["number"])
+    except RuntimeError as error:
+        print(
+            f"warning: issue search failed ({error}); falling back to repository scan",
+            file=sys.stderr,
+        )
+
     matches: list[dict[str, Any]] = []
     page = 1
     while True:

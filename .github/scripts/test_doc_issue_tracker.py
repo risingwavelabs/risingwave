@@ -5,6 +5,7 @@ import unittest
 from doc_issue_tracker import (
     analyze_event,
     canonical_pr_number,
+    find_tracking_issues,
     merge_tracking_body,
     tracking_marker,
 )
@@ -125,6 +126,70 @@ class TrackingBodyTest(unittest.TestCase):
         body = merge_tracking_body(f"Initial body\n\n{marker}\n", marker, [backport])
         self.assertIn(backport["html_url"], body)
         self.assertIn("`release-3.0`", body)
+
+    def test_backports_reuse_existing_related_prs_section(self):
+        marker = tracking_marker("risingwavelabs/risingwave", 100)
+        first_backport = {
+            "number": 200,
+            "html_url": "https://github.com/risingwavelabs/risingwave/pull/200",
+            "base": {"ref": "release-3.0"},
+            "merged_at": "2026-07-20T01:00:00Z",
+        }
+        second_backport = {
+            "number": 201,
+            "html_url": "https://github.com/risingwavelabs/risingwave/pull/201",
+            "base": {"ref": "release-2.8"},
+            "merged_at": "2026-07-20T02:00:00Z",
+        }
+
+        body = merge_tracking_body("Initial body\n", marker, [first_backport])
+        updated = merge_tracking_body(body, marker, [second_backport])
+
+        self.assertEqual(updated.count("## Related merged PRs"), 1)
+        self.assertIn(first_backport["html_url"], updated)
+        self.assertIn(second_backport["html_url"], updated)
+
+
+class FindTrackingIssuesTest(unittest.TestCase):
+    def test_search_results_are_filtered_and_deduplicated(self):
+        marker = tracking_marker("risingwavelabs/risingwave", 100)
+        canonical_url = "https://github.com/risingwavelabs/risingwave/pull/100"
+        matching_issue = {"number": 1, "body": marker}
+        unrelated_issue = {"number": 2, "body": "unrelated"}
+
+        class SearchApi:
+            def request(self, method, path):
+                self.assert_request(method, path)
+                return {"items": [matching_issue, unrelated_issue]}
+
+            def assert_request(self, method, path):
+                if method != "GET" or not path.startswith("/search/issues?"):
+                    raise AssertionError((method, path))
+
+        matches = find_tracking_issues(
+            SearchApi(), "risingwavelabs/risingwave-docs", marker, canonical_url
+        )
+
+        self.assertEqual(matches, [matching_issue])
+
+    def test_repository_scan_is_used_when_search_fails(self):
+        marker = tracking_marker("risingwavelabs/risingwave", 100)
+        canonical_url = "https://github.com/risingwavelabs/risingwave/pull/100"
+        matching_issue = {"number": 1, "body": marker}
+
+        class FallbackApi:
+            def request(self, method, path):
+                if path.startswith("/search/issues?"):
+                    raise RuntimeError("search unavailable")
+                if path.startswith("/repos/risingwavelabs/risingwave-docs/issues?"):
+                    return [matching_issue]
+                raise AssertionError((method, path))
+
+        matches = find_tracking_issues(
+            FallbackApi(), "risingwavelabs/risingwave-docs", marker, canonical_url
+        )
+
+        self.assertEqual(matches, [matching_issue])
 
 
 if __name__ == "__main__":
