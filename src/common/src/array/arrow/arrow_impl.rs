@@ -1736,8 +1736,8 @@ pub fn is_parquet_schema_match_source_schema(
                 return false;
             }
             // Below a list/map boundary the decode follows the file-side layout, so an
-            // extension anywhere under an undeclared extra child would decode into a type the
-            // declared schema cannot account for; reject the match so the column NULL-fills.
+            // extension under an undeclared extra child would decode into a type diverging
+            // from the catalog; reject so the column NULL-fills.
             if strict_ext
                 && arrow_fields.iter().any(|f| {
                     rw_struct.iter().all(|(name, _)| name != f.name())
@@ -1974,9 +1974,8 @@ mod tests {
 
     #[test]
     fn test_undeclared_extension_extra_under_list_rejects_match() {
-        // `list<struct<a, v: variant-ext>>` vs declared `list<struct<a>>`: below the list
-        // boundary the extra child would be decoded by the file-side layout into a struct
-        // diverging from the catalog, so the match must be rejected (column NULL-fills).
+        // `list<struct<a, v: variant-ext>>` vs declared `list<struct<a>>`: the undeclared
+        // extension-tagged extra must reject the match.
         let make_list = |extra: ArrowField| {
             ArrowField::new(
                 "l",
@@ -2017,8 +2016,7 @@ mod tests {
 
     #[test]
     fn test_variant_ext_declared_as_scalar_rejects_match() {
-        // The variant extension binds exclusively to `Variant`; a scalar declared type must
-        // not match even outside a list/map boundary.
+        // The variant extension binds exclusively to `Variant`, even outside list/map boundaries.
         let v = variant_field("v");
         assert!(!is_parquet_field_match_source_schema(&v, &RwType::Varchar));
         assert!(!is_parquet_field_match_source_schema(&v, &RwType::Bytea));

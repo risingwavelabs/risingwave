@@ -567,9 +567,8 @@ fn fallback_rw_expr_builder(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
-    // A variant result would cross the RW -> Arrow boundary at runtime, which is unsupported
-    // (`to_arrow_field` succeeds schema-only); refuse so plan conversion fails and the query
-    // falls back to the RisingWave engine at plan time.
+    // A variant result would cross the RW -> Arrow boundary at runtime, which is unsupported;
+    // refuse so the query falls back to the RisingWave engine at plan time.
     if func_call.return_type().contains_variant() {
         return None;
     }

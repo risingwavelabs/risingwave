@@ -221,9 +221,8 @@ select count(distinct v_object) from iceberg_variant_source;
 ----
 2
 
-# A variant-typed subexpression over a variant-free plan schema: no node schema contains
-# variant, so the plan passes the DataFusion schema gate, but the RwScalarFunction wrapper
-# refuses the variant-returning cast and the query falls back at plan time.
+# A variant-typed subexpression over a variant-free plan schema passes the DataFusion
+# schema gate but must still fall back at plan time (variant-returning fallback expr).
 query I
 select id from iceberg_variant_source where (id::varchar::variant) is not null and id = 1;
 ----
@@ -265,6 +264,9 @@ variant t t t t
 # through the struct projection path, which must decode nested variants (incl. in map)
 # by the declared type.
 statement ok
+drop table if exists parquet_variant_projected;
+
+statement ok
 create table parquet_variant_projected (
     id int,
     nested struct<variant_map map(varchar, variant), top_variant variant>
@@ -295,6 +297,9 @@ drop table parquet_variant_projected;
 # type mismatch: the `arrow.parquet.variant` extension binds exclusively to `variant`, so the
 # column NULL-fills instead of decoding to a diverging struct. Other columns decode normally.
 statement ok
+drop table if exists parquet_variant_as_struct;
+
+statement ok
 create table parquet_variant_as_struct (
     id int,
     v_object struct<metadata bytea, value bytea>
@@ -320,9 +325,8 @@ from parquet_variant_as_struct;
 statement ok
 drop table parquet_variant_as_struct;
 
-# Declared `struct<a int>[]` while the file element struct also carries an extension-tagged
-# variant child: below the list boundary the decode cannot drop the extra child, so the
-# schema match rejects the column and it NULL-fills instead of diverging from the catalog.
+# Declared `struct<a int>[]` while the file element struct also carries a variant child:
+# the undeclared extension-tagged extra rejects the match and the column NULL-fills.
 statement ok
 drop table if exists parquet_variant_evolved;
 
