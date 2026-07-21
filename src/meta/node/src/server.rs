@@ -465,6 +465,15 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    // Register before the barrier manager starts recovery. Dirty creating-job cleanup emits local
+    // serving mapping deletes, which must not be dropped during bootstrap.
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping.clone(),
+        env.session_params_manager_impl_ref(),
+    ));
+
     let iceberg_pk_index_sink_manager =
         IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
     tracing::info!("IcebergPkIndexSinkManager started");
@@ -659,17 +668,21 @@ pub async fn start_service_as_election_leader(
         backup_manager.clone(),
         &env.opts,
         {
-            let barrier_manager = barrier_manager.clone();
+            let catalog_controller = metadata_manager.catalog_controller.clone();
             Box::new(move || {
-                let barrier_manager = barrier_manager.clone();
+                let catalog_controller = catalog_controller.clone();
                 Box::pin(async move {
-                    barrier_manager.may_have_creating_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having creating jobs. pause vacuum time travel");
-                        true
-                    })
+                    catalog_controller
+                        .get_pinned_snapshot_epochs()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect pinned snapshot epochs. pause vacuum time travel");
+                            None
+                        })
                 })
             })
-        }
+        },
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),
@@ -699,13 +712,6 @@ pub async fn start_service_as_election_leader(
     sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
         iceberg_compaction_mgr.clone(),
         iceberg_compactor_event_rx,
-    ));
-
-    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
-        env.notification_manager_ref(),
-        metadata_manager.clone(),
-        serving_vnode_mapping,
-        env.session_params_manager_impl_ref(),
     ));
 
     {
