@@ -24,7 +24,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_mut, visit_stream_node_stream_scan,
+};
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
@@ -35,9 +37,9 @@ use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
-use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
+use risingwave_pb::stream_plan::{PbUpstreamSinkInfo, StreamScanType};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
@@ -433,9 +435,36 @@ impl InflightStreamingJobInfo {
         StreamJobFragments::tracking_progress_actor_ids_impl(
             fragment_infos
                 .values()
+                .filter(|fragment| {
+                    let tracks_other_progress = fragment.fragment_type_mask.contains_any([
+                        FragmentTypeFlag::Values,
+                        FragmentTypeFlag::SourceScan,
+                        FragmentTypeFlag::LocalityProvider,
+                    ]);
+                    tracks_other_progress
+                        || !fragment
+                            .fragment_type_mask
+                            .contains(FragmentTypeFlag::StreamScan)
+                        || stream_scan_requires_progress(&fragment.nodes)
+                })
                 .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
         )
     }
+}
+
+fn stream_scan_requires_progress(node: &risingwave_pb::stream_plan::StreamNode) -> bool {
+    let mut saw_stream_scan = false;
+    let mut requires_progress = false;
+    visit_stream_node_stream_scan(node, |scan| {
+        saw_stream_scan = true;
+        if scan.stream_scan_type() != StreamScanType::UpstreamOnly {
+            requires_progress = true;
+        }
+    });
+
+    // A fragment with the `StreamScan` flag should contain a scan node. Conservatively retain it
+    // in the tracker if malformed legacy metadata does not.
+    !saw_stream_scan || requires_progress
 }
 
 impl<'a> IntoIterator for &'a InflightStreamingJobInfo {

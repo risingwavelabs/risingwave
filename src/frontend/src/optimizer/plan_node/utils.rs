@@ -38,6 +38,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
@@ -467,15 +468,30 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
-/// Check that all leaf nodes support background DDL.
-/// Some leaf nodes like `StreamValues` do not support recovery, and they cannot
-/// use background DDL.
+/// Check that all leaf nodes support recoverable background DDL.
 pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
-        plan.as_stream_source_scan().is_some()
+        if plan.as_stream_source_scan().is_some()
             || plan.as_stream_now().is_some()
             || plan.as_stream_source().is_some()
-            || plan.as_stream_table_scan().is_some()
+        {
+            true
+        } else if let Some(scan) = plan.as_stream_table_scan() {
+            #[expect(deprecated)]
+            match scan.stream_scan_type() {
+                StreamScanType::Backfill
+                | StreamScanType::ArrangementBackfill
+                | StreamScanType::CrossDbSnapshotBackfill
+                | StreamScanType::SnapshotBackfill
+                | StreamScanType::UpstreamOnly => true,
+                StreamScanType::Unspecified => unreachable!(),
+                // These legacy scan types do not persist snapshot progress.
+                StreamScanType::Chain | StreamScanType::Rearrange => false,
+            }
+        } else {
+            // Other leaf nodes, such as `StreamValues`, do not support recovery.
+            false
+        }
     } else {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_can_use_background_ddl)
