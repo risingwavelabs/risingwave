@@ -21,6 +21,7 @@ pub mod split;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
+use anyhow::Context;
 pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_common::id::{ActorId, SourceId};
@@ -33,6 +34,7 @@ use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::connector_common::IpVersion;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
@@ -156,6 +158,16 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         properties: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
+        if matches!(
+            T::source_type(),
+            CdcSourceType::Postgres | CdcSourceType::Citus
+        ) && let Some(ip_version) = properties.get("ip.version").filter(|v| !v.is_empty())
+        {
+            ip_version
+                .parse::<IpVersion>()
+                .with_context(|| format!("invalid postgres ip.version `{}`", ip_version))?;
+        }
+
         let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");

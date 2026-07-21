@@ -172,15 +172,23 @@ pub fn pg_connection_config_from_properties(
             .and_then(|v| v.parse::<SslMode>().ok())
             .unwrap_or_default(),
         ssl_root_cert: props.get("ssl.root.cert").cloned(),
-        ip_version: postgres_ip_version_from_properties(props),
+        ip_version: postgres_ip_version_from_properties(props)?,
     })
 }
 
-fn postgres_ip_version_from_properties(props: &BTreeMap<String, String>) -> IpVersion {
+fn postgres_ip_version_from_properties(
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<IpVersion> {
     props
         .get("ip.version")
-        .and_then(|v| v.parse::<IpVersion>().ok())
-        .unwrap_or_default()
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            v.parse::<IpVersion>()
+                .with_context(|| format!("invalid postgres ip.version `{}`", v))
+                .map_err(Into::into)
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 pub async fn create_pg_client_from_properties(
@@ -841,6 +849,7 @@ mod tests {
         assert_eq!("4".parse::<IpVersion>().unwrap(), IpVersion::Ipv4);
         assert_eq!("ipv6".parse::<IpVersion>().unwrap(), IpVersion::Ipv6);
         assert_eq!("6".parse::<IpVersion>().unwrap(), IpVersion::Ipv6);
+        assert!("invalid".parse::<IpVersion>().is_err());
     }
 
     #[test]
