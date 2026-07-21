@@ -3698,8 +3698,7 @@ async fn test_schedule_group_split_with_normalize_disabled() {
     assert_eq!(ranges, vec![(64, 80), (65, 81)]);
 }
 
-#[tokio::test]
-async fn test_time_travel_vacuum_pins_snapshot_epoch() {
+mod time_travel_vacuum_test_utils {
     use risingwave_hummock_sdk::level::Levels;
     use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
     use risingwave_meta_model::{
@@ -3707,9 +3706,11 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         hummock_time_travel_version,
     };
     use sea_orm::ActiveValue::Set;
-    use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder, QuerySelect};
+    use sea_orm::EntityTrait;
 
-    async fn insert_version(env: &MetaSrvEnv, id: u64, sst: Option<SstableInfo>) {
+    use super::*;
+
+    pub(super) async fn insert_version(env: &MetaSrvEnv, id: u64, sst: Option<SstableInfo>) {
         let mut version = HummockVersion::default();
         version.id = id.into();
         if let Some(sst) = sst {
@@ -3733,7 +3734,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         .unwrap();
     }
 
-    async fn insert_sstable_info(env: &MetaSrvEnv, sst: &SstableInfo) {
+    pub(super) async fn insert_sstable_info(env: &MetaSrvEnv, sst: &SstableInfo) {
         hummock_sstable_info::Entity::insert(hummock_sstable_info::ActiveModel {
             sst_id: Set(sst.sst_id),
             object_id: Set(sst.object_id),
@@ -3744,7 +3745,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         .unwrap();
     }
 
-    async fn insert_delta(env: &MetaSrvEnv, id: u64, prev_id: u64) {
+    pub(super) async fn insert_delta(env: &MetaSrvEnv, id: u64, prev_id: u64) {
         let mut delta = risingwave_hummock_sdk::version::HummockVersionDelta::default();
         delta.id = id.into();
         delta.prev_id = prev_id.into();
@@ -3757,7 +3758,12 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         .unwrap();
     }
 
-    async fn insert_epoch_mapping(env: &MetaSrvEnv, table_id: TableId, epoch: u64, version: u64) {
+    pub(super) async fn insert_epoch_mapping(
+        env: &MetaSrvEnv,
+        table_id: TableId,
+        epoch: u64,
+        version: u64,
+    ) {
         hummock_epoch_to_version::Entity::insert(hummock_epoch_to_version::ActiveModel {
             epoch: Set(epoch.try_into().unwrap()),
             table_id: Set(i64::from(table_id.as_raw_id())),
@@ -3767,6 +3773,17 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         .await
         .unwrap();
     }
+}
+
+#[tokio::test]
+async fn test_time_travel_vacuum_pins_snapshot_epoch() {
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+        hummock_time_travel_version,
+    };
+    use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder, QuerySelect};
+
+    use self::time_travel_vacuum_test_utils::*;
 
     let mut opts = MetaOpts::test(false);
     opts.time_travel_vacuum_max_version_count = Some(1);
@@ -3917,5 +3934,87 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             .map(|object_id| object_id.as_raw().as_raw_id())
             .collect_vec(),
         vec![10]
+    );
+}
+
+/// A snapshot backfill that has just started pins an epoch still inside the retention window. Its
+/// epoch row is above the epoch watermark and thus never deleted, but the version that row resolves
+/// to is vacuumed on an independent threshold and must be pinned too.
+#[tokio::test]
+async fn test_time_travel_vacuum_pins_snapshot_epoch_above_watermark() {
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_version,
+    };
+    use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder, QuerySelect};
+
+    use self::time_travel_vacuum_test_utils::*;
+
+    let (env, hummock_manager, _, _) =
+        setup_compute_env_with_meta_opts(80, MetaOpts::test(false)).await;
+    let table_id = TableId::new(1);
+    let pinned_sst = gen_sstable_info(10, vec![table_id.as_raw_id()], test_epoch(1));
+    insert_sstable_info(&env, &pinned_sst).await;
+    insert_version(&env, 1, Some(pinned_sst)).await;
+    insert_delta(&env, 2, 1).await;
+    insert_version(&env, 3, None).await;
+    insert_version(&env, 4, None).await;
+    // Drives the version watermark to 4, so versions below it are vacuumed.
+    insert_epoch_mapping(&env, table_id, 100, 4).await;
+    // The backfill snapshot: above the epoch watermark, but resolving to version 2.
+    insert_epoch_mapping(&env, table_id, 300, 2).await;
+
+    hummock_manager
+        .truncate_time_travel_metadata(200, HashMap::from([(table_id, HashSet::from([300]))]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(300, table_id)
+            .await
+            .unwrap()
+            .id
+            .as_raw_id(),
+        2
+    );
+    // Pinning the version must not hold back the rest of the vacuum: the epoch row below the
+    // watermark, and the version that is neither pinned nor the latest valid one, are still gone.
+    let epoch_rows = hummock_epoch_to_version::Entity::find()
+        .order_by_asc(hummock_epoch_to_version::Column::Epoch)
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        epoch_rows
+            .iter()
+            .map(|row| u64::try_from(row.epoch).unwrap())
+            .collect_vec(),
+        vec![300]
+    );
+    let version_ids: Vec<risingwave_meta_model::HummockVersionId> =
+        hummock_time_travel_version::Entity::find()
+            .select_only()
+            .column(hummock_time_travel_version::Column::VersionId)
+            .order_by_asc(hummock_time_travel_version::Column::VersionId)
+            .into_tuple()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        version_ids.iter().map(|id| id.as_raw_id()).collect_vec(),
+        vec![1, 4]
+    );
+    assert_eq!(
+        hummock_sstable_info::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        hummock_manager
+            .gc_manager
+            .try_take_may_delete_object_ids(1)
+            .is_none()
     );
 }

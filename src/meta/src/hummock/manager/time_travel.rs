@@ -83,9 +83,6 @@ impl HummockManager {
         let mut pinned_snapshot_version_ids = HashSet::new();
         for (table_id, pinned_epochs) in pinned_snapshot_epochs {
             for pinned_epoch in pinned_epochs {
-                if pinned_epoch >= epoch_watermark {
-                    continue;
-                }
                 let pinned_epoch_model =
                     risingwave_meta_model::Epoch::try_from(pinned_epoch).unwrap();
                 let epoch_to_version = hummock_epoch_to_version::Entity::find_by_id((
@@ -102,7 +99,12 @@ impl HummockManager {
                     );
                     continue;
                 };
-                pinned_epoch_rows.insert((epoch_to_version.epoch, epoch_to_version.table_id));
+                // Only rows below the epoch watermark are subject to deletion.
+                if pinned_epoch < epoch_watermark {
+                    pinned_epoch_rows.insert((epoch_to_version.epoch, epoch_to_version.table_id));
+                }
+                // The version is vacuumed by a threshold independent of the epoch watermark, so it
+                // must be pinned regardless of where the epoch sits.
                 pinned_snapshot_version_ids.insert(epoch_to_version.version_id);
             }
         }
