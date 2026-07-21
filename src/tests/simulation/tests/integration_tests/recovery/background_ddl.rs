@@ -439,6 +439,52 @@ async fn test_background_join_mv_recovery() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_background_temporal_join_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session
+        .run("CREATE TABLE stream (id int primary key, value int);")
+        .await?;
+    session
+        .run("CREATE TABLE version (id int primary key, value int);")
+        .await?;
+    session
+        .run("INSERT INTO stream SELECT i, i FROM generate_series(1, 20) AS i;")
+        .await?;
+    session
+        .run("INSERT INTO version SELECT i, i FROM generate_series(1, 20) AS i;")
+        .await?;
+    session.flush().await?;
+
+    session.run("SET streaming_parallelism = 1;").await?;
+    session.run(SET_RATE_LIMIT_1).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run(
+            "CREATE MATERIALIZED VIEW mv AS \
+             SELECT stream.id, version.value \
+             FROM stream JOIN version FOR SYSTEM_TIME AS OF PROCTIME() \
+             ON stream.id = version.id;",
+        )
+        .await?;
+
+    wait_jobs_running(&mut session).await?;
+    sleep(Duration::from_secs(2)).await;
+    kill_cn_meta_and_wait_full_recovery(&mut cluster).await;
+
+    tokio::time::timeout(Duration::from_secs(60), session.run(WAIT)).await??;
+    assert_eq!(session.run("SELECT count(*) FROM mv;").await?, "20");
+
+    session.run("DROP MATERIALIZED VIEW mv;").await?;
+    session.run("DROP TABLE stream;").await?;
+    session.run("DROP TABLE version;").await?;
+
+    Ok(())
+}
+
 /// Test cancel for background ddl, foreground ddl.
 #[tokio::test]
 async fn test_ddl_cancel() -> Result<()> {
