@@ -36,6 +36,9 @@ INSERT INTO test SELECT generate_series(1, 100), true, 1, 1, 1, 1.0, 1.0, 1.0, '
 system ok
 python3 e2e_test/commands/pg_tcp_proxy.py start --target-host "$PGHOST" --target-port "$PGPORT" --listen-host 127.0.0.1 --listen-port 28432 --pid-file /tmp/rw_pg_tcp_proxy_28432.pid --log-file /tmp/rw_pg_tcp_proxy_28432.log
 
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py start --target-host "$PGHOST" --target-port "$PGPORT" --listen-host ::1 --listen-port 28433 --pid-file /tmp/rw_pg_tcp_proxy_28433.pid --log-file /tmp/rw_pg_tcp_proxy_28433.log
+
 statement ok
 create source postgres_cdc_source with (
   ${RISEDEV_POSTGRES_WITH_OPTIONS_COMMON},
@@ -96,7 +99,7 @@ select * from postgres_query('postgres_cdc_source_ipv4', 'select count(*) from t
 5
 
 statement error .*[Cc]onnection refused.*
-create source postgres_cdc_source_ipv6 with (
+create source postgres_cdc_source_ipv6_on_ipv4 with (
   connector = 'postgres-cdc',
   hostname = 'localhost',
   port = '28432',
@@ -107,6 +110,36 @@ create source postgres_cdc_source_ipv6 with (
 );
 
 statement ok
+create source postgres_cdc_source_ipv6 with (
+  connector = 'postgres-cdc',
+  hostname = 'localhost',
+  port = '28433',
+  username = '$PGUSER',
+  password = '$PGPASSWORD',
+  database.name = 'source_test',
+  ip.version = 'ipv6'
+);
+
+query I retry 4 backoff 1s
+select * from postgres_query('postgres_cdc_source_ipv6', 'select count(*) from test where id > 95;');
+----
+5
+
+statement error .*[Cc]onnection refused.*
+create source postgres_cdc_source_ipv4_on_ipv6 with (
+  connector = 'postgres-cdc',
+  hostname = 'localhost',
+  port = '28433',
+  username = '$PGUSER',
+  password = '$PGPASSWORD',
+  database.name = 'source_test',
+  ip.version = 'ipv4'
+);
+
+statement ok
+drop source postgres_cdc_source_ipv6;
+
+statement ok
 drop source postgres_cdc_source_ipv4;
 
 statement ok
@@ -114,6 +147,9 @@ drop source postgres_cdc_source;
 
 system ok
 python3 e2e_test/commands/pg_tcp_proxy.py stop --pid-file /tmp/rw_pg_tcp_proxy_28432.pid
+
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py stop --pid-file /tmp/rw_pg_tcp_proxy_28433.pid
 
 system ok retry 10 backoff 1s
 PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE database = 'source_test' AND active_pid IS NOT NULL" -c "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE database = 'source_test'" -c "DROP DATABASE IF EXISTS source_test WITH (FORCE)"
