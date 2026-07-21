@@ -2107,6 +2107,16 @@ mod tests {
         );
     }
 
+    /// Decodes a struct array against a declared struct with the given fields.
+    fn decode_struct(
+        declared_fields: Vec<arrow_schema::Field>,
+        actual: arrow_array::StructArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        let declared = ArrowField::new("s", ArrowType::Struct(declared_fields.into()), true);
+        let array: arrow_array::ArrayRef = Arc::new(actual);
+        Dummy.from_array(&declared, &array)
+    }
+
     #[test]
     fn test_struct_name_mismatch_same_arity_decodes_positionally() {
         // An external UDF may label struct children differently from the declared return
@@ -2116,27 +2126,23 @@ mod tests {
             ArrowField::new("count", ArrowType::Utf8, true),
         ]
         .into();
-        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+        let array = arrow_array::StructArray::new(
             actual_fields,
             vec![
                 Arc::new(arrow_array::Int32Array::from(vec![Some(42)])),
                 Arc::new(arrow_array::StringArray::from(vec![Some("x")])),
             ],
             None,
-        ));
-        let declared_field = ArrowField::new(
-            "s",
-            ArrowType::Struct(
-                vec![
-                    ArrowField::new("sum", ArrowType::Int32, true),
-                    ArrowField::new("cnt", ArrowType::Utf8, true),
-                ]
-                .into(),
-            ),
-            true,
         );
 
-        let converted = Dummy.from_array(&declared_field, &array).unwrap();
+        let converted = decode_struct(
+            vec![
+                ArrowField::new("sum", ArrowType::Int32, true),
+                ArrowField::new("cnt", ArrowType::Utf8, true),
+            ],
+            array,
+        )
+        .unwrap();
         assert_eq!(
             converted.data_type(),
             RwType::Struct(StructType::new(vec![
@@ -2160,24 +2166,20 @@ mod tests {
     fn test_struct_unalignable_fields_error() {
         // A declared name is missing and the arity differs: neither by-name nor positional
         // alignment applies.
-        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+        let array = arrow_array::StructArray::new(
             vec![ArrowField::new("a", ArrowType::Int32, true)].into(),
             vec![Arc::new(arrow_array::Int32Array::from(vec![Some(1)]))],
             None,
-        ));
-        let declared_field = ArrowField::new(
-            "s",
-            ArrowType::Struct(
-                vec![
-                    ArrowField::new("a", ArrowType::Int32, true),
-                    ArrowField::new("b", ArrowType::Utf8, true),
-                ]
-                .into(),
-            ),
-            true,
         );
 
-        let err = Dummy.from_array(&declared_field, &array).unwrap_err();
+        let err = decode_struct(
+            vec![
+                ArrowField::new("a", ArrowType::Int32, true),
+                ArrowField::new("b", ArrowType::Utf8, true),
+            ],
+            array,
+        )
+        .unwrap_err();
         assert!(
             err.to_string()
                 .contains("unable to align struct fields: expected [a, b], actual [a]"),
@@ -2189,18 +2191,14 @@ mod tests {
     fn test_struct_child_type_divergence_stamped_honestly() {
         // Same child name, different type: the result must report the decoded child type,
         // not the expected one, so callers' boundary checks can see the divergence.
-        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+        let array = arrow_array::StructArray::new(
             vec![ArrowField::new("a", ArrowType::Utf8, true)].into(),
             vec![Arc::new(arrow_array::StringArray::from(vec![Some("oops")]))],
             None,
-        ));
-        let declared_field = ArrowField::new(
-            "s",
-            ArrowType::Struct(vec![ArrowField::new("a", ArrowType::Int64, true)].into()),
-            true,
         );
 
-        let converted = Dummy.from_array(&declared_field, &array).unwrap();
+        let converted =
+            decode_struct(vec![ArrowField::new("a", ArrowType::Int64, true)], array).unwrap();
         assert_eq!(
             converted.data_type(),
             RwType::Struct(StructType::new(vec![("a", RwType::Varchar)]))
@@ -2212,21 +2210,17 @@ mod tests {
         // The parquet path renders a declared `struct<a smallint>` through the iceberg-lossy
         // to_arrow_field as struct<a: Int32>. A foreign file storing a genuine Int16 child
         // must still decode to Int16 with correct values instead of erroring.
-        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+        let array = arrow_array::StructArray::new(
             vec![ArrowField::new("a", ArrowType::Int16, true)].into(),
             vec![Arc::new(arrow_array::Int16Array::from(vec![
                 Some(7),
                 Some(-3),
             ]))],
             None,
-        ));
-        let lossy_expected = ArrowField::new(
-            "s",
-            ArrowType::Struct(vec![ArrowField::new("a", ArrowType::Int32, true)].into()),
-            true,
         );
 
-        let converted = Dummy.from_array(&lossy_expected, &array).unwrap();
+        let converted =
+            decode_struct(vec![ArrowField::new("a", ArrowType::Int32, true)], array).unwrap();
         assert_eq!(
             converted.data_type(),
             RwType::Struct(StructType::new(vec![("a", RwType::Int16)]))
@@ -2250,7 +2244,7 @@ mod tests {
             ArrowField::new("b", ArrowType::Utf8, true),
         ]
         .into();
-        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+        let array = arrow_array::StructArray::new(
             actual_fields,
             vec![
                 Arc::new(arrow_array::Int32Array::from(vec![Some(1)])),
@@ -2258,20 +2252,16 @@ mod tests {
                 Arc::new(arrow_array::StringArray::from(vec![Some("x")])),
             ],
             None,
-        ));
-        let declared_field = ArrowField::new(
-            "s",
-            ArrowType::Struct(
-                vec![
-                    ArrowField::new("a", ArrowType::Int32, true),
-                    ArrowField::new("b", ArrowType::Utf8, true),
-                ]
-                .into(),
-            ),
-            true,
         );
 
-        let converted = Dummy.from_array(&declared_field, &array).unwrap();
+        let converted = decode_struct(
+            vec![
+                ArrowField::new("a", ArrowType::Int32, true),
+                ArrowField::new("b", ArrowType::Utf8, true),
+            ],
+            array,
+        )
+        .unwrap();
         let ArrayImpl::Struct(structs) = &converted else {
             panic!("expected struct array");
         };

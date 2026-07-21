@@ -126,6 +126,11 @@ mod tests {
     use super::*;
     use crate::array::*;
 
+    /// Wraps an array's own type into a nameless field for the `from_*_array` calls.
+    fn typed_field(array: &impl arrow_array::Array) -> arrow_schema::Field {
+        arrow_schema::Field::new("", array.data_type().clone(), true)
+    }
+
     #[test]
     fn struct_array() {
         // Empty array - risingwave to arrow conversion.
@@ -143,7 +148,7 @@ mod tests {
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::new_empty_fields(0, None);
-        let test_arr_2_field = arrow_schema::Field::new("", test_arr_2.data_type().clone(), true);
+        let test_arr_2_field = typed_field(&test_arr_2);
         assert_eq!(
             UdfArrowConvert::default()
                 .from_struct_array(&test_arr_2_field, &test_arr_2)
@@ -174,8 +179,7 @@ mod tests {
             ),
         ])
         .unwrap();
-        let struct_field =
-            arrow_schema::Field::new("", test_arrow_struct_array.data_type().clone(), true);
+        let struct_field = typed_field(&test_arrow_struct_array);
         let actual_risingwave_struct_array = UdfArrowConvert::default()
             .from_struct_array(&struct_field, &test_arrow_struct_array)
             .unwrap()
@@ -201,7 +205,7 @@ mod tests {
         let arrow = UdfArrowConvert::default()
             .list_to_arrow(&data_type, &array)
             .unwrap();
-        let list_field = arrow_schema::Field::new("", arrow.data_type().clone(), true);
+        let list_field = typed_field(&arrow);
         let rw_array = UdfArrowConvert::default()
             .from_list_array(&list_field, arrow.as_any().downcast_ref().unwrap())
             .unwrap();
@@ -322,7 +326,7 @@ mod tests {
                 .join("\n"),
         );
 
-        let map_field = arrow_schema::Field::new("", arrow.data_type().clone(), true);
+        let map_field = typed_field(&arrow);
         let rw_array_new = UdfArrowConvert::default()
             .from_map_array(&map_field, arrow.as_any().downcast_ref().unwrap())
             .unwrap();
