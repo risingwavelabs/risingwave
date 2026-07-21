@@ -146,6 +146,8 @@ pub async fn compute_node_serve(
     ));
 
     let state_store_url = system_params.state_store();
+    let state_store_url = state_store_url.expose();
+
     let data_directory = system_params.data_directory();
 
     let embedded_compactor_enabled =

@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
@@ -229,12 +229,6 @@ impl CheckpointControl {
             .get(&database_id)
             .and_then(|database| database.running_state())
             .map(|database| &database.database_info)
-    }
-
-    pub(crate) fn may_have_snapshot_backfilling_jobs(&self) -> bool {
-        self.databases
-            .values()
-            .any(|database| database.may_have_snapshot_backfilling_jobs())
     }
 
     /// return Some(failed `database_id` -> `err`)
@@ -706,17 +700,6 @@ impl DatabaseCheckpointControlStatus {
         }
     }
 
-    fn may_have_snapshot_backfilling_jobs(&self) -> bool {
-        self.running_state()
-            .map(|database| {
-                database
-                    .independent_checkpoint_job_controls
-                    .values()
-                    .any(|job| job.is_snapshot_backfilling())
-            })
-            .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
-    }
-
     fn expect_running(&mut self, reason: &'static str) -> &mut DatabaseCheckpointControl {
         match self {
             DatabaseCheckpointControlStatus::Running(state) => state,
@@ -774,10 +757,13 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
     finishing_jobs_collector:
         BarrierItemCollector<JobId, (Vec<BarrierCompleteResponse>, TrackingJob), ()>,
     /// The barrier that are completing.
-    /// Some(`prev_epoch`)
-    completing_barrier: Option<u64>,
+    completing_barrier: Option<EpochPair>,
 
     committed_epoch: Option<u64>,
+
+    /// `None` while the database has no streaming job, so that a frozen timestamp does not
+    /// render as an ever-growing barrier pending time.
+    last_committed_barrier_time: Option<LabelGuardedIntGauge>,
 
     pub(super) database_info: InflightDatabaseInfo,
     pub independent_checkpoint_job_controls: HashMap<JobId, IndependentCheckpointJobControl>,
@@ -792,6 +778,7 @@ impl DatabaseCheckpointControl {
             finishing_jobs_collector: BarrierItemCollector::new(false),
             completing_barrier: None,
             committed_epoch: None,
+            last_committed_barrier_time: None,
             database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
             independent_checkpoint_job_controls: Default::default(),
         }
@@ -811,6 +798,7 @@ impl DatabaseCheckpointControl {
             finishing_jobs_collector: BarrierItemCollector::new(false),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
+            last_committed_barrier_time: None,
             database_info,
             independent_checkpoint_job_controls,
         }
@@ -1109,7 +1097,7 @@ impl DatabaseCheckpointControl {
                     resps_to_commit,
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
-                self.completing_barrier = Some(info.barrier_info.prev_epoch());
+                self.completing_barrier = Some(info.barrier_info.epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
                 task.finished_cdc_table_backfill
                     .extend(staging_commit_info.finished_cdc_table_backfill);
@@ -1144,10 +1132,17 @@ impl DatabaseCheckpointControl {
         independent_job_epochs: Vec<(JobId, u64)>,
     ) {
         {
-            if let Some(prev_epoch) = self.completing_barrier.take() {
-                assert_eq!(command_prev_epoch, Some(prev_epoch));
-                self.committed_epoch = Some(prev_epoch);
-                partial_graph_manager.ack_completed(self.partial_graph_id, prev_epoch);
+            if let Some(epoch) = self.completing_barrier.take() {
+                assert_eq!(command_prev_epoch, Some(epoch.prev));
+                self.committed_epoch = Some(epoch.prev);
+                partial_graph_manager.ack_completed(self.partial_graph_id, epoch.prev);
+                self.last_committed_barrier_time
+                    .get_or_insert_with(|| {
+                        GLOBAL_META_METRICS
+                            .last_committed_barrier_time
+                            .with_guarded_label_values(&[&self.database_id.to_string()])
+                    })
+                    .set(Epoch(epoch.curr).as_unix_secs() as i64);
             } else {
                 assert_eq!(command_prev_epoch, None);
             };
@@ -1324,6 +1319,8 @@ impl DatabaseCheckpointControl {
                 self.independent_checkpoint_job_controls.is_empty(),
                 "should not have snapshot backfill job when there is no normal job in database"
             );
+            // Drop the guard to remove the metric series of this database.
+            self.last_committed_barrier_time = None;
             // skip the command when there is nothing to do with the barrier
             for mut notifier in notifiers {
                 notifier.notify_started();

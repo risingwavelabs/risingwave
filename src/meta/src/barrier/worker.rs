@@ -57,6 +57,7 @@ use crate::barrier::{
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -312,6 +313,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -332,6 +334,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await
@@ -564,11 +567,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     );
                                 if sender.send(()).is_err() {
                                     warn!("failed to notify finish of update database barrier");
-                                }
-                            }
-                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
-                                    warn!("failed to may have snapshot backfill job");
                                 }
                             }
                         }
@@ -1258,7 +1256,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     unreachable!("no barrier collected event on initializing")
                                 }
                                 PartialGraphEvent::Reset(_) => {
-                                    unreachable!("no partial graph reset on initializing")
+                                    // Reset responses only carry diagnostic root errors. Recovery
+                                    // itself only needs to track the partial graphs still resetting.
+                                    let (database_id, _) =
+                                        from_partial_graph_id(partial_graph_id);
+                                    let resetting_partial_graphs = failed_databases
+                                        .get_mut(&database_id)
+                                        .expect("reset partial graph should belong to a failed database");
+                                    assert!(
+                                        resetting_partial_graphs.remove(&partial_graph_id),
+                                        "partial graph {partial_graph_id} should be resetting"
+                                    );
                                 }
                                 PartialGraphEvent::Error(worker_id) => {
                                     let (database_id, _) = from_partial_graph_id(partial_graph_id);
@@ -1380,10 +1388,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
-                        }
-                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                            // may recover snapshot backfill jobs
-                            let _ = tx.send(true);
                         }
                     }
                 }

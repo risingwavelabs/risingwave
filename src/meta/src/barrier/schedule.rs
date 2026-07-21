@@ -509,7 +509,7 @@ impl PeriodicBarriers {
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        let force_checkpoint_database = self.force_checkpoint_databases.drain().next();
+        let force_checkpoint_database = self.force_checkpoint_databases.extract_if(|_| true).next();
         let new_barrier = if let Some(database_id) = force_checkpoint_database {
             self.reset_database_timer(database_id);
             NewBarrier {
@@ -785,7 +785,11 @@ impl ScheduledBarriers {
                         unreachable!("only drop and cancel streaming jobs should be buffered");
                     }
                 }
-                notifiers.into_iter().for_each(|notify| {
+                // `run_command` waits for both the started and collected notifications. These
+                // buffered commands are pre-applied during recovery without injecting a real
+                // barrier, so complete both waiters here.
+                notifiers.into_iter().for_each(|mut notify| {
+                    notify.notify_started();
                     notify.notify_collected();
                 });
             }
@@ -1131,6 +1135,34 @@ mod tests {
         assert!(barrier.checkpoint);
         assert_eq!(barrier.database_id, DatabaseId::from(1));
         assert!(barrier.command.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_multiple_force_checkpoints() {
+        let databases = vec![
+            create_test_database(1, Some(100), Some(10)),
+            create_test_database(2, Some(100), Some(10)),
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(100), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(1));
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(2));
+
+        let barrier1 = periodic.next_barrier(&context).now_or_never().unwrap();
+        let barrier2 = periodic.next_barrier(&context).now_or_never().unwrap();
+
+        assert!(barrier1.checkpoint);
+        assert!(barrier1.command.is_none());
+        assert!(barrier2.checkpoint);
+        assert!(barrier2.command.is_none());
+        assert_eq!(
+            HashSet::from([barrier1.database_id, barrier2.database_id]),
+            HashSet::from([DatabaseId::from(1), DatabaseId::from(2)])
+        );
+        assert!(periodic.force_checkpoint_databases.is_empty());
     }
 
     #[tokio::test]

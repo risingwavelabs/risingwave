@@ -219,22 +219,24 @@ impl CatalogController {
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
-        // Collect Iceberg pk-index sink ids among dropped sinks so the pk-index sink manager
-        // can tear down their per-sink commit workers. Unlike the iceberg-table
-        // cleanup above, pk-index sinks are user-created with arbitrary names, so we
-        // identify them by inspecting properties rather than by name prefix.
-        let removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Sink::find()
+        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // names, so unlike the iceberg-table cleanup above, identify them by
+        // inspecting properties rather than by name prefix.
+        let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
+        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
+        for sink in Sink::find()
             .filter(sink::Column::SinkId.is_in(removed_object_ids.clone()))
             .all(&txn)
             .await?
-            .into_iter()
-            .filter_map(|sink| {
-                crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
-                    sink.properties.inner_ref(),
-                )
-                .then_some(sink.sink_id)
-            })
-            .collect();
+        {
+            let properties = sink.properties.inner_ref();
+            if crate::manager::iceberg_compaction::is_iceberg_sink(properties) {
+                removed_iceberg_sink_ids.push(sink.sink_id);
+            }
+            if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(properties) {
+                removed_iceberg_pk_index_sink_ids.push(sink.sink_id);
+            }
+        }
 
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
@@ -448,6 +450,7 @@ impl CatalogController {
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
+                removed_iceberg_sink_ids,
                 removed_iceberg_pk_index_sink_ids,
             },
             version,

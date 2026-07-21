@@ -644,7 +644,6 @@ impl BatchRefreshJobCheckpointControl {
             backfill_order_state,
             version_stat,
         );
-
         let first_barrier_info = super::new_fake_barrier(
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
@@ -1139,16 +1138,6 @@ impl BatchRefreshJobCheckpointControl {
             | BatchRefreshJobStatus::Idle { .. }
             | BatchRefreshJobStatus::Resetting { .. } => None,
         }
-    }
-
-    pub(crate) fn is_snapshot_backfilling(&self) -> bool {
-        matches!(
-            self.status,
-            BatchRefreshJobStatus::ConsumingSnapshot { .. }
-                | BatchRefreshJobStatus::FinishingSnapshot { .. }
-                | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-                | BatchRefreshJobStatus::ConsumingLogStore { .. }
-        )
     }
 
     /// Whether this idle job should start a refresh run.

@@ -42,6 +42,7 @@ use crate::barrier::{
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -202,6 +203,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     sink_manager: SinkCoordinatorManager,
 
     pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+
+    pub(super) iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -219,6 +222,7 @@ impl GlobalBarrierWorkerContextImpl {
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -233,6 +237,7 @@ impl GlobalBarrierWorkerContextImpl {
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
         }
     }
 

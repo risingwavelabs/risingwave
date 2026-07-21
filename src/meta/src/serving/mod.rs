@@ -91,6 +91,40 @@ impl ServingVnodeMapping {
         max_serving_parallelism: Option<u64>,
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
+        Self::upsert_locked(
+            &mut serving_vnode_mappings,
+            fragment_serving_infos,
+            workers,
+            max_serving_parallelism,
+        )
+    }
+
+    /// Rebuild mappings from a complete catalog snapshot.
+    ///
+    /// Unlike [`Self::upsert`], this removes mappings for fragments absent from the snapshot.
+    pub(crate) fn reconcile(
+        &self,
+        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
+        workers: &[WorkerNode],
+        max_serving_parallelism: Option<u64>,
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
+        let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
+        serving_vnode_mappings
+            .retain(|fragment_id, _| fragment_serving_infos.contains_key(fragment_id));
+        Self::upsert_locked(
+            &mut serving_vnode_mappings,
+            fragment_serving_infos,
+            workers,
+            max_serving_parallelism,
+        )
+    }
+
+    fn upsert_locked(
+        serving_vnode_mappings: &mut HashMap<FragmentId, WorkerSlotMapping>,
+        fragment_serving_infos: &HashMap<FragmentId, FragmentServingInfo>,
+        workers: &[WorkerNode],
+        max_serving_parallelism: Option<u64>,
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, HashSet<FragmentId>) {
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: HashSet<FragmentId> = HashSet::default();
         for (fragment_id, info) in fragment_serving_infos {
@@ -106,7 +140,7 @@ impl ServingVnodeMapping {
             };
             match new_mapping {
                 None => {
-                    serving_vnode_mappings.remove(fragment_id as _);
+                    serving_vnode_mappings.remove(fragment_id);
                     failed.insert(*fragment_id);
                 }
                 Some(mapping) => {
@@ -158,7 +192,7 @@ pub async fn on_meta_start(
     let (serving_compute_nodes, fragment_serving_infos) = fetch_serving_infos(metadata_manager)
         .await
         .expect("fail to fetch serving infos");
-    let (mappings, failed) = serving_vnode_mapping.upsert(
+    let (mappings, failed) = serving_vnode_mapping.reconcile(
         &fragment_serving_infos,
         &serving_compute_nodes,
         max_serving_parallelism,
@@ -250,7 +284,7 @@ pub fn start_serving_vnode_mapping_worker(
                 .await
                 .batch_parallelism()
                 .map(|p| p.get());
-            let (mappings, failed) = serving_vnode_mapping.upsert(
+            let (mappings, failed) = serving_vnode_mapping.reconcile(
                 &fragment_serving_infos,
                 &workers,
                 max_serving_parallelism,
@@ -531,5 +565,69 @@ mod tests {
             bitmap1.count_ones() + bitmap2.count_ones(),
             VirtualNode::COUNT_FOR_TEST
         );
+    }
+
+    fn hash_serving_info() -> FragmentServingInfo {
+        FragmentServingInfo {
+            result_table_id: None,
+            distribution_type: FragmentDistributionType::Hash,
+            vnode_count: VirtualNode::COUNT_FOR_TEST,
+        }
+    }
+
+    #[test]
+    fn test_reconcile_exactly_matches_full_snapshot_and_removes_failed_placements() {
+        let mapping = ServingVnodeMapping::default();
+        let worker = serving_worker(1);
+        let stale_fragment = FragmentId::new(1);
+        let retained_fragment = FragmentId::new(2);
+        let added_fragment = FragmentId::new(3);
+
+        let initial_snapshot = HashMap::from([
+            (stale_fragment, hash_serving_info()),
+            (retained_fragment, hash_serving_info()),
+        ]);
+        mapping.upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
+        assert!(mapping.all().contains_key(&stale_fragment));
+        let retained_mapping = mapping.all()[&retained_fragment].clone();
+
+        let current_snapshot = HashMap::from([
+            (retained_fragment, hash_serving_info()),
+            (added_fragment, hash_serving_info()),
+        ]);
+        let (reconciled, failed) = mapping.reconcile(&current_snapshot, &[worker], None);
+        assert!(failed.is_empty());
+        assert_eq!(reconciled.len(), 2);
+        assert!(reconciled.contains_key(&retained_fragment));
+        assert!(reconciled.contains_key(&added_fragment));
+
+        let mappings = mapping.all();
+        assert_eq!(mappings.len(), 2);
+        assert!(mappings.contains_key(&retained_fragment));
+        assert!(mappings.contains_key(&added_fragment));
+        assert_eq!(mappings[&retained_fragment], retained_mapping);
+
+        let final_snapshot = HashMap::from([(retained_fragment, hash_serving_info())]);
+        let (reconciled, failed) = mapping.reconcile(&final_snapshot, &[], None);
+        assert!(reconciled.is_empty());
+        assert_eq!(failed, HashSet::from([retained_fragment]));
+        assert!(mapping.all().is_empty());
+    }
+
+    #[test]
+    fn test_upsert_keeps_fragments_absent_from_incremental_update() {
+        let mapping = ServingVnodeMapping::default();
+        let worker = serving_worker(1);
+        let first_fragment = FragmentId::new(1);
+        let second_fragment = FragmentId::new(2);
+
+        let first_update = HashMap::from([(first_fragment, hash_serving_info())]);
+        mapping.upsert(&first_update, std::slice::from_ref(&worker), None);
+        let second_update = HashMap::from([(second_fragment, hash_serving_info())]);
+        mapping.upsert(&second_update, &[worker], None);
+
+        let mappings = mapping.all();
+        assert!(mappings.contains_key(&first_fragment));
+        assert!(mappings.contains_key(&second_fragment));
     }
 }

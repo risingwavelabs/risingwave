@@ -146,6 +146,10 @@ pub struct ReleaseContext {
     /// Dropped iceberg table sinks
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 
+    /// Dropped iceberg sink ids. Used to clear iceberg maintenance (compaction
+    /// schedule and snapshot expiration) in `IcebergCompactionManager`.
+    pub(crate) removed_iceberg_sink_ids: Vec<SinkId>,
+
     /// Dropped Iceberg pk-index sink ids. Used to unregister per-sink commit workers
     /// owned by `IcebergPkIndexSinkManager`. Filtered via `is_iceberg_pk_index_sink` on
     /// the sink properties so user-created pk-index sinks (any name) are included.
@@ -158,6 +162,8 @@ pub(crate) struct CleanedDirtyStreamingJobs {
     /// Only populated for per-database recovery.
     pub(crate) dropped_table_ids: Vec<TableId>,
     pub(crate) source_ids: Vec<SourceId>,
+    /// Cleaned dirty sink jobs, whose iceberg maintenance state must be cleared.
+    pub(crate) sink_ids: Vec<SinkId>,
 }
 
 fn explicit_cache_refill_policy(config_override: &str) -> MetaResult<Option<CacheRefillPolicy>> {
@@ -620,10 +626,24 @@ impl CatalogController {
             .iter()
             .map(|obj| obj.oid.as_job_id())
             .collect_vec();
+        let dirty_sink_ids = dirty_job_objs
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Sink)
+            .map(|obj| obj.oid.as_sink_id())
+            .collect_vec();
         let dirty_job_table_ids = dirty_job_ids
             .iter()
             .map(|job_id| job_id.as_mv_table_id())
             .collect_vec();
+        // Object deletion cascades to the fragments of the dirty streaming jobs. Keep their IDs
+        // before the transaction deletes them so the serving mapping can be notified after commit.
+        let dirty_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(dirty_job_ids.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         // Filter out dummy objs for replacement.
         // todo: we'd better introduce a new dummy object type for replacement.
@@ -753,6 +773,10 @@ impl CatalogController {
             .dropped_tables
             .extend(dropped_tables.into_iter().map(|t| (t.id, t)));
 
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(dirty_fragment_ids);
+
         let object_group = build_object_group_for_delete(
             to_notify_objs
                 .into_iter()
@@ -768,6 +792,7 @@ impl CatalogController {
             streaming_job_ids: dirty_job_ids,
             dropped_table_ids,
             source_ids: dirty_associated_source_ids,
+            sink_ids: dirty_sink_ids,
         })
     }
 

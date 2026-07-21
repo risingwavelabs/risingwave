@@ -898,15 +898,18 @@ impl PostCollectCommand {
                     )
                     .await?;
 
-                let source_change = SourceChange::CreateJob {
-                    added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                };
-
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(source_change)
-                    .await;
+                let added_source_fragments = stream_job_fragments.stream_source_fragments();
+                let added_backfill_fragments = stream_job_fragments.source_backfill_fragments();
+                // Skip the source-manager notification (and its `core` lock) when the job has no source/backfill fragments.
+                if !added_source_fragments.is_empty() || !added_backfill_fragments.is_empty() {
+                    barrier_manager_context
+                        .source_manager
+                        .apply_source_change(SourceChange::CreateJob {
+                            added_source_fragments,
+                            added_backfill_fragments,
+                        })
+                        .await;
+                }
 
                 if let Some(old_sink_id) = replace_sink {
                     barrier_manager_context
