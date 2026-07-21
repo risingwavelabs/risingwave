@@ -93,29 +93,19 @@ mod tests {
     #[test]
     fn test_reject_variant_sink() {
         for connector in ["kafka", "doris", "jdbc", "mongodb"] {
-            let sink = make_sink(connector, DataType::Variant);
-            let err = reject_variant_sink(&sink).unwrap_err();
-            assert!(
-                err.to_string()
-                    .contains("sinking VARIANT columns is not supported yet: column `payload`"),
-                "{connector}: {err:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_reject_nested_variant_sink() {
-        for data_type in [
-            DataType::list(DataType::Variant),
-            DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
-        ] {
-            let sink = make_sink("kafka", data_type.clone());
-            let err = reject_variant_sink(&sink).unwrap_err();
-            assert!(
-                err.to_string()
-                    .contains("sinking VARIANT columns is not supported yet: column `payload`"),
-                "{data_type:?}: {err:?}"
-            );
+            for data_type in [
+                DataType::Variant,
+                DataType::list(DataType::Variant),
+                DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
+            ] {
+                let sink = make_sink(connector, data_type.clone());
+                let err = reject_variant_sink(&sink).unwrap_err();
+                assert!(
+                    err.to_string()
+                        .contains("sinking VARIANT columns is not supported yet: column `payload`"),
+                    "{connector} / {data_type:?}: {err:?}"
+                );
+            }
         }
     }
 

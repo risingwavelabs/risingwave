@@ -34,7 +34,7 @@ use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, parquet_to
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
 use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
+use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_field_match_source_schema};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -270,11 +270,18 @@ pub fn get_project_mask(
                         _ => None,
                     }?;
                     let arrow_field = converted_arrow_schema.fields.get(pos)?;
-                    let arrow_data_type = arrow_field.data_type();
                     let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
-                    if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                    if is_parquet_field_match_source_schema(arrow_field, rw_data_type) {
                         Some(pos)
                     } else {
+                        // The parquet column exists but its type does not match the declared
+                        // schema; it is NULL-filled rather than decoded to a diverging type.
+                        tracing::warn!(
+                            column = %column.name,
+                            declared_type = %rw_data_type,
+                            parquet_field = ?arrow_field,
+                            "parquet column does not match the declared source schema; it will be NULL-filled",
+                        );
                         None
                     }
                 })

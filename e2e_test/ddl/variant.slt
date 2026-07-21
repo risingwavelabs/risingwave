@@ -301,6 +301,22 @@ alter source variant_alter_source_t add column s struct<v variant>;
 statement ok
 drop source variant_alter_source_t;
 
+# ENCODE PARQUET reads variant via the Parquet Variant extension type, so ALTER may add one.
+
+statement ok
+create source variant_alter_parquet_source_t (id int)
+with (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp',
+    match_pattern = '*.parquet'
+) format plain encode parquet;
+
+statement ok
+alter source variant_alter_parquet_source_t add column v variant;
+
+statement ok
+drop source variant_alter_parquet_source_t;
+
 # VARIANT is rejected in non-SQL UDF signatures (both argument and return types).
 
 statement error VARIANT is not supported in UDFs yet

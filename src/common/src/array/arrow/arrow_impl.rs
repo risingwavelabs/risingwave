@@ -231,7 +231,7 @@ pub trait ToArrow {
         Ok(Arc::new(arrow_array::StringArray::from(array)))
     }
 
-    // TODO(#25165): support the Parquet Variant Arrow extension layout.
+    // TODO: support the Parquet Variant Arrow extension layout.
     #[inline]
     fn variant_to_arrow(&self, _array: &VariantArray) -> Result<arrow_array::ArrayRef, ArrayError> {
         Err(ArrayError::to_arrow(
@@ -369,7 +369,7 @@ pub trait ToArrow {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
-            // TODO(#25165): support the Parquet Variant Arrow extension layout.
+            // TODO: support the Parquet Variant Arrow extension layout.
             DataType::Variant => {
                 return Err(ArrayError::to_arrow(
                     "VARIANT is not supported in Arrow conversion yet",
@@ -1641,6 +1641,30 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
+/// Field-aware version of [`is_parquet_schema_match_source_schema`]: it inspects the field
+/// metadata to match an `arrow.parquet.variant` struct against `Variant`. A variant extension
+/// binds exclusively to `Variant` at every nesting depth — declaring such a column as anything
+/// else (e.g. the raw physical struct) is an illegal type mismatch, so the parser NULL-fills it
+/// instead of decoding a diverging type. Other extensions do not affect matching: decode
+/// follows the declared side, which simply ignores them. Prefer this whenever a `Field` is
+/// available.
+pub fn is_parquet_field_match_source_schema(
+    arrow_field: &arrow_schema::Field,
+    rw_data_type: &crate::types::DataType,
+) -> bool {
+    use arrow_schema::extension::ExtensionType as _;
+
+    // A file-side variant extension binds exclusively to `Variant` at every depth; matching it
+    // against any other declared type is an illegal type mismatch, not a lenient physical
+    // match. Other extensions do not affect matching: decode follows the declared side, which
+    // simply ignores them.
+    if arrow_field.extension_type_name() == Some(parquet_variant_compute::VariantType::NAME) {
+        return matches!(arrow_field.data_type(), arrow_schema::DataType::Struct(_))
+            && matches!(rw_data_type, crate::types::DataType::Variant);
+    }
+    is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_data_type)
+}
+
 /// This function checks whether the schema of a Parquet file matches the user-defined schema in RisingWave.
 /// It handles the following special cases:
 /// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `Timestamp` type.
@@ -1656,6 +1680,9 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
 /// - Struct: Arrow's `Struct` type matches with RisingWave's `Struct` type recursively, requiring that all expected fields exist and match by name and type. Extra Arrow fields are allowed, but a declared name matching multiple Arrow siblings is ambiguous and rejected.
 /// - List: Arrow's `List` type matches with RisingWave's `List` type recursively, requiring the same element type.
 /// - Map: Arrow's `Map` type matches with RisingWave's `Map` type recursively, requiring the key and value types to match, and the inner struct must have exactly two fields named "key" and "value".
+///
+/// Nested positions recurse through [`is_parquet_field_match_source_schema`] so a variant
+/// extension is recognized at any depth.
 pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &arrow_schema::DataType,
     rw_data_type: &crate::types::DataType,
@@ -1702,7 +1729,7 @@ pub fn is_parquet_schema_match_source_schema(
                 if candidates.next().is_some() {
                     return false;
                 }
-                if !is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_ty) {
+                if !is_parquet_field_match_source_schema(arrow_field, rw_ty) {
                     return false;
                 }
             }
@@ -1711,7 +1738,7 @@ pub fn is_parquet_schema_match_source_schema(
         // List type recursive matching
         // Arrow's List matches RisingWave's List if the element type matches recursively
         (ArrowType::List(arrow_field), RwType::List(rw_list_ty)) => {
-            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_list_ty.elem())
+            is_parquet_field_match_source_schema(arrow_field, rw_list_ty.elem())
         }
         // Map type recursive matching
         // Arrow's Map matches RisingWave's Map if the key and value types match recursively,
@@ -1727,8 +1754,8 @@ pub fn is_parquet_schema_match_source_schema(
                     return false;
                 }
                 let (rw_key_ty, rw_value_ty) = (rw_map_ty.key(), rw_map_ty.value());
-                is_parquet_schema_match_source_schema(key_field.data_type(), rw_key_ty)
-                    && is_parquet_schema_match_source_schema(value_field.data_type(), rw_value_ty)
+                is_parquet_field_match_source_schema(key_field, rw_key_ty)
+                    && is_parquet_field_match_source_schema(value_field, rw_value_ty)
             } else {
                 false
             }
@@ -1743,11 +1770,313 @@ mod tests {
     use arrow_schema::{DataType as ArrowType, Field as ArrowField};
 
     use super::*;
+    use crate::array::arrow::IcebergArrowConvert;
     use crate::types::{DataType as RwType, MapType, StructType};
 
     /// A default-only `FromArrow` for exercising the shared decode logic.
     struct Dummy;
     impl FromArrow for Dummy {}
+
+    fn variant_field(name: &str) -> ArrowField {
+        use std::collections::HashMap;
+        ArrowField::new(
+            name,
+            ArrowType::Struct(
+                vec![
+                    ArrowField::new("metadata", ArrowType::Binary, false),
+                    ArrowField::new("value", ArrowType::Binary, true),
+                ]
+                .into(),
+            ),
+            true,
+        )
+        .with_metadata(HashMap::from([(
+            "ARROW:extension:name".to_owned(),
+            "arrow.parquet.variant".to_owned(),
+        )]))
+    }
+
+    #[test]
+    fn test_variant_field_schema_match() {
+        let variant = variant_field("v");
+
+        assert!(is_parquet_field_match_source_schema(
+            &variant,
+            &RwType::Variant
+        ));
+        assert!(!is_parquet_schema_match_source_schema(
+            variant.data_type(),
+            &RwType::Variant
+        ));
+        // A variant field does NOT match its raw physical struct layout: the variant extension
+        // binds exclusively to `Variant`, so declaring it as a struct is an illegal type mismatch.
+        let rw_physical = RwType::Struct(StructType::new(vec![
+            ("metadata".to_owned(), RwType::Bytea),
+            ("value".to_owned(), RwType::Bytea),
+        ]));
+        assert!(!is_parquet_field_match_source_schema(
+            &variant,
+            &rw_physical
+        ));
+
+        // Variant nested in struct / list / map.
+        let arrow_struct = ArrowField::new(
+            "s",
+            ArrowType::Struct(vec![variant_field("v")].into()),
+            true,
+        );
+        let rw_struct = RwType::Struct(StructType::new(vec![("v".to_owned(), RwType::Variant)]));
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_struct,
+            &rw_struct
+        ));
+
+        let arrow_list = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(variant_field("element"))),
+            true,
+        );
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_list,
+            &RwType::list(RwType::Variant)
+        ));
+
+        let arrow_map = ArrowField::new(
+            "m",
+            ArrowType::Map(
+                Arc::new(ArrowField::new(
+                    "entries",
+                    ArrowType::Struct(
+                        vec![
+                            ArrowField::new("key", ArrowType::Utf8, false),
+                            variant_field("value"),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                )),
+                false,
+            ),
+            true,
+        );
+        assert!(is_parquet_field_match_source_schema(
+            &arrow_map,
+            &RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Variant))
+        ));
+    }
+
+    #[test]
+    fn test_variant_ext_under_list_map_rejects_physical_struct() {
+        let physical = RwType::Struct(StructType::new(vec![
+            ("metadata".to_owned(), RwType::Bytea),
+            ("value".to_owned(), RwType::Bytea),
+        ]));
+
+        // A list element carrying the variant extension only matches a declared `variant[]`;
+        // a declared physical struct must NOT match (decoding it would yield `list<variant>`,
+        // diverging from the catalog, so the parser NULL-fills instead).
+        let list_field = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(variant_field("element"))),
+            true,
+        );
+        assert!(!is_parquet_field_match_source_schema(
+            &list_field,
+            &RwType::list(physical.clone())
+        ));
+        assert!(is_parquet_field_match_source_schema(
+            &list_field,
+            &RwType::list(RwType::Variant)
+        ));
+
+        // Same rule for a map value carrying the variant extension.
+        let map_field = ArrowField::new(
+            "m",
+            ArrowType::Map(
+                Arc::new(ArrowField::new(
+                    "entries",
+                    ArrowType::Struct(
+                        vec![
+                            ArrowField::new("key", ArrowType::Utf8, false),
+                            variant_field("value"),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                )),
+                false,
+            ),
+            true,
+        );
+        assert!(!is_parquet_field_match_source_schema(
+            &map_field,
+            &RwType::Map(MapType::from_kv(RwType::Varchar, physical))
+        ));
+        assert!(is_parquet_field_match_source_schema(
+            &map_field,
+            &RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Variant))
+        ));
+    }
+
+    #[test]
+    fn test_variant_ext_nested_under_list_rejects_physical_struct() {
+        // `list<struct<v: variant-ext>>`: strictness applies one struct level below the list.
+        let list_field = ArrowField::new(
+            "l",
+            ArrowType::List(Arc::new(ArrowField::new(
+                "element",
+                ArrowType::Struct(vec![variant_field("v")].into()),
+                true,
+            ))),
+            true,
+        );
+        let physical = RwType::Struct(StructType::new(vec![
+            ("metadata".to_owned(), RwType::Bytea),
+            ("value".to_owned(), RwType::Bytea),
+        ]));
+        let elem_physical = RwType::Struct(StructType::new(vec![("v".to_owned(), physical)]));
+        assert!(!is_parquet_field_match_source_schema(
+            &list_field,
+            &RwType::list(elem_physical)
+        ));
+        let elem_variant = RwType::Struct(StructType::new(vec![("v".to_owned(), RwType::Variant)]));
+        assert!(is_parquet_field_match_source_schema(
+            &list_field,
+            &RwType::list(elem_variant)
+        ));
+    }
+
+    #[test]
+    fn test_variant_ext_declared_as_scalar_rejects_match() {
+        // The variant extension binds exclusively to `Variant`, even outside list/map boundaries.
+        let v = variant_field("v");
+        assert!(!is_parquet_field_match_source_schema(&v, &RwType::Varchar));
+        assert!(!is_parquet_field_match_source_schema(&v, &RwType::Bytea));
+        assert!(is_parquet_field_match_source_schema(&v, &RwType::Variant));
+    }
+
+    #[test]
+    fn test_nested_struct_reorder_and_superset_decode_by_declared() {
+        // File inner is reordered and a superset: inner<b, a, c>; declared inner<a, b>.
+        let inner: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![
+            (
+                Arc::new(ArrowField::new("b", ArrowType::Utf8, true)),
+                Arc::new(arrow_array::StringArray::from(vec![Some("x")])) as arrow_array::ArrayRef,
+            ),
+            (
+                Arc::new(ArrowField::new("a", ArrowType::Int32, true)),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(1)])) as arrow_array::ArrayRef,
+            ),
+            (
+                Arc::new(ArrowField::new("c", ArrowType::Int32, true)),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(9)])) as arrow_array::ArrayRef,
+            ),
+        ]));
+        let st: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![(
+            Arc::new(ArrowField::new("inner", inner.data_type().clone(), true)),
+            inner,
+        )]));
+
+        let declared_field = ArrowField::new(
+            "st",
+            ArrowType::Struct(
+                vec![ArrowField::new(
+                    "inner",
+                    ArrowType::Struct(
+                        vec![
+                            ArrowField::new("a", ArrowType::Int32, true),
+                            ArrowField::new("b", ArrowType::Utf8, true),
+                        ]
+                        .into(),
+                    ),
+                    true,
+                )]
+                .into(),
+            ),
+            true,
+        );
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&declared_field, &st)
+            .unwrap();
+
+        assert_eq!(
+            converted.data_type(),
+            RwType::Struct(StructType::new(vec![(
+                "inner",
+                RwType::Struct(StructType::new(vec![
+                    ("a", RwType::Int32),
+                    ("b", RwType::Varchar),
+                ])),
+            )])),
+        );
+        let ArrayImpl::Struct(s) = &converted else {
+            panic!("expected RW struct");
+        };
+        assert_eq!(
+            s.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Utf8("x".into())),
+            ])))]),
+        );
+    }
+
+    #[test]
+    fn test_variant_ext_grandchild_decodes_as_physical_struct() {
+        // Actual: s<mid<v: variant-ext struct<metadata, value>>>, with binary children.
+        let v_child: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![
+            (
+                Arc::new(ArrowField::new("metadata", ArrowType::Binary, false)),
+                Arc::new(arrow_array::BinaryArray::from_iter_values([
+                    &[1_u8, 0, 0][..]
+                ])) as arrow_array::ArrayRef,
+            ),
+            (
+                Arc::new(ArrowField::new("value", ArrowType::Binary, true)),
+                Arc::new(arrow_array::BinaryArray::from_iter_values([&[9_u8][..]]))
+                    as arrow_array::ArrayRef,
+            ),
+        ]));
+        let mid: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![(
+            Arc::new(variant_field("v")),
+            v_child,
+        )]));
+        let s: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::from(vec![(
+            Arc::new(ArrowField::new("mid", mid.data_type().clone(), true)),
+            mid,
+        )]));
+
+        // Declared as a physical struct all the way down (no variant).
+        let declared = RwType::Struct(StructType::new(vec![(
+            "mid".to_owned(),
+            RwType::Struct(StructType::new(vec![(
+                "v".to_owned(),
+                RwType::Struct(StructType::new(vec![
+                    ("metadata".to_owned(), RwType::Bytea),
+                    ("value".to_owned(), RwType::Bytea),
+                ])),
+            )])),
+        )]));
+        let declared_field = IcebergArrowConvert.to_arrow_field("s", &declared).unwrap();
+
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&declared_field, &s)
+            .unwrap();
+        // The depth-2 variant extension is ignored: `v` decodes as raw bytea struct, not Variant.
+        assert_eq!(
+            converted.data_type(),
+            RwType::Struct(StructType::new(vec![(
+                "mid",
+                RwType::Struct(StructType::new(vec![(
+                    "v",
+                    RwType::Struct(StructType::new(vec![
+                        ("metadata", RwType::Bytea),
+                        ("value", RwType::Bytea),
+                    ])),
+                )])),
+            )])),
+        );
+    }
 
     #[test]
     fn test_struct_schema_match() {
