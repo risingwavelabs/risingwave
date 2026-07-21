@@ -6104,13 +6104,15 @@ impl Parser<'_> {
         Ok(Assignment { id, value })
     }
 
-    /// Parse a `[VARIADIC] name => expr`.
+    /// Parse a `[VARIADIC] name {=>|:=} expr`.
     fn parse_function_args(&mut self) -> ModalResult<(bool, FunctionArg)> {
         let variadic = self.parse_keyword(Keyword::VARIADIC);
-        let arg = if self.peek_nth_token(1) == Token::RArrow {
+        let arg = if matches!(self.peek_nth_token(1).token, Token::RArrow | Token::ColonEq) {
             let name = self.parse_identifier()?;
 
-            self.expect_token(&Token::RArrow)?;
+            if !self.consume_token(&Token::RArrow) {
+                self.expect_token(&Token::ColonEq)?;
+            }
             let arg = if self.parse_keyword(Keyword::SECRET) {
                 FunctionArgExpr::SecretRef(self.parse_secret_ref()?)
             } else {
@@ -6527,6 +6529,21 @@ mod tests {
 
         // Named secret argument
         run_parser_method("header => SECRET my_secret", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Named {
+                    name: Ident::new_unchecked("header"),
+                    arg: FunctionArgExpr::SecretRef(SecretRefValue {
+                        secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                        ref_as: SecretRefAsType::Text,
+                    }),
+                }
+            );
+        });
+
+        // Legacy named secret argument
+        run_parser_method("header := SECRET my_secret", |parser| {
             let (_variadic, arg) = parser.parse_function_args().unwrap();
             assert_eq!(
                 arg,
