@@ -988,7 +988,8 @@ pub trait FromArrow {
         let columns: Vec<Arc<ArrayImpl>> = if names_aligned {
             decode_positionally(expected_fields)?
         } else {
-            // First occurrence wins, agreeing with the schema matcher's `find`.
+            // First occurrence wins. The schema matcher rejects duplicate sibling names,
+            // so on the parquet path this tie-break is never exercised.
             let mut actual_name_to_index = HashMap::new();
             for (idx, f) in actual_fields.iter().enumerate() {
                 actual_name_to_index.entry(f.name().as_str()).or_insert(idx);
@@ -1046,6 +1047,10 @@ pub trait FromArrow {
             _ => unreachable!("a map array must have a map data type"),
         };
         let struct_array = self.from_struct_array(expected_entries, array.entries())?;
+        // RW restricts map key types, so deriving a map type from decoded entries is
+        // fallible and `MapArray::data_type()` panics on an invalid key. Reject it here.
+        MapType::try_from_entries(struct_array.data_type())
+            .map_err(|e| ArrayError::from_arrow(format!("invalid arrow map array: {e}")))?;
         let list_array = ListArray {
             value: Box::new(struct_array),
             bitmap: match array.nulls() {
@@ -2269,6 +2274,44 @@ mod tests {
                     ScalarImpl::Int32(42)
                 )]))),
             ])
+        );
+    }
+
+    #[test]
+    fn test_map_invalid_key_type_errors() {
+        // A float64 map key is representable in arrow but not in RW's `MapType`;
+        // decode must reject it instead of building a map whose `data_type()` panics.
+        let entries_fields: arrow_schema::Fields = vec![
+            ArrowField::new("key", ArrowType::Float64, false),
+            ArrowField::new("value", ArrowType::Int32, true),
+        ]
+        .into();
+        let entries = arrow_array::StructArray::new(
+            entries_fields.clone(),
+            vec![
+                Arc::new(arrow_array::Float64Array::from(vec![Some(1.5)])),
+                Arc::new(arrow_array::Int32Array::from(vec![Some(42)])),
+            ],
+            None,
+        );
+        let entries_field = Arc::new(ArrowField::new(
+            "entries",
+            ArrowType::Struct(entries_fields),
+            false,
+        ));
+        let file_map: arrow_array::ArrayRef = Arc::new(arrow_array::MapArray::new(
+            entries_field.clone(),
+            arrow_buffer::OffsetBuffer::new(vec![0, 1].into()),
+            entries,
+            None,
+            false,
+        ));
+        let field = ArrowField::new("m", ArrowType::Map(entries_field, false), true);
+
+        let err = Dummy.from_array(&field, &file_map).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid map key type"),
+            "unexpected error: {err}"
         );
     }
 

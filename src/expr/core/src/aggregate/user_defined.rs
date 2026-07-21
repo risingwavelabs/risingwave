@@ -192,7 +192,7 @@ mod tests {
     use anyhow::Result;
     use futures::stream::BoxStream;
     use risingwave_common::array::arrow::arrow_array_udf::{
-        BooleanArray, Int64Array, RecordBatch, StringArray, StructArray,
+        BooleanArray, Float64Array, Int64Array, MapArray, RecordBatch, StringArray, StructArray,
     };
     use risingwave_common::array::arrow::arrow_schema_udf::DataType as ArrowDataType;
     use risingwave_common::types::StructType;
@@ -289,6 +289,89 @@ mod tests {
                 risingwave_common::array::arrow::arrow_array_udf::Int32Array::from(vec![Some(1)]),
             ))
         }
+    }
+
+    #[derive(Debug)]
+    struct MistypedMapKeyRuntime;
+
+    #[async_trait::async_trait]
+    impl UdfImpl for MistypedMapKeyRuntime {
+        async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
+            unimplemented!()
+        }
+
+        async fn call_table_function<'a>(
+            &'a self,
+            _input: &'a RecordBatch,
+        ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
+            unimplemented!()
+        }
+
+        async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+            // Violates the declared `map(varchar, int)`: the key is float64, which RW's
+            // `MapType` cannot represent at all.
+            let entries_fields: Fields = vec![
+                Field::new("key", ArrowDataType::Float64, false),
+                Field::new("value", ArrowDataType::Int32, true),
+            ]
+            .into();
+            let entries = StructArray::new(
+                entries_fields.clone(),
+                vec![
+                    Arc::new(Float64Array::from(vec![Some(1.5)])) as ArrayRef,
+                    Arc::new(
+                        risingwave_common::array::arrow::arrow_array_udf::Int32Array::from(vec![
+                            Some(42),
+                        ]),
+                    ),
+                ],
+                None,
+            );
+            Ok(Arc::new(MapArray::new(
+                Arc::new(Field::new(
+                    "entries",
+                    ArrowDataType::Struct(entries_fields),
+                    false,
+                )),
+                risingwave_common::array::arrow::arrow_buffer_udf::OffsetBuffer::new(
+                    vec![0, 1].into(),
+                ),
+                entries,
+                None,
+                false,
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn misbehaving_runtime_invalid_map_key() {
+        let return_type = DataType::Map(risingwave_common::types::MapType::from_kv(
+            DataType::Varchar,
+            DataType::Int32,
+        ));
+        let convert = UdfArrowConvert::default();
+        let agg = UserDefinedAggregateFunction {
+            return_field: convert.to_arrow_field("", &return_type).unwrap(),
+            state_field: Field::new(
+                "state",
+                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
+                true,
+            ),
+            return_type: return_type.clone(),
+            arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
+            runtime: Box::new(MistypedMapKeyRuntime),
+        };
+
+        let state = AggregateState::Any(Box::new(State(
+            Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
+        )));
+        // Must be a graceful error, not a panic from `MapArray::data_type()`.
+        let err = agg.get_result(&state).await.unwrap_err();
+        let msg = format!("{:?}", anyhow::anyhow!(err));
+        assert!(
+            msg.contains("invalid map key type"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[tokio::test]
