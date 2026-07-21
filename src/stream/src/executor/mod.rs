@@ -102,7 +102,6 @@ mod no_op;
 mod now;
 mod over_window;
 pub mod project;
-mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
 mod sink;
@@ -169,7 +168,6 @@ pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
 pub use over_window::*;
-pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
@@ -244,10 +242,6 @@ impl ExecutorInfo {
 pub trait Execute: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
-    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
-        self.execute()
-    }
-
     fn boxed(self) -> Box<dyn Execute>
     where
         Self: Sized + Send + 'static,
@@ -290,10 +284,6 @@ impl Executor {
 
     pub fn execute(self) -> BoxedMessageStream {
         self.execute.execute()
-    }
-
-    pub fn execute_with_epoch(self, epoch: u64) -> BoxedMessageStream {
-        self.execute.execute_with_epoch(epoch)
     }
 }
 
