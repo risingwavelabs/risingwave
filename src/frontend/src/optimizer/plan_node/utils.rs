@@ -46,7 +46,6 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
-use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
@@ -468,32 +467,15 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
-/// Check that all leaf nodes must be stream table scan,
-/// since that plan node maps to `backfill` executor, which supports recovery.
-/// Some other leaf nodes like `StreamValues` do not support recovery, and they
-/// cannot use background ddl.
+/// Check that all leaf nodes support background DDL.
+/// Some leaf nodes like `StreamValues` do not support recovery, and they cannot
+/// use background DDL.
 pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if plan.as_stream_source_scan().is_some()
+        plan.as_stream_source_scan().is_some()
             || plan.as_stream_now().is_some()
             || plan.as_stream_source().is_some()
-        {
-            true
-        } else if let Some(scan) = plan.as_stream_table_scan() {
-            #[expect(deprecated)]
-            match scan.stream_scan_type() {
-                StreamScanType::Backfill
-                | StreamScanType::ArrangementBackfill
-                | StreamScanType::CrossDbSnapshotBackfill
-                | StreamScanType::SnapshotBackfill => true,
-                StreamScanType::Unspecified => unreachable!(),
-                StreamScanType::Chain
-                | StreamScanType::Rearrange
-                | StreamScanType::UpstreamOnly => false,
-            }
-        } else {
-            false
-        }
+            || plan.as_stream_table_scan().is_some()
     } else {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_can_use_background_ddl)
