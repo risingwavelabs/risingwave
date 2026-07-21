@@ -262,7 +262,58 @@ mod tests {
         let err = agg.get_result(&state).await.unwrap_err();
         let msg = format!("{:?}", anyhow::anyhow!(err));
         assert!(
-            msg.contains("diverges from the expected field type"),
+            msg.contains("declared return type"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[derive(Debug)]
+    struct MistypedScalarRuntime;
+
+    #[async_trait::async_trait]
+    impl UdfImpl for MistypedScalarRuntime {
+        async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
+            unimplemented!()
+        }
+
+        async fn call_table_function<'a>(
+            &'a self,
+            _input: &'a RecordBatch,
+        ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
+            unimplemented!()
+        }
+
+        async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+            // Violates the declared `bigint`: the output is int32.
+            Ok(Arc::new(
+                risingwave_common::array::arrow::arrow_array_udf::Int32Array::from(vec![Some(1)]),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn misbehaving_runtime_mistyped_scalar() {
+        let return_type = DataType::Int64;
+        let convert = UdfArrowConvert::default();
+        let agg = UserDefinedAggregateFunction {
+            return_field: convert.to_arrow_field("", &return_type).unwrap(),
+            state_field: Field::new(
+                "state",
+                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
+                true,
+            ),
+            return_type: return_type.clone(),
+            arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
+            runtime: Box::new(MistypedScalarRuntime),
+        };
+
+        let state = AggregateState::Any(Box::new(State(
+            Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
+        )));
+        let err = agg.get_result(&state).await.unwrap_err();
+        let msg = format!("{:?}", anyhow::anyhow!(err));
+        assert!(
+            msg.contains("declared return type"),
             "unexpected error: {msg}"
         );
     }
