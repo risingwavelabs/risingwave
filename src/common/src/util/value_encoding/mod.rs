@@ -228,6 +228,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
+        ScalarRefImpl::Variant(v) => serialize_str(&v.value_serialize(), buf),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
@@ -255,6 +256,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         // not exact as we use internal encoding size to estimate the json string size
         ScalarRefImpl::Jsonb(v) => v.capacity(),
+        ScalarRefImpl::Variant(v) => estimate_serialize_str_size(&v.value_serialize()),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
@@ -366,6 +368,10 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Jsonb => ScalarImpl::Jsonb(
             JsonbVal::value_deserialize(&deserialize_bytea(data))
                 .ok_or(ValueEncodingError::InvalidJsonbEncoding)?,
+        ),
+        DataType::Variant => ScalarImpl::Variant(
+            VariantVal::value_deserialize(&deserialize_bytea(data))
+                .ok_or(ValueEncodingError::InvalidVariantEncoding)?,
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),

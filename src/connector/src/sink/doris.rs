@@ -234,6 +234,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Jsonb => {
                 Ok(doris_data_type.contains("JSON") || is_variant)
             }
+            risingwave_common::types::DataType::Variant => {
+                Err(SinkError::Doris("VARIANT is not supported for Doris sink.".to_owned()))
+            }
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("INT256 is not supported for Doris sink.".to_owned()))

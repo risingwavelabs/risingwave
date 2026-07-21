@@ -41,6 +41,7 @@
 #![allow(dead_code)]
 
 use std::fmt::Write;
+use std::sync::Arc;
 
 use arrow_array::array;
 use arrow_array::cast::AsArray;
@@ -48,6 +49,7 @@ use arrow_buffer::OffsetBuffer;
 use arrow_schema::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 
 use super::arrow_schema::IntervalUnit;
 // This is important because we want to use the arrow version specified by the outer mod.
@@ -114,6 +116,7 @@ pub trait ToArrow {
             ArrayImpl::Bytea(array) => self.bytea_to_arrow(array),
             ArrayImpl::Decimal(array) => self.decimal_to_arrow(data_type, array),
             ArrayImpl::Jsonb(array) => self.jsonb_to_arrow(array),
+            ArrayImpl::Variant(array) => self.variant_to_arrow(array),
             ArrayImpl::Serial(array) => self.serial_to_arrow(array),
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
@@ -226,6 +229,14 @@ pub trait ToArrow {
     #[inline]
     fn jsonb_to_arrow(&self, array: &JsonbArray) -> Result<arrow_array::ArrayRef, ArrayError> {
         Ok(Arc::new(arrow_array::StringArray::from(array)))
+    }
+
+    // TODO(#25165): support the Parquet Variant Arrow extension layout.
+    #[inline]
+    fn variant_to_arrow(&self, _array: &VariantArray) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Err(ArrayError::to_arrow(
+            "VARIANT is not supported in Arrow conversion yet",
+        ))
     }
 
     #[inline]
@@ -358,6 +369,12 @@ pub trait ToArrow {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
+            // TODO(#25165): support the Parquet Variant Arrow extension layout.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported in Arrow conversion yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,

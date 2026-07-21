@@ -685,11 +685,18 @@ impl LogicalPlanRoot {
 
         let plan = {
             {
+                if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
+                    return Err(ErrorCode::NotSupported(
+                        err,
+                        "Using VARIANT columns as stream keys is not supported.".to_owned(),
+                    )
+                    .into());
+                }
                 if !ctx
                     .session_ctx()
                     .config()
                     .streaming_allow_jsonb_in_stream_key()
-                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                    && let Some(err) = StreamKeyChecker::jsonb().visit(self.plan.clone())
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
@@ -1308,6 +1315,7 @@ fn find_version_column_indices(
         for (index, column) in column_catalog.iter().enumerate() {
             if column.column_desc.name == version_column_name {
                 if let &DataType::Jsonb
+                | &DataType::Variant
                 | &DataType::List(_)
                 | &DataType::Struct(_)
                 | &DataType::Bytea

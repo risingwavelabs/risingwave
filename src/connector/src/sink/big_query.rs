@@ -420,6 +420,9 @@ impl BigQuerySink {
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
+            DataType::Variant => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "VARIANT is not supported for BigQuery sink."
+            ))),
             DataType::Serial => Ok("INT64".to_owned()),
             DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "INT256 is not supported for BigQuery sink."
@@ -476,6 +479,11 @@ impl BigQuerySink {
 
             DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
+            DataType::Variant => {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "VARIANT is not supported for BigQuery sink."
+                )));
+            }
             DataType::Int256 => {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "INT256 is not supported for BigQuery sink."
@@ -993,6 +1001,9 @@ fn build_protobuf_field(
         }
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
+        DataType::Variant => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("Don't support Variant")));
+        }
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
         DataType::Float32 | DataType::Int256 => {
             return Err(SinkError::BigQuery(anyhow::anyhow!(

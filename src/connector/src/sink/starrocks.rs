@@ -345,6 +345,9 @@ impl StarrocksSink {
                 "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Jsonb => Ok(starrocks_data_type.contains("json")),
+            risingwave_common::types::DataType::Variant => Err(SinkError::Starrocks(
+                "VARIANT is not supported for Starrocks sink.".to_owned(),
+            )),
             risingwave_common::types::DataType::Serial => {
                 Ok(starrocks_data_type.contains("bigint"))
             }

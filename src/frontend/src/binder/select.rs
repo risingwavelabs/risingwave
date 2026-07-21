@@ -751,6 +751,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Text => "text".to_owned(),
         AstDataType::Bytea => "bytea".to_owned(),
         AstDataType::Jsonb => "jsonb".to_owned(),
+        AstDataType::Variant => "variant".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Vector(_) => "vector".to_owned(),

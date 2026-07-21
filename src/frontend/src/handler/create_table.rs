@@ -78,7 +78,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::create_source::{
     UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns,
+    bind_source_watermark, handle_addition_columns, reject_variant_columns,
 };
 use crate::handler::util::{
     LongRunningNotificationAction, SourceSchemaCompatExt, execute_with_long_running_notification,
@@ -1535,6 +1535,8 @@ fn bind_cdc_table_schema(
     is_for_replace_plan: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     let columns = bind_sql_columns(column_defs, is_for_replace_plan)?;
+    // CDC parsers cannot produce variant values, and this path has no FORMAT/ENCODE gate.
+    reject_variant_columns(&columns, "on a table created from a CDC source")?;
 
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
     Ok((columns, pk_names))

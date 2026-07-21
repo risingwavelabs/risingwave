@@ -30,6 +30,8 @@ use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::types::DataType;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
@@ -178,7 +180,8 @@ pub fn build_graph_with_strategy(
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost(&mut state)?;
+    let mut stream_node = plan_node.to_stream_prost(&mut state)?;
+    reject_variant_in_internal_storage_key(&mut stream_node)?;
     generate_fragment_graph(&mut state, stream_node)?;
     if state.has_source_backfill && state.has_snapshot_backfill {
         return Err(RwError::from(NotSupported(
@@ -264,6 +267,40 @@ pub fn build_graph_with_strategy(
         max_parallelism,
         backfill_order,
     })
+}
+
+/// Rejects `VARIANT` (including nested) in the storage pk of any internal state table. Internal
+/// tables only materialize when the plan is lowered to protobuf, so this is the single point that
+/// covers paths no logical checker visits (e.g. a join on a nested-`VARIANT` key).
+fn reject_variant_in_internal_storage_key(stream_node: &mut StreamNode) -> Result<()> {
+    let mut err = None;
+    visit_stream_node_internal_tables(stream_node, |table, table_name| {
+        if err.is_some() {
+            return;
+        }
+        for order in &table.pk {
+            let column = &table.columns[order.column_index as usize];
+            let column_desc = column.column_desc.as_ref().unwrap();
+            let data_type: DataType = column_desc.column_type.as_ref().unwrap().into();
+            if data_type.contains_variant() {
+                err = Some(RwError::from(NotSupported(
+                    format!(
+                        "VARIANT column \"{}\" is part of the storage primary key of the internal \
+                        state table of `{}`",
+                        column_desc.name, table_name,
+                    ),
+                    "VARIANT values only have byte-wise equality and ordering, so they cannot be \
+                    used in primary keys, join keys, group keys, or ORDER BY of streaming queries."
+                        .to_owned(),
+                )));
+                return;
+            }
+        }
+    });
+    match err {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 #[cfg(any())]

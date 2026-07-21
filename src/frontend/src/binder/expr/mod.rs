@@ -1133,6 +1133,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
+        AstDataType::Variant => DataType::Variant,
         AstDataType::Vector(size) => match (1..=DataType::VEC_MAX_SIZE).contains(&(*size as _)) {
             true => DataType::Vector(*size as _),
             false => {

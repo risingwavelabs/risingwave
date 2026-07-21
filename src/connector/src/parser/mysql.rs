@@ -233,7 +233,8 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Vector(_)
+        DataType::Variant
+        | DataType::Vector(_)
         | DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)
