@@ -42,14 +42,7 @@ def handle_client(client, target_host, target_port):
     threading.Thread(target=forward, args=(upstream, client), daemon=True).start()
 
 
-def listen(family, host, listen_port, target_host, target_port):
-    server = socket.socket(family, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if family == socket.AF_INET6:
-        server.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
-    server.bind((host, listen_port))
-    server.listen(128)
-
+def accept_loop(server, target_host, target_port):
     while True:
         client, _ = server.accept()
         threading.Thread(
@@ -59,23 +52,39 @@ def listen(family, host, listen_port, target_host, target_port):
         ).start()
 
 
+def bind_listener(family, host, listen_port):
+    server = socket.socket(family, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        server.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    server.bind((host, listen_port))
+    server.listen(128)
+    return server
+
+
+def listen_specs(listen_hosts):
+    hosts = listen_hosts or ["127.0.0.1", "::1"]
+    return [
+        (socket.AF_INET6 if ":" in host else socket.AF_INET, host) for host in hosts
+    ]
+
+
 def serve(args):
     target_port = int(args.target_port)
     listen_port = int(args.listen_port)
-    threads = [
+    servers = []
+    for family, host in listen_specs(args.listen_host):
+        try:
+            servers.append(bind_listener(family, host, listen_port))
+        except OSError as e:
+            raise RuntimeError(f"failed to listen on {host}:{listen_port}: {e}") from e
+
+    for server in servers:
         threading.Thread(
-            target=listen,
-            args=(socket.AF_INET, "127.0.0.1", listen_port, args.target_host, target_port),
+            target=accept_loop,
+            args=(server, args.target_host, target_port),
             daemon=True,
-        ),
-        threading.Thread(
-            target=listen,
-            args=(socket.AF_INET6, "::1", listen_port, args.target_host, target_port),
-            daemon=True,
-        ),
-    ]
-    for thread in threads:
-        thread.start()
+        ).start()
     while True:
         time.sleep(3600)
 
@@ -98,18 +107,36 @@ def stop_pid(pid_file):
             pass
 
 
-def wait_ready(port):
+def read_log_tail(log_file):
+    try:
+        with open(log_file, "rb") as f:
+            tail = f.read()[-4096:]
+            return tail.decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def wait_ready(port, listen_hosts, proc, log_file):
     deadline = time.time() + 10
+    hosts = listen_hosts or ["127.0.0.1", "::1"]
+    last_error = None
     while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(
+                f"proxy process exited before becoming ready:\n{read_log_tail(log_file)}"
+            )
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=1):
-                pass
-            with socket.create_connection(("::1", port), timeout=1):
-                pass
+            for host in hosts:
+                with socket.create_connection((host, port), timeout=1):
+                    pass
             return
-        except OSError:
+        except OSError as e:
+            last_error = e
             time.sleep(0.1)
-    raise TimeoutError(f"proxy on port {port} did not become ready")
+    raise TimeoutError(
+        f"proxy on {','.join(hosts)}:{port} did not become ready: {last_error}\n"
+        f"{read_log_tail(log_file)}"
+    )
 
 
 def start(args):
@@ -127,12 +154,14 @@ def start(args):
         "--listen-port",
         args.listen_port,
     ]
+    for listen_host in args.listen_host or []:
+        cmd.extend(["--listen-host", listen_host])
     proc = subprocess.Popen(cmd, stdout=log, stderr=log, close_fds=True)
     with open(args.pid_file, "w") as f:
         f.write(str(proc.pid))
 
     try:
-        wait_ready(int(args.listen_port))
+        wait_ready(int(args.listen_port), args.listen_host, proc, args.log_file)
     except Exception:
         proc.terminate()
         raise
@@ -146,6 +175,7 @@ def main():
     start_parser.add_argument("--target-host", required=True)
     start_parser.add_argument("--target-port", required=True)
     start_parser.add_argument("--listen-port", required=True)
+    start_parser.add_argument("--listen-host", action="append")
     start_parser.add_argument("--pid-file", required=True)
     start_parser.add_argument("--log-file", required=True)
 
@@ -153,6 +183,7 @@ def main():
     serve_parser.add_argument("--target-host", required=True)
     serve_parser.add_argument("--target-port", required=True)
     serve_parser.add_argument("--listen-port", required=True)
+    serve_parser.add_argument("--listen-host", action="append")
 
     stop_parser = subparsers.add_parser("stop")
     stop_parser.add_argument("--pid-file", required=True)
