@@ -86,6 +86,17 @@ impl AggregateFunction for UserDefinedAggregateFunction {
         let state = &state.downcast_ref::<State>().0;
         let arrow_output = self.runtime.call_agg_finish(state).await?;
         let output = UdfArrowConvert::default().from_array(&self.return_field, &arrow_output)?;
+        // The UDF runtime is external input: a server may drift from the signature it was
+        // checked against at creation time. Surface a mistyped result instead of letting it
+        // corrupt downstream value encoding.
+        if output.data_type() != self.return_type {
+            return Err(anyhow::anyhow!(
+                "UDF returned a value of type {} while the declared return type is {}",
+                output.data_type(),
+                self.return_type
+            )
+            .into());
+        }
         Ok(output.datum_at(0))
     }
 
@@ -174,4 +185,85 @@ pub fn new_user_defined(
         arg_schema,
         runtime,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+    use futures::stream::BoxStream;
+    use risingwave_common::array::arrow::arrow_array_udf::{
+        BooleanArray, Int64Array, RecordBatch, StringArray, StructArray,
+    };
+    use risingwave_common::array::arrow::arrow_schema_udf::DataType as ArrowDataType;
+    use risingwave_common::types::StructType;
+
+    use super::*;
+    use crate::sig::UdfImpl;
+
+    #[derive(Debug)]
+    struct MisbehavingRuntime;
+
+    #[async_trait::async_trait]
+    impl UdfImpl for MisbehavingRuntime {
+        async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
+            unimplemented!()
+        }
+
+        async fn call_table_function<'a>(
+            &'a self,
+            _input: &'a RecordBatch,
+        ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
+            unimplemented!()
+        }
+
+        async fn call_agg_create_state(&self) -> Result<ArrayRef> {
+            Ok(Arc::new(Int64Array::from(vec![0i64])))
+        }
+
+        async fn call_agg_accumulate_or_retract(
+            &self,
+            state: &ArrayRef,
+            _ops: &BooleanArray,
+            _input: &RecordBatch,
+        ) -> Result<ArrayRef> {
+            Ok(state.clone())
+        }
+
+        async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
+            // Violates the declared `struct<a bigint>`: child `a` is utf8.
+            let fields: Fields = vec![Field::new("a", ArrowDataType::Utf8, true)].into();
+            Ok(Arc::new(StructArray::new(
+                fields,
+                vec![Arc::new(StringArray::from(vec![Some("oops")])) as ArrayRef],
+                None,
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn misbehaving_runtime_mistyped_struct_child() {
+        let return_type = DataType::Struct(StructType::new(vec![("a", DataType::Int64)]));
+        let convert = UdfArrowConvert::default();
+        let agg = UserDefinedAggregateFunction {
+            return_field: convert.to_arrow_field("", &return_type).unwrap(),
+            state_field: Field::new(
+                "state",
+                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
+                true,
+            ),
+            return_type: return_type.clone(),
+            arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
+            runtime: Box::new(MisbehavingRuntime),
+        };
+
+        let state = AggregateState::Any(Box::new(State(
+            Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
+        )));
+        let err = agg.get_result(&state).await.unwrap_err();
+        let msg = format!("{:?}", anyhow::anyhow!(err));
+        assert!(
+            msg.contains("diverges from the expected field type"),
+            "unexpected error: {msg}"
+        );
+    }
 }
