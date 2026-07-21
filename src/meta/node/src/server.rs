@@ -465,6 +465,15 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    // Register before the barrier manager starts recovery. Dirty creating-job cleanup emits local
+    // serving mapping deletes, which must not be dropped during bootstrap.
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping.clone(),
+        env.session_params_manager_impl_ref(),
+    ));
+
     let iceberg_pk_index_sink_manager =
         IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
     tracing::info!("IcebergPkIndexSinkManager started");
@@ -703,13 +712,6 @@ pub async fn start_service_as_election_leader(
     sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
         iceberg_compaction_mgr.clone(),
         iceberg_compactor_event_rx,
-    ));
-
-    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
-        env.notification_manager_ref(),
-        metadata_manager.clone(),
-        serving_vnode_mapping,
-        env.session_params_manager_impl_ref(),
     ));
 
     {
