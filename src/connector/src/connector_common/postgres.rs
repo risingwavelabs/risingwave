@@ -176,7 +176,7 @@ pub fn pg_connection_config_from_properties(
     })
 }
 
-fn postgres_ip_version_from_properties(
+pub fn postgres_ip_version_from_properties(
     props: &BTreeMap<String, String>,
 ) -> ConnectorResult<IpVersion> {
     props
