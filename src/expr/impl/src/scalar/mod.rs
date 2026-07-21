@@ -103,3 +103,4 @@ mod trim_array;
 mod tumble;
 mod upper;
 mod vector;
+mod volatile;
