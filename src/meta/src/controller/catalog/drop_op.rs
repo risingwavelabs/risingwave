@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
+use risingwave_meta_model::cdc_table_snapshot_split;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
@@ -384,6 +385,21 @@ impl CatalogController {
             .await?
             .into_iter()
             .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
+        // Clean up CDC backfill state (cdc_table_snapshot_splits) for removed streaming jobs.
+        //
+        // Without this, dropping a CDC-sourced table and recreating one with the same name on
+        // the same source would silently skip snapshot backfill, because the leftover state
+        // makes CdcBackfill believe backfill has already finished. See issue #26355.
+        if !removed_streaming_job_ids.is_empty() {
+            cdc_table_snapshot_split::Entity::delete_many()
+                .filter(
+                    cdc_table_snapshot_split::Column::TableId
+                        .is_in(removed_streaming_job_ids.clone()),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))
