@@ -192,19 +192,21 @@ mod tests {
     use anyhow::Result;
     use futures::stream::BoxStream;
     use risingwave_common::array::arrow::arrow_array_udf::{
-        BooleanArray, Float64Array, Int64Array, MapArray, RecordBatch, StringArray, StructArray,
+        Float64Array, Int32Array, Int64Array, MapArray, RecordBatch, StringArray, StructArray,
     };
+    use risingwave_common::array::arrow::arrow_buffer_udf::OffsetBuffer;
     use risingwave_common::array::arrow::arrow_schema_udf::DataType as ArrowDataType;
-    use risingwave_common::types::StructType;
+    use risingwave_common::types::{MapType, StructType};
 
     use super::*;
     use crate::sig::UdfImpl;
 
+    /// Returns the given array from `finish`, regardless of the declared return type.
     #[derive(Debug)]
-    struct MisbehavingRuntime;
+    struct MistypedRuntime(ArrayRef);
 
     #[async_trait::async_trait]
-    impl UdfImpl for MisbehavingRuntime {
+    impl UdfImpl for MistypedRuntime {
         async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
             unimplemented!()
         }
@@ -216,187 +218,87 @@ mod tests {
             unimplemented!()
         }
 
-        async fn call_agg_create_state(&self) -> Result<ArrayRef> {
-            Ok(Arc::new(Int64Array::from(vec![0i64])))
-        }
-
-        async fn call_agg_accumulate_or_retract(
-            &self,
-            state: &ArrayRef,
-            _ops: &BooleanArray,
-            _input: &RecordBatch,
-        ) -> Result<ArrayRef> {
-            Ok(state.clone())
-        }
-
         async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
-            // Violates the declared `struct<a bigint>`: child `a` is utf8.
-            let fields: Fields = vec![Field::new("a", ArrowDataType::Utf8, true)].into();
-            Ok(Arc::new(StructArray::new(
-                fields,
-                vec![Arc::new(StringArray::from(vec![Some("oops")])) as ArrayRef],
-                None,
-            )))
+            Ok(self.0.clone())
         }
     }
 
-    #[tokio::test]
-    async fn misbehaving_runtime_mistyped_struct_child() {
-        let return_type = DataType::Struct(StructType::new(vec![("a", DataType::Int64)]));
+    /// Drives `get_result` with a runtime that returns `output` and yields the error message.
+    async fn get_result_err(return_type: DataType, output: ArrayRef) -> String {
         let convert = UdfArrowConvert::default();
         let agg = UserDefinedAggregateFunction {
             return_field: convert.to_arrow_field("", &return_type).unwrap(),
-            state_field: Field::new(
-                "state",
-                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
-                true,
-            ),
-            return_type: return_type.clone(),
+            state_field: Field::new("state", ArrowDataType::Binary, true),
+            return_type,
             arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
-            runtime: Box::new(MisbehavingRuntime),
+            runtime: Box::new(MistypedRuntime(output)),
         };
-
         let state = AggregateState::Any(Box::new(State(
             Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
         )));
         let err = agg.get_result(&state).await.unwrap_err();
-        let msg = format!("{:?}", anyhow::anyhow!(err));
+        format!("{:?}", anyhow::anyhow!(err))
+    }
+
+    #[tokio::test]
+    async fn misbehaving_runtime_mistyped_finish() {
+        // Struct child diverges from the declared `struct<a bigint>`.
+        let fields: Fields = vec![Field::new("a", ArrowDataType::Utf8, true)].into();
+        let struct_output: ArrayRef = Arc::new(StructArray::new(
+            fields,
+            vec![Arc::new(StringArray::from(vec![Some("oops")])) as ArrayRef],
+            None,
+        ));
+        let msg = get_result_err(
+            DataType::Struct(StructType::new(vec![("a", DataType::Int64)])),
+            struct_output,
+        )
+        .await;
         assert!(
             msg.contains("declared return type"),
             "unexpected error: {msg}"
         );
-    }
 
-    #[derive(Debug)]
-    struct MistypedScalarRuntime;
+        // Scalar output diverges from the declared `bigint`.
+        let msg = get_result_err(DataType::Int64, Arc::new(Int32Array::from(vec![Some(1)]))).await;
+        assert!(
+            msg.contains("declared return type"),
+            "unexpected error: {msg}"
+        );
 
-    #[async_trait::async_trait]
-    impl UdfImpl for MistypedScalarRuntime {
-        async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
-            unimplemented!()
-        }
-
-        async fn call_table_function<'a>(
-            &'a self,
-            _input: &'a RecordBatch,
-        ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
-            unimplemented!()
-        }
-
-        async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
-            // Violates the declared `bigint`: the output is int32.
-            Ok(Arc::new(
-                risingwave_common::array::arrow::arrow_array_udf::Int32Array::from(vec![Some(1)]),
-            ))
-        }
-    }
-
-    #[derive(Debug)]
-    struct MistypedMapKeyRuntime;
-
-    #[async_trait::async_trait]
-    impl UdfImpl for MistypedMapKeyRuntime {
-        async fn call(&self, _input: &RecordBatch) -> Result<RecordBatch> {
-            unimplemented!()
-        }
-
-        async fn call_table_function<'a>(
-            &'a self,
-            _input: &'a RecordBatch,
-        ) -> Result<BoxStream<'a, Result<RecordBatch>>> {
-            unimplemented!()
-        }
-
-        async fn call_agg_finish(&self, _state: &ArrayRef) -> Result<ArrayRef> {
-            // Violates the declared `map(varchar, int)`: the key is float64, which RW's
-            // `MapType` cannot represent at all.
-            let entries_fields: Fields = vec![
-                Field::new("key", ArrowDataType::Float64, false),
-                Field::new("value", ArrowDataType::Int32, true),
-            ]
-            .into();
-            let entries = StructArray::new(
-                entries_fields.clone(),
-                vec![
-                    Arc::new(Float64Array::from(vec![Some(1.5)])) as ArrayRef,
-                    Arc::new(
-                        risingwave_common::array::arrow::arrow_array_udf::Int32Array::from(vec![
-                            Some(42),
-                        ]),
-                    ),
-                ],
-                None,
-            );
-            Ok(Arc::new(MapArray::new(
-                Arc::new(Field::new(
-                    "entries",
-                    ArrowDataType::Struct(entries_fields),
-                    false,
-                )),
-                risingwave_common::array::arrow::arrow_buffer_udf::OffsetBuffer::new(
-                    vec![0, 1].into(),
-                ),
-                entries,
-                None,
+        // Map key type is unrepresentable in RW: must be a graceful error, not a panic
+        // from `MapArray::data_type()`.
+        let entries_fields: Fields = vec![
+            Field::new("key", ArrowDataType::Float64, false),
+            Field::new("value", ArrowDataType::Int32, true),
+        ]
+        .into();
+        let entries = StructArray::new(
+            entries_fields.clone(),
+            vec![
+                Arc::new(Float64Array::from(vec![Some(1.5)])) as ArrayRef,
+                Arc::new(Int32Array::from(vec![Some(42)])),
+            ],
+            None,
+        );
+        let map_output: ArrayRef = Arc::new(MapArray::new(
+            Arc::new(Field::new(
+                "entries",
+                ArrowDataType::Struct(entries_fields),
                 false,
-            )))
-        }
-    }
-
-    #[tokio::test]
-    async fn misbehaving_runtime_invalid_map_key() {
-        let return_type = DataType::Map(risingwave_common::types::MapType::from_kv(
-            DataType::Varchar,
-            DataType::Int32,
+            )),
+            OffsetBuffer::new(vec![0, 1].into()),
+            entries,
+            None,
+            false,
         ));
-        let convert = UdfArrowConvert::default();
-        let agg = UserDefinedAggregateFunction {
-            return_field: convert.to_arrow_field("", &return_type).unwrap(),
-            state_field: Field::new(
-                "state",
-                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
-                true,
-            ),
-            return_type: return_type.clone(),
-            arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
-            runtime: Box::new(MistypedMapKeyRuntime),
-        };
-
-        let state = AggregateState::Any(Box::new(State(
-            Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
-        )));
-        // Must be a graceful error, not a panic from `MapArray::data_type()`.
-        let err = agg.get_result(&state).await.unwrap_err();
-        let msg = format!("{:?}", anyhow::anyhow!(err));
+        let msg = get_result_err(
+            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+            map_output,
+        )
+        .await;
         assert!(
             msg.contains("invalid map key type"),
-            "unexpected error: {msg}"
-        );
-    }
-
-    #[tokio::test]
-    async fn misbehaving_runtime_mistyped_scalar() {
-        let return_type = DataType::Int64;
-        let convert = UdfArrowConvert::default();
-        let agg = UserDefinedAggregateFunction {
-            return_field: convert.to_arrow_field("", &return_type).unwrap(),
-            state_field: Field::new(
-                "state",
-                risingwave_common::array::arrow::arrow_schema_udf::DataType::Binary,
-                true,
-            ),
-            return_type: return_type.clone(),
-            arg_schema: Arc::new(Schema::new(Vec::<Field>::new())),
-            runtime: Box::new(MistypedScalarRuntime),
-        };
-
-        let state = AggregateState::Any(Box::new(State(
-            Arc::new(Int64Array::from(vec![0i64])) as ArrayRef
-        )));
-        let err = agg.get_result(&state).await.unwrap_err();
-        let msg = format!("{:?}", anyhow::anyhow!(err));
-        assert!(
-            msg.contains("declared return type"),
             "unexpected error: {msg}"
         );
     }
