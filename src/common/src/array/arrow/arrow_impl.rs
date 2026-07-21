@@ -1003,7 +1003,7 @@ pub trait FromArrow {
                 .map(|(column, field)| self.from_array(field, column).map(Arc::new))
                 .try_collect()
         };
-        let columns = if expected_fields == actual_fields {
+        let columns: Vec<Arc<ArrayImpl>> = if expected_fields == actual_fields {
             // Exact match (including all nested fields and metadata): zip in order.
             decode_positionally(expected_fields)?
         } else {
@@ -1042,8 +1042,22 @@ pub trait FromArrow {
             }
         };
 
+        // The result is stamped with the expected struct type below, so a child decoded to a
+        // different type would silently lie about its contents. Guard the trust boundary here.
+        let struct_type = self.from_fields(expected_fields)?;
+        for ((name, field_ty), column) in struct_type.iter().zip_eq_fast(columns.iter()) {
+            if column.data_type() != *field_ty {
+                return Err(ArrayError::from_arrow(format!(
+                    "decoded struct child `{}` diverges from the expected field type: expected {}, got {}",
+                    name,
+                    field_ty,
+                    column.data_type(),
+                )));
+            }
+        }
+
         Ok(ArrayImpl::Struct(StructArray::new(
-            self.from_fields(expected_fields)?,
+            struct_type,
             columns,
             (0..len).map(|i| array.is_valid(i)).collect(),
         )))
@@ -2183,6 +2197,34 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("unable to align struct fields: expected [a, b], actual [a]"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_struct_child_type_divergence_errors() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        // Same child name, different type: decode would stamp the declared type onto a
+        // mistyped child, so it must error instead.
+        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+            vec![ArrowField::new("a", ArrowType::Utf8, true)].into(),
+            vec![Arc::new(arrow_array::StringArray::from(vec![Some("oops")]))],
+            None,
+        ));
+        let declared_field = ArrowField::new(
+            "s",
+            ArrowType::Struct(vec![ArrowField::new("a", ArrowType::Int64, true)].into()),
+            true,
+        );
+
+        let err = Dummy.from_array(&declared_field, &array).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("decoded struct child `a` diverges from the expected field type"),
             "unexpected error: {err}"
         );
     }
