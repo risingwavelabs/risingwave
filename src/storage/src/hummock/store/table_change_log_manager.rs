@@ -145,7 +145,7 @@ impl TableChangeLogManager {
                     {
                         return None;
                     }
-                    Some((key.clone(), inflight.clone()))
+                    Some((key, inflight.clone()))
                 } else {
                     None
                 }
