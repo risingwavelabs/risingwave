@@ -60,15 +60,9 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
             let password = eval_args[3].clone();
             let database = eval_args[4].clone();
             let query = eval_args[5].clone();
-            let (ssl_mode, ssl_root_cert, ip_version) = match eval_args.len() {
-                7 => (None, None, eval_args.get(6).cloned()),
-                9 => (
-                    eval_args.get(6).cloned(),
-                    eval_args.get(7).cloned(),
-                    eval_args.get(8).cloned(),
-                ),
-                _ => (None, None, None),
-            };
+            let ssl_mode = eval_args.get(6).cloned();
+            let ssl_root_cert = eval_args.get(7).cloned();
+            let ip_version = eval_args.get(8).cloned();
 
             Some(
                 LogicalPostgresQuery::new(generic::PostgresQuery {

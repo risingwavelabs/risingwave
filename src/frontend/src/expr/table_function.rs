@@ -40,7 +40,6 @@ use crate::utils::FRONTEND_RUNTIME;
 
 const INLINE_ARG_LEN: usize = 6;
 const CDC_SOURCE_ARG_LEN: usize = 2;
-const POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION: usize = 7;
 const POSTGRES_QUERY_CDC_ARG_LEN: usize = 9;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
@@ -309,11 +308,8 @@ impl TableFunction {
         function_name: &str,
     ) -> RwResult<Vec<ExprImpl>> {
         let cast_args = match args.len() {
-            len if len == INLINE_ARG_LEN
-                || (expect_connector_name.eq_ignore_ascii_case("postgres-cdc")
-                    && len == POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION) =>
-            {
-                let mut cast_args = Vec::with_capacity(args.len());
+            INLINE_ARG_LEN => {
+                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
                 for arg in args {
                     let arg = arg.cast_implicit(&DataType::Varchar)?;
                     cast_args.push(arg);
@@ -371,15 +367,9 @@ impl TableFunction {
                 args_vec
             }
             _ => {
-                let message = if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
-                    format!(
-                        "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar), 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar), or 7 arguments with ip_version appended"
-                    )
-                } else {
-                    format!(
-                        "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)"
-                    )
-                };
+                let message = format!(
+                    "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)"
+                );
                 return Err(BindError(message).into());
             }
         };
@@ -735,13 +725,9 @@ impl TableFunction {
 }
 
 fn postgres_query_ip_version_arg(evaled_args: &[String]) -> anyhow::Result<IpVersion> {
-    let raw = match evaled_args.len() {
-        POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION => evaled_args.get(6),
-        POSTGRES_QUERY_CDC_ARG_LEN => evaled_args.get(8),
-        _ => None,
-    };
-
-    raw.filter(|s| !s.is_empty())
+    evaled_args
+        .get(8)
+        .filter(|s| evaled_args.len() == POSTGRES_QUERY_CDC_ARG_LEN && !s.is_empty())
         .map(|s| {
             s.parse::<IpVersion>()
                 .with_context(|| format!("invalid postgres ip.version `{}`", s))
