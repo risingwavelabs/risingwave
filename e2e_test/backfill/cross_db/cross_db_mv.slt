@@ -109,9 +109,9 @@ select count(*) from rw_ddl_progress;
 sleep 2s
 
 query I
-select count(*) from mv_rate_limit;
+select count(*) from rw_ddl_progress;
 ----
-0
+1
 
 statement ok
 alter materialized view mv_rate_limit set backfill_rate_limit = 1000;
