@@ -27,6 +27,7 @@ use crate::optimizer::plan_node::{
     StreamPlanRef as PlanRef,
 };
 use crate::optimizer::plan_rewriter::PlanRewriter;
+use crate::optimizer::property::WatermarkColumns;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,7 +46,8 @@ impl StreamSyncLogStore {
             input.distribution().clone(),
             input.stream_kind(),
             input.emit_on_window_close(),
-            input.watermark_columns().clone(),
+            // Sync log store executors currently drop watermark messages.
+            WatermarkColumns::new(),
             input.columns_monotonicity().clone(),
         );
 
@@ -115,5 +117,22 @@ impl PlanRewriter<Stream> for EnsureSyncLogStoreFragmentRootRewriter {
         }
 
         plan.clone_root_with_inputs(&inputs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OptimizerContext;
+    use crate::optimizer::plan_node::{StreamNow, generic};
+
+    #[test]
+    fn does_not_propagate_watermark_columns() {
+        let input: PlanRef =
+            StreamNow::new(generic::Now::update_current(OptimizerContext::mock())).into();
+        assert!(!input.watermark_columns().is_empty());
+
+        let log_store = StreamSyncLogStore::new(input);
+        assert!(log_store.watermark_columns().is_empty());
     }
 }
