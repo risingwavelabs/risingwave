@@ -651,6 +651,21 @@
     └─BatchLookupJoin { type: Inner, predicate: d.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (t1.d > 9:Int32), output: [], lookup table: t1 }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: d, columns: [d.t1._row_id], scan_ranges: [d.a = Int32(1)], distribution: SomeShard }
+- name: covering index with residual predicate outside the index
+  sql: |
+    create materialized view mc as select 1 as id, 'a' as val, 'x' as tag;
+    create index mc_idx on mc (id) include (val);
+    select 1 from mc where id = 1 and tag = 'x';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
+        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: Single }
+  batch_local_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
+        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: SomeShard }
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);

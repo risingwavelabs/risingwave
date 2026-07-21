@@ -25,6 +25,7 @@ pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::license::LicenseKey;
+use risingwave_common::system_param::StateStoreUrl;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -140,7 +141,7 @@ pub struct MetaNodeOpts {
     /// State store url
     #[clap(long, hide = true, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
-    pub state_store: Option<String>,
+    pub state_store: Option<StateStoreUrl>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, hide = true, env = "RW_DATA_DIRECTORY")]
@@ -321,6 +322,9 @@ pub fn start(
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
+        let snapshot_backfill_finish_max_lagged_barriers = config
+            .streaming
+            .snapshot_backfill_finish_max_lagged_barriers;
         let privatelink_endpoint_default_tags =
             opts.privatelink_endpoint_default_tags.map(|tags| {
                 tags.split(',')
@@ -381,6 +385,7 @@ pub fn start(
                     .meta
                     .parallelism_control_trigger_first_delay_sec,
                 in_flight_barrier_nums,
+                snapshot_backfill_finish_max_lagged_barriers,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,

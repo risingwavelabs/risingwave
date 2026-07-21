@@ -46,7 +46,12 @@ pub struct HttpConfig {
 
     /// Sink type, must be "append-only".
     pub r#type: String,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(HttpConfig);
 
 impl EnforceSecret for HttpConfig {}
 
@@ -93,6 +98,7 @@ fn validate_http_sink(
     url: Option<&str>,
     content_type: Option<&str>,
     headers: &BTreeMap<String, String>,
+    unknown_fields: std::collections::HashMap<String, String>,
 ) -> Result<HttpSink> {
     if !is_append_only && !ignore_delete {
         return Err(SinkError::Config(anyhow!(
@@ -204,6 +210,7 @@ fn validate_http_sink(
         url,
         payload_index,
         header_map,
+        unknown_fields,
     })
 }
 
@@ -212,6 +219,7 @@ pub struct HttpSink {
     url: HttpUrl,
     payload_index: usize,
     header_map: HeaderMap,
+    unknown_fields: std::collections::HashMap<String, String>,
 }
 
 impl EnforceSecret for HttpSink {
@@ -238,6 +246,7 @@ impl TryFrom<SinkParam> for HttpSink {
             config.url.as_deref(),
             config.content_type.as_deref(),
             &headers,
+            config.unknown_fields,
         )
     }
 }
@@ -246,6 +255,10 @@ impl Sink for HttpSink {
     type LogSinker = AsyncTruncateLogSinkerOf<HttpSinkWriter>;
 
     const SINK_NAME: &'static str = HTTP_SINK;
+
+    fn validate_unknown_fields(&self) -> Result<()> {
+        crate::sink::validate_sink_unknown_fields(&self.unknown_fields)
+    }
 
     async fn validate(&self) -> Result<()> {
         Ok(())

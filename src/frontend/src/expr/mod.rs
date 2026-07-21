@@ -927,19 +927,16 @@ impl ExprImpl {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.func_type() == ExprType::In
         {
-            let mut inputs = function_call.inputs().iter().cloned();
-            let input_ref = match inputs.next().unwrap() {
-                ExprImpl::InputRef(i) => *i,
+            let (input, list) = function_call.inputs().split_first()?;
+            let input_ref = match input {
+                ExprImpl::InputRef(i) => i.as_ref().clone(),
                 _ => return None,
             };
-            let list: Vec<_> = inputs
-                .inspect(|expr| {
-                    // Non constant IN will be bound to OR
-                    assert!(expr.is_const());
-                })
-                .collect();
+            if !list.iter().all(ExprImpl::is_const) {
+                return None;
+            }
 
-            Some((input_ref, list))
+            Some((input_ref, list.to_vec()))
         } else {
             None
         }
