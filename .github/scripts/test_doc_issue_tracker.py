@@ -5,6 +5,7 @@ import unittest
 from doc_issue_tracker import (
     GitHubApiError,
     analyze_event,
+    analyze_event_with_canonical_pr,
     canonical_pr_number,
     find_tracking_issues,
     merge_tracking_body,
@@ -117,6 +118,141 @@ class AnalyzeEventTest(unittest.TestCase):
             {"action": "closed", "pull_request": pull_request(merged=False)}
         )
         self.assertFalse(result.should_process)
+
+    def test_backport_uses_canonical_pr_checkbox(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["cherry-pick"],
+        )
+        canonical = pull_request(number=100)
+
+        result = analyze_event(
+            {"action": "closed", "pull_request": backport}, canonical
+        )
+
+        self.assertTrue(result.should_process)
+        self.assertEqual(result.canonical_pr_number, 100)
+
+    def test_backport_uses_canonical_pr_docs_label(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["cherry-pick"],
+        )
+        canonical = pull_request(
+            number=100, body="", labels=["user-facing-changes"]
+        )
+
+        result = analyze_event(
+            {"action": "closed", "pull_request": backport}, canonical
+        )
+
+        self.assertTrue(result.should_process)
+
+    def test_backport_trigger_label_does_not_override_canonical_pr(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["user-facing-changes"],
+        )
+        canonical = pull_request(number=100, body="", labels=[])
+
+        result = analyze_event(
+            {
+                "action": "labeled",
+                "label": {"name": "user-facing-changes"},
+                "pull_request": backport,
+            },
+            canonical,
+        )
+
+        self.assertFalse(result.should_process)
+        self.assertEqual(result.reason, "documentation_not_required")
+
+
+class AnalyzeEventWithCanonicalPullRequestTest(unittest.TestCase):
+    def test_fetches_canonical_pr_for_backport_eligibility(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["cherry-pick"],
+        )
+        canonical = pull_request(number=100)
+
+        class SourceApi:
+            def request(self, method, path):
+                self.last_request = (method, path)
+                return canonical
+
+        api = SourceApi()
+        result = analyze_event_with_canonical_pr(
+            api,
+            "risingwavelabs/risingwave",
+            {"action": "closed", "pull_request": backport},
+        )
+
+        self.assertTrue(result.should_process)
+        self.assertEqual(result.canonical_pr_number, 100)
+        self.assertEqual(
+            api.last_request,
+            ("GET", "/repos/risingwavelabs/risingwave/pulls/100"),
+        )
+
+    def test_irrelevant_backport_label_does_not_fetch_canonical_pr(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["cherry-pick"],
+        )
+
+        class SourceApi:
+            def request(self, method, path):
+                raise AssertionError((method, path))
+
+        result = analyze_event_with_canonical_pr(
+            SourceApi(),
+            "risingwavelabs/risingwave",
+            {
+                "action": "labeled",
+                "label": {"name": "cherry-pick"},
+                "pull_request": backport,
+            },
+        )
+
+        self.assertFalse(result.should_process)
+        self.assertEqual(result.reason, "irrelevant_label:cherry-pick")
+
+    def test_missing_canonical_pr_falls_back_to_trigger_pr_eligibility(self):
+        backport = pull_request(
+            number=200,
+            base_ref="release-3.0",
+            body="Original-PR: risingwavelabs/risingwave#100",
+            labels=["cherry-pick"],
+        )
+
+        class SourceApi:
+            def request(self, method, path):
+                if path.endswith("/pulls/100"):
+                    raise GitHubApiError(method, path, 404, "not found")
+                if path.endswith("/pulls/200"):
+                    return backport
+                raise AssertionError((method, path))
+
+        result = analyze_event_with_canonical_pr(
+            SourceApi(),
+            "risingwavelabs/risingwave",
+            {"action": "closed", "pull_request": backport},
+        )
+
+        self.assertFalse(result.should_process)
+        self.assertEqual(result.canonical_pr_number, 200)
+        self.assertEqual(result.reason, "documentation_not_required")
 
 
 class ResolveCanonicalPullRequestTest(unittest.TestCase):

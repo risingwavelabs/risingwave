@@ -75,9 +75,15 @@ def canonical_pr_number(pr: dict[str, Any]) -> int:
     return number
 
 
-def analyze_event(event: dict[str, Any]) -> Analysis:
+def analyze_event(
+    event: dict[str, Any], documentation_pr: dict[str, Any] | None = None
+) -> Analysis:
     pr = event["pull_request"]
-    number = canonical_pr_number(pr)
+    number = (
+        int(documentation_pr["number"])
+        if documentation_pr is not None
+        else canonical_pr_number(pr)
+    )
 
     if not pr.get("merged", False):
         return Analysis(False, number, "pull_request_not_merged")
@@ -90,12 +96,33 @@ def analyze_event(event: dict[str, Any]) -> Analysis:
     elif action != "closed":
         return Analysis(False, number, f"unsupported_action:{action}")
 
-    labels = {label["name"] for label in pr.get("labels", [])}
-    body = pr.get("body") or ""
+    eligibility_pr = documentation_pr or pr
+    labels = {label["name"] for label in eligibility_pr.get("labels", [])}
+    body = eligibility_pr.get("body") or ""
     if not DOC_CHECKBOX_RE.search(body) and not labels.intersection(DOC_LABELS):
         return Analysis(False, number, "documentation_not_required")
 
     return Analysis(True, number, "documentation_required")
+
+
+def analyze_event_with_canonical_pr(
+    api: GitHubApi,
+    source_repo: str,
+    event: dict[str, Any],
+) -> Analysis:
+    trigger_pr = event["pull_request"]
+    preliminary = analyze_event(event)
+    if not preliminary.should_process and preliminary.reason != "documentation_not_required":
+        return preliminary
+
+    requested_number = preliminary.canonical_pr_number
+    if requested_number == int(trigger_pr["number"]):
+        return analyze_event(event)
+
+    canonical_pr = resolve_canonical_pr(
+        api, source_repo, requested_number, trigger_pr
+    )
+    return analyze_event(event, canonical_pr)
 
 
 def tracking_marker(source_repo: str, canonical_number: int) -> str:
@@ -297,7 +324,14 @@ def write_output(name: str, value: str | int) -> None:
 
 
 def analyze_command(args: argparse.Namespace) -> None:
-    analysis = analyze_event(load_event(args.event_path))
+    source_token = os.environ.get("SOURCE_GITHUB_TOKEN")
+    if not source_token:
+        raise RuntimeError("SOURCE_GITHUB_TOKEN is required")
+    analysis = analyze_event_with_canonical_pr(
+        GitHubApi(source_token),
+        args.source_repo,
+        load_event(args.event_path),
+    )
     write_output("should_process", str(analysis.should_process).lower())
     write_output("canonical_pr_number", analysis.canonical_pr_number)
     write_output("reason", analysis.reason)
@@ -376,6 +410,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze = subparsers.add_parser("analyze")
     analyze.add_argument("--event-path", required=True)
+    analyze.add_argument("--source-repo", required=True)
     analyze.set_defaults(func=analyze_command)
 
     track = subparsers.add_parser("track")

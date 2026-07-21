@@ -24,7 +24,12 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - name: Analyze documentation follow-up
         id: analyze
-        run: python3 .github/scripts/doc_issue_tracker.py analyze --event-path "$GITHUB_EVENT_PATH"
+        run: |
+          python3 .github/scripts/doc_issue_tracker.py analyze \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --source-repo "$GITHUB_REPOSITORY"
+        env:
+          SOURCE_GITHUB_TOKEN: ${{ github.token }}
 
   track:
     needs: analyze
