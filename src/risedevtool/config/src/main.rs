@@ -149,7 +149,7 @@ from source. This implies `ENABLE_BUILD_RUST` to be false.
                 "
 Required if you want to build dashboard from source.
 This is generally not the option you want to use to develop the
-dashboard. Instead, directly run `npm run dev` in the dashboard
+dashboard. Instead, directly run `pnpm run dev` in the dashboard
 directory to start the development server, set the API endpoint
 to a running RisingWave cluster in the settings page.
 "
