@@ -40,7 +40,6 @@ use crate::utils::FRONTEND_RUNTIME;
 
 const INLINE_ARG_LEN: usize = 6;
 const CDC_SOURCE_ARG_LEN: usize = 2;
-const POSTGRES_QUERY_CDC_ARG_LEN: usize = 9;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -357,8 +356,6 @@ impl TableFunction {
                     args_vec.push(ExprImpl::literal_varchar(
                         secret_resolved
                             .get("ip.version")
-                            .or_else(|| secret_resolved.get("ip.family"))
-                            .or_else(|| secret_resolved.get("address.family"))
                             .cloned()
                             .unwrap_or_default(),
                     ));
@@ -727,7 +724,7 @@ impl TableFunction {
 fn postgres_query_ip_version_arg(evaled_args: &[String]) -> anyhow::Result<IpVersion> {
     evaled_args
         .get(8)
-        .filter(|s| evaled_args.len() == POSTGRES_QUERY_CDC_ARG_LEN && !s.is_empty())
+        .filter(|s| !s.is_empty())
         .map(|s| {
             s.parse::<IpVersion>()
                 .with_context(|| format!("invalid postgres ip.version `{}`", s))

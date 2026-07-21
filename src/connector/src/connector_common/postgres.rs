@@ -179,8 +179,6 @@ pub fn pg_connection_config_from_properties(
 fn postgres_ip_version_from_properties(props: &BTreeMap<String, String>) -> IpVersion {
     props
         .get("ip.version")
-        .or_else(|| props.get("ip.family"))
-        .or_else(|| props.get("address.family"))
         .and_then(|v| v.parse::<IpVersion>().ok())
         .unwrap_or_default()
 }

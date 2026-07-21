@@ -73,8 +73,6 @@ pub struct PostgresConfig {
     #[serde(rename = "ssl.root.cert")]
     pub ssl_root_cert: Option<String>,
     #[serde(default, rename = "ip.version")]
-    #[serde(alias = "ip.family")]
-    #[serde(alias = "address.family")]
     pub ip_version: IpVersion,
     #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]

@@ -302,8 +302,6 @@ pub struct ExternalTableConfig {
     pub ssl_root_cert: Option<String>,
 
     #[serde(default, rename = "ip.version")]
-    #[serde(alias = "ip.family")]
-    #[serde(alias = "address.family")]
     pub ip_version: IpVersion,
 
     /// `encrypt` specifies whether connect to SQL Server using SSL.

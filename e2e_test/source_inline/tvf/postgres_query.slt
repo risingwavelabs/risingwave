@@ -95,11 +95,19 @@ select * from postgres_query('postgres_cdc_source_ipv4', 'select count(*) from t
 ----
 5
 
+statement error .*[Cc]onnection refused.*
+create source postgres_cdc_source_ipv6 with (
+  connector = 'postgres-cdc',
+  hostname = 'localhost',
+  port = '28432',
+  username = '$PGUSER',
+  password = '$PGPASSWORD',
+  database.name = 'source_test',
+  ip.version = 'ipv6'
+);
+
 statement ok
 drop source postgres_cdc_source_ipv4;
-
-query error
-select * from postgres_query('localhost', '28432', '$PGUSER', '$PGPASSWORD', 'source_test', 'select count(*) from test where id > 95;', 'ipv6');
 
 statement ok
 drop source postgres_cdc_source;
