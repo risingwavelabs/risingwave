@@ -142,6 +142,7 @@ message PostgresQueryNode {
   string query = 7;
   string ssl_mode = 8;
   string ssl_root_cert = 9;
+  string ip_version = 10;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.

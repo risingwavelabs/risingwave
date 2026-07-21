@@ -21,7 +21,7 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
+use risingwave_connector::connector_common::{IpVersion, PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
@@ -40,6 +40,8 @@ use crate::utils::FRONTEND_RUNTIME;
 
 const INLINE_ARG_LEN: usize = 6;
 const CDC_SOURCE_ARG_LEN: usize = 2;
+const POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION: usize = 7;
+const POSTGRES_QUERY_CDC_ARG_LEN: usize = 9;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -306,8 +308,11 @@ impl TableFunction {
         expect_connector_name: &str,
     ) -> RwResult<Vec<ExprImpl>> {
         let cast_args = match args.len() {
-            INLINE_ARG_LEN => {
-                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
+            len if len == INLINE_ARG_LEN
+                || (expect_connector_name.eq_ignore_ascii_case("postgres-cdc")
+                    && len == POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION) =>
+            {
+                let mut cast_args = Vec::with_capacity(args.len());
                 for arg in args {
                     let arg = arg.cast_implicit(&DataType::Varchar)?;
                     cast_args.push(arg);
@@ -352,12 +357,20 @@ impl TableFunction {
                             .cloned()
                             .unwrap_or_default(),
                     ));
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved
+                            .get("ip.version")
+                            .or_else(|| secret_resolved.get("ip.family"))
+                            .or_else(|| secret_resolved.get("address.family"))
+                            .cloned()
+                            .unwrap_or_default(),
+                    ));
                 }
 
                 args_vec
             }
             _ => {
-                return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
+                return Err(BindError("postgres_query function accepts either 2 arguments: (cdc_source_name varchar, query varchar), 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar), or 7 arguments with ip_version appended; mysql_query accepts either 2 or 6 arguments".to_owned()).into());
             }
         };
 
@@ -403,6 +416,8 @@ impl TableFunction {
                         .get(7)
                         .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
 
+                    let ip_version = postgres_query_ip_version_arg(&evaled_args)?;
+
                     let port = evaled_args[1]
                         .parse::<u16>()
                         .with_context(|| format!("invalid postgres port `{}`", evaled_args[1]))?;
@@ -414,6 +429,7 @@ impl TableFunction {
                         database: evaled_args[4].clone(),
                         ssl_mode,
                         ssl_root_cert,
+                        ip_version,
                     };
                     let client = create_pg_client(&pg_conn, None).await?;
 
@@ -704,6 +720,22 @@ impl TableFunction {
             ..self
         }
     }
+}
+
+fn postgres_query_ip_version_arg(evaled_args: &[String]) -> anyhow::Result<IpVersion> {
+    let raw = match evaled_args.len() {
+        POSTGRES_QUERY_ARG_LEN_WITH_IP_VERSION => evaled_args.get(6),
+        POSTGRES_QUERY_CDC_ARG_LEN => evaled_args.get(8),
+        _ => None,
+    };
+
+    raw.filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<IpVersion>()
+                .with_context(|| format!("invalid postgres ip.version `{}`", s))
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 impl std::fmt::Debug for TableFunction {

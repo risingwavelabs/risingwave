@@ -820,6 +820,7 @@ mod tests {
             table: "part".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
+            ip_version: Default::default(),
             encrypt: "false".to_owned(),
         };
 

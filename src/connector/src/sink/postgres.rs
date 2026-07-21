@@ -34,7 +34,8 @@ use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
 use crate::connector_common::{
-    PgConnectionConfig, PostgresExternalTable, SslMode, TcpKeepaliveConfig, create_pg_client,
+    IpVersion, PgConnectionConfig, PostgresExternalTable, SslMode, TcpKeepaliveConfig,
+    create_pg_client,
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
@@ -71,6 +72,10 @@ pub struct PostgresConfig {
     pub ssl_mode: SslMode,
     #[serde(rename = "ssl.root.cert")]
     pub ssl_root_cert: Option<String>,
+    #[serde(default, rename = "ip.version")]
+    #[serde(alias = "ip.family")]
+    #[serde(alias = "address.family")]
+    pub ip_version: IpVersion,
     #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
@@ -167,6 +172,7 @@ impl PostgresConfig {
             database: self.database.clone(),
             ssl_mode: self.ssl_mode.clone(),
             ssl_root_cert: self.ssl_root_cert.clone(),
+            ip_version: self.ip_version.clone(),
         }
     }
 }

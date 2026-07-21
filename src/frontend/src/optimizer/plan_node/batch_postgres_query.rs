@@ -90,6 +90,7 @@ impl ToBatchPb for BatchPostgresQuery {
             query: self.core.query.clone(),
             ssl_mode: self.core.ssl_mode.clone().unwrap_or_default(),
             ssl_root_cert: self.core.ssl_root_cert.clone().unwrap_or_default(),
+            ip_version: self.core.ip_version.clone().unwrap_or_default(),
         })
     }
 }

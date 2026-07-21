@@ -31,6 +31,7 @@ pub struct PostgresQuery {
     pub query: String,
     pub ssl_mode: Option<String>,
     pub ssl_root_cert: Option<String>,
+    pub ip_version: Option<String>,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
