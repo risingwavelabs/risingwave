@@ -618,7 +618,7 @@ impl MySqlExternalTableReader {
     fn needs_unsigned_i64_compare(&self, column_name: &str) -> ConnectorResult<bool> {
         self.upstream_mysql_pk_infos
             .iter()
-            .find(|(col_name, _)| col_name == column_name)
+            .find(|(col_name, _)| col_name.eq_ignore_ascii_case(column_name))
             .map(|(_, col_type)| {
                 let col_type = col_type.to_lowercase();
                 col_type.starts_with("bigint") && col_type.contains("unsigned")
