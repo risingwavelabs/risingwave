@@ -306,6 +306,7 @@ impl TableFunction {
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
         expect_connector_name: &str,
+        function_name: &str,
     ) -> RwResult<Vec<ExprImpl>> {
         let cast_args = match args.len() {
             len if len == INLINE_ARG_LEN
@@ -370,7 +371,16 @@ impl TableFunction {
                 args_vec
             }
             _ => {
-                return Err(BindError("postgres_query function accepts either 2 arguments: (cdc_source_name varchar, query varchar), 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar), or 7 arguments with ip_version appended; mysql_query accepts either 2 or 6 arguments".to_owned()).into());
+                let message = if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
+                    format!(
+                        "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar), 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar), or 7 arguments with ip_version appended"
+                    )
+                } else {
+                    format!(
+                        "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)"
+                    )
+                };
+                return Err(BindError(message).into());
             }
         };
 
@@ -389,6 +399,7 @@ impl TableFunction {
             schema_path,
             args,
             "postgres-cdc",
+            "postgres_query",
         )?;
         let evaled_args = args
             .iter()
@@ -491,6 +502,7 @@ impl TableFunction {
             schema_path,
             args,
             "mysql-cdc",
+            "mysql_query",
         )?;
         let evaled_args = args
             .iter()
@@ -500,7 +512,7 @@ impl TableFunction {
         #[cfg(madsim)]
         {
             return Err(crate::error::ErrorCode::BindError(
-                "postgres_query can't be used in the madsim mode".to_string(),
+                "mysql_query can't be used in the madsim mode".to_string(),
             )
             .into());
         }
