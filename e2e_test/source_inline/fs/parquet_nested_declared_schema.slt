@@ -4,41 +4,19 @@
 # Before the fix, decode below a list/map boundary followed the file-side layout, producing
 # chunk columns whose type silently diverged from the catalog.
 #
-# The fixture is written by RisingWave's own fs parquet sink: the writer table's element
-# struct <b, a, extra> is a reordered superset of the reader's declared element <a, b>, and
-# the map value struct <y, x> is a reordered superset of the declared value <x>.
-
-system ok
-rm -rf /tmp/rw_parquet_nested_declared && mkdir -p /tmp/rw_parquet_nested_declared
-
-statement ok
-create table parquet_nested_writer (
-    id int,
-    l struct<b varchar, a int, extra int>[],
-    m map(varchar, struct<y int, x int>)
-) append only;
-
-statement ok
-insert into parquet_nested_writer values
-    (1,
-     array[row('x', 10, 9), row('y', 20, 8)]::struct<b varchar, a int, extra int>[],
-     map {'k1': row(7, 42)::struct<y int, x int>, 'k2': row(6, 43)::struct<y int, x int>}),
-    (2, null, null),
-    (3,
-     array[row(null, 30, 7)]::struct<b varchar, a int, extra int>[],
-     map {'k3': row(5, null)::struct<y int, x int>});
-
-statement ok
-flush;
-
-statement ok
-create sink parquet_nested_sink from parquet_nested_writer
-with (
-    connector = 'fs',
-    type = 'append-only',
-    fs.path = '/tmp/rw_parquet_nested_declared',
-    max_row_count = 1
-) format plain encode parquet;
+# The committed fixture `data/nested_declared_schema/data.parquet` was written by
+# RisingWave's own fs parquet sink (`format plain encode parquet`): the writer table's
+# element struct <b, a, extra> is a reordered superset of the reader's declared element
+# <a, b>, and the map value struct <y, x> is a reordered superset of the declared value <x>.
+# To regenerate, sink this table through an fs sink and commit the produced file:
+#   create table w (id int, l struct<b varchar, a int, extra int>[],
+#                   m map(varchar, struct<y int, x int>)) append only;
+#   insert into w values
+#       (1, array[row('x', 10, 9), row('y', 20, 8)]::struct<b varchar, a int, extra int>[],
+#        map {'k1': row(7, 42)::struct<y int, x int>, 'k2': row(6, 43)::struct<y int, x int>}),
+#       (2, null, null),
+#       (3, array[row(null, 30, 7)]::struct<b varchar, a int, extra int>[],
+#        map {'k3': row(5, null)::struct<y int, x int>});
 
 statement ok
 create table parquet_nested_declared_schema (
@@ -47,19 +25,13 @@ create table parquet_nested_declared_schema (
     m map(varchar, struct<x int>)
 ) with (
     connector = 'posix_fs',
-    posix_fs.root = '/tmp/rw_parquet_nested_declared'
+    posix_fs.root = 'e2e_test/source_inline/fs/data/nested_declared_schema'
 ) format plain encode parquet;
 
-# Wait until the sink has written all rows (each file is committed as soon as its row is
-# written, `max_row_count = 1`) and the reader has discovered them; only then is it safe to
-# drop the sink, and the value assertions below become deterministic.
 query I retry 60 backoff 1s
 select count(*) from parquet_nested_declared_schema;
 ----
 3
-
-statement ok
-drop sink parquet_nested_sink;
 
 query IITII
 select
@@ -82,9 +54,3 @@ NULL NULL
 
 statement ok
 drop table parquet_nested_declared_schema;
-
-statement ok
-drop table parquet_nested_writer;
-
-system ok
-rm -rf /tmp/rw_parquet_nested_declared
