@@ -35,6 +35,10 @@ public class PgCompositeToStringConverter
     // through Debezium's standard handlers untouched.
     private static final int PG_FIRST_USER_OID = 16384;
 
+    // Must match `DEBEZIUM_UNAVAILABLE_VALUE` on the Rust side
+    // (src/common/src/types/mod.rs).
+    private static final String UNAVAILABLE_VALUE_PLACEHOLDER = "__debezium_unavailable_value";
+
     private boolean debug;
 
     @Override
@@ -77,7 +81,51 @@ public class PgCompositeToStringConverter
         // below PG_FIRST_USER_OID and are skipped. User-defined enum/domain
         // arrays will also match and get rendered as text — acceptable
         // since the downstream column is varchar[] anyway.
-        return column.jdbcType() == Types.ARRAY && column.nativeType() >= PG_FIRST_USER_OID;
+        //
+        // Do not intercept extension arrays that Debezium already knows how to
+        // encode with a native schema. For example, PostGIS geometry[] arrives
+        // as an array of geometry structs and RisingWave decodes each element
+        // as EWKB bytea. Re-registering it as array(string) would make the
+        // downstream bytea parser treat hex EWKB text as base64.
+        return column.jdbcType() == Types.ARRAY
+                && column.nativeType() >= PG_FIRST_USER_OID
+                && !isDebeziumNativeExtensionArray(column);
+    }
+
+    private static boolean isDebeziumNativeExtensionArray(RelationalColumn column) {
+        return isPostgresArrayOf(column, "geometry") || isPostgresArrayOf(column, "geography");
+    }
+
+    private static boolean isPostgresArrayOf(RelationalColumn column, String elementTypeName) {
+        return isPostgresArrayTypeName(column.typeName(), elementTypeName)
+                || isPostgresArrayTypeExpression(column.typeExpression(), elementTypeName);
+    }
+
+    private static boolean isPostgresArrayTypeName(String typeName, String elementTypeName) {
+        if (typeName == null) {
+            return false;
+        }
+        var normalized = unquoteAndUnqualify(typeName.toLowerCase());
+        return normalized.equals("_" + elementTypeName)
+                || normalized.equals(elementTypeName + "[]");
+    }
+
+    private static boolean isPostgresArrayTypeExpression(
+            String typeExpression, String elementTypeName) {
+        if (typeExpression == null) {
+            return false;
+        }
+        var normalized = typeExpression.toLowerCase().replace("\"", "").trim();
+        var unqualified = unquoteAndUnqualify(normalized);
+        return unqualified.equals("_" + elementTypeName)
+                || unqualified.equals(elementTypeName + "[]")
+                || (unqualified.startsWith(elementTypeName + "(") && unqualified.endsWith("[]"));
+    }
+
+    private static String unquoteAndUnqualify(String typeName) {
+        var unquoted = typeName.replace("\"", "").trim();
+        var dot = unquoted.lastIndexOf('.');
+        return dot >= 0 ? unquoted.substring(dot + 1) : unquoted;
     }
 
     private String convertScalar(Object value) {
@@ -104,6 +152,9 @@ public class PgCompositeToStringConverter
                 out.add(elementToString(el));
             }
             return out;
+        }
+        if (isDebeziumUnavailableValueObject(value)) {
+            return List.of(UNAVAILABLE_VALUE_PLACEHOLDER);
         }
         // Under include.unknown.datatypes=true, Debezium hands us the raw
         // PG textual array form `{"(a,b)","(c,d)"}` as bytes / string.
@@ -153,9 +204,19 @@ public class PgCompositeToStringConverter
         return out;
     }
 
+    private static boolean isDebeziumUnavailableValueObject(Object value) {
+        // Debezium's unchanged-TOAST sentinel for non-STRING schema columns is
+        // a bare java.lang.Object singleton. Normal composite array values
+        // arrive as concrete subclasses (byte[] / ByteBuffer / String / ...).
+        return value != null && value.getClass() == Object.class;
+    }
+
     private static String elementToString(Object el) {
         if (el == null) {
             return null;
+        }
+        if (isDebeziumUnavailableValueObject(el)) {
+            return UNAVAILABLE_VALUE_PLACEHOLDER;
         }
         if (el instanceof byte[] eb) {
             return new String(eb, StandardCharsets.UTF_8);

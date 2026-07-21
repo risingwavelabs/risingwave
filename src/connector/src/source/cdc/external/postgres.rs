@@ -294,7 +294,11 @@ impl PostgresExternalTableReader {
                         format!("{quoted}::text AS {quoted}")
                     }
                     Some(true) if matches!(f.data_type, DataType::List(_)) => {
-                        format!("ARRAY(SELECT t::text FROM unnest({quoted}) t)::text[] AS {quoted}")
+                        format!(
+                            "CASE WHEN {quoted} IS NULL THEN NULL \
+                             ELSE ARRAY(SELECT t::text FROM unnest({quoted}) t)::text[] \
+                             END AS {quoted}"
+                        )
                     }
                     _ => quoted,
                 }

@@ -68,6 +68,7 @@ CREATE TABLE order_ledger_entries_composite (
     complex_col outer_type,
     prices money_type[]
 );
+ALTER TABLE order_ledger_entries_composite ALTER COLUMN prices SET STORAGE EXTERNAL;
 
 INSERT INTO order_ledger_entries_composite VALUES
     (
@@ -86,7 +87,7 @@ INSERT INTO order_ledger_entries_composite VALUES
         ROW('EUR', 99.90)::money_type,
         ROW('EUR', 11.10)::money_type,
         ROW('bar', ROW(2, true, 'world')::inner_type)::outer_type,
-        ARRAY[ROW('JPY', 100)::money_type]::money_type[]
+        NULL
     );
 
 CREATE TABLE IF NOT EXISTS postgres_all_types(
