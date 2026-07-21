@@ -108,35 +108,68 @@ impl TableChangeLogManager {
             .collect()
     }
 
-    fn get_cached_covering_range(
+    fn table_change_logs_cover_epoch_range(
+        table_change_logs: &TableChangeLogs,
+        table_id: TableId,
+        epoch_range: (u64, u64),
+    ) -> bool {
+        table_change_logs
+            .get(&table_id)
+            .and_then(|change_log| change_log.filter_epoch(epoch_range).last())
+            .is_some_and(|change_log| change_log.epochs().any(|epoch| epoch == epoch_range.1))
+    }
+
+    async fn get_cached_covering_range(
         &self,
         table_id: TableId,
         epoch_range: (u64, u64),
         include_epoch_only: bool,
         limit: Option<u32>,
-    ) -> Option<InflightResult> {
+    ) -> Option<HummockResult<TableChangeLogs>> {
         if limit.is_some() {
             return None;
         }
 
-        self.cache.iter().find_map(|entry| {
-            let (key, inflight) = entry;
-            if key.table_id == table_id
-                && key.epoch_range.0 <= epoch_range.0
-                && epoch_range.1 <= key.epoch_range.1
-                && key.include_epoch_only == include_epoch_only
-                && key.limit == limit
-            {
-                if let Some(result) = inflight.peek()
-                    && result.is_err()
+        let candidates = self
+            .cache
+            .iter()
+            .filter_map(|entry| {
+                let (key, inflight) = entry;
+                if key.table_id == table_id
+                    && key.epoch_range.0 <= epoch_range.0
+                    && key.include_epoch_only == include_epoch_only
+                    && (key.limit.is_some() || epoch_range.1 <= key.epoch_range.1)
                 {
-                    return None;
+                    if let Some(result) = inflight.peek()
+                        && result.is_err()
+                    {
+                        return None;
+                    }
+                    Some((key.clone(), inflight.clone()))
+                } else {
+                    None
                 }
-                Some(inflight.clone())
-            } else {
-                None
+            })
+            .collect::<Vec<_>>();
+
+        for (key, inflight) in candidates {
+            let result = inflight.await;
+            if key.limit.is_none()
+                || result.as_ref().is_ok_and(|table_change_logs| {
+                    Self::table_change_logs_cover_epoch_range(
+                        table_change_logs,
+                        table_id,
+                        epoch_range,
+                    )
+                })
+            {
+                self.metrics.table_change_log_cache_hit.inc();
+                return Some(result.map(|table_change_logs| {
+                    Self::filter_table_change_logs(table_change_logs, table_id, epoch_range)
+                }));
             }
-        })
+        }
+        None
     }
 
     /// Fetches table change logs for the given `table_id` and `epoch_range`.
@@ -160,13 +193,11 @@ impl TableChangeLogManager {
     ) -> HummockResult<TableChangeLogs> {
         let _timer = self.metrics.table_change_log_fetch_latency.start_timer();
         if epoch_range.1 != u64::MAX
-            && let Some(inflight) =
-                self.get_cached_covering_range(table_id, epoch_range, include_epoch_only, limit)
+            && let Some(result) = self
+                .get_cached_covering_range(table_id, epoch_range, include_epoch_only, limit)
+                .await
         {
-            self.metrics.table_change_log_cache_hit.inc();
-            return inflight.await.map(|table_change_logs| {
-                Self::filter_table_change_logs(table_change_logs, table_id, epoch_range)
-            });
+            return result;
         }
 
         let hummock_meta_client = self.hummock_meta_client.clone();
@@ -183,22 +214,11 @@ impl TableChangeLogManager {
                 .await
                 .map_err(HummockError::meta_error)
         };
-        if epoch_range.1 == u64::MAX {
+        if epoch_range.1 == u64::MAX && limit.is_none() {
             return fetch.await;
         }
         self.get_or_insert(table_id, epoch_range, include_epoch_only, limit, fetch)
             .await
-    }
-
-    /// Prefetches full table change logs for a committed finite epoch range.
-    pub async fn prefetch_table_change_logs(
-        &self,
-        table_id: TableId,
-        epoch_range: (u64, u64),
-    ) -> HummockResult<()> {
-        self.fetch_table_change_logs(table_id, epoch_range, false, None)
-            .await
-            .map(|_| ())
     }
 }
 
@@ -320,7 +340,7 @@ mod tests {
             end_epoch_inclusive: Option<u64>,
             _table_ids: Option<HashSet<TableId>>,
             _exclude_empty: bool,
-            _limit: Option<u32>,
+            limit: Option<u32>,
         ) -> Result<TableChangeLogs> {
             self.fetch_count.fetch_add(1, Ordering::Relaxed);
             self.requested_ranges
@@ -328,14 +348,14 @@ mod tests {
                 .unwrap()
                 .push((start_epoch_inclusive, end_epoch_inclusive));
 
-            let logs = (start_epoch_inclusive.unwrap()..=end_epoch_inclusive.unwrap()).map(
-                |checkpoint_epoch| EpochNewChangeLog {
+            let logs = (start_epoch_inclusive.unwrap()..=end_epoch_inclusive.unwrap())
+                .take(limit.map(|limit| limit as usize).unwrap_or(usize::MAX))
+                .map(|checkpoint_epoch| EpochNewChangeLog {
                     new_value: vec![],
                     old_value: vec![],
                     non_checkpoint_epochs: vec![],
                     checkpoint_epoch,
-                },
-            );
+                });
             Ok(TableChangeLogs::from_iter([(
                 self.table_id,
                 TableChangeLog::new(logs),
@@ -354,7 +374,7 @@ mod tests {
         );
 
         manager
-            .prefetch_table_change_logs(table_id, (1, 3))
+            .fetch_table_change_logs(table_id, (1, u64::MAX), false, Some(3))
             .await
             .unwrap();
         let table_change_logs = manager
@@ -365,7 +385,36 @@ mod tests {
         assert_eq!(meta_client.fetch_count.load(Ordering::Relaxed), 1);
         assert_eq!(
             meta_client.requested_ranges.lock().unwrap().as_slice(),
-            &[(Some(1), Some(3))]
+            &[(Some(1), Some(u64::MAX))]
+        );
+
+        let epochs = table_change_logs[&table_id].epochs().collect::<Vec<_>>();
+        assert_eq!(epochs, vec![2]);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_ignores_limited_cache_when_not_covering_range() {
+        let table_id = TableId::new(1);
+        let meta_client = Arc::new(TestHummockMetaClient::new(table_id));
+        let manager = TableChangeLogManager::new(
+            10,
+            meta_client.clone(),
+            Arc::new(HummockStateStoreMetrics::unused()),
+        );
+
+        manager
+            .fetch_table_change_logs(table_id, (1, u64::MAX), false, Some(1))
+            .await
+            .unwrap();
+        let table_change_logs = manager
+            .fetch_table_change_logs(table_id, (2, 2), false, None)
+            .await
+            .unwrap();
+
+        assert_eq!(meta_client.fetch_count.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            meta_client.requested_ranges.lock().unwrap().as_slice(),
+            &[(Some(1), Some(u64::MAX)), (Some(2), Some(2))]
         );
 
         let epochs = table_change_logs[&table_id].epochs().collect::<Vec<_>>();

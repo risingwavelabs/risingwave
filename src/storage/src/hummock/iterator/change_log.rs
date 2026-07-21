@@ -746,7 +746,10 @@ mod tests {
                     .iter_log(
                         epoch_range,
                         (Unbounded, Unbounded),
-                        ReadLogOptions { table_id },
+                        ReadLogOptions {
+                            table_id,
+                            table_change_log_prefetch_limit: None,
+                        },
                     )
                     .await
                     .unwrap();

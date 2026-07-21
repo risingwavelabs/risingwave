@@ -1539,7 +1539,10 @@ async fn test_iter_log() {
                         .iter_log(
                             (min_epoch, max_epoch),
                             key_range.clone(),
-                            ReadLogOptions { table_id },
+                            ReadLogOptions {
+                                table_id,
+                                table_change_log_prefetch_limit: None,
+                            },
                         )
                         .await
                         .unwrap();

@@ -936,9 +936,6 @@ async fn make_log_stream(
 ) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let start_pk = start_pk.as_ref();
-    upstream_table
-        .prefetch_log(start_epoch, HummockReadEpoch::Committed(end_epoch))
-        .await?;
     // TODO: may avoid polling all vnodes concurrently at the same time but instead with a limit on concurrency.
     let vnode_streams = try_join_all(upstream_table.vnodes().iter_vnodes().map(move |vnode| {
         upstream_table

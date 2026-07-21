@@ -195,14 +195,6 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
         self.inner.next_epoch(epoch, options)
     }
 
-    fn prefetch_table_change_logs(
-        &self,
-        start_epoch: u64,
-        options: ReadLogOptions,
-    ) -> impl StorageFuture<'_, ()> {
-        self.inner.prefetch_table_change_logs(start_epoch, options)
-    }
-
     fn iter_log(
         &self,
         epoch_range: (u64, u64),

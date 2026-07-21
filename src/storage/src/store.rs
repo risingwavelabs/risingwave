@@ -243,6 +243,7 @@ pub struct NextEpochOptions {
 #[derive(Clone)]
 pub struct ReadLogOptions {
     pub table_id: TableId,
+    pub table_change_log_prefetch_limit: Option<u32>,
 }
 
 pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + Send + 'static;
@@ -252,14 +253,6 @@ pub trait StateStoreReadLog: StaticSendSync {
     type ChangeLogIter: StateStoreReadChangeLogIter;
 
     fn next_epoch(&self, epoch: u64, options: NextEpochOptions) -> impl StorageFuture<'_, u64>;
-
-    fn prefetch_table_change_logs(
-        &self,
-        _start_epoch: u64,
-        _options: ReadLogOptions,
-    ) -> impl StorageFuture<'_, ()> {
-        async { Ok(()) }
-    }
 
     fn iter_log(
         &self,

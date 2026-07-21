@@ -28,6 +28,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::key::{
     FullKey, TableKey, TableKeyRange, UserKey, bound_table_key_range,
 };
@@ -77,6 +78,17 @@ use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
+
+fn table_change_logs_cover_epoch_range(
+    table_change_logs: &TableChangeLogs,
+    table_id: TableId,
+    epoch_range: (u64, u64),
+) -> bool {
+    table_change_logs
+        .get(&table_id)
+        .and_then(|change_log| change_log.filter_epoch(epoch_range).last())
+        .is_some_and(|change_log| change_log.epochs().any(|epoch| epoch == epoch_range.1))
+}
 
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
@@ -1189,9 +1201,32 @@ impl HummockVersionReader {
     ) -> HummockResult<ChangeLogIterator> {
         // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
         let change_log: Vec<_> = {
-            let table_change_logs = table_change_log_manager
-                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
-                .await?;
+            let table_change_logs =
+                if let Some(prefetch_limit) = options.table_change_log_prefetch_limit {
+                    let prefetch_table_change_logs = table_change_log_manager
+                        .fetch_table_change_logs(
+                            options.table_id,
+                            (epoch_range.0, u64::MAX),
+                            false,
+                            Some(prefetch_limit),
+                        )
+                        .await?;
+                    if table_change_logs_cover_epoch_range(
+                        &prefetch_table_change_logs,
+                        options.table_id,
+                        epoch_range,
+                    ) {
+                        prefetch_table_change_logs
+                    } else {
+                        table_change_log_manager
+                            .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                            .await?
+                    }
+                } else {
+                    table_change_log_manager
+                        .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                        .await?
+                };
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {

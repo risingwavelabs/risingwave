@@ -65,6 +65,8 @@ use crate::table::{
 
 pub type PkRangeBounds = (Bound<OwnedRow>, Bound<OwnedRow>);
 
+const CHANGE_LOG_PREFETCH_LIMIT: u32 = 64;
+
 /// Primary-key scan range decoded from the batch plan scan-range protobuf.
 ///
 /// This is shared by batch row scans and snapshot backfill so the protobuf decoding, full-scan
@@ -1260,29 +1262,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         Ok(stream.map_ok(|(_, row)| row))
     }
 
-    pub async fn prefetch_log(
-        &self,
-        start_epoch: u64,
-        min_end_epoch: HummockReadEpoch,
-    ) -> StorageResult<()> {
-        self.store
-            .try_wait_epoch(
-                min_end_epoch,
-                TryWaitEpochOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await?;
-        self.store
-            .prefetch_table_change_logs(
-                start_epoch,
-                ReadLogOptions {
-                    table_id: self.table_id,
-                },
-            )
-            .await
-    }
-
     pub async fn batch_iter_log_with_pk_bounds(
         &self,
         start_epoch: u64,
@@ -1328,6 +1307,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
         let read_options = ReadLogOptions {
             table_id: self.table_id,
+            table_change_log_prefetch_limit: Some(CHANGE_LOG_PREFETCH_LIMIT),
         };
         let iter = BatchTableInnerIterLogInner::<S, SD>::new(
             &self.store,
