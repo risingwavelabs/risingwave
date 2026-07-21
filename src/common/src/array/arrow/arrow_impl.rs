@@ -966,15 +966,16 @@ pub trait FromArrow {
         }))
     }
 
-    /// Converts an Arrow `StructArray` by the expected struct field, so the result always
-    /// carries the expected struct type (extensions on file-side children cannot override the
-    /// declared type):
-    /// - every expected name present in the Arrow struct: children are aligned by name (first
-    ///   occurrence) and extra Arrow children are dropped;
-    /// - some expected name absent but the arity matches: children are decoded positionally
-    ///   (an external UDF may label struct children differently from the declared return type,
-    ///   as the signature check ignores nested field names);
-    /// - otherwise the fields cannot be aligned: error.
+    /// Converts an Arrow `StructArray` by the expected struct field: children align by name
+    /// (first occurrence, extras dropped), positionally when a name is missing but the arity
+    /// matches (an external UDF may label struct children differently, as its signature check
+    /// ignores nested field names), and error otherwise. Extensions are taken from the
+    /// expected side only.
+    ///
+    /// The result carries the expected field *names* with the *decoded* child types: the
+    /// expected field may be a lossy rendering of the declared type (e.g. iceberg has no
+    /// 16-bit int), so the decoded types are authoritative and any divergence from the
+    /// declared type stays visible to the callers' boundary checks.
     ///
     /// Falls back to the array's own fields when the expected field does not describe a struct.
     fn from_struct_array(
@@ -1003,8 +1004,14 @@ pub trait FromArrow {
                 .map(|(column, field)| self.from_array(field, column).map(Arc::new))
                 .try_collect()
         };
-        let columns: Vec<Arc<ArrayImpl>> = if expected_fields == actual_fields {
-            // Exact match (including all nested fields and metadata): zip in order.
+        // Children decode by the expected field either way, so aligning names in order is
+        // enough for the zip fast path — no deep field comparison needed.
+        let names_aligned = expected_fields.len() == actual_fields.len()
+            && expected_fields
+                .iter()
+                .zip_eq_fast(actual_fields.iter())
+                .all(|(e, a)| e.name() == a.name());
+        let columns: Vec<Arc<ArrayImpl>> = if names_aligned {
             decode_positionally(expected_fields)?
         } else {
             // First occurrence wins, agreeing with the schema matcher's `find`.
@@ -1025,15 +1032,12 @@ pub trait FromArrow {
                     })
                     .try_collect()?
             } else if expected_fields.len() == actual_fields.len() {
+                // Positional fallback for external UDFs. Unreachable on the parquet path:
+                // the schema matcher requires every declared name to be present.
                 decode_positionally(expected_fields)?
             } else {
-                let names = |fields: &arrow_schema::Fields| {
-                    fields
-                        .iter()
-                        .map(|f| f.name().as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
+                let names =
+                    |fields: &arrow_schema::Fields| fields.iter().map(|f| f.name()).join(", ");
                 return Err(ArrayError::from_arrow(format!(
                     "unable to align struct fields: expected [{}], actual [{}]",
                     names(expected_fields),
@@ -1042,22 +1046,13 @@ pub trait FromArrow {
             }
         };
 
-        // The result is stamped with the expected struct type below, so a child decoded to a
-        // different type would silently lie about its contents. Guard the trust boundary here.
-        let struct_type = self.from_fields(expected_fields)?;
-        for ((name, field_ty), column) in struct_type.iter().zip_eq_fast(columns.iter()) {
-            if column.data_type() != *field_ty {
-                return Err(ArrayError::from_arrow(format!(
-                    "decoded struct child `{}` diverges from the expected field type: expected {}, got {}",
-                    name,
-                    field_ty,
-                    column.data_type(),
-                )));
-            }
-        }
-
         Ok(ArrayImpl::Struct(StructArray::new(
-            struct_type,
+            StructType::new(
+                expected_fields
+                    .iter()
+                    .zip_eq_fast(columns.iter())
+                    .map(|(f, c)| (f.name().clone(), c.data_type())),
+            ),
             columns,
             (0..len).map(|i| array.is_valid(i)).collect(),
         )))
@@ -1859,6 +1854,10 @@ mod tests {
     use super::*;
     use crate::types::{DataType as RwType, MapType, StructType};
 
+    /// A default-only `FromArrow` for exercising the shared decode logic.
+    struct Dummy;
+    impl FromArrow for Dummy {}
+
     #[test]
     fn test_struct_schema_match() {
         // Arrow: struct<f1: Double, f2: Utf8>
@@ -1958,12 +1957,7 @@ mod tests {
 
     #[test]
     fn test_struct_projection_from_arrow() {
-        use std::sync::Arc;
-
         use itertools::Itertools;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
 
         // Actual Arrow struct: struct<foo:int32, bar:utf8, baz:int32>
         let actual_fields: arrow_schema::Fields = vec![
@@ -2047,11 +2041,6 @@ mod tests {
 
     #[test]
     fn test_list_element_struct_decodes_by_declared_field() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         // File: list<struct<b utf8, a int32, extra int32>> — reordered and a superset of the
         // declared element struct.
         let file_array = build_list_of_struct(
@@ -2115,11 +2104,6 @@ mod tests {
 
     #[test]
     fn test_struct_name_mismatch_same_arity_decodes_positionally() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         // An external UDF may label struct children differently from the declared return
         // type; the correspondence defined by the signature check is positional.
         let actual_fields: arrow_schema::Fields = vec![
@@ -2169,11 +2153,6 @@ mod tests {
 
     #[test]
     fn test_struct_unalignable_fields_error() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         // A declared name is missing and the arity differs: neither by-name nor positional
         // alignment applies.
         let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
@@ -2202,14 +2181,9 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_child_type_divergence_errors() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
-        // Same child name, different type: decode would stamp the declared type onto a
-        // mistyped child, so it must error instead.
+    fn test_struct_child_type_divergence_stamped_honestly() {
+        // Same child name, different type: the result must report the decoded child type,
+        // not the expected one, so callers' boundary checks can see the divergence.
         let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
             vec![ArrowField::new("a", ArrowType::Utf8, true)].into(),
             vec![Arc::new(arrow_array::StringArray::from(vec![Some("oops")]))],
@@ -2221,21 +2195,48 @@ mod tests {
             true,
         );
 
-        let err = Dummy.from_array(&declared_field, &array).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("decoded struct child `a` diverges from the expected field type"),
-            "unexpected error: {err}"
+        let converted = Dummy.from_array(&declared_field, &array).unwrap();
+        assert_eq!(
+            converted.data_type(),
+            RwType::Struct(StructType::new(vec![("a", RwType::Varchar)]))
+        );
+    }
+
+    #[test]
+    fn test_struct_child_decodes_despite_lossy_expected_field() {
+        // The parquet path renders a declared `struct<a smallint>` through the iceberg-lossy
+        // to_arrow_field as struct<a: Int32>. A foreign file storing a genuine Int16 child
+        // must still decode to Int16 with correct values instead of erroring.
+        let array: arrow_array::ArrayRef = Arc::new(arrow_array::StructArray::new(
+            vec![ArrowField::new("a", ArrowType::Int16, true)].into(),
+            vec![Arc::new(arrow_array::Int16Array::from(vec![
+                Some(7),
+                Some(-3),
+            ]))],
+            None,
+        ));
+        let lossy_expected = ArrowField::new(
+            "s",
+            ArrowType::Struct(vec![ArrowField::new("a", ArrowType::Int32, true)].into()),
+            true,
+        );
+
+        let converted = Dummy.from_array(&lossy_expected, &array).unwrap();
+        assert_eq!(
+            converted.data_type(),
+            RwType::Struct(StructType::new(vec![("a", RwType::Int16)]))
+        );
+        let ArrayImpl::Struct(structs) = &converted else {
+            panic!("expected struct array");
+        };
+        assert_eq!(
+            structs.value_at(0).unwrap().to_owned_scalar(),
+            StructValue::new(vec![Some(ScalarImpl::Int16(7))])
         );
     }
 
     #[test]
     fn test_struct_duplicate_sibling_names_decode_first_occurrence() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         // The by-name decode must consult the same child as the schema matcher (the first
         // occurrence), never a later duplicate of a different type.
         let actual_fields: arrow_schema::Fields = vec![
@@ -2280,11 +2281,6 @@ mod tests {
 
     #[test]
     fn test_extension_decode_follows_declared_field_under_list() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         let json_meta: std::collections::HashMap<String, String> = [(
             "ARROW:extension:name".to_owned(),
             "arrowudf.json".to_owned(),
@@ -2321,11 +2317,6 @@ mod tests {
 
     #[test]
     fn test_map_value_struct_decodes_by_declared_field() {
-        use std::sync::Arc;
-
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         // File: map<utf8, struct<y int32, x int32>>; declared value struct is the subset
         // struct<x int32>.
         let value_fields: arrow_schema::Fields = vec![
@@ -2895,9 +2886,6 @@ mod tests {
 
     #[test]
     fn fixed_size_binary() {
-        struct Dummy;
-        impl FromArrow for Dummy {}
-
         let uuid = [
             0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
             0xde, 0xf0,
