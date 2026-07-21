@@ -81,7 +81,12 @@ pub struct PostgresConfig {
 
     #[serde(flatten)]
     pub tcp_keepalive: Option<TcpKeepaliveConfig>,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(PostgresConfig);
 
 impl EnforceSecret for PostgresConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf_set! {
@@ -216,6 +221,8 @@ impl Sink for PostgresSink {
     type LogSinker = PostgresSinkWriter;
 
     const SINK_NAME: &'static str = POSTGRES_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {

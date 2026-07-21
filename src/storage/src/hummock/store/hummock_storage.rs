@@ -226,6 +226,7 @@ impl HummockStorage {
         let table_change_log_manager = Arc::new(TableChangeLogManager::new(
             options.table_change_log_cache_capacity,
             hummock_meta_client.clone(),
+            state_store_metrics.clone(),
         ));
         let instance = Self {
             context: compactor_context,

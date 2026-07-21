@@ -229,6 +229,15 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "doris.stream_load.http.timeout.ms".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // ElasticSearchConfig
+    map.try_insert(
+        std::any::type_name::<ElasticSearchConfig>().to_owned(),
+        [
+            "batch_num_messages".to_owned(),
+            "batch_size_kb".to_owned(),
+            "concurrent_requests".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // IcebergConfig
     map.try_insert(
         std::any::type_name::<IcebergConfig>().to_owned(),
@@ -292,6 +301,28 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.request.required.acks".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // OpenSearchConfig
+    map.try_insert(
+        std::any::type_name::<OpenSearchConfig>().to_owned(),
+        [
+            "batch_num_messages".to_owned(),
+            "batch_size_kb".to_owned(),
+            "concurrent_requests".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PulsarConfig
+    map.try_insert(
+        std::any::type_name::<PulsarConfig>().to_owned(),
+        [
+            "properties.routing.mode".to_owned(),
+            "properties.routing_mode".to_owned(),
+            "routing_mode".to_owned(),
+            "pulsar.routing_mode".to_owned(),
+            "pulsar.routing.mode".to_owned(),
+            "pulsar.properties.routing.mode".to_owned(),
+            "pulsar.properties.routing_mode".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // SnowflakeV2Config
     map.try_insert(
         std::any::type_name::<SnowflakeV2Config>().to_owned(),
@@ -305,6 +336,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         [
             "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
+            "starrocks.max_batch_size_bytes".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // TurbopufferConfig
