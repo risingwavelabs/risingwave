@@ -84,16 +84,19 @@ pub struct ElasticSearchOpenSearchConfig {
     #[serde(rename = "batch_num_messages")]
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default = "default_batch_num_messages")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_num_messages: usize,
 
     #[serde(rename = "batch_size_kb")]
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default = "default_batch_size_kb")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_size_kb: usize,
 
     #[serde(rename = "concurrent_requests")]
     #[serde_as(as = "DisplayFromStr")]
     #[serde(default = "default_concurrent_requests")]
+    #[with_option(allow_alter_on_fly)]
     pub concurrent_requests: usize,
 
     #[serde(default = "default_type")]

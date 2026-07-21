@@ -229,6 +229,15 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "doris.stream_load.http.timeout.ms".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // ElasticSearchConfig
+    map.try_insert(
+        std::any::type_name::<ElasticSearchConfig>().to_owned(),
+        [
+            "batch_num_messages".to_owned(),
+            "batch_size_kb".to_owned(),
+            "concurrent_requests".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // IcebergConfig
     map.try_insert(
         std::any::type_name::<IcebergConfig>().to_owned(),
@@ -290,6 +299,15 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.message.timeout.ms".to_owned(),
             "properties.max.in.flight.requests.per.connection".to_owned(),
             "properties.request.required.acks".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // OpenSearchConfig
+    map.try_insert(
+        std::any::type_name::<OpenSearchConfig>().to_owned(),
+        [
+            "batch_num_messages".to_owned(),
+            "batch_size_kb".to_owned(),
+            "concurrent_requests".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // PulsarConfig
