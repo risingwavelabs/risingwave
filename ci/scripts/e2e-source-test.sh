@@ -38,6 +38,7 @@ risedev slt './e2e_test/source_inline/fs/parquet_dirty_object.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_fixed_size_binary.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_time_units.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_nested_declared_schema.slt'
+risedev slt './e2e_test/source_inline/fs/parquet_duplicate_field_names.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 
