@@ -23,9 +23,15 @@ import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
+import io.debezium.openlineage.ConnectorContext;
+import io.debezium.openlineage.DebeziumOpenLineageEmitter;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class DbzCdcEngine implements Runnable {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
@@ -33,6 +39,7 @@ public class DbzCdcEngine implements Runnable {
     private final DebeziumEngine<?> engine;
     private final DbzChangeEventConsumer changeEventConsumer;
     private final long id;
+    private final ConnectorContext openLineageContext;
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
@@ -51,6 +58,12 @@ public class DbzCdcEngine implements Runnable {
                         transactionTopic,
                         topicPrefix,
                         new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+
+        var openLineageConfig = toStringMap(config);
+        var connectorTypeName = toDebeziumConnectorTypeName(connector);
+        DebeziumOpenLineageEmitter.init(openLineageConfig, connectorTypeName);
+        this.openLineageContext =
+                DebeziumOpenLineageEmitter.connectorContext(openLineageConfig, connectorTypeName);
 
         // Builds a debezium engine but not start it
         this.id = sourceId;
@@ -74,7 +87,11 @@ public class DbzCdcEngine implements Runnable {
     }
 
     public void stop() throws Exception {
-        engine.close();
+        try {
+            engine.close();
+        } finally {
+            DebeziumOpenLineageEmitter.cleanup(openLineageContext);
+        }
     }
 
     public BlockingQueue<ConnectorServiceProto.GetEventStreamResponse> getOutputChannel() {
@@ -83,5 +100,18 @@ public class DbzCdcEngine implements Runnable {
 
     public DbzChangeEventConsumer getChangeEventConsumer() {
         return changeEventConsumer;
+    }
+
+    private static Map<String, String> toStringMap(Properties config) {
+        return config.stringPropertyNames().stream()
+                .collect(Collectors.toMap(Function.identity(), config::getProperty));
+    }
+
+    private static String toDebeziumConnectorTypeName(SourceTypeE connector) {
+        return switch (connector) {
+            case CITUS, POSTGRES -> "postgres";
+            case SQL_SERVER -> "sqlserver";
+            default -> connector.name().toLowerCase(Locale.ROOT);
+        };
     }
 }
