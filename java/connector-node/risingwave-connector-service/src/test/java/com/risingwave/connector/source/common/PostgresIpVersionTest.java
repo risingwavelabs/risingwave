@@ -17,9 +17,12 @@
 package com.risingwave.connector.source.common;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
 import io.grpc.StatusRuntimeException;
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.Properties;
 import org.junit.Test;
@@ -48,7 +51,7 @@ public class PostgresIpVersionTest {
     }
 
     @Test
-    public void testApplyToDebeziumPostgresProperties() {
+    public void testApplyToDebeziumPostgresPropertiesKeepsHostnameDynamic() {
         var postgresProps = new Properties();
         PostgresIpVersion.applyToDebeziumPostgresProperties(
                 postgresProps,
@@ -58,6 +61,20 @@ public class PostgresIpVersionTest {
                         PostgresIpVersion.PROPERTY_NAME,
                         "ipv4"));
 
-        assertEquals("127.0.0.1", postgresProps.getProperty("database.hostname"));
+        assertNull(postgresProps.getProperty("database.hostname"));
+        assertEquals(
+                PostgresIpVersionSocketFactory.class.getName(),
+                postgresProps.getProperty("database.socketFactory"));
+        assertEquals("ipv4", postgresProps.getProperty("database.socketFactoryArg"));
+    }
+
+    @Test
+    public void testSocketFactoryRejectsMismatchedLiteralAddressBeforeConnect() throws IOException {
+        var socketFactory = new PostgresIpVersionSocketFactory("ipv6");
+        var socket = socketFactory.createSocket();
+
+        assertThrows(
+                IOException.class,
+                () -> socket.connect(InetSocketAddress.createUnresolved("127.0.0.1", 5432), 1));
     }
 }

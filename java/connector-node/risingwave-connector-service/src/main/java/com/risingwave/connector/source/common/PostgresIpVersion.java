@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -33,7 +34,8 @@ enum PostgresIpVersion {
 
     static final String PROPERTY_NAME = "ip.version";
 
-    private static final String DBZ_HOSTNAME_PROPERTY = "database.hostname";
+    private static final String DBZ_SOCKET_FACTORY_PROPERTY = "database.socketFactory";
+    private static final String DBZ_SOCKET_FACTORY_ARG_PROPERTY = "database.socketFactoryArg";
 
     private final String displayName;
 
@@ -73,6 +75,27 @@ enum PostgresIpVersion {
             return host;
         }
 
+        return toJdbcUrlHost(resolveAddresses(host).getFirst());
+    }
+
+    static String resolveHostForJdbcUrl(Map<String, String> props) {
+        var host = props.get(DbzConnectorConfig.HOST);
+        return fromProperties(props).resolveHostForJdbcUrl(host);
+    }
+
+    static void applyToDebeziumPostgresProperties(
+            Properties postgresProps, Map<String, String> userProps) {
+        var ipVersion = fromProperties(userProps);
+        if (ipVersion == ANY) {
+            return;
+        }
+
+        postgresProps.setProperty(
+                DBZ_SOCKET_FACTORY_PROPERTY, PostgresIpVersionSocketFactory.class.getName());
+        postgresProps.setProperty(DBZ_SOCKET_FACTORY_ARG_PROPERTY, ipVersion.toString());
+    }
+
+    List<InetAddress> resolveAddresses(String host) {
         var addresses = new LinkedHashSet<InetAddress>();
         try {
             Arrays.stream(InetAddress.getAllByName(host))
@@ -92,23 +115,7 @@ enum PostgresIpVersion {
                             host, displayName));
         }
 
-        return toJdbcUrlHost(addresses.iterator().next());
-    }
-
-    static String resolveHostForJdbcUrl(Map<String, String> props) {
-        var host = props.get(DbzConnectorConfig.HOST);
-        return fromProperties(props).resolveHostForJdbcUrl(host);
-    }
-
-    static void applyToDebeziumPostgresProperties(
-            Properties postgresProps, Map<String, String> userProps) {
-        var ipVersion = fromProperties(userProps);
-        if (ipVersion == ANY) {
-            return;
-        }
-
-        var host = userProps.get(DbzConnectorConfig.HOST);
-        postgresProps.setProperty(DBZ_HOSTNAME_PROPERTY, ipVersion.resolveHostForJdbcUrl(host));
+        return List.copyOf(addresses);
     }
 
     private static String toJdbcUrlHost(InetAddress address) {
