@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
-use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::parser::{
     BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
@@ -47,7 +47,8 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
-    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
+    cmp_pk_unsigned_aware, get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
+    mark_cdc_chunk,
 };
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
@@ -193,6 +194,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         current_pk_pos: Option<&OwnedRow>,
         pk_indices: &[usize],
         pk_order: &[OrderType],
+        pk_needs_unsigned_i64_compare: &[bool],
         last_binlog_offset: &Option<CdcOffset>,
         output_indices: &[usize],
     ) -> StreamExecutorResult<(Vec<StreamChunk>, u64, Option<CdcOffset>)> {
@@ -228,9 +230,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .is_none_or(|binlog_low| *binlog_low <= event_offset);
 
                 let row_pk = row.project(pk_indices);
-                let reached_current_pos =
-                    cmp_datum_iter(row_pk.iter(), current_pos.iter(), pk_order.iter().copied())
-                        .is_le();
+                let reached_current_pos = cmp_pk_unsigned_aware(
+                    row_pk.iter(),
+                    current_pos.iter(),
+                    pk_order,
+                    pk_needs_unsigned_i64_compare,
+                )
+                .is_le();
                 if !in_binlog_range {
                     continue;
                 }
@@ -637,6 +643,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             current_pk_pos.as_ref(),
                                             &pk_indices,
                                             &pk_order,
+                                            &pk_needs_unsigned_i64_compare,
                                             &last_binlog_offset,
                                             &self.output_indices,
                                         )?;
@@ -1361,6 +1368,7 @@ mod tests {
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
                 &[0],
                 &[OrderType::ascending()],
+                &[false],
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1393,6 +1401,83 @@ mod tests {
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(6)),
                 Some(ScalarImpl::Int64(600)),
+                Some(ScalarImpl::Utf8(
+                    r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                        .into(),
+                )),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_consume_buffer_uses_unsigned_bigint_pk_order() {
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
+            &[
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(4)),
+                        Some(ScalarImpl::Int64(400)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        // `u64::MAX` represented in RisingWave's `i64` storage.
+                        Some(ScalarImpl::Int64(-1)),
+                        Some(ScalarImpl::Int64(900)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+            ],
+            &[DataType::Int64, DataType::Int64, DataType::Varchar],
+        )];
+
+        let (emitted_chunks, drained_row_count, drained_offset) =
+            CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                &MockExternalTableReader::get_cdc_offset_parser(),
+                &mut upstream_chunk_buffer,
+                Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+                &[0],
+                &[OrderType::ascending()],
+                &[true],
+                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &[0, 1],
+            )
+            .unwrap();
+
+        assert_eq!(drained_row_count, 1);
+        assert_eq!(
+            drained_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+        );
+        assert_eq!(emitted_chunks.len(), 1);
+        assert_eq!(
+            emitted_chunks[0].rows().next().unwrap().1.to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(4)),
+                Some(ScalarImpl::Int64(400))
+            ])
+        );
+
+        assert_eq!(upstream_chunk_buffer.len(), 1);
+        assert_eq!(
+            upstream_chunk_buffer[0]
+                .rows()
+                .next()
+                .unwrap()
+                .1
+                .to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(-1)),
+                Some(ScalarImpl::Int64(900)),
                 Some(ScalarImpl::Utf8(
                     r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
                         .into(),
@@ -1449,6 +1534,7 @@ mod tests {
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
                 &[0],
                 &[OrderType::ascending()],
+                &[false],
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1551,6 +1637,7 @@ mod tests {
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
                 &[0],
                 &[OrderType::ascending()],
+                &[false],
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1628,6 +1715,7 @@ mod tests {
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])),
                 &[0],
                 &[OrderType::ascending()],
+                &[false],
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3))),
                 &[0, 1],
             )

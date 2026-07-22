@@ -326,7 +326,7 @@ pub(crate) fn mark_cdc_chunk(
 /// float/double/decimal types must keep their native comparison semantics. Only `BIGINT UNSIGNED`
 /// can overflow into a negative `i64`, so we reinterpret both sides as `u64` to restore upstream
 /// MySQL ordering. The `ScalarRefImpl::Int64` match below is a defensive guard for that contract.
-fn cmp_pk_unsigned_aware<'a>(
+pub(crate) fn cmp_pk_unsigned_aware<'a>(
     lhs: impl Iterator<Item = DatumRef<'a>>,
     rhs: impl Iterator<Item = DatumRef<'a>>,
     pk_order: &[OrderType],
