@@ -260,7 +260,12 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(BigQueryConfig);
 
 impl EnforceSecret for BigQueryConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -518,6 +523,8 @@ impl Sink for BigQuerySink {
     type LogSinker = BigQueryLogSinker;
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
@@ -1129,6 +1136,7 @@ mod test {
                     msk_signer_timeout_sec: None,
                 },
                 r#type: "append-only".to_owned(),
+                unknown_fields: Default::default(),
             },
             schema: Schema {
                 fields: vec![Field::with_name(DataType::Decimal, "capitalizedcost")],

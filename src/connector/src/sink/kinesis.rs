@@ -88,6 +88,8 @@ impl Sink for KinesisSink {
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
         // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.
         // https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecord.html#Streams-PutRecord-request-PartitionKey
@@ -138,7 +140,12 @@ impl Sink for KinesisSink {
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(KinesisSinkConfig);
 
 impl EnforceSecret for KinesisSinkConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {

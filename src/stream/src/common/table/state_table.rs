@@ -2507,15 +2507,15 @@ fn fill_non_output_indices(
     data_types: &[DataType],
     chunk: StreamChunk,
 ) -> StreamChunk {
-    let cardinality = chunk.cardinality();
     let (ops, columns, vis) = chunk.into_inner();
+    let capacity = vis.len();
     let mut full_columns = Vec::with_capacity(data_types.len());
     for (i, data_type) in data_types.iter().enumerate() {
         if let Some(j) = i2o_mapping.try_map(i) {
             full_columns.push(columns[j].clone());
         } else {
-            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
-            column_builder.append_n_null(cardinality);
+            let mut column_builder = ArrayImplBuilder::with_type(capacity, data_type.clone());
+            column_builder.append_n_null(capacity);
             let column: ArrayRef = column_builder.finish().into();
             full_columns.push(column)
         }
@@ -2557,6 +2557,32 @@ mod tests {
             +---+---+---+-----+
             | + | 2 |   | 222 |
             +---+---+---+-----+
+             }"#]],
+        );
+    }
+
+    #[test]
+    fn test_fill_non_output_indices_with_invisible_rows() {
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [
+            OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into())]),
+            OwnedRow::new(vec![Some(333_i32.into()), Some(3_i32.into())]),
+        ];
+        let (columns, _) =
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32])
+                .into_parts();
+        let replicated_chunk = StreamChunk::with_visibility(
+            vec![Op::Insert, Op::Insert],
+            columns,
+            Bitmap::from_iter([false, false]),
+        );
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 0, capacity: 2, data:
+            (empty)
              }"#]],
         );
     }

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use futures::{StreamExt, stream};
 use opendal::layers::{RetryLayer, TimeoutLayer};
@@ -28,8 +28,8 @@ use thiserror_ext::AsReport;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
+    MonitoredObjectStore, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
+    ObjectRangeBounds, ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
 /// Opendal object storage.
@@ -124,14 +124,26 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
-        Ok(OpendalStreamingUploader::new(
-            self.op.clone(),
-            path.to_owned(),
-            self.config.clone(),
-            self.metrics.clone(),
-            self.store_media_type(),
-        )
-        .await?)
+        if self.op.info().native_capability().write_can_multi {
+            Ok(OpendalStreamingUploader::Native(Box::new(
+                OpendalNativeStreamingUploader::new(
+                    self.op.clone(),
+                    path.to_owned(),
+                    self.config.clone(),
+                    self.metrics.clone(),
+                    self.store_media_type(),
+                )
+                .await?,
+            )))
+        } else {
+            Ok(OpendalStreamingUploader::Buffered(
+                OpendalBufferedStreamingUploader::new(
+                    self.clone()
+                        .monitored(self.metrics.clone(), self.config.clone()),
+                    path.to_owned(),
+                ),
+            ))
+        }
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -288,10 +300,6 @@ impl ObjectStore for OpendalObjectStore {
     fn store_media_type(&self) -> &'static str {
         self.media_type.as_str()
     }
-
-    fn support_streaming_upload(&self) -> bool {
-        self.op.info().native_capability().write_can_multi
-    }
 }
 
 impl OpendalObjectStore {
@@ -335,8 +343,13 @@ impl Execute for OpendalStreamingUploaderExecute {
     }
 }
 
+pub enum OpendalStreamingUploader {
+    Native(Box<OpendalNativeStreamingUploader>),
+    Buffered(OpendalBufferedStreamingUploader),
+}
+
 /// Store multiple parts in a map, and concatenate them on finish.
-pub struct OpendalStreamingUploader {
+pub struct OpendalNativeStreamingUploader {
     writer: Writer,
     /// Buffer for data. It will store at least `UPLOAD_BUFFER_SIZE` bytes of data before wrapping itself
     /// into a stream and upload to object store as a part.
@@ -351,7 +364,7 @@ pub struct OpendalStreamingUploader {
     upload_part_size: usize,
 }
 
-impl OpendalStreamingUploader {
+impl OpendalNativeStreamingUploader {
     pub async fn new(
         op: Operator,
         path: String,
@@ -407,7 +420,7 @@ impl OpendalStreamingUploader {
     }
 }
 
-impl StreamingUploader for OpendalStreamingUploader {
+impl StreamingUploader for OpendalNativeStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         assert!(self.is_valid);
         self.not_uploaded_len += data.len();
@@ -444,6 +457,60 @@ impl StreamingUploader for OpendalStreamingUploader {
     // Not absolutely accurate. Some bytes may be in the infight request.
     fn get_memory_usage(&self) -> u64 {
         self.not_uploaded_len as u64
+    }
+}
+
+pub struct OpendalBufferedStreamingUploader {
+    store: MonitoredObjectStore<OpendalObjectStore>,
+    path: String,
+    buf: BytesMut,
+}
+
+impl OpendalBufferedStreamingUploader {
+    fn new(store: MonitoredObjectStore<OpendalObjectStore>, path: String) -> Self {
+        Self {
+            store,
+            path,
+            buf: BytesMut::new(),
+        }
+    }
+}
+
+impl StreamingUploader for OpendalBufferedStreamingUploader {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        self.buf.extend_from_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self) -> ObjectResult<()> {
+        self.store.upload(&self.path, self.buf.freeze()).await
+    }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buf.len() as u64
+    }
+}
+
+impl StreamingUploader for OpendalStreamingUploader {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        match self {
+            Self::Native(uploader) => uploader.write_bytes(data).await,
+            Self::Buffered(uploader) => uploader.write_bytes(data).await,
+        }
+    }
+
+    async fn finish(self) -> ObjectResult<()> {
+        match self {
+            Self::Native(uploader) => (*uploader).finish().await,
+            Self::Buffered(uploader) => uploader.finish().await,
+        }
+    }
+
+    fn get_memory_usage(&self) -> u64 {
+        match self {
+            Self::Native(uploader) => uploader.get_memory_usage(),
+            Self::Buffered(uploader) => uploader.get_memory_usage(),
+        }
     }
 }
 
@@ -504,6 +571,39 @@ mod tests {
         let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
         obj_store.delete(&path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_buffered_streaming_upload() {
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        let mut uploader = OpendalBufferedStreamingUploader::new(
+            store
+                .clone()
+                .monitored(store.metrics.clone(), store.config.clone()),
+            "/abc".to_owned(),
+        );
+
+        uploader.write_bytes(Bytes::from("123")).await.unwrap();
+        assert_eq!(uploader.get_memory_usage(), 3);
+        uploader.write_bytes(Bytes::from("456")).await.unwrap();
+        assert_eq!(uploader.get_memory_usage(), 6);
+        uploader.finish().await.unwrap();
+
+        let read_obj = store.read("/abc", ..).await.unwrap();
+        assert_eq!(read_obj, Bytes::from("123456"));
+    }
+
+    #[tokio::test]
+    async fn test_empty_buffered_streaming_upload() {
+        let store = OpendalObjectStore::test_new_memory_engine().unwrap();
+        let uploader = OpendalBufferedStreamingUploader::new(
+            store
+                .clone()
+                .monitored(store.metrics.clone(), store.config.clone()),
+            "/abc".to_owned(),
+        );
+
+        uploader.finish().await.unwrap_err();
     }
 
     #[tokio::test]

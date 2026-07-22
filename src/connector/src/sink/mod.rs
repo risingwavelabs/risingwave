@@ -59,7 +59,7 @@ pub mod prelude {
     };
 }
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
@@ -250,6 +250,71 @@ pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 /// same downstream primary key instead of compacting them into one final-state update within a
 /// barrier. Upstream changes under the same stream key may still be compacted earlier.
 pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
+
+pub trait UnknownFields {
+    /// Unrecognized fields in the `WITH` clause.
+    fn unknown_fields(&self) -> HashMap<String, String>;
+}
+
+impl UnknownFields for () {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
+}
+
+impl UnknownFields for HashMap<String, String> {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.clone()
+    }
+}
+
+#[macro_export]
+macro_rules! impl_sink_unknown_fields {
+    ($config_type:ty) => {
+        impl $crate::sink::UnknownFields for $config_type {
+            fn unknown_fields(&self) -> std::collections::HashMap<String, String> {
+                self.unknown_fields.clone()
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_validate_sink_unknown_fields {
+    () => {
+        fn validate_unknown_fields(&self) -> $crate::sink::Result<()> {
+            $crate::sink::validate_sink_unknown_fields(&self.config)
+        }
+    };
+}
+
+pub fn validate_sink_unknown_fields(config: &impl UnknownFields) -> Result<()> {
+    let mut unknown_fields = config.unknown_fields();
+    // These options are consumed by the sink DDL/planner layer. They are valid for sink creation
+    // even if a connector-specific config does not declare them.
+    for key in [
+        CONNECTOR_TYPE_KEY,
+        SINK_TYPE_OPTION,
+        SINK_SNAPSHOT_OPTION,
+        SINK_USER_IGNORE_DELETE_OPTION,
+        SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        SINK_USER_FORCE_COMPACTION,
+        SINK_USER_PRESERVE_ROW_LEVEL_CHANGES,
+        "backfill_rate_limit",
+        "primary_key",
+        "sink_rate_limit",
+    ] {
+        unknown_fields.remove(key);
+    }
+    if unknown_fields.is_empty() {
+        Ok(())
+    } else {
+        Err(SinkError::Config(anyhow!(
+            "Unknown fields in the WITH clause: {:?}",
+            unknown_fields
+        )))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
@@ -770,6 +835,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         Ok(())
     }
 
+    fn validate_unknown_fields(&self) -> Result<()> {
+        Ok(())
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
 
@@ -929,6 +998,10 @@ impl SinkImpl {
 
     pub fn is_coordinated_sink(&self) -> bool {
         dispatch_sink!(self, sink, sink.is_coordinated_sink())
+    }
+
+    pub fn validate_unknown_fields(&self) -> Result<()> {
+        dispatch_sink!(self, sink, sink.validate_unknown_fields())
     }
 }
 
@@ -1178,5 +1251,51 @@ impl From<::opensearch::Error> for SinkError {
 impl From<tokio_postgres::Error> for SinkError {
     fn from(err: tokio_postgres::Error) -> Self {
         SinkError::Postgres(anyhow!(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn test_validate_sink_unknown_fields() {
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("primary_key", "id"),
+            (SINK_USER_FORCE_COMPACTION, "true"),
+            (SINK_USER_PRESERVE_ROW_LEVEL_CHANGES, "true"),
+            ("redis.url", "redis://127.0.0.1:6379"),
+        ]))
+        .unwrap();
+        validate_sink_unknown_fields(&config).unwrap();
+
+        let config = crate::sink::redis::RedisConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "redis"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+            ("redis.url", "redis://127.0.0.1:6379"),
+            ("bogus_with", "1"),
+        ]))
+        .unwrap();
+        let err = validate_sink_unknown_fields(&config).unwrap_err();
+        let report = err.to_report_string();
+        assert!(report.contains("bogus_with"), "{report}");
+
+        let err = crate::sink::kafka::KafkaConfig::from_btreemap(btreemap([
+            (CONNECTOR_TYPE_KEY, "kafka"),
+            (SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY),
+        ]))
+        .unwrap_err();
+        assert!(err.to_report_string().contains("missing field `topic`"));
     }
 }

@@ -170,6 +170,8 @@ pub struct MetaMetrics {
     pub table_change_log_object_size: IntGaugeVec,
     /// Min epoch currently retained in table change log.
     pub table_change_log_min_epoch: IntGaugeVec,
+    /// Latency of serving table change log requests.
+    pub table_change_log_get_latency: Histogram,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -208,6 +210,10 @@ pub struct MetaMetrics {
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: LabelGuardedIntGaugeVec,
+    /// Duration of a source worker `tick` execution (`list_splits` + `on_tick`), in seconds.
+    pub source_worker_tick_duration_seconds: LabelGuardedHistogramVec,
+    /// Number of source enumerator `on_tick` monitor round-trip failures.
+    pub source_enumerator_monitor_error_count: LabelGuardedIntCounterVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
@@ -562,6 +568,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "storage_table_change_log_get_latency",
+            "latency of serving table change log requests",
+            exponential_buckets(0.001, 5.0, 7).unwrap()
+        );
+        let table_change_log_get_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -712,6 +726,25 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let opts = histogram_opts!(
+            "source_worker_tick_duration_seconds",
+            "Duration of a source worker tick (list_splits + on_tick) in seconds",
+            exponential_buckets(0.1, 1.5, 20).unwrap() // max ~221s
+        );
+        let source_worker_tick_duration_seconds = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+        let source_enumerator_monitor_error_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "source_enumerator_monitor_error_count",
+                "Number of source enumerator on_tick monitor round-trip failures",
+                &["source_id", "source_name"],
+                registry
+            )
+            .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
@@ -998,6 +1031,7 @@ impl MetaMetrics {
             table_change_log_object_count,
             table_change_log_object_size,
             table_change_log_min_epoch,
+            table_change_log_get_latency,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -1018,6 +1052,8 @@ impl MetaMetrics {
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_worker_tick_duration_seconds,
+            source_enumerator_monitor_error_count,
             source_enumerator_metrics,
             actor_info,
             table_info,
