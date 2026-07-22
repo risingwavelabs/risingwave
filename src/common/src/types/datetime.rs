@@ -250,8 +250,8 @@ enum ErrorKind {
     Date { days: i32 },
     #[error("Invalid time: secs: {secs}, nanoseconds: {nsecs}")]
     Time { secs: u32, nsecs: u32 },
-    #[error("Invalid time: {value} is out of range for a time of day")]
-    TimeOfDay { value: u64 },
+    #[error("Invalid time: {value} {unit} is out of range for a time of day")]
+    TimeOfDay { value: u64, unit: &'static str },
     #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
     #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
@@ -279,8 +279,8 @@ impl InvalidParamsError {
         ErrorKind::Time { secs, nsecs }.into()
     }
 
-    pub fn time_of_day(value: u64) -> Self {
-        ErrorKind::TimeOfDay { value }.into()
+    pub fn time_of_day(value: u64, unit: &'static str) -> Self {
+        ErrorKind::TimeOfDay { value, unit }.into()
     }
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
@@ -463,14 +463,14 @@ impl Time {
     pub fn with_nano(nano: u64) -> Result<Self> {
         // Rejecting out-of-day values here also keeps the casts below lossless.
         if nano >= NANOS_PER_DAY {
-            return Err(InvalidParamsError::time_of_day(nano));
+            return Err(InvalidParamsError::time_of_day(nano, "nanoseconds"));
         }
         Self::with_secs_nano((nano / 1_000_000_000) as u32, (nano % 1_000_000_000) as u32)
     }
 
     pub fn with_micro(micro: u64) -> Result<Self> {
         if micro >= MICROS_PER_DAY {
-            return Err(InvalidParamsError::time_of_day(micro));
+            return Err(InvalidParamsError::time_of_day(micro, "microseconds"));
         }
         Self::with_secs_nano(
             (micro / 1_000_000) as u32,

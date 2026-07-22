@@ -1389,6 +1389,7 @@ impl TemporalArrowConvert<i64> for Timestamp {
                 .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
             TimeUnit::Microsecond => Timestamp::with_micros(value)
                 .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
+            // Every `i64` nanosecond count is representable, so there is nothing to check.
             TimeUnit::Nanosecond => {
                 Ok(Timestamp(DateTime::from_timestamp_nanos(value).naive_utc()))
             }
