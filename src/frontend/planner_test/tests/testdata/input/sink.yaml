@@ -351,3 +351,24 @@
     with (connector = 'blackhole', snapshot = 'false');
   expected_outputs:
     - explain_output
+- name: materialize impure sink select-list expressions by default
+  sql: |
+    create table t_impure_sink (id int, value int);
+    create materialized view mv_impure_sink as select * from t_impure_sink;
+    explain create sink s_impure_sink as
+    select gen_random_uuid() as event_id, clock_timestamp() as event_ts, id, value
+    from mv_impure_sink
+    with (connector = 'blackhole');
+  expected_outputs:
+    - explain_output
+- name: skip impure sink select-list materialization with unsafe session option
+  sql: |
+    set streaming_unsafe_allow_unmaterialized_impure_expr = true;
+    create table t_impure_sink (id int, value int);
+    create materialized view mv_impure_sink as select * from t_impure_sink;
+    explain create sink s_impure_sink as
+    select gen_random_uuid() as event_id, clock_timestamp() as event_ts, id, value
+    from mv_impure_sink
+    with (connector = 'blackhole');
+  expected_outputs:
+    - explain_output

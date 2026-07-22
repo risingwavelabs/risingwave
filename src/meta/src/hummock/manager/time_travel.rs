@@ -79,6 +79,19 @@ impl HummockManager {
 
         let epoch_watermark_model =
             risingwave_meta_model::Epoch::try_from(epoch_watermark).unwrap();
+        let has_expired_epoch = hummock_epoch_to_version::Entity::find()
+            .filter(hummock_epoch_to_version::Column::Epoch.lt(epoch_watermark_model))
+            .select_only()
+            .column(hummock_epoch_to_version::Column::VersionId)
+            .into_tuple::<HummockVersionId>()
+            .one(&txn)
+            .await?
+            .is_some();
+        if !has_expired_epoch {
+            txn.commit().await?;
+            return Ok(());
+        }
+
         let mut pinned_epoch_rows = HashSet::new();
         let mut pinned_snapshot_version_ids = HashSet::new();
         for (table_id, pinned_epochs) in pinned_snapshot_epochs {
@@ -131,19 +144,22 @@ impl HummockManager {
             }
         }
 
+        // Version ids follow global commit order, while epochs are only monotonic per table.
+        // Use the earliest version needed by any retained mapping as the watermark so its replay
+        // metadata cannot be truncated. If no mapping is retained, only version pins and vacuum
+        // throttling need to constrain the watermark.
         let version_watermark = hummock_epoch_to_version::Entity::find()
-            .filter(hummock_epoch_to_version::Column::Epoch.lt(epoch_watermark_model))
-            .order_by_desc(hummock_epoch_to_version::Column::Epoch)
+            .filter(hummock_epoch_to_version::Column::Epoch.gte(epoch_watermark_model))
+            .select_only()
+            .column(hummock_epoch_to_version::Column::VersionId)
             .order_by_asc(hummock_epoch_to_version::Column::VersionId)
+            .into_tuple::<HummockVersionId>()
             .one(&txn)
             .await?;
-        let Some(version_watermark) = version_watermark else {
-            txn.commit().await?;
-            return Ok(());
-        };
         // metadata BELOW watermark_version_id will be truncated.
-        let mut watermark_version_id =
-            std::cmp::min(version_watermark.version_id, min_pinned_version_id);
+        let mut watermark_version_id = version_watermark.map_or(min_pinned_version_id, |id| {
+            std::cmp::min(id, min_pinned_version_id)
+        });
         if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count {
             let mut query = hummock_time_travel_version::Entity::find()
                 .select_only()
