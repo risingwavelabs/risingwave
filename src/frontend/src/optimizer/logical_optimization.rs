@@ -611,10 +611,8 @@ impl LogicalOptimizer {
         explain_trace: bool,
         ctx: &OptimizerContextRef,
     ) -> LogicalPlanRef {
-        let plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
+        let mut pushdown_ctx = PredicatePushdownContext::new(plan.clone());
+        let plan = pushdown_ctx.run(plan, Condition::true_cond());
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string());
@@ -663,21 +661,11 @@ impl LogicalOptimizer {
     ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+        plan = column_pruning_ctx.run(plan, &required_cols);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string());
-        }
-
-        if column_pruning_ctx.need_second_round() {
-            // Second round of column pruning and reuse the column pruning context.
-            // Try to replace original share operator with the new one.
-            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-            if explain_trace {
-                ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string());
-            }
         }
         plan
     }

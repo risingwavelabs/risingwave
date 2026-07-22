@@ -22,9 +22,9 @@ use super::ApplyResult;
 #[cfg(debug_assertions)]
 use crate::Explain;
 use crate::error::Result;
-use crate::optimizer::plan_node::ConventionMarker;
+use crate::optimizer::plan_node::{ConventionMarker, ShareNode};
 use crate::optimizer::rule::BoxedRule;
-use crate::optimizer::{PlanRef, PlanTreeNode};
+use crate::optimizer::{PlanRef, PlanTreeNode, ShareId};
 
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {
@@ -39,6 +39,7 @@ pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
     rules: &'a [BoxedRule<C>],
     stats: Stats,
+    share_cache: HashMap<ShareId, PlanRef<C>>,
 }
 
 impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
@@ -47,10 +48,12 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
             apply_order,
             rules,
             stats: Stats::new(),
+            share_cache: HashMap::new(),
         }
     }
 
-    fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
+    fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<(PlanRef<C>, bool)> {
+        let mut changed = false;
         for rule in self.rules {
             match rule.apply(plan.clone()) {
                 ApplyResult::Ok(applied) => {
@@ -58,41 +61,73 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
                     Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
                     plan = applied;
+                    changed = true;
                     self.stats.count_rule(rule);
                 }
                 ApplyResult::NotApplicable => {}
                 ApplyResult::Err(error) => return Err(error),
             }
         }
-        Ok(plan)
+        Ok((plan, changed))
     }
 
-    fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
-        let pre_applied = self.stats.total_applied();
-        let inputs: Vec<_> = plan
+    fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<(PlanRef<C>, bool)> {
+        let optimized_inputs: Vec<_> = plan
             .inputs()
             .into_iter()
-            .map(|sub_tree| self.optimize(sub_tree))
+            .map(|sub_tree| self.optimize_recursively(sub_tree))
             .try_collect()?;
+        let changed = optimized_inputs.iter().any(|(_, changed)| *changed);
 
-        Ok(if pre_applied != self.stats.total_applied() {
-            plan.clone_root_with_inputs(&inputs)
+        if changed {
+            let inputs = optimized_inputs
+                .into_iter()
+                .map(|(input, _)| input)
+                .collect_vec();
+            Ok((plan.clone_root_with_inputs(&inputs), true))
         } else {
-            plan
-        })
+            Ok((plan, false))
+        }
     }
 
-    pub fn optimize(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
+    fn optimize_recursively(&mut self, plan: PlanRef<C>) -> Result<(PlanRef<C>, bool)> {
+        if let Some(share_id) = plan.as_share_node().map(ShareNode::share_id) {
+            if let Some(cached) = self.share_cache.get(&share_id) {
+                let unchanged = cached.as_share_node().is_some_and(|cached_share| {
+                    let original_share = plan
+                        .as_share_node()
+                        .expect("the cache is only consulted for a share");
+                    cached_share.share_id() == original_share.share_id()
+                        && cached_share.share_version() == original_share.share_version()
+                });
+                return Ok((cached.clone(), !unchanged));
+            }
+            let (optimized, changed) = self.optimize_uncached(plan)?;
+            self.share_cache.insert(share_id, optimized.clone());
+            return Ok((optimized, changed));
+        }
+
+        self.optimize_uncached(plan)
+    }
+
+    fn optimize_uncached(&mut self, plan: PlanRef<C>) -> Result<(PlanRef<C>, bool)> {
         match self.apply_order {
             ApplyOrder::TopDown => {
-                plan = self.optimize_node(plan)?;
-                self.optimize_inputs(plan)
+                let (plan, node_changed) = self.optimize_node(plan)?;
+                let (plan, inputs_changed) = self.optimize_inputs(plan)?;
+                Ok((plan, node_changed || inputs_changed))
             }
             ApplyOrder::BottomUp => {
-                plan = self.optimize_inputs(plan)?;
-                self.optimize_node(plan)
+                let (plan, inputs_changed) = self.optimize_inputs(plan)?;
+                let (plan, node_changed) = self.optimize_node(plan)?;
+                Ok((plan, inputs_changed || node_changed))
             }
         }
+    }
+
+    pub fn optimize(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
+        self.share_cache.clear();
+        self.optimize_recursively(plan).map(|(plan, _)| plan)
     }
 
     pub fn get_stats(&self) -> &Stats {
@@ -160,5 +195,68 @@ impl fmt::Display for Stats {
             writeln!(f, "apply {} {} time(s)", rule, count)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::Schema;
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, InputRef};
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{
+        LogicalPlanRef, LogicalProject, LogicalShare, LogicalUnion, LogicalValues,
+        PlanTreeNodeUnary,
+    };
+    use crate::optimizer::rule::TrivialProjectToValuesRule;
+
+    #[tokio::test]
+    async fn test_cached_share_rewrite_reaches_every_parent() {
+        let ctx = OptimizerContext::mock();
+        let values: LogicalPlanRef =
+            LogicalValues::new(vec![vec![]], Schema::empty().clone(), ctx).into();
+        let share = LogicalShare::create(LogicalProject::create(
+            values,
+            vec![ExprImpl::literal_int(1)],
+        ));
+
+        let pass_through = |input| {
+            LogicalProject::create(
+                input,
+                vec![ExprImpl::InputRef(Box::new(InputRef::new(
+                    0,
+                    DataType::Int32,
+                )))],
+            )
+        };
+        let root =
+            LogicalUnion::create(true, vec![pass_through(share.clone()), pass_through(share)]);
+
+        let rules = vec![TrivialProjectToValuesRule::create()];
+        let result = HeuristicOptimizer::new(&ApplyOrder::BottomUp, &rules)
+            .optimize(root)
+            .unwrap();
+
+        let shares = result
+            .inputs()
+            .into_iter()
+            .map(|input| {
+                input
+                    .as_logical_project()
+                    .expect("union input must remain a project")
+                    .input()
+            })
+            .collect_vec();
+        assert_eq!(shares.len(), 2);
+        assert!(shares.iter().all(|share| {
+            share
+                .as_logical_share()
+                .expect("project input must remain a share")
+                .input()
+                .as_logical_values()
+                .is_some()
+        }));
     }
 }

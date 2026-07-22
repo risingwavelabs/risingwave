@@ -34,7 +34,9 @@ use crate::datafusion::{
 };
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
-use crate::optimizer::plan_node::{PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    LogicalShare, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
+};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
@@ -51,6 +53,12 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValueBehavior
+    }
+
+    fn visit_logical_share(&mut self, plan: &LogicalShare) -> Self::Result {
+        // DataFusion logical plans are trees, so transparently expand a shared input here. The
+        // converter's default empty result is an error and is not neutral for a repeated edge.
+        self.visit(plan.input())
     }
 
     fn visit_logical_agg(

@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-
 use super::*;
-use crate::optimizer::plan_visitor::ShareParentCounter;
-use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
+use crate::optimizer::LogicalPlanRef as PlanRef;
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 pub trait ColPrunable {
@@ -34,80 +31,93 @@ pub trait ColPrunable {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef;
 }
 
+#[derive(Clone, Debug)]
+struct RequiredColumns(Vec<usize>);
+
+impl ShareRequirement for RequiredColumns {
+    fn merge(requirements: Vec<Self>) -> Self {
+        Self(
+            requirements
+                .into_iter()
+                .flat_map(|required| required.0)
+                .sorted()
+                .dedup()
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
-    /// `share_required_cols_map` is used by the first round of column pruning to keep track of
-    /// each parent required columns.
-    share_required_cols_map: HashMap<PlanNodeId, Vec<Vec<usize>>>,
-    /// Used to calculate how many parents the share operator has.
-    share_parent_counter: ShareParentCounter,
-    /// Share input cache used by the second round of column pruning.
-    /// For a DAG plan, use only one round to prune column is not enough,
-    /// because we need to change the schema of share operator
-    /// and you don't know what is the final schema when the first parent try to prune column,
-    /// so we need a second round to use the information collected by the first round.
-    /// `share_cache` maps original share operator plan id to the new share operator and the column
-    /// changed mapping which is actually the merged required columns calculated at the first
-    /// round.
-    share_cache: HashMap<PlanNodeId, (PlanRef, Vec<usize>)>,
-    /// `share_visited` is used to track whether the share operator is visited, because we need to
-    /// recursively call the `prune_col` of the new share operator to trigger the replacement.
-    /// It is only used at the second round of the column pruning.
-    share_visited: HashSet<PlanNodeId>,
+    dag: ShareDagContext<RequiredColumns>,
 }
 
 impl ColumnPruningContext {
     pub fn new(root: PlanRef) -> Self {
-        let mut share_parent_counter = ShareParentCounter::default();
-        share_parent_counter.visit(root);
         Self {
-            share_required_cols_map: Default::default(),
-            share_parent_counter,
-            share_cache: Default::default(),
-            share_visited: Default::default(),
+            dag: ShareDagContext::new(root),
         }
     }
 
-    pub fn get_parent_num(&self, share: &LogicalShare) -> usize {
-        self.share_parent_counter.get_parent_num(share)
+    pub(in crate::optimizer) fn is_running(&self) -> bool {
+        self.dag.is_running()
     }
 
-    pub fn add_required_cols(
+    pub(in crate::optimizer) fn phase(&self) -> ShareDagPhase {
+        self.dag.phase()
+    }
+
+    pub(in crate::optimizer) fn get_parent_num(&self, share: &LogicalShare) -> usize {
+        self.dag.parent_num(share)
+    }
+
+    pub(in crate::optimizer) fn add_required_cols(
         &mut self,
-        plan_node_id: PlanNodeId,
+        share: &LogicalShare,
         required_cols: Vec<usize>,
-    ) -> usize {
-        self.share_required_cols_map
-            .entry(plan_node_id)
-            .and_modify(|e| e.push(required_cols.clone()))
-            .or_insert_with(|| vec![required_cols])
-            .len()
+    ) -> Option<Vec<usize>> {
+        self.dag
+            .record_requirement(share, RequiredColumns(required_cols))
+            .map(|required| required.0)
     }
 
-    pub fn take_required_cols(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Vec<usize>>> {
-        self.share_required_cols_map.remove(&plan_node_id)
+    pub(in crate::optimizer) fn share_mapping(&self, share: &LogicalShare) -> ColIndexMapping {
+        share.ctx().logical_share_pending_mapping(share.share_id())
     }
 
-    pub fn add_share_cache(
-        &mut self,
-        plan_node_id: PlanNodeId,
-        new_share: PlanRef,
-        merged_required_columns: Vec<usize>,
-    ) {
-        self.share_cache
-            .try_insert(plan_node_id, (new_share, merged_required_columns))
-            .unwrap();
-    }
+    pub(in crate::optimizer) fn run(&mut self, root: PlanRef, required_cols: &[usize]) -> PlanRef {
+        self.dag.reset(root.clone());
+        let optimizer_ctx = root.ctx();
+        let transaction = LogicalShareTableTransaction::new(optimizer_ctx.clone());
+        optimizer_ctx.clear_logical_share_pending_mappings();
 
-    pub fn get_share_cache(&self, plan_node_id: PlanNodeId) -> Option<(PlanRef, Vec<usize>)> {
-        self.share_cache.get(&plan_node_id).cloned()
-    }
+        self.dag.set_phase(ShareDagPhase::Collect);
+        let collected = root.prune_col_inner(required_cols, self);
+        let rebuild_order = self.dag.rebuild_order();
+        if rebuild_order.is_empty() {
+            self.dag.finish();
+            transaction.commit();
+            return collected;
+        }
 
-    pub fn need_second_round(&self) -> bool {
-        !self.share_cache.is_empty()
-    }
+        self.dag.set_phase(ShareDagPhase::Rebuild);
+        for share_id in rebuild_order {
+            let original_input = self.dag.original_input(share_id);
+            let required = self.dag.merged_requirement(share_id).0;
+            let old_schema_len = optimizer_ctx
+                .resolve_current_logical_share(share_id)
+                .schema()
+                .len();
+            let rebuilt_input = original_input.prune_col(&required, self);
+            let mapping = ColIndexMapping::with_remaining_columns(&required, old_schema_len);
+            optimizer_ctx.update_logical_share_for_dag(share_id, rebuilt_input, mapping);
+        }
 
-    pub fn visit_share_at_first_round(&mut self, plan_node_id: PlanNodeId) -> bool {
-        self.share_visited.insert(plan_node_id)
+        self.dag.set_phase(ShareDagPhase::Adapt);
+        let result = root.prune_col(required_cols, self);
+        optimizer_ctx.clear_logical_share_pending_mappings();
+        self.dag.finish();
+        transaction.commit();
+        result
     }
 }

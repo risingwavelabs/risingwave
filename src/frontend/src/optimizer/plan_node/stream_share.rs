@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::PbStreamNode;
@@ -28,11 +28,12 @@ use crate::Explain;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
+use crate::optimizer::{ShareId, ShareVersion};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct StreamShare {
     pub base: PlanBase<Stream>,
     core: generic::Share<PlanRef>,
@@ -40,28 +41,37 @@ pub struct StreamShare {
 
 impl StreamShare {
     pub fn new(core: generic::Share<PlanRef>) -> Self {
-        let base = {
-            let input = core.input.borrow();
-            let dist = input.distribution().clone();
-            // Filter executor won't change the append-only behavior of the stream.
-            PlanBase::new_stream_with_core(
-                &core,
-                dist,
-                input.stream_kind(),
-                input.emit_on_window_close(),
-                input.watermark_columns().clone(),
-                input.columns_monotonicity().clone(),
-            )
-        };
+        let input = core.input();
+        let dist = input.distribution().clone();
+        // Filter executor won't change the append-only behavior of the stream.
+        let base = PlanBase::new_stream_share(
+            &core,
+            dist,
+            input.stream_kind(),
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
+        );
 
         StreamShare { base, core }
     }
 
     pub fn new_from_input(input: PlanRef) -> Self {
-        let core = generic::Share {
-            input: RefCell::new(input),
-        };
-        Self::new(core)
+        Self::new(generic::Share::new(input))
+    }
+}
+
+impl PartialEq for StreamShare {
+    fn eq(&self, other: &Self) -> bool {
+        self.share_id() == other.share_id()
+    }
+}
+
+impl Eq for StreamShare {}
+
+impl Hash for StreamShare {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.share_id().hash(state);
     }
 }
 
@@ -73,7 +83,7 @@ impl Distill for StreamShare {
 
 impl PlanTreeNodeUnary<Stream> for StreamShare {
     fn input(&self) -> PlanRef {
-        self.core.input.borrow().clone()
+        self.core.input()
     }
 
     fn clone_with_input(&self, _input: PlanRef) -> Self {
@@ -82,12 +92,24 @@ impl PlanTreeNodeUnary<Stream> for StreamShare {
 }
 
 impl ShareNode<Stream> for StreamShare {
+    fn share_id(&self) -> ShareId {
+        self.core.share_id()
+    }
+
+    fn share_version(&self) -> ShareVersion {
+        self.core.version()
+    }
+
     fn new_share(core: Share<PlanRef>) -> PlanRef {
         Self::new(core).into()
     }
 
-    fn replace_input(&self, plan: PlanRef) {
-        self.core.replace_input(plan);
+    fn replace_input(&self, plan: PlanRef) -> PlanRef {
+        Self::new(self.core.update_input(plan)).into()
+    }
+
+    fn fork_with_input(&self, plan: PlanRef) -> PlanRef {
+        Self::new(self.core.fork_with_input(plan)).into()
     }
 }
 

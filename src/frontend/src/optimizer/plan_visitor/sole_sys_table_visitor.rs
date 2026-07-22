@@ -14,7 +14,7 @@
 
 use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::{LogicalSysScan, LogicalValues};
+use crate::optimizer::plan_node::{LogicalShare, LogicalSysScan, LogicalValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -48,5 +48,11 @@ impl LogicalPlanVisitor for SoleSysTableVisitor {
     fn visit_logical_values(&mut self, _plan: &LogicalValues) -> Self::Result {
         // sys table together with values is ok
         true
+    }
+
+    fn visit_logical_share(&mut self, plan: &LogicalShare) -> Self::Result {
+        // `false` is not the neutral value of this visitor's AND merge, so do not use the
+        // default share-edge de-duplication result.
+        self.visit(plan.input())
     }
 }

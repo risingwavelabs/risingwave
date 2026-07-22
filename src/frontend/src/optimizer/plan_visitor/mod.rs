@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+
 use paste::paste;
 mod apply_visitor;
 pub use apply_visitor::*;
@@ -58,7 +61,62 @@ mod datafusion_plan_converter;
 pub use datafusion_plan_converter::*;
 
 use crate::for_each_convention_all_plan_nodes;
+use crate::optimizer::ShareId;
 use crate::optimizer::plan_node::*;
+
+type VisitorKey = (&'static str, usize);
+
+#[derive(Default)]
+struct VisitorTraversalState {
+    depth: usize,
+    visited_shares: HashSet<ShareId>,
+}
+
+thread_local! {
+    static VISITOR_TRAVERSALS: RefCell<HashMap<VisitorKey, VisitorTraversalState>> =
+        RefCell::new(HashMap::new());
+}
+
+struct VisitorTraversalGuard {
+    key: VisitorKey,
+}
+
+impl VisitorTraversalGuard {
+    fn enter<V: ?Sized>(convention: &'static str, visitor: &mut V) -> Self {
+        let key = (convention, visitor as *mut V as *mut () as usize);
+        VISITOR_TRAVERSALS.with_borrow_mut(|traversals| {
+            traversals.entry(key).or_default().depth += 1;
+        });
+        Self { key }
+    }
+}
+
+impl Drop for VisitorTraversalGuard {
+    fn drop(&mut self) {
+        VISITOR_TRAVERSALS.with_borrow_mut(|traversals| {
+            let state = traversals
+                .get_mut(&self.key)
+                .expect("visitor traversal must exist");
+            state.depth -= 1;
+            if state.depth == 0 {
+                traversals.remove(&self.key);
+            }
+        });
+    }
+}
+
+fn visit_share_once<V: ?Sized>(
+    convention: &'static str,
+    visitor: &mut V,
+    share_id: ShareId,
+) -> bool {
+    let key = (convention, visitor as *mut V as *mut () as usize);
+    VISITOR_TRAVERSALS.with_borrow_mut(|traversals| {
+        traversals
+            .get_mut(&key)
+            .is_none_or(|state| state.visited_shares.insert(share_id))
+    })
+}
 
 /// The behavior for the default implementations of `visit_xxx`.
 pub trait DefaultBehavior<R> {
@@ -99,6 +157,30 @@ pub trait PlanVisitor<C: ConventionMarker> {
     fn visit(&mut self, plan: PlanRef<C>) -> Self::Result;
 }
 
+macro_rules! def_visit_method {
+    ($convention:ident, Share) => {
+        paste! {
+            #[doc = "Visit [`" [<$convention Share>] "`] once per stable share identity and merge its input. Repeated edges return the default behavior for an empty input set; visitors for which that is not a neutral value must override this method."]
+            fn [<visit_ $convention:snake _share>](&mut self, plan: &[<$convention Share>]) -> Self::Result {
+                if !visit_share_once(stringify!($convention), self, plan.share_id()) {
+                    return Self::default_behavior().apply(std::iter::empty());
+                }
+                let results = plan.inputs().into_iter().map(|input| self.[<visit_ $convention:snake>](input));
+                Self::default_behavior().apply(results)
+            }
+        }
+    };
+    ($convention:ident, $name:ident) => {
+        paste! {
+            #[doc = "Visit [`" [<$convention $name>] "`] and merge its inputs."]
+            fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
+                let results = plan.inputs().into_iter().map(|input| self.[<visit_ $convention:snake>](input));
+                Self::default_behavior().apply(results)
+            }
+        }
+    };
+}
+
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
     ({
@@ -119,6 +201,8 @@ macro_rules! def_visitor {
                         use risingwave_common::util::recursive::{tracker, Recurse};
                         use crate::session::current::notice_to_user;
 
+                        let _traversal_guard =
+                            VisitorTraversalGuard::enter(stringify!($convention), self);
                         tracker!().recurse(|t| {
                             if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
                                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
@@ -133,11 +217,7 @@ macro_rules! def_visitor {
                     }
 
                     $(
-                        #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
-                        fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> Self::Result {
-                            let results = plan.inputs().into_iter().map(|input| self.[<visit_ $convention:snake>](input));
-                            Self::default_behavior().apply(results)
-                        }
+                        def_visit_method!($convention, $name);
                     )*
 
                 }
@@ -208,4 +288,51 @@ impl_has_variant! {
     {Batch Insert},
     {Batch Delete},
     {Batch Update}
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+
+    #[derive(Default)]
+    struct ValuesVisitCounter {
+        values_visits: usize,
+    }
+
+    impl LogicalPlanVisitor for ValuesVisitCounter {
+        type Result = ();
+
+        type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+        fn default_behavior() -> Self::DefaultBehavior {
+            DefaultValue
+        }
+
+        fn visit_logical_values(&mut self, _plan: &LogicalValues) {
+            self.values_visits += 1;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_default_visitor_visits_shared_subplan_once() {
+        let ctx = OptimizerContext::mock();
+        let schema = Schema::new(vec![Field::with_name(DataType::Int32, "v")]);
+        let values = LogicalValues::new(vec![], schema, ctx).into();
+        let share = LogicalShare::create(values);
+        let left: LogicalPlanRef = LogicalProject::with_out_col_idx(share.clone(), 0..1).into();
+        let right: LogicalPlanRef = LogicalProject::with_out_col_idx(share, 0..1).into();
+        let root = LogicalUnion::create(true, vec![left, right]);
+
+        let mut visitor = ValuesVisitCounter::default();
+        visitor.visit(root.clone());
+        assert_eq!(visitor.values_visits, 1);
+
+        // Visited state is scoped to one top-level traversal.
+        visitor.visit(root);
+        assert_eq!(visitor.values_visits, 2);
+    }
 }
