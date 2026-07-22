@@ -16,6 +16,14 @@ To run all lints, run `cargo dylint --all` in the root of the repository.
 
 If you find there are some compile errors, try updating the `cargo-dylint` binary by installing it again.
 
+Some lints are allow-by-default because the existing codebase still has known
+violations. To also run these development checks locally, use the `rw_all`
+group, for example:
+
+```bash
+DYLINT_RUSTFLAGS="-A warnings -D rw_all" cargo dylint --all
+```
+
 ## Add new lints
 
 To add a new lint, add a new file in the `src` directory to declare the lint, then register it in `fn register_lints(..)` in `lib.rs`.
