@@ -29,3 +29,7 @@ tracing = "0.1"
 [[example]]
 name = "format_error"
 path = "ui/format_error.rs"
+
+[[example]]
+name = "temporary_guarded_metric"
+path = "ui/temporary_guarded_metric.rs"
