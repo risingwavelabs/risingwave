@@ -60,12 +60,11 @@ impl ServingVnodeMapping {
             .collect::<HashMap<_, _>>();
         let serving_vnode_mappings = self.all();
 
-        for (fragment_id, mapping) in &serving_vnode_mappings {
-            let Some(info) = fragment_serving_infos.get(fragment_id) else {
-                tracing::warn!(%fragment_id, "fragment serving info not found");
+        for (fragment_id, info) in fragment_serving_infos {
+            let Some(table_id) = info.result_table_id else {
                 continue;
             };
-            let Some(table_id) = info.result_table_id else {
+            let Some(mapping) = serving_vnode_mappings.get(fragment_id) else {
                 continue;
             };
 
