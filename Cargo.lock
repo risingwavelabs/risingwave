@@ -11940,6 +11940,7 @@ dependencies = [
  "thiserror-ext",
  "tonic 0.12.3",
  "tracing",
+ "uuid",
  "workspace-hack",
  "zstd 0.13.3",
 ]

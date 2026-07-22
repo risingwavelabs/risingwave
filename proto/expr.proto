@@ -342,6 +342,8 @@ message ExprNode {
     PG_SLEEP_FOR = 2025;
     PG_SLEEP_UNTIL = 2026;
     RANDOM = 2027;
+    CLOCK_TIMESTAMP = 2028;
+    GEN_RANDOM_UUID = 2029;
 
     // System administration functions
     CAST_REGCLASS = 2100;

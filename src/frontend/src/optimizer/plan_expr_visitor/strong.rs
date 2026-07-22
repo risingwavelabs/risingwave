@@ -363,7 +363,9 @@ impl Strong {
             | ExprType::RwEpochToTs
             | ExprType::OpenaiEmbedding
             | ExprType::HasDatabasePrivilege
-            | ExprType::Random => false,
+            | ExprType::Random
+            | ExprType::ClockTimestamp
+            | ExprType::GenRandomUuid => false,
             ExprType::Unspecified => unreachable!(),
         }
     }
