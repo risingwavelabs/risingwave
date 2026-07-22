@@ -262,15 +262,14 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
     // Debezium schema change message may include extra qualifiers, e.g. `BIGINT UNSIGNED`,
     // `BIGINT(20) UNSIGNED`, `INT UNSIGNED ZEROFILL`, etc.
     let ty = ty_name.trim().to_lowercase();
-    let base = ty
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .split('(')
-        .next()
-        .unwrap_or_default();
-    let is_unsigned = ty.contains("unsigned");
-    let is_zero_fill = ty.contains("zerofill");
+    let tokens = ty
+        .split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ','))
+        .filter(|token| !token.is_empty())
+        .collect_vec();
+    let base = tokens.first().copied().unwrap_or_default();
+    let second = tokens.get(1).copied();
+    let is_unsigned = tokens.iter().any(|token| *token == "unsigned");
+    let is_zero_fill = tokens.iter().any(|token| *token == "zerofill");
 
     let make_numeric_attr = || {
         let mut attr = NumericAttr::default();
@@ -283,20 +282,31 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         attr
     };
 
+    match (base, second) {
+        ("character", Some("varying")) => return Some(ColumnType::Varchar(Default::default())),
+        ("double", Some("precision")) => return Some(ColumnType::Double(make_numeric_attr())),
+        ("long", Some("varchar")) => return Some(ColumnType::MediumText(Default::default())),
+        ("long", Some("varbinary")) => return Some(ColumnType::MediumBlob),
+        _ => {}
+    }
+
     match base {
+        "serial" => Some(ColumnType::Serial),
         "bit" => Some(ColumnType::Bit(make_numeric_attr())),
-        "tinyint" => Some(ColumnType::TinyInt(make_numeric_attr())),
-        "smallint" => Some(ColumnType::SmallInt(make_numeric_attr())),
-        "mediumint" => Some(ColumnType::MediumInt(make_numeric_attr())),
-        "int" => Some(ColumnType::Int(make_numeric_attr())),
-        "bigint" => Some(ColumnType::BigInt(make_numeric_attr())),
-        "decimal" => Some(ColumnType::Decimal(make_numeric_attr())),
-        "float" => Some(ColumnType::Float(make_numeric_attr())),
-        "double" => Some(ColumnType::Double(make_numeric_attr())),
+        "tinyint" | "int1" => Some(ColumnType::TinyInt(make_numeric_attr())),
+        "bool" | "boolean" => Some(ColumnType::Bool),
+        "smallint" | "int2" => Some(ColumnType::SmallInt(make_numeric_attr())),
+        "mediumint" | "middleint" | "int3" => Some(ColumnType::MediumInt(make_numeric_attr())),
+        "int" | "integer" | "int4" => Some(ColumnType::Int(make_numeric_attr())),
+        "bigint" | "int8" => Some(ColumnType::BigInt(make_numeric_attr())),
+        "decimal" | "dec" | "fixed" | "numeric" => Some(ColumnType::Decimal(make_numeric_attr())),
+        "float" | "float4" => Some(ColumnType::Float(make_numeric_attr())),
+        "double" | "float8" | "real" => Some(ColumnType::Double(make_numeric_attr())),
         "time" => Some(ColumnType::Time(Default::default())),
         "datetime" => Some(ColumnType::DateTime(Default::default())),
         "timestamp" => Some(ColumnType::Timestamp(Default::default())),
-        "char" => Some(ColumnType::Char(Default::default())),
+        "year" => Some(ColumnType::Year),
+        "char" | "character" => Some(ColumnType::Char(Default::default())),
         "nchar" => Some(ColumnType::NChar(Default::default())),
         "varchar" => Some(ColumnType::Varchar(Default::default())),
         "nvarchar" => Some(ColumnType::NVarchar(Default::default())),
@@ -314,7 +324,6 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         "set" => Some(ColumnType::Set(Default::default())),
         "json" => Some(ColumnType::Json),
         "date" => Some(ColumnType::Date),
-        "bool" => Some(ColumnType::Bool),
         "geometry" => Some(ColumnType::Geometry(Default::default())),
         "point" => Some(ColumnType::Point(Default::default())),
         "linestring" => Some(ColumnType::LineString(Default::default())),
@@ -324,6 +333,15 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         "multipolygon" => Some(ColumnType::MultiPolygon(Default::default())),
         "geometrycollection" => Some(ColumnType::GeometryCollection(Default::default())),
         _ => None,
+    }
+}
+
+fn mysql_type_is_unsigned_bigint(col_type: &ColumnType) -> bool {
+    match col_type {
+        // MySQL SERIAL is an alias for BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE.
+        ColumnType::Serial => true,
+        ColumnType::BigInt(attr) => attr.unsigned == Some(true),
+        _ => false,
     }
 }
 
@@ -426,7 +444,7 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
-    upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
+    upstream_mysql_pk_infos: Vec<(String, ColumnType)>, // (column_name, column_type)
     mysql_version: (u8, u8),
     is_mariadb: bool,
 }
@@ -581,7 +599,7 @@ impl MySqlExternalTableReader {
         pool: &mysql_async::Pool,
         database: &str,
         table: &str,
-    ) -> ConnectorResult<Vec<(String, String)>> {
+    ) -> ConnectorResult<Vec<(String, ColumnType)>> {
         let mut conn = pool.get_conn().await?;
 
         // Query primary key columns and their data types
@@ -601,6 +619,8 @@ impl MySqlExternalTableReader {
         for row in &rs {
             let column_name: String = row.get(0).unwrap();
             let column_type: String = row.get(1).unwrap();
+            let column_type = type_name_to_mysql_type(&column_type)
+                .unwrap_or_else(|| ColumnType::Unknown(column_type));
             column_infos.push((column_name, column_type));
         }
 
@@ -619,10 +639,7 @@ impl MySqlExternalTableReader {
         self.upstream_mysql_pk_infos
             .iter()
             .find(|(col_name, _)| col_name.eq_ignore_ascii_case(column_name))
-            .map(|(_, col_type)| {
-                let col_type = col_type.to_lowercase();
-                col_type.starts_with("bigint") && col_type.contains("unsigned")
-            })
+            .map(|(_, col_type)| mysql_type_is_unsigned_bigint(col_type))
             .ok_or_else(|| {
                 anyhow!(
                     "primary key column `{column_name}` not found in upstream MySQL primary key info"
@@ -823,12 +840,98 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
+    use sea_schema::mysql::def::ColumnType;
 
+    use super::{mysql_type_is_unsigned_bigint, type_name_to_mysql_type};
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
         SchemaTableName,
     };
+
+    fn parse_mysql_type_name(ty_name: &str) -> ColumnType {
+        type_name_to_mysql_type(ty_name).unwrap()
+    }
+
+    #[test]
+    fn test_mysql_unsigned_bigint_type_detection() {
+        for ty_name in [
+            "SERIAL",
+            "BIGINT UNSIGNED",
+            "BIGINT(20) UNSIGNED",
+            "BIGINT UNSIGNED ZEROFILL",
+            "INT8 UNSIGNED",
+        ] {
+            assert!(
+                mysql_type_is_unsigned_bigint(&parse_mysql_type_name(ty_name)),
+                "{ty_name}"
+            );
+        }
+
+        for ty_name in [
+            "BIGINT",
+            "INTEGER UNSIGNED",
+            "INT4 UNSIGNED",
+            "MEDIUMINT UNSIGNED",
+            "DECIMAL UNSIGNED",
+            "FLOAT8 UNSIGNED",
+        ] {
+            assert!(
+                !mysql_type_is_unsigned_bigint(&parse_mysql_type_name(ty_name)),
+                "{ty_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mysql_type_aliases() {
+        assert!(matches!(
+            parse_mysql_type_name("INTEGER UNSIGNED"),
+            ColumnType::Int(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("INT1 UNSIGNED"),
+            ColumnType::TinyInt(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("INT2 UNSIGNED"),
+            ColumnType::SmallInt(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("INT3 UNSIGNED"),
+            ColumnType::MediumInt(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("INT4 UNSIGNED"),
+            ColumnType::Int(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("INT8 UNSIGNED"),
+            ColumnType::BigInt(attr) if attr.unsigned == Some(true)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("MIDDLEINT"),
+            ColumnType::MediumInt(_)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("NUMERIC"),
+            ColumnType::Decimal(_)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("CHARACTER VARYING(64)"),
+            ColumnType::Varchar(_)
+        ));
+        assert!(matches!(
+            parse_mysql_type_name("LONG VARBINARY"),
+            ColumnType::MediumBlob
+        ));
+    }
+
+    #[test]
+    fn test_mysql_serial_maps_as_unsigned_bigint() {
+        let col_type = parse_mysql_type_name("SERIAL");
+        assert!(mysql_type_is_unsigned_bigint(&col_type));
+    }
 
     #[ignore]
     #[tokio::test]
