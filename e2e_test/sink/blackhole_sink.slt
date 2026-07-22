@@ -15,6 +15,18 @@ CREATE SINK s5mv AS select mv5.v1 as v1, mv5.v2 as v2 from mv5 WITH (
 );
 
 statement ok
+CREATE SINK s5_impure AS
+select
+    gen_random_uuid() as event_id,
+    clock_timestamp() as event_ts,
+    mv5.v1 as v1,
+    mv5.v2 as v2
+from mv5
+WITH (
+    connector = 'blackhole'
+);
+
+statement ok
 INSERT INTO t5 VALUES (101, 102), (101, 102), (102, 102), (103, 102), (105, 102), (108, 102), (113, 102), (121, 102);
 
 statement error
@@ -28,6 +40,9 @@ DROP MATERIALIZED VIEW mv5;
 
 statement ok
 DROP SINK s5mv;
+
+statement ok
+DROP SINK s5_impure;
 
 statement ok
 DROP MATERIALIZED VIEW mv5;
