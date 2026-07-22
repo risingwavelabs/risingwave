@@ -1,0 +1,24 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE FUNCTION test_sql_func(a int, b int) RETURNS int LANGUAGE sql AS $$ select a + b $$;
+
+statement ok
+CREATE FUNCTION test_sql_func(a float, b float) RETURNS float LANGUAGE sql AS $$ select a + b $$;
+
+
+
+query TT
+SHOW CREATE FUNCTION test_sql_func;
+----
+public.test_sql_func CREATE FUNCTION test_sql_func(a integer, b integer) RETURNS integer LANGUAGE sql AS $$ select a + b $$
+public.test_sql_func CREATE FUNCTION test_sql_func(a double precision, b double precision) RETURNS double precision LANGUAGE sql AS $$ select a + b $$
+
+statement ok
+DROP FUNCTION test_sql_func(int, int);
+
+statement ok
+DROP FUNCTION test_sql_func(float, float);
+
+

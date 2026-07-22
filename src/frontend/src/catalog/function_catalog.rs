@@ -46,6 +46,34 @@ pub struct FunctionCatalog {
     pub created_at_cluster_version: Option<String>,
 }
 
+impl FunctionCatalog {
+    pub fn create_sql(&self) -> String {
+        let mut args = Vec::new();
+        for (name, ty) in self.arg_names.iter().zip(self.arg_types.iter()) {
+            if name.is_empty() {
+                args.push(format!("{}", ty));
+            } else {
+                args.push(format!("{} {}", name, ty));
+            }
+        }
+        let args_str = args.join(", ");
+
+        if let Some(link) = &self.link {
+            let name_in_runtime = self.name_in_runtime.as_deref().unwrap_or(&self.name);
+            format!(
+                "CREATE FUNCTION {}({}) RETURNS {} AS {} USING LINK '{}'",
+                self.name, args_str, self.return_type, name_in_runtime, link
+            )
+        } else {
+            let body = self.body.as_deref().unwrap_or("");
+            format!(
+                "CREATE FUNCTION {}({}) RETURNS {} LANGUAGE {} AS $${}$$",
+                self.name, args_str, self.return_type, self.language, body
+            )
+        }
+    }
+}
+
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
 #[display(style = "UPPERCASE")]
 pub enum FunctionKind {

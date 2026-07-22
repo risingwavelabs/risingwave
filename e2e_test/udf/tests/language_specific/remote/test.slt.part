@@ -7,6 +7,12 @@
 statement ok retry 3 backoff 5s
 create function int_42() returns int as int_42 using link 'http://localhost:8815';
 
+query TT
+show create function int_42;
+----
+public.int_42 CREATE FUNCTION int_42() RETURNS integer AS int_42 USING LINK 'http://localhost:8815'
+
+
 # Argument or return type mismatch.
 statement error type mismatch
 create function foo(int) returns int as int_42 using link 'http://localhost:8815';
