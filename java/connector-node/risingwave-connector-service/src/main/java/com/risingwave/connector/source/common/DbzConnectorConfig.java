@@ -244,6 +244,7 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("database.sslmode", sslMode);
             }
 
+            PostgresIpVersion.applyToDebeziumPostgresProperties(postgresProps, userProps);
             dbzProps.putAll(postgresProps);
 
             if (isCdcSourceJob) {
@@ -277,6 +278,7 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
+            PostgresIpVersion.applyToDebeziumPostgresProperties(postgresProps, userProps);
             dbzProps.putAll(postgresProps);
         } else if (source == SourceTypeE.MONGODB) {
             var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);

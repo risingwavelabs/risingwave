@@ -74,7 +74,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var dbHost = userProps.get(DbzConnectorConfig.HOST);
         var dbPort = userProps.get(DbzConnectorConfig.PORT);
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
+        var jdbcHost = PostgresIpVersion.resolveHostForJdbcUrl(userProps);
+        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, jdbcHost, dbPort, dbName);
 
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);

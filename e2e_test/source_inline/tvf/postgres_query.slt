@@ -95,7 +95,7 @@ select * from postgres_query('postgres_cdc_source_ipv4', 'select count(*) from t
 ----
 5
 
-statement ok
+statement error .*((did not resolve to any ipv6 address)|([Cc]onnection refused)|(Cannot assign requested address)|(Network is unreachable)).*
 create source postgres_cdc_source_ipv6_on_ipv4 with (
   connector = 'postgres-cdc',
   hostname = 'localhost',
@@ -105,12 +105,6 @@ create source postgres_cdc_source_ipv6_on_ipv4 with (
   database.name = 'source_test',
   ip.version = 'ipv6'
 );
-
-query error .*((did not resolve to any ipv6 address)|([Cc]onnection refused)|(Cannot assign requested address)|(Network is unreachable)).*
-select * from postgres_query('postgres_cdc_source_ipv6_on_ipv4', 'select count(*) from test where id > 95;');
-
-statement ok
-drop source postgres_cdc_source_ipv6_on_ipv4;
 
 statement ok
 drop source postgres_cdc_source_ipv4;
