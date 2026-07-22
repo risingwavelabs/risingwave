@@ -88,23 +88,37 @@ impl Timestamptz {
 
     /// Creates a `Timestamptz` from seconds. Returns `None` if the given timestamp is out of range.
     pub fn from_secs(timestamp_secs: i64) -> Option<Self> {
-        timestamp_secs.checked_mul(1_000_000).map(Self)
+        timestamp_secs
+            .checked_mul(1_000_000)
+            .and_then(Self::checked)
     }
 
     /// Creates a `Timestamptz` from milliseconds. Returns `None` if the given timestamp is out of
     /// range.
     pub fn from_millis(timestamp_millis: i64) -> Option<Self> {
-        timestamp_millis.checked_mul(1000).map(Self)
+        timestamp_millis.checked_mul(1000).and_then(Self::checked)
     }
 
-    /// Creates a `Timestamptz` from microseconds.
+    /// Creates a `Timestamptz` from microseconds, the internal representation, verbatim.
+    ///
+    /// Unlike the other constructors, this does not validate that the value is representable.
+    /// See #26397.
     pub fn from_micros(timestamp_micros: i64) -> Self {
         Self(timestamp_micros)
     }
 
-    /// Creates a `Timestamptz` from microseconds.
-    pub fn from_nanos(timestamp_nanos: i64) -> Option<Self> {
-        timestamp_nanos.checked_div(1_000).map(Self)
+    /// Creates a `Timestamptz` from nanoseconds, flooring to microseconds.
+    ///
+    /// An `i64` nanosecond count spans only ±292 years around the epoch, well within the
+    /// representable range, so this cannot fail.
+    pub fn from_nanos(timestamp_nanos: i64) -> Self {
+        Self(timestamp_nanos.div_euclid(1_000))
+    }
+
+    /// Returns `Some` only if the value converts to [`chrono::DateTime`], which formatting and
+    /// time zone operations require.
+    fn checked(timestamp_micros: i64) -> Option<Self> {
+        DateTime::from_timestamp_micros(timestamp_micros).map(|_| Self(timestamp_micros))
     }
 
     /// Returns the number of non-leap-microseconds since January 1, 1970 UTC.
