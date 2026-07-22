@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use await_tree::InstrumentAwait;
+use parking_lot::Mutex;
 use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
@@ -33,18 +34,40 @@ const MAX_FAIL_CNT: u32 = 10;
 // Only valid in debug builds - will return an error in release builds.
 const DEBUG_SPLITS_KEY: &str = "debug_splits";
 
-pub struct SharedSplitMap {
-    pub splits: Option<BTreeMap<SplitId, SplitImpl>>,
-}
+/// Latest splits discovered by a source worker, shared between the worker and its handle.
+/// The internal lock never escapes, so no holder can keep it across an await point.
+#[derive(Clone, Default)]
+pub struct SharedSplits(Arc<Mutex<Option<BTreeMap<SplitId, SplitImpl>>>>);
 
-type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
+impl SharedSplits {
+    fn publish(&self, splits: impl IntoIterator<Item = SplitImpl>) {
+        *self.0.lock() = Some(
+            splits
+                .into_iter()
+                .map(|split| (split.id(), split))
+                .collect(),
+        );
+    }
+
+    fn snapshot(&self) -> Option<BTreeMap<SplitId, SplitImpl>> {
+        self.0.lock().clone()
+    }
+
+    pub(super) fn take(&self) -> Option<BTreeMap<SplitId, SplitImpl>> {
+        self.0.lock().take()
+    }
+
+    pub(super) fn is_unset(&self) -> bool {
+        self.0.lock().is_none()
+    }
+}
 
 /// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
 /// and maintains it in `current_splits`.
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
     source_name: String,
-    current_splits: SharedSplitMapRef,
+    current_splits: SharedSplits,
     // XXX: box or arc?
     enumerator: Box<dyn AnySplitEnumerator>,
     period: Duration,
@@ -100,7 +123,7 @@ pub async fn create_source_worker(
 ) -> MetaResult<ConnectorSourceWorkerHandle> {
     tracing::info!("spawning new watcher for source {}", source.id);
 
-    let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+    let splits = SharedSplits::default();
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
@@ -159,7 +182,7 @@ pub fn create_source_worker_async(
 ) -> MetaResult<()> {
     tracing::info!("spawning new watcher for source {}", source.id);
 
-    let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+    let splits = SharedSplits::default();
     let current_splits_ref = splits.clone();
     let source_id = source.id;
     let source_name = source.name.clone();
@@ -284,7 +307,7 @@ impl ConnectorSourceWorker {
         source: &Source,
         connector_properties: ConnectorProperties,
         period: Duration,
-        splits: Arc<Mutex<SharedSplitMap>>,
+        splits: SharedSplits,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let enumerator = connector_properties
@@ -439,15 +462,7 @@ impl ConnectorSourceWorker {
         };
 
         self.fail_cnt = 0;
-        {
-            let mut current_splits = self.current_splits.lock().await;
-            current_splits.splits.replace(
-                splits
-                    .into_iter()
-                    .map(|split| (split.id(), split))
-                    .collect(),
-            );
-        }
+        self.current_splits.publish(splits);
 
         // Call enumerator's `on_tick` method for monitoring tasks. `on_tick` may do unbounded
         // network I/O, so it must not run under `current_splits` (#26275). For CDC, `list_splits`
@@ -484,7 +499,7 @@ pub struct ConnectorSourceWorkerHandle {
     #[expect(dead_code)]
     handle: JoinHandle<()>,
     command_tx: UnboundedSender<SourceWorkerCommand>,
-    pub splits: SharedSplitMapRef,
+    pub splits: SharedSplits,
     pub enable_drop_split: bool,
     pub enable_adaptive_splits: bool,
 }
@@ -494,11 +509,8 @@ impl ConnectorSourceWorkerHandle {
         self.enable_adaptive_splits
     }
 
-    pub async fn discovered_splits(
-        &self,
-        source_id: SourceId,
-    ) -> MetaResult<Option<DiscoveredSplits>> {
-        let Some(discovered_splits) = self.splits.lock().await.splits.clone() else {
+    pub fn discovered_splits(&self, source_id: SourceId) -> MetaResult<Option<DiscoveredSplits>> {
+        let Some(discovered_splits) = self.splits.snapshot() else {
             tracing::info!(
                 "The discover loop for source {} is not ready yet; we'll wait for the next run",
                 source_id
