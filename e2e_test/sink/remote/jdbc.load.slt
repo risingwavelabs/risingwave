@@ -63,6 +63,63 @@ create materialized view mv_remote_0 as select * from t_remote_0;
 statement ok
 create materialized view mv_remote_1 as select * from t_remote_1;
 
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py start --target-host db --target-port 5432 --listen-host 127.0.0.1 --listen-port 28434 --pid-file /tmp/rw_pg_tcp_proxy_28434.pid --log-file /tmp/rw_pg_tcp_proxy_28434.log
+
+system ok
+PGPASSWORD=connector psql -h db -U test -d test -c "CREATE TABLE t_jdbc_ip_version (id BIGINT PRIMARY KEY, v BIGINT)"
+
+statement ok
+CREATE TABLE rw_jdbc_ip_version (
+    id BIGINT PRIMARY KEY,
+    v BIGINT
+);
+
+statement ok
+CREATE SINK s_jdbc_ip_version_ipv4 FROM rw_jdbc_ip_version WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://localhost:28434/test',
+    user='test',
+    password='connector',
+    table.name='t_jdbc_ip_version',
+    primary_key='id',
+    type='upsert',
+    ip.version='ipv4'
+);
+
+statement ok
+INSERT INTO rw_jdbc_ip_version VALUES (1, 10), (2, 20);
+
+statement ok
+FLUSH;
+
+system ok retry 4 backoff 1s
+bash -c 'PGPASSWORD=connector psql -h db -U test -d test -At -c "SELECT id, v FROM t_jdbc_ip_version ORDER BY id" | grep -Fx "1|10" && PGPASSWORD=connector psql -h db -U test -d test -At -c "SELECT id, v FROM t_jdbc_ip_version ORDER BY id" | grep -Fx "2|20"'
+
+statement error .*((did not resolve to any ipv6 address)|([Cc]onnection refused)|(Cannot assign requested address)|(Network is unreachable)).*
+CREATE SINK s_jdbc_ip_version_ipv6_on_ipv4 FROM rw_jdbc_ip_version WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://localhost:28434/test',
+    user='test',
+    password='connector',
+    table.name='t_jdbc_ip_version',
+    primary_key='id',
+    type='upsert',
+    ip.version='ipv6'
+);
+
+statement ok
+DROP SINK s_jdbc_ip_version_ipv4;
+
+statement ok
+DROP TABLE rw_jdbc_ip_version;
+
+system ok
+PGPASSWORD=connector psql -h db -U test -d test -c "DROP TABLE t_jdbc_ip_version"
+
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py stop --pid-file /tmp/rw_pg_tcp_proxy_28434.pid
+
 statement ok
 CREATE SINK s_postgres_0 FROM mv_remote_0 WITH (
     connector='jdbc',

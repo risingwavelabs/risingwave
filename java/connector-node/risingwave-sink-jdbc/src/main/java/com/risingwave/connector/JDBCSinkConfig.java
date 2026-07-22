@@ -49,6 +49,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "database.name")
     private String databaseName;
 
+    @JsonProperty(value = "ip.version")
+    private String ipVersion = "any";
+
     // Only applicable for redshift BatchAppendOnlyJDBCSink
     @JsonProperty(value = "batch.insert.rows")
     private int batchInsertRows = 0;
@@ -119,6 +122,10 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public int getBatchInsertRows() {
         return batchInsertRows;
+    }
+
+    public String getIpVersion() {
+        return ipVersion;
     }
 
     public boolean isKeepaliveEnabled() {

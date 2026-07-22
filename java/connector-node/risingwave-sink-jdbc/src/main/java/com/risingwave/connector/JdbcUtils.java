@@ -93,6 +93,7 @@ public abstract class JdbcUtils {
     static Connection getConnectionDefault(JDBCSinkConfig config) throws SQLException {
         String jdbcUrl = config.getJdbcUrl();
         var props = createBaseProperties(jdbcUrl, config.getUser());
+        boolean isPg = jdbcUrl.startsWith("jdbc:postgresql");
 
         // Default password authentication
         if (config.getPassword() != null) {
@@ -105,21 +106,29 @@ public abstract class JdbcUtils {
                     "reWriteBatchedInsertsSize", String.valueOf(config.getBatchInsertRows()));
         }
         // Configure TCP keep-alive with custom SocketFactory if enabled
-        boolean keepaliveConfigured = false;
+        boolean socketFactoryConfigured = false;
         try {
-            if (config.isKeepaliveEnabled()) {
+            JDBCPostgresIpVersion ipVersion =
+                    isPg
+                            ? JDBCPostgresIpVersion.fromUserValue(config.getIpVersion())
+                            : JDBCPostgresIpVersion.ANY;
+            if (config.isKeepaliveEnabled() || ipVersion != JDBCPostgresIpVersion.ANY) {
                 LOG.info(
-                        "Enabling TCP keep-alive: idle={}s, interval={}s, count={}",
+                        "Enabling JDBC socket factory: keepalive={}, idle={}s, interval={}s, count={}, ip.version={}",
+                        config.isKeepaliveEnabled(),
                         config.getKeepaliveIdleSeconds(),
                         config.getKeepaliveIntervalSeconds(),
-                        config.getKeepaliveCount());
+                        config.getKeepaliveCount(),
+                        ipVersion);
                 // Configure the ThreadLocal factory parameters
-                JDBCKeepaliveSocketFactory.configure(
+                JDBCSocketFactory.configure(
+                        config.isKeepaliveEnabled(),
                         config.getKeepaliveIdleSeconds(),
                         config.getKeepaliveIntervalSeconds(),
-                        config.getKeepaliveCount());
-                keepaliveConfigured = true;
-                props.setProperty("socketFactory", JDBCKeepaliveSocketFactory.class.getName());
+                        config.getKeepaliveCount(),
+                        ipVersion);
+                socketFactoryConfigured = true;
+                props.setProperty("socketFactory", JDBCSocketFactory.class.getName());
             }
 
             var conn = DriverManager.getConnection(jdbcUrl, props);
@@ -133,8 +142,8 @@ public abstract class JdbcUtils {
             return conn;
         } finally {
             // Clean up ThreadLocal to prevent memory leak
-            if (keepaliveConfigured) {
-                JDBCKeepaliveSocketFactory.clearConfig();
+            if (socketFactoryConfigured) {
+                JDBCSocketFactory.clearConfig();
             }
         }
     }
