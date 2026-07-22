@@ -1,40 +1,42 @@
-# Regression test for reading Parquet TIME columns with all Arrow time units.
+# Regression test for reading Parquet TIME columns in every Arrow time unit.
 #
-# The Parquet file below was generated with pyarrow 23.0.1:
+# Schema conversion already mapped all four units to RisingWave `time`, but array
+# conversion only handled `Time64(Microsecond)`, so the other three failed to decode.
+#
+# The committed fixture `data/time_units/data.parquet` was generated with parquet-rs
+# 58.1.0 (ArrowWriter), which is the only writer that round-trips `time32[s]`: Parquet's
+# TIME logical type has no SECOND unit, so it is stored as a bare INT32 and recovered
+# from the embedded `ARROW:schema` hint.
 #   id:   int32      = [1, 2]
 #   t_s:  time32[s]  = [01:01:01, NULL]
 #   t_ms: time32[ms] = [01:01:01.123, NULL]
 #   t_us: time64[us] = [01:01:01.123456, NULL]
 #   t_ns: time64[ns] = [01:01:01.123456789, NULL]
 
-system ok
-bash -euo pipefail -c '
-  rm -rf /tmp/rw_parquet_time_units
-  mkdir -p /tmp/rw_parquet_time_units
-  printf "%s" "UEFSMRUEFRAVFEwVBBUAEgAACBwBAAAAAgAAABUAFRIVFiwVBBUQFQYVBhwYBAIAAAAYBAEAAAAWACgEAgAAABgEAQAAABERAAAACSACAAAABAEBAwIVBBUIFQxMFQIVABIAAAQMyNw3ABUAFRIVFiwVBBUQFQYVBhwYBMjcNwAYBMjcNwAWAigEyNw3ABgEyNw3ABERAAAACSACAAAAAwEBAgAVBBUIFQxMFQIVABIAAAQMQ903ABUAFRIVFiwVBBUQFQYVBhwYBEPdNwAYBEPdNwAWAigEQ903ABgEQ903ABERAAAACSACAAAAAwEBAgAVBBUQFRRMFQIVABIAAAgcgE842gAAAAAVABUSFRYsFQQVEBUGFQYcGAiATzjaAAAAABgIgE842gAAAAAWAigIgE842gAAAAAYCIBPONoAAAAAEREAAAAJIAIAAAADAQECABUEFRAVFEwVAhUAEgAACBwVj/ZrVAMAABUAFRIVFiwVBBUQFQYVBhwYCBWP9mtUAwAAGAgVj/ZrVAMAABYCKAgVj/ZrVAMAABgIFY/2a1QDAAAREQAAAAkgAgAAAAMBAQIAFQQZbDUAGAZzY2hlbWEVCgAVAiUCGAJpZAAVAiUCGAN0X3NsfBIcHAAAAAAAFQIlAhgEdF9tc2x8EhwcAAAAAAAVBCUCGAR0X3VzbHwSHCwAAAAAABUEJQIYBHRfbnNsfBIcPAAAAAAAFgQZHBlcJgAcFQIZNQAGEBkYAmlkFQIWBBacARakASY4JggcGAQCAAAAGAQBAAAAFgAoBAIAAAAYBAEAAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYABAAAACYAHBUCGTUABhAZGAN0X3MVAhYEFpQBFpwBJtQBJqwBHBgEyNw3ABgEyNw3ABYCKATI3DcAGATI3DcAEREAGSwVBBUAFQIAFQAVEBUCADwpBhkmAgIAAAAmABwVAhk1AAYQGRgEdF9tcxUCFgQWlAEWnAEm8AImyAIcGARD3TcAGARD3TcAFgIoBEPdNwAYBEPdNwAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYCAgAAACYAHBUEGTUABhAZGAR0X3VzFQIWBBa8ARbEASaUBCbkAxwYCIBPONoAAAAAGAiATzjaAAAAABYCKAiATzjaAAAAABgIgE842gAAAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYCAgAAACYAHBUEGTUABhAZGAR0X25zFQIWBBa8ARbEASbYBSaoBRwYCBWP9mtUAwAAGAgVj/ZrVAMAABYCKAgVj/ZrVAMAABgIFY/2a1QDAAAREQAZLBUEFQAVAgAVABUQFQIAPCkGGSYCAgAAABa8BhYEJggW5AYAGRwYDEFSUk9XOnNjaGVtYRjMAy8vLy8vMUFCQUFBUUFBQUFBQUFLQUF3QUJnQUZBQWdBQ2dBQUFBQUJCQUFNQUFBQUNBQUlBQUFBQkFBSUFBQUFCQUFBQUFVQUFBRG9BQUFBcEFBQUFIUUFBQUE0QUFBQUJBQUFBRHovLy84QUFBRUpFQUFBQUJnQUFBQUVBQUFBQUFBQUFBUUFBQUIwWDI1ekFBQUFBTkQvLy84QUFBTUFRQUFBQUd6Ly8vOEFBQUVKRUFBQUFDQUFBQUFFQUFBQUFBQUFBQVFBQUFCMFgzVnpBQUFBQUFnQURBQUdBQWdBQ0FBQUFBQUFBZ0JBQUFBQXBQLy8vd0FBQVFrUUFBQUFIQUFBQUFRQUFBQUFBQUFBQkFBQUFIUmZiWE1BQUFBQUJBQUVBQVFBQUFEUS8vLy9BQUFCQ1JBQUFBQWNBQUFBQkFBQUFBQUFBQUFEQUFBQWRGOXpBQUFBQmdBSUFBWUFCZ0FBQUFBQUFBQVFBQlFBQ0FBR0FBY0FEQUFBQUJBQUVBQUFBQUFBQVFJUUFBQUFIQUFBQUFRQUFBQUFBQUFBQWdBQUFHbGtBQUFJQUF3QUNBQUhBQWdBQUFBQUFBQUJJQUFBQUFBQUFBQT0AGCBwYXJxdWV0LWNwcC1hcnJvdyB2ZXJzaW9uIDIzLjAuMRlcHAAAHAAAHAAAHAAAHAAAAGYEAABQQVIx" \
-    | base64 -d > /tmp/rw_parquet_time_units/data.parquet
-'
-
 statement ok
-CREATE TABLE parquet_time_units (
+create table parquet_time_units (
     id int,
     t_s time,
     t_ms time,
     t_us time,
     t_ns time
-) WITH (
+) with (
     connector = 'posix_fs',
-    posix_fs.root = '/tmp/rw_parquet_time_units'
-) FORMAT PLAIN ENCODE PARQUET;
+    posix_fs.root = 'e2e_test/source_inline/fs/data/time_units'
+) format plain encode parquet;
 
-query ITTTT retry 20 backoff 1s
-SELECT id, t_s, t_ms, t_us, t_ns FROM parquet_time_units ORDER BY id;
+# Wait until the reader has discovered and ingested the file.
+query I retry 60 backoff 1s
+select count(*) from parquet_time_units;
 ----
-1 01:01:01 01:01:01.123 01:01:01.123456 01:01:01.123456789
+2
+
+# `t_ns` is truncated to microseconds, matching the precision of RisingWave's `time`.
+query ITTTT
+select id, t_s, t_ms, t_us, t_ns from parquet_time_units order by id;
+----
+1 01:01:01 01:01:01.123 01:01:01.123456 01:01:01.123456
 2 NULL NULL NULL NULL
 
 statement ok
-DROP TABLE parquet_time_units;
-
-system ok
-rm -rf /tmp/rw_parquet_time_units
+drop table parquet_time_units;

@@ -250,6 +250,8 @@ enum ErrorKind {
     Date { days: i32 },
     #[error("Invalid time: secs: {secs}, nanoseconds: {nsecs}")]
     Time { secs: u32, nsecs: u32 },
+    #[error("Invalid time: {value} is out of range for a time of day")]
+    TimeOfDay { value: u64 },
     #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
     #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
@@ -275,6 +277,10 @@ impl InvalidParamsError {
 
     pub fn time(secs: u32, nsecs: u32) -> Self {
         ErrorKind::Time { secs, nsecs }.into()
+    }
+
+    pub fn time_of_day(value: u64) -> Self {
+        ErrorKind::TimeOfDay { value }.into()
     }
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
@@ -424,6 +430,10 @@ impl Date {
     }
 }
 
+/// Exclusive upper bounds of a time of day.
+const NANOS_PER_DAY: u64 = 86_400 * 1_000_000_000;
+const MICROS_PER_DAY: u64 = 86_400 * 1_000_000;
+
 impl Time {
     pub fn with_secs_nano(secs: u32, nano: u32) -> Result<Self> {
         Ok(Time::new(
@@ -451,15 +461,21 @@ impl Time {
     }
 
     pub fn with_nano(nano: u64) -> Result<Self> {
-        let secs = (nano / 1_000_000_000) as u32;
-        let nano = (nano % 1_000_000_000) as u32;
-        Self::with_secs_nano(secs, nano)
+        // Rejecting out-of-day values here also keeps the casts below lossless.
+        if nano >= NANOS_PER_DAY {
+            return Err(InvalidParamsError::time_of_day(nano));
+        }
+        Self::with_secs_nano((nano / 1_000_000_000) as u32, (nano % 1_000_000_000) as u32)
     }
 
     pub fn with_micro(micro: u64) -> Result<Self> {
-        let secs = (micro / 1_000_000) as u32;
-        let nano = ((micro % 1_000_000) * 1_000) as u32;
-        Self::with_secs_nano(secs, nano)
+        if micro >= MICROS_PER_DAY {
+            return Err(InvalidParamsError::time_of_day(micro));
+        }
+        Self::with_secs_nano(
+            (micro / 1_000_000) as u32,
+            ((micro % 1_000_000) * 1_000) as u32,
+        )
     }
 
     pub fn with_milli(milli: u32) -> Result<Self> {
