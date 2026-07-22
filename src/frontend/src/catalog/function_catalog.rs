@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
+use itertools::Itertools;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
@@ -49,7 +51,7 @@ pub struct FunctionCatalog {
 impl FunctionCatalog {
     pub fn create_sql(&self) -> String {
         let mut args = Vec::new();
-        for (name, ty) in self.arg_names.iter().zip(self.arg_types.iter()) {
+        for (name, ty) in self.arg_names.iter().zip_eq_debug(self.arg_types.iter()) {
             if name.is_empty() {
                 args.push(format!("{}", ty));
             } else {

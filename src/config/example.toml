@@ -486,7 +486,7 @@ per_database_isolation = true
 enforce_secret = false
 
 [udf]
-enable_embedded_python_udf = false
+enable_embedded_python_udf = true
 enable_embedded_javascript_udf = true
 enable_embedded_wasm_udf = true
 
