@@ -38,6 +38,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
@@ -46,7 +47,6 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
-use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
@@ -468,10 +468,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
-/// Check that all leaf nodes must be stream table scan,
-/// since that plan node maps to `backfill` executor, which supports recovery.
-/// Some other leaf nodes like `StreamValues` do not support recovery, and they
-/// cannot use background ddl.
+/// Check that all leaf nodes support recoverable background DDL.
 pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
         if plan.as_stream_source_scan().is_some()
@@ -485,13 +482,14 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
                 StreamScanType::Backfill
                 | StreamScanType::ArrangementBackfill
                 | StreamScanType::CrossDbSnapshotBackfill
-                | StreamScanType::SnapshotBackfill => true,
+                | StreamScanType::SnapshotBackfill
+                | StreamScanType::UpstreamOnly => true,
                 StreamScanType::Unspecified => unreachable!(),
-                StreamScanType::Chain
-                | StreamScanType::Rearrange
-                | StreamScanType::UpstreamOnly => false,
+                // These legacy scan types do not persist snapshot progress.
+                StreamScanType::Chain | StreamScanType::Rearrange => false,
             }
         } else {
+            // Other leaf nodes, such as `StreamValues`, do not support recovery.
             false
         }
     } else {
