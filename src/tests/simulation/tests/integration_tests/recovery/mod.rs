@@ -19,3 +19,4 @@ mod drop_streaming_job;
 mod event_log;
 mod locality_backfill;
 mod nexmark_recovery;
+mod time_travel;
