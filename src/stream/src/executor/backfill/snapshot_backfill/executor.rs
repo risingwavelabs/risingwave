@@ -339,8 +339,11 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         loop {
                             let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                             assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
-                            if barrier.is_stop(self.actor_ctx.id) {
+                            let is_stop = barrier.is_stop(self.actor_ctx.id);
+                            if is_stop && barrier.epoch.curr != u64::MAX {
+                                let post_commit = backfill_state.commit(barrier.epoch).await?;
                                 yield Message::Barrier(barrier);
+                                post_commit.post_yield_barrier(None).await?;
                                 return Ok(());
                             }
 
@@ -429,6 +432,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                             yield Message::Barrier(barrier);
                             post_commit.post_yield_barrier(None).await?;
+                            if is_stop {
+                                return Ok(());
+                            }
                             if update_vnode_bitmap.is_some() {
                                 return Err(anyhow!(
                                     "should not update vnode bitmap during consuming log store"
@@ -1078,7 +1084,9 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 barrier_epoch = barrier.epoch;
 
                 if barrier.is_stop(actor_ctx.id) {
+                    let post_commit = backfill_state.commit(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
+                    post_commit.post_yield_barrier(None).await?;
                     return Ok(());
                 }
 
