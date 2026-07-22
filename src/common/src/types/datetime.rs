@@ -884,4 +884,23 @@ mod tests {
         Time::from_str("AA04:05:06").unwrap_err();
         Timestamp::from_str("1999-01-08 04:05:06AA").unwrap_err();
     }
+
+    #[test]
+    fn time_of_day_bounds() {
+        assert_eq!(
+            Time::with_micro(86_399_999_999).unwrap(),
+            Time::from_hms_micro_uncheck(23, 59, 59, 999_999)
+        );
+        assert_eq!(
+            Time::with_nano(86_399_999_999_999).unwrap(),
+            Time::from_hms_nano_uncheck(23, 59, 59, 999_999_999)
+        );
+
+        Time::with_micro(86_400_000_000).unwrap_err();
+        Time::with_nano(86_400_000_000_000).unwrap_err();
+
+        // A seconds count at a multiple of 2^32 used to wrap into the valid range.
+        Time::with_micro(4_294_967_296_000_000).unwrap_err();
+        Time::with_nano(4_294_967_296_000_000_000).unwrap_err();
+    }
 }
