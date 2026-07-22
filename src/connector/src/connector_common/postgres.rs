@@ -465,11 +465,11 @@ pub enum IpVersion {
     #[default]
     #[serde(alias = "")]
     Any,
-    /// Connect only to IPv4 addresses.
+    /// Connect only to `IPv4` addresses.
     #[serde(alias = "4")]
     #[serde(alias = "v4")]
     Ipv4,
-    /// Connect only to IPv6 addresses.
+    /// Connect only to `IPv6` addresses.
     #[serde(alias = "6")]
     #[serde(alias = "v6")]
     Ipv6,
