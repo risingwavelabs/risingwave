@@ -69,6 +69,17 @@ impl Checker {
             .await;
     }
 
+    /// Resets the schema and replays all setup statements to reconstruct a clean
+    /// execution environment.
+    ///
+    /// Use this after path-based reduction finishes to ensure EXPLAIN runs in a
+    /// deliberately-reconstructed state (same sequence as any `is_failure_preserved`
+    /// check) rather than in whatever session state was left by the last check.
+    pub async fn reset_and_replay_setup(&self) {
+        self.reset_schema().await;
+        self.replay_setup().await;
+    }
+
     /// Determines if the transformation preserved the original failure behavior.
     ///
     /// Each test run resets the schema, replays setup, and runs the query.
@@ -108,6 +119,18 @@ impl Checker {
         for stmt in &self.setup_stmts {
             let _ = self.client.simple_query(&stmt.to_string()).await;
         }
+    }
+
+    /// Reset the schema and replay setup statements to reconstruct a clean,
+    /// deterministic post-setup database state.
+    ///
+    /// This is intended to be used by callers that want to run a follow-up
+    /// query (e.g. `EXPLAIN`) against a known, fully-replayed environment,
+    /// rather than relying on whatever connection state happened to be left
+    /// behind by the last call to [`Self::is_failure_preserved`].
+    pub async fn reset_and_replay_setup(&self) {
+        self.reset_schema().await;
+        self.replay_setup().await;
     }
 }
 
