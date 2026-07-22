@@ -87,6 +87,7 @@ pub struct PgConnectionConfig {
     pub database: String,
     pub ssl_mode: SslMode,
     pub ssl_root_cert: Option<String>,
+    /// Address family to use when resolving and connecting to the Postgres host.
     pub ip_version: IpVersion,
 }
 
@@ -456,15 +457,19 @@ impl std::str::FromStr for SslMode {
     }
 }
 
+/// Address family preference for Postgres connections.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum IpVersion {
+    /// Use the addresses returned by DNS resolution without filtering by family.
     #[default]
     #[serde(alias = "")]
     Any,
+    /// Connect only to IPv4 addresses.
     #[serde(alias = "4")]
     #[serde(alias = "v4")]
     Ipv4,
+    /// Connect only to IPv6 addresses.
     #[serde(alias = "6")]
     #[serde(alias = "v6")]
     Ipv6,
