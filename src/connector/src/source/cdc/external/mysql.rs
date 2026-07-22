@@ -268,8 +268,8 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         .collect_vec();
     let base = tokens.first().copied().unwrap_or_default();
     let second = tokens.get(1).copied();
-    let is_unsigned = tokens.iter().any(|token| *token == "unsigned");
-    let is_zero_fill = tokens.iter().any(|token| *token == "zerofill");
+    let is_unsigned = tokens.contains(&"unsigned");
+    let is_zero_fill = tokens.contains(&"zerofill");
 
     let make_numeric_attr = || {
         let mut attr = NumericAttr::default();
@@ -619,8 +619,8 @@ impl MySqlExternalTableReader {
         for row in &rs {
             let column_name: String = row.get(0).unwrap();
             let column_type: String = row.get(1).unwrap();
-            let column_type = type_name_to_mysql_type(&column_type)
-                .unwrap_or_else(|| ColumnType::Unknown(column_type));
+            let column_type =
+                type_name_to_mysql_type(&column_type).unwrap_or(ColumnType::Unknown(column_type));
             column_infos.push((column_name, column_type));
         }
 
