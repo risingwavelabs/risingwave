@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
-use itertools::Itertools;
+
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
