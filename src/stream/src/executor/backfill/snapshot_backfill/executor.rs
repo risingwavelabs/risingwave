@@ -339,14 +339,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         loop {
                             let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                             assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
-                            let is_stop = barrier.is_stop(self.actor_ctx.id);
-                            if is_stop && barrier.epoch.curr != u64::MAX {
-                                let post_commit = backfill_state.commit(barrier.epoch).await?;
-                                yield Message::Barrier(barrier);
-                                post_commit.post_yield_barrier(None).await?;
-                                return Ok(());
-                            }
-
                             let is_finished = upstream_buffer.consumed_epoch(barrier.epoch).await?;
                             // Disable calling next_epoch, because, if barrier_epoch.prev is a checkpoint epoch,
                             // next_epoch(barrier_epoch.prev) is actually waiting for the committed epoch.
@@ -432,9 +424,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                             yield Message::Barrier(barrier);
                             post_commit.post_yield_barrier(None).await?;
-                            if is_stop {
-                                return Ok(());
-                            }
                             if update_vnode_bitmap.is_some() {
                                 return Err(anyhow!(
                                     "should not update vnode bitmap during consuming log store"
@@ -1083,13 +1072,6 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
                 barrier_epoch = barrier.epoch;
 
-                if barrier.is_stop(actor_ctx.id) {
-                    let post_commit = backfill_state.commit(barrier.epoch).await?;
-                    yield Message::Barrier(barrier);
-                    post_commit.post_yield_barrier(None).await?;
-                    return Ok(());
-                }
-
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
@@ -1211,9 +1193,7 @@ mod tests {
     use crate::common::table::test_utils::gen_pbtable_with_value_indices;
     use crate::executor::exchange::input::{Input, LocalInput};
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{
-        ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream, StopMutation,
-    };
+    use crate::executor::{ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream};
     use crate::task::LocalBarrierManager;
 
     const SOURCE_TABLE_ID: TableId = TableId::new(0x233);
@@ -1671,152 +1651,6 @@ mod tests {
                 .await
                 .epoch,
             stop_barrier.epoch
-        );
-    }
-
-    #[tokio::test]
-    async fn test_snapshot_backfill_stop_during_log_store_skips_replay_on_hummock() {
-        let source_env = prepare_hummock_test_env().await;
-        source_env.register_table(source_table_pb()).await;
-        let progress_env = prepare_hummock_test_env().await;
-        progress_env.register_table(progress_table_pb()).await;
-
-        let mut source_state_table = source_state_table(source_env.storage.clone()).await;
-        let source_table = source_batch_table(source_env.storage.clone());
-        let progress_state_table = progress_state_table(progress_env.storage.clone()).await;
-
-        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        source_env
-            .storage
-            .start_epoch(epoch.curr, HashSet::from_iter([SOURCE_TABLE_ID]));
-        source_state_table.init_epoch(epoch).await.unwrap();
-
-        commit_insert_epoch(
-            &source_env,
-            &mut source_state_table,
-            &mut epoch,
-            HashSet::from_iter([SOURCE_TABLE_ID]),
-            &[],
-        )
-        .await;
-        commit_insert_epoch(
-            &source_env,
-            &mut source_state_table,
-            &mut epoch,
-            HashSet::from_iter([SOURCE_TABLE_ID]),
-            &[],
-        )
-        .await;
-        commit_insert_epoch(
-            &source_env,
-            &mut source_state_table,
-            &mut epoch,
-            HashSet::from_iter([SOURCE_TABLE_ID]),
-            &[],
-        )
-        .await;
-        commit_insert_epoch(
-            &source_env,
-            &mut source_state_table,
-            &mut epoch,
-            HashSet::from_iter([SOURCE_TABLE_ID]),
-            &[4],
-        )
-        .await;
-        start_progress_epochs(&progress_env, 5);
-
-        let barrier_manager = LocalBarrierManager::for_test();
-        let progress = CreateMviewProgressReporter::for_test(barrier_manager.clone());
-        let actor_ctx = ActorContext::for_test(1236);
-        let actor_id = actor_ctx.id;
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        let (upstream_tx, upstream_rx) = channel_for_test();
-
-        upstream_tx
-            .send(
-                DispatcherMessage::Barrier(
-                    Barrier::new_test_barrier(test_epoch(5)).into_dispatcher(),
-                )
-                .into(),
-            )
-            .await
-            .unwrap();
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(1)))
-            .unwrap();
-
-        let mut executor = SnapshotBackfillExecutor::new(
-            source_table,
-            progress_state_table,
-            Some(make_upstream_input(
-                barrier_manager,
-                actor_ctx.clone(),
-                upstream_rx,
-            )),
-            None,
-            vec![0],
-            vec![0],
-            actor_ctx,
-            progress,
-            1024,
-            RateLimit::Disabled,
-            barrier_rx,
-            Arc::new(StreamingMetrics::unused()),
-            Some(test_epoch(3)),
-        )
-        .expect("snapshot backfill executor should be created")
-        .boxed()
-        .execute();
-
-        assert_eq!(
-            expect_barrier_with_timeout(&mut executor, "initial injected barrier")
-                .await
-                .epoch,
-            Barrier::new_test_barrier(test_epoch(1)).epoch
-        );
-        expect_pending_with_timeout(&mut executor, "snapshot finish barrier 2").await;
-
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(2)))
-            .unwrap();
-        assert_eq!(
-            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 2")
-                .await
-                .epoch,
-            Barrier::new_test_barrier(test_epoch(2)).epoch
-        );
-
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(3)))
-            .unwrap();
-        assert_eq!(
-            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 3")
-                .await
-                .epoch,
-            Barrier::new_test_barrier(test_epoch(3)).epoch
-        );
-
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(4)))
-            .unwrap();
-        assert_eq!(
-            expect_barrier_with_timeout(&mut executor, "snapshot completion barrier 4")
-                .await
-                .epoch,
-            Barrier::new_test_barrier(test_epoch(4)).epoch
-        );
-
-        let stop_barrier =
-            Barrier::new_test_barrier(test_epoch(5)).with_mutation(Mutation::Stop(StopMutation {
-                dropped_actors: HashSet::from_iter([actor_id]),
-                dropped_sink_fragments: Default::default(),
-            }));
-        barrier_tx.send(stop_barrier.clone()).unwrap();
-
-        assert_eq!(
-            expect_barrier_with_timeout(&mut executor, "stop barrier during log-store replay")
-                .await,
-            stop_barrier
         );
     }
 }
