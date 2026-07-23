@@ -754,6 +754,24 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
+  - name: enable_manifest_rewrite
+    field_type: bool
+    comments: Whether to periodically rewrite fragmented Iceberg data manifests.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: manifest_rewrite_target_size_bytes
+    field_type: u64
+    comments: Target size in bytes for rewritten Iceberg data manifests.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: manifest_rewrite_min_count_to_merge
+    field_type: usize
+    comments: Minimum number of manifests required to rewrite an under-filled batch.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
   - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
