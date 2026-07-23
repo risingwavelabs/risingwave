@@ -891,8 +891,8 @@ from composite_text_schema_specified_shared
 where id in (2, 4)
 order by id;
 ----
-2 true NULL false false false
-4 false 1 false true true
+2 t NULL f f f
+4 f 1 f t t
 
 query IBIBBB retry 8 backoff 1s
 select
@@ -906,8 +906,8 @@ from composite_text_auto_derived_shared
 where id in (2, 4)
 order by id;
 ----
-2 true NULL false false false
-4 false 1 false true true
+2 t NULL f f f
+4 f 1 f t t
 
 # Regression: DELETE on a row whose composite column is declared NOT NULL upstream.
 # Under REPLICA IDENTITY DEFAULT, Debezium fills non-PK columns with null in the
