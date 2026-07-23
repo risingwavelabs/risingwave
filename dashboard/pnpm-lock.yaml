@@ -83,6 +83,9 @@ importers:
       lodash:
         specifier: ^4.18.1
         version: 4.18.1
+      monaco-editor:
+        specifier: ^0.56.0
+        version: 0.56.0
       next:
         specifier: ^16.2.6
         version: 16.2.10(@babel/core@7.29.7)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -95,9 +98,6 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      react-flow-renderer:
-        specifier: 10.3.16
-        version: 10.3.16(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react-json-view:
         specifier: ^1.21.3
         version: 1.21.3(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -952,9 +952,6 @@ packages:
   '@types/react@18.3.31':
     resolution: {integrity: sha512-vfEqpXTvwT91yhmwdfouStN2hSKwTvyRs8qpLfADyrq/kxDw0hZM7Wk9Ug1FELj8hIby+S/+kQCSRFF32nv2Qw==}
 
-  '@types/resize-observer-browser@0.1.11':
-    resolution: {integrity: sha512-cNw5iH8JkMkb3QkCoe7DaZiawbDQEUX8t7iuQaRTyLOyQCR2h+ibBD4GJt7p5yhUHrlOeL7ZtbxNHeipqNsBzQ==}
-
   '@types/stack-utils@2.0.3':
     resolution: {integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw==}
 
@@ -1354,9 +1351,6 @@ packages:
 
   class-transformer@0.5.1:
     resolution: {integrity: sha512-SQa1Ws6hUbfC98vKGxZH3KFY0Y1lm5Zm0SY8XX9zbK7FJCyVEac3ATW0RIpwzW+oOfmHE5PMPufDG9hCfoEOMw==}
-
-  classcat@5.0.5:
-    resolution: {integrity: sha512-JhZUT7JFcQy/EzW605k/ktHtncoo9vnyW/2GspNYwFlN1C/WmjuV/xtS04e9SOkL2sTdw0VAZ2UGCcQ9lR6p6w==}
 
   client-only@0.0.1:
     resolution: {integrity: sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==}
@@ -2752,14 +2746,6 @@ packages:
   react-fast-compare@3.2.2:
     resolution: {integrity: sha512-nsO+KSNgo1SbJqJEYRE9ERzo7YtYbou/OqjSQKxV7jcKox7+usiUVZOAC+XnDOABXggQTno0Y1CpVnuWEc1boQ==}
 
-  react-flow-renderer@10.3.16:
-    resolution: {integrity: sha512-QNvM/W1eurDd4gDK47wBLNE4GfK6Gx+JeygI00JsanNIDKEL/cxNdXcP2fwYgJme72AxuaLXc5xliHGaGmy+Jw==}
-    engines: {node: '>=14'}
-    deprecated: react-flow-renderer has been renamed to reactflow, please use this package from now on https://reactflow.dev/docs/guides/migrate-to-v11/
-    peerDependencies:
-      react: 16 || 17 || 18
-      react-dom: 16 || 17 || 18
-
   react-focus-lock@2.13.7:
     resolution: {integrity: sha512-20lpZHEQrXPb+pp1tzd4ULL6DyO5D2KnR0G69tTDdydrmNhU7pdFmbQUYVyHUgp+xN29IuFR0PVuhOmvaZL9Og==}
     peerDependencies:
@@ -3319,15 +3305,6 @@ packages:
 
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
-
-  zustand@3.7.2:
-    resolution: {integrity: sha512-PIJDIZKtokhof+9+60cpockVOq05sJzHCriyvaLBmEJixseQ1a5Kdov6fWZfWOu5SK9c+FhH1jU0tntLxRJYMA==}
-    engines: {node: '>=12.7.0'}
-    peerDependencies:
-      react: '>=16.8'
-    peerDependenciesMeta:
-      react:
-        optional: true
 
 snapshots:
 
@@ -4184,8 +4161,6 @@ snapshots:
       '@types/prop-types': 15.7.15
       csstype: 3.2.3
 
-  '@types/resize-observer-browser@0.1.11': {}
-
   '@types/stack-utils@2.0.3': {}
 
   '@types/styled-components@5.1.36':
@@ -4609,8 +4584,6 @@ snapshots:
   ci-info@4.4.0: {}
 
   class-transformer@0.5.1: {}
-
-  classcat@5.0.5: {}
 
   client-only@0.0.1: {}
 
@@ -6240,19 +6213,6 @@ snapshots:
 
   react-fast-compare@3.2.2: {}
 
-  react-flow-renderer@10.3.16(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
-    dependencies:
-      '@babel/runtime': 7.29.7
-      '@types/d3': 7.4.3
-      '@types/resize-observer-browser': 0.1.11
-      classcat: 5.0.5
-      d3-drag: 3.0.0
-      d3-selection: 3.0.0
-      d3-zoom: 3.0.0
-      react: 18.3.1
-      react-dom: 18.3.1(react@18.3.1)
-      zustand: 3.7.2(react@18.3.1)
-
   react-focus-lock@2.13.7(@types/react@18.3.31)(react@18.3.1):
     dependencies:
       '@babel/runtime': 7.29.7
@@ -6974,7 +6934,3 @@ snapshots:
       zod: 4.4.3
 
   zod@4.4.3: {}
-
-  zustand@3.7.2(react@18.3.1):
-    optionalDependencies:
-      react: 18.3.1
