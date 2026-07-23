@@ -56,6 +56,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.core.BaseConnection;
 import org.slf4j.Logger;
@@ -568,7 +570,8 @@ public class PostgresStreamingChangeEventSource
                         PostgresConnector.class,
                         connectorConfig.getLogicalName(),
                         KEEP_ALIVE_THREAD_NAME);
-        return new MonitoredKeepAliveExecutor(delegate);
+        return new MonitoredKeepAliveExecutor(
+                delegate, () -> keepAliveStopping, this::recordKeepAliveFailure);
     }
 
     private void throwIfKeepAliveFailed() {
@@ -579,8 +582,15 @@ public class PostgresStreamingChangeEventSource
         }
     }
 
-    private boolean isKeepAliveStopException(Throwable t) {
-        if (keepAliveStopping || Thread.currentThread().isInterrupted()) {
+    private void recordKeepAliveFailure(Throwable t) {
+        if (!keepAliveFailure) {
+            keepAliveError = t;
+            keepAliveFailure = true;
+        }
+    }
+
+    private static boolean isKeepAliveStopException(BooleanSupplier stopping, Throwable t) {
+        if (stopping.getAsBoolean() || Thread.currentThread().isInterrupted()) {
             return true;
         }
 
@@ -601,11 +611,18 @@ public class PostgresStreamingChangeEventSource
      * A delegating ExecutorService that wraps submitted tasks to detect keep-alive thread failures.
      * Only the methods used by ReplicationStream.startKeepAlive are overridden.
      */
-    private class MonitoredKeepAliveExecutor extends AbstractExecutorService {
+    static class MonitoredKeepAliveExecutor extends AbstractExecutorService {
         private final ExecutorService delegate;
+        private final BooleanSupplier stopping;
+        private final Consumer<Throwable> failureRecorder;
 
-        MonitoredKeepAliveExecutor(ExecutorService delegate) {
+        MonitoredKeepAliveExecutor(
+                ExecutorService delegate,
+                BooleanSupplier stopping,
+                Consumer<Throwable> failureRecorder) {
             this.delegate = delegate;
+            this.stopping = stopping;
+            this.failureRecorder = failureRecorder;
         }
 
         @Override
@@ -614,19 +631,59 @@ public class PostgresStreamingChangeEventSource
                     () -> {
                         try {
                             command.run();
+                            Throwable failure = completedTaskFailure(command);
+                            if (failure != null) {
+                                if (delegate.isShutdown()
+                                        || isKeepAliveStopException(stopping, failure)) {
+                                    LOGGER.debug(
+                                            "Keep-alive thread stopped during shutdown/reconnect",
+                                            failure);
+                                    return;
+                                }
+                                LOGGER.error(
+                                        "Keep-alive thread failed, will trigger streaming restart",
+                                        failure);
+                                failureRecorder.accept(failure);
+                            } else if (!delegate.isShutdown()
+                                    && !stopping.getAsBoolean()
+                                    && !Thread.currentThread().isInterrupted()) {
+                                LOGGER.error(
+                                        "Keep-alive thread stopped unexpectedly, will trigger streaming restart");
+                                failureRecorder.accept(
+                                        new IllegalStateException(
+                                                "Keep-alive thread stopped unexpectedly"));
+                            }
                         } catch (Throwable t) {
-                            if (delegate.isShutdown() || isKeepAliveStopException(t)) {
+                            if (delegate.isShutdown() || isKeepAliveStopException(stopping, t)) {
                                 LOGGER.debug(
                                         "Keep-alive thread stopped during shutdown/reconnect", t);
                                 return;
                             }
                             LOGGER.error(
                                     "Keep-alive thread failed, will trigger streaming restart", t);
-                            keepAliveFailure = true;
-                            keepAliveError = t;
+                            failureRecorder.accept(t);
                             throw t;
                         }
                     });
+        }
+
+        private Throwable completedTaskFailure(Runnable command) {
+            if (!(command instanceof Future<?>)) {
+                return null;
+            }
+
+            Future<?> future = (Future<?>) command;
+            try {
+                future.get();
+                return null;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return e;
+            } catch (ExecutionException e) {
+                return e.getCause();
+            } catch (CancellationException e) {
+                return e;
+            }
         }
 
         @Override
