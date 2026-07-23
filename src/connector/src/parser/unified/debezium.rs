@@ -124,7 +124,7 @@ async fn fetch_pgvector_dimensions_for_table(
 /// columns, and `jdbcType == STRUCT` is only set for scalar composite columns),
 /// so we ask the upstream catalog directly: follow the array type's `typelem`
 /// to its element type and check `typtype IN ('e', 'c')`. Enum values are plain
-/// text, and composite values are converted to text by our CustomConverter,
+/// text, and composite values are converted to text by our `CustomConverter`,
 /// hence `varchar[]`.
 async fn can_fallback_array_to_varchar(
     connector_props: &ConnectorProperties,
