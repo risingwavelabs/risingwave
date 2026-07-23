@@ -114,7 +114,7 @@ impl RandValue for Timestamp {
 
 impl RandValue for Timestamptz {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        Timestamptz::from_micros(rand.random())
+        Timestamp::rand_value(rand).0.and_utc().into()
     }
 }
 

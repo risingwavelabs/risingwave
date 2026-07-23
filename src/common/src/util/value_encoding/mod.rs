@@ -15,6 +15,8 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable, i.e., Key encoding).
 
+use std::sync::LazyLock;
+
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use either::{Either, for_both};
@@ -22,6 +24,7 @@ use enum_as_inner::EnumAsInner;
 use risingwave_pb::data::PbDatum;
 
 use crate::array::ArrayImpl;
+use crate::log::LogSuppressor;
 use crate::row::Row;
 use crate::types::*;
 
@@ -360,7 +363,18 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Time => ScalarImpl::Time(deserialize_time(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
         DataType::Timestamptz => {
-            ScalarImpl::Timestamptz(Timestamptz::from_micros(data.get_i64_le()))
+            let micros = data.get_i64_le();
+            let tz = Timestamptz::from_micros(micros).unwrap_or_else(|| {
+                // Values written before validation existed may be out of range (#26397). Keep
+                // them readable and report, so the row can still be read and deleted.
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    tracing::error!(suppressed_count, micros, "decoded out-of-range timestamptz");
+                }
+                Timestamptz::from_micros_uncheck(micros)
+            });
+            ScalarImpl::Timestamptz(tz)
         }
         DataType::Date => ScalarImpl::Date(deserialize_date(data)?),
         DataType::Jsonb => ScalarImpl::Jsonb(

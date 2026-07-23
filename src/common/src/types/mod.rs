@@ -1501,7 +1501,7 @@ mod tests {
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestamptz => (
-                    ScalarImpl::Timestamptz(Timestamptz::from_micros(233333333)),
+                    ScalarImpl::Timestamptz(Timestamptz::from_micros(233333333).unwrap()),
                     DataType::Timestamptz,
                 ),
                 DataTypeName::Interval => (
