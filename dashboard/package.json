@@ -16,6 +16,7 @@
   "dependencies": {
     "16": "^0.0.2",
     "@chakra-ui/react": "^2.3.1",
+    "@ctrl/tinycolor": "^3.4.1",
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
     "@hpcc-js/wasm-graphviz": "^1.7.0",
