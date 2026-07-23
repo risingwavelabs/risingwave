@@ -196,10 +196,10 @@ impl GlobalRefreshManager {
         job: &refresh_job::Model,
     ) -> MetaResult<()> {
         if job.current_status != RefreshState::Idle {
-            GLOBAL_META_METRICS
+            let refresh_cron_job_miss_cnt = GLOBAL_META_METRICS
                 .refresh_cron_job_miss_cnt
-                .with_guarded_label_values(&[&job.table_id.to_string()])
-                .inc();
+                .with_guarded_label_values(&[&job.table_id.to_string()]);
+            refresh_cron_job_miss_cnt.inc();
             tracing::warn!(table_id = %job.table_id, "skip scheduled refresh: current status is not idle: {:?}", job.current_status);
             return Ok(());
         }
@@ -258,10 +258,10 @@ impl GlobalRefreshManager {
 
         // Increment cron job trigger counter
         let table_id_str = job.table_id.to_string();
-        GLOBAL_META_METRICS
+        let refresh_cron_job_trigger_cnt = GLOBAL_META_METRICS
             .refresh_cron_job_trigger_cnt
-            .with_guarded_label_values(&[&table_id_str])
-            .inc();
+            .with_guarded_label_values(&[&table_id_str]);
+        refresh_cron_job_trigger_cnt.inc();
         tracing::info!(table_id = %job.table_id, "trigger scheduled refresh at interval {:?}", interval);
 
         self.ensure_refreshable(job.table_id, associated_source_id)
@@ -426,14 +426,15 @@ impl GlobalRefreshManager {
         let mut guard = self.progress_trackers.lock();
         if let Some(entry) = guard.inner.remove(&table_id) {
             let status = status.to_owned();
-            GLOBAL_META_METRICS
+            let table_id = table_id.to_string();
+            let refresh_job_duration = GLOBAL_META_METRICS
                 .refresh_job_duration
-                .with_guarded_label_values(&[&table_id.to_string(), &status])
-                .set(entry.start_time.elapsed().as_secs());
-            GLOBAL_META_METRICS
+                .with_guarded_label_values(&[&table_id, &status]);
+            refresh_job_duration.set(entry.start_time.elapsed().as_secs());
+            let refresh_job_finish_cnt = GLOBAL_META_METRICS
                 .refresh_job_finish_cnt
-                .with_guarded_label_values(&[&table_id.to_string(), &status])
-                .inc();
+                .with_guarded_label_values(&[&table_id, &status]);
+            refresh_job_finish_cnt.inc();
         }
         guard.table_id_by_database_id.values_mut().for_each(|set| {
             set.remove(&table_id);

@@ -797,17 +797,15 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
-        GLOBAL_CONNECTION_METRICS
+        let io_err_rate = GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "read",
                 err.kind().to_string().as_str(),
-            ])
-            .inc();
+            ]);
+        io_err_rate.inc();
     }
 
     fn on_write(&mut self, size: usize) {
@@ -828,16 +826,14 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
-        GLOBAL_CONNECTION_METRICS
+        let io_err_rate = GLOBAL_CONNECTION_METRICS
             .io_err_rate
             .with_guarded_label_values(&[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "write",
                 err.kind().to_string().as_str(),
-            ])
-            .inc();
+            ]);
+        io_err_rate.inc();
     }
 }
