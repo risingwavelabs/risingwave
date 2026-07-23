@@ -786,10 +786,10 @@ impl IcebergSinkCommitter {
         let catalog_name = self.config.common.catalog_name();
         let table_name = self.table.identifier().to_string();
         let metrics_labels = [&self.param.sink_name, &catalog_name, &table_name];
-        GLOBAL_SINK_METRICS
+        let iceberg_snapshot_num = GLOBAL_SINK_METRICS
             .iceberg_snapshot_num
-            .with_guarded_label_values(&metrics_labels)
-            .set(snapshot_num as i64);
+            .with_guarded_label_values(&metrics_labels);
+        iceberg_snapshot_num.set(snapshot_num as i64);
 
         tracing::debug!(
             iceberg_component = "sink_committer",

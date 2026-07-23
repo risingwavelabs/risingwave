@@ -468,10 +468,10 @@ pub async fn scan_task_to_chunk_with_deletes(
 
     let mut read_bytes = scopeguard::guard(0u64, |read_bytes| {
         if let Some(metrics) = metrics.clone() {
-            metrics
+            let iceberg_read_bytes = metrics
                 .iceberg_read_bytes
-                .with_guarded_label_values(&[&table_name])
-                .inc_by(read_bytes as _);
+                .with_guarded_label_values(&[&table_name]);
+            iceberg_read_bytes.inc_by(read_bytes as _);
         }
     });
 
@@ -545,24 +545,24 @@ pub async fn scan_task_to_chunk_with_deletes(
         let label_values = [table_name.as_str()];
 
         // File read duration.
-        metrics
+        let file_read_duration_seconds = metrics
             .iceberg_source_file_read_duration_seconds
-            .with_guarded_label_values(&label_values)
-            .observe(file_start.elapsed().as_secs_f64());
+            .with_guarded_label_values(&label_values);
+        file_read_duration_seconds.observe(file_start.elapsed().as_secs_f64());
 
         // Rows read.
         if total_rows_read > 0 {
-            metrics
+            let rows_read_total = metrics
                 .iceberg_source_rows_read_total
-                .with_guarded_label_values(&label_values)
-                .inc_by(total_rows_read);
+                .with_guarded_label_values(&label_values);
+            rows_read_total.inc_by(total_rows_read);
         }
 
         // File read count.
-        metrics
+        let files_read_total = metrics
             .iceberg_source_files_read_total
-            .with_guarded_label_values(&[table_name.as_str(), "data"])
-            .inc();
+            .with_guarded_label_values(&[table_name.as_str(), "data"]);
+        files_read_total.inc();
 
         // APPROXIMATE: Estimate delete rows applied. The delta between expected_record_count
         // and actual rows read may also include predicate pushdown / row-group pruning effects,
@@ -574,10 +574,10 @@ pub async fn scan_task_to_chunk_with_deletes(
         {
             let deleted = expected.saturating_sub(total_rows_read);
             if deleted > 0 {
-                metrics
+                let delete_rows_applied_total = metrics
                     .iceberg_source_delete_rows_applied_total
-                    .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
-                    .inc_by(deleted);
+                    .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"]);
+                delete_rows_applied_total.inc_by(deleted);
             }
         }
     }
