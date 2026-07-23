@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use super::{LogicalPlanRef as PlanRef, LogicalShare, PlanTreeNodeUnary, ShareNode};
+use crate::optimizer::ShareId;
 use crate::optimizer::plan_visitor::{PlanVisitor, ShareParentCounter};
-use crate::optimizer::{OptimizerContextRef, ShareId};
 
 /// A requirement contributed by one parent of a share.
 pub trait ShareRequirement: Clone + Debug {
@@ -208,34 +208,6 @@ impl<R: ShareRequirement> ShareDagContext<R> {
                 seen_dependencies,
                 seen_single_parent_shares,
             );
-        }
-    }
-}
-
-/// Restores the logical share table if a DAG-aware pass unwinds before committing all phases.
-pub struct LogicalShareTableTransaction {
-    ctx: OptimizerContextRef,
-    snapshot: Option<crate::optimizer::LogicalShareTableSnapshot>,
-}
-
-impl LogicalShareTableTransaction {
-    pub fn new(ctx: OptimizerContextRef) -> Self {
-        let snapshot = ctx.snapshot_logical_shares();
-        Self {
-            ctx,
-            snapshot: Some(snapshot),
-        }
-    }
-
-    pub fn commit(mut self) {
-        self.snapshot = None;
-    }
-}
-
-impl Drop for LogicalShareTableTransaction {
-    fn drop(&mut self) {
-        if let Some(snapshot) = self.snapshot.take() {
-            self.ctx.restore_logical_shares(snapshot);
         }
     }
 }

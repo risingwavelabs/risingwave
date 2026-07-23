@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use super::*;
 use crate::optimizer::LogicalPlanRef as PlanRef;
 
@@ -50,12 +52,14 @@ impl ShareRequirement for RequiredColumns {
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
     dag: ShareDagContext<RequiredColumns>,
+    share_mappings: HashMap<ShareId, ColIndexMapping>,
 }
 
 impl ColumnPruningContext {
     pub fn new(root: PlanRef) -> Self {
         Self {
             dag: ShareDagContext::new(root),
+            share_mappings: HashMap::new(),
         }
     }
 
@@ -82,21 +86,27 @@ impl ColumnPruningContext {
     }
 
     pub(in crate::optimizer) fn share_mapping(&self, share: &LogicalShare) -> ColIndexMapping {
-        share.ctx().logical_share_pending_mapping(share.share_id())
+        self.share_mappings
+            .get(&share.share_id())
+            .unwrap_or_else(|| {
+                panic!(
+                    "logical share {:?} has no column-pruning mapping",
+                    share.share_id()
+                )
+            })
+            .clone()
     }
 
     pub(in crate::optimizer) fn run(&mut self, root: PlanRef, required_cols: &[usize]) -> PlanRef {
         self.dag.reset(root.clone());
+        self.share_mappings.clear();
         let optimizer_ctx = root.ctx();
-        let transaction = LogicalShareTableTransaction::new(optimizer_ctx.clone());
-        optimizer_ctx.clear_logical_share_pending_mappings();
 
         self.dag.set_phase(ShareDagPhase::Collect);
         let collected = root.prune_col_inner(required_cols, self);
         let rebuild_order = self.dag.rebuild_order();
         if rebuild_order.is_empty() {
             self.dag.finish();
-            transaction.commit();
             return collected;
         }
 
@@ -104,20 +114,19 @@ impl ColumnPruningContext {
         for share_id in rebuild_order {
             let original_input = self.dag.original_input(share_id);
             let required = self.dag.merged_requirement(share_id).0;
-            let old_schema_len = optimizer_ctx
-                .resolve_current_logical_share(share_id)
-                .schema()
-                .len();
+            let old_schema_len = original_input.schema().len();
             let rebuilt_input = original_input.prune_col(&required, self);
             let mapping = ColIndexMapping::with_remaining_columns(&required, old_schema_len);
-            optimizer_ctx.update_logical_share_for_dag(share_id, rebuilt_input, mapping);
+            debug_assert_eq!(mapping.target_size(), rebuilt_input.schema().len());
+            self.share_mappings
+                .try_insert(share_id, mapping)
+                .expect("a logical share must be rebuilt once");
+            optimizer_ctx.update_logical_share(share_id, rebuilt_input);
         }
 
         self.dag.set_phase(ShareDagPhase::Adapt);
         let result = root.prune_col(required_cols, self);
-        optimizer_ctx.clear_logical_share_pending_mappings();
         self.dag.finish();
-        transaction.commit();
         result
     }
 }

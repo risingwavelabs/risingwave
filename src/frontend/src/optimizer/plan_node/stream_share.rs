@@ -25,10 +25,10 @@ use super::{
     StreamPlanRef as PlanRef, generic,
 };
 use crate::Explain;
+use crate::optimizer::ShareId;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
-use crate::optimizer::{ShareId, ShareVersion};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -57,7 +57,8 @@ impl StreamShare {
     }
 
     pub fn new_from_input(input: PlanRef) -> Self {
-        Self::new(generic::Share::new(input))
+        let ctx = input.ctx();
+        Self::new(ctx.register_stream_share(input))
     }
 }
 
@@ -96,20 +97,22 @@ impl ShareNode<Stream> for StreamShare {
         self.core.share_id()
     }
 
-    fn share_version(&self) -> ShareVersion {
-        self.core.version()
-    }
-
     fn new_share(core: Share<PlanRef>) -> PlanRef {
         Self::new(core).into()
     }
 
     fn replace_input(&self, plan: PlanRef) -> PlanRef {
-        Self::new(self.core.update_input(plan)).into()
+        debug_assert!(
+            self.schema().type_eq(plan.schema()),
+            "replacing a stream share input must preserve its schema"
+        );
+        self.ctx()
+            .update_stream_share(self.share_id(), plan.clone());
+        Self::new(self.core.with_input(plan)).into()
     }
 
     fn fork_with_input(&self, plan: PlanRef) -> PlanRef {
-        Self::new(self.core.fork_with_input(plan)).into()
+        Self::new_from_input(plan).into()
     }
 }
 

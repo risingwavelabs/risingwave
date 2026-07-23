@@ -24,10 +24,10 @@ use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 use super::property::WatermarkGroupId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::Share;
 use crate::optimizer::plan_node::{LogicalPlanRef, PlanNodeId, StreamPlanRef};
 use crate::session::SessionImpl;
-use crate::utils::{ColIndexMapping, OverwriteOptions, WithOptions};
+use crate::utils::{OverwriteOptions, WithOptions};
 use crate::{Explain, TableCatalog};
 
 const RESERVED_ID_NUM: u16 = 10000;
@@ -37,31 +37,38 @@ type PhantomUnsend = PhantomData<Rc<()>>;
 /// The stable identity of a shared subplan.
 ///
 /// Unlike [`PlanNodeId`], a `ShareId` survives rebuilding the wrapper plan node around a share.
-/// The actual input of the share is resolved through the registry in [`OptimizerContext`].
+/// [`OptimizerContext`] tracks the current input used to rebuild wrappers after a DAG pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ShareId(u32);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[doc(hidden)]
-pub struct ShareVersion(u32);
-
-#[derive(Clone, Debug)]
-#[doc(hidden)]
-pub struct ShareEntry<P> {
-    versions: Vec<P>,
-    current_version: ShareVersion,
+#[derive(Debug)]
+pub(in crate::optimizer) struct ShareEntry<P> {
+    current: RefCell<P>,
     plan_node_id: PlanNodeId,
-    /// Set only while a DAG-aware column-pruning pass is rebuilding shared inputs.
-    pending_mapping: Option<ColIndexMapping>,
 }
 
-#[doc(hidden)]
-pub type ShareEntryRef<P> = Rc<RefCell<ShareEntry<P>>>;
+impl<P> ShareEntry<P> {
+    fn update_current(&self, current: P) {
+        *self.current.borrow_mut() = current;
+    }
+
+    pub(in crate::optimizer) fn plan_node_id(&self) -> PlanNodeId {
+        self.plan_node_id
+    }
+}
+
+impl<P: Clone> ShareEntry<P> {
+    fn current(&self) -> P {
+        self.current.borrow().clone()
+    }
+}
+
+pub(in crate::optimizer) type ShareEntryRef<P> = Rc<ShareEntry<P>>;
 
 struct ShareTable<P> {
     /// Weak entries avoid a reference cycle through `PlanBase::ctx` in the stored plans. A live
     /// share handle owns the corresponding strong entry.
-    entries: HashMap<ShareId, Weak<RefCell<ShareEntry<P>>>>,
+    entries: HashMap<ShareId, Weak<ShareEntry<P>>>,
 }
 
 impl<P> Default for ShareTable<P> {
@@ -70,11 +77,6 @@ impl<P> Default for ShareTable<P> {
             entries: HashMap::new(),
         }
     }
-}
-
-#[derive(Clone)]
-pub(in crate::optimizer) struct LogicalShareTableSnapshot {
-    entries: HashMap<ShareId, (ShareEntryRef<LogicalPlanRef>, ShareEntry<LogicalPlanRef>)>,
 }
 
 pub struct OptimizerContext {
@@ -120,8 +122,7 @@ pub struct OptimizerContext {
     /// because `enable_locality_backfill` is off.
     missed_locality_providers: Cell<usize>,
 
-    /// Shared subplans are kept outside plan nodes so that a share has stable identity while its
-    /// input is rebuilt.
+    /// Tracks the current input of each live share while DAG-aware passes rebuild wrappers.
     logical_share_table: RefCell<ShareTable<LogicalPlanRef>>,
     stream_share_table: RefCell<ShareTable<StreamPlanRef>>,
 
@@ -228,250 +229,87 @@ impl OptimizerContext {
         ShareId(self.last_share_id.get())
     }
 
-    pub(in crate::optimizer) fn register_logical_share(
-        &self,
-        input: LogicalPlanRef,
-    ) -> (ShareId, ShareEntryRef<LogicalPlanRef>) {
+    fn share_entry<P>(
+        table: &RefCell<ShareTable<P>>,
+        share_id: ShareId,
+        convention: &str,
+    ) -> ShareEntryRef<P> {
+        table
+            .borrow()
+            .entries
+            .get(&share_id)
+            .unwrap_or_else(|| panic!("{convention} share {share_id:?} is not registered"))
+            .upgrade()
+            .unwrap_or_else(|| panic!("{convention} share {share_id:?} is no longer live"))
+    }
+
+    fn register_share<P: Clone>(&self, table: &RefCell<ShareTable<P>>, input: P) -> Share<P> {
         let share_id = self.next_share_id();
-        let entry = Rc::new(RefCell::new(ShareEntry {
-            versions: vec![input],
-            current_version: ShareVersion(0),
+        let entry = Rc::new(ShareEntry {
+            current: RefCell::new(input.clone()),
             plan_node_id: self.next_plan_node_id(),
-            pending_mapping: None,
-        }));
-        self.logical_share_table
+        });
+        table
             .borrow_mut()
             .entries
             .try_insert(share_id, Rc::downgrade(&entry))
             .expect("share id must be unique");
-        (share_id, entry)
+        Share::new(share_id, input, entry)
     }
 
-    pub(in crate::optimizer) fn logical_share_entry(
+    fn share<P: Clone>(
         &self,
+        table: &RefCell<ShareTable<P>>,
         share_id: ShareId,
-    ) -> ShareEntryRef<LogicalPlanRef> {
-        self.logical_share_table
-            .borrow()
-            .entries
-            .get(&share_id)
-            .unwrap_or_else(|| panic!("logical share {share_id:?} is not registered"))
-            .upgrade()
-            .unwrap_or_else(|| panic!("logical share {share_id:?} is no longer live"))
+        convention: &str,
+    ) -> Share<P> {
+        let entry = Self::share_entry(table, share_id, convention);
+        let input = entry.current();
+        Share::new(share_id, input, entry)
     }
 
-    pub(in crate::optimizer) fn resolve_logical_share(
+    fn update_share<P>(
+        table: &RefCell<ShareTable<P>>,
+        share_id: ShareId,
+        new_input: P,
+        convention: &str,
+    ) {
+        let entry = Self::share_entry(table, share_id, convention);
+        entry.update_current(new_input);
+    }
+
+    pub(in crate::optimizer) fn register_logical_share(
         &self,
-        share_id: ShareId,
-        version: ShareVersion,
-    ) -> LogicalPlanRef {
-        self.logical_share_entry(share_id)
-            .borrow()
-            .versions
-            .get(version.0 as usize)
-            .unwrap_or_else(|| panic!("logical share {share_id:?} has no version {version:?}"))
-            .clone()
+        input: LogicalPlanRef,
+    ) -> Share<LogicalPlanRef> {
+        self.register_share(&self.logical_share_table, input)
     }
 
-    pub(in crate::optimizer) fn current_logical_share_version(
-        &self,
-        share_id: ShareId,
-    ) -> ShareVersion {
-        self.logical_share_entry(share_id).borrow().current_version
-    }
-
-    pub(in crate::optimizer) fn resolve_current_logical_share(
-        &self,
-        share_id: ShareId,
-    ) -> LogicalPlanRef {
-        self.resolve_logical_share(share_id, self.current_logical_share_version(share_id))
-    }
-
-    pub(in crate::optimizer) fn logical_share_plan_node_id(&self, share_id: ShareId) -> PlanNodeId {
-        self.logical_share_entry(share_id).borrow().plan_node_id
+    pub(in crate::optimizer) fn logical_share(&self, share_id: ShareId) -> Share<LogicalPlanRef> {
+        self.share(&self.logical_share_table, share_id, "logical")
     }
 
     pub(in crate::optimizer) fn update_logical_share(
         &self,
         share_id: ShareId,
-        base_version: ShareVersion,
         new_input: LogicalPlanRef,
-    ) -> ShareVersion {
-        let old_input = self.resolve_logical_share(share_id, base_version);
-        debug_assert!(
-            old_input.schema().type_eq(new_input.schema()),
-            "replacing logical share {share_id:?} must preserve its schema: old={:?}, new={:?}",
-            old_input.schema(),
-            new_input.schema(),
-        );
-        let entry = self.logical_share_entry(share_id);
-        let mut entry = entry.borrow_mut();
-        if entry.current_version != base_version {
-            let current_input = &entry.versions[entry.current_version.0 as usize];
-            assert_eq!(
-                current_input, &new_input,
-                "conflicting rewrites of logical share {share_id:?}"
-            );
-            return entry.current_version;
-        }
-        entry.versions.push(new_input);
-        entry.current_version = ShareVersion((entry.versions.len() - 1) as u32);
-        entry.pending_mapping = None;
-        entry.current_version
-    }
-
-    /// Updates a logical share while a DAG-aware pass changes its output schema.
-    ///
-    /// The mapping is from the old output columns to the rebuilt output columns. Callers must
-    /// rebuild every reachable wrapper of this share before exposing the resulting plan.
-    pub(in crate::optimizer) fn update_logical_share_for_dag(
-        &self,
-        share_id: ShareId,
-        new_input: LogicalPlanRef,
-        mapping: ColIndexMapping,
-    ) -> ShareVersion {
-        let old_input = self.resolve_current_logical_share(share_id);
-        debug_assert_eq!(mapping.source_size(), old_input.schema().len());
-        debug_assert_eq!(mapping.target_size(), new_input.schema().len());
-        debug_assert!(mapping.mapping_pairs().all(|(old_idx, new_idx)| {
-            old_input.schema().fields()[old_idx].data_type
-                == new_input.schema().fields()[new_idx].data_type
-        }));
-
-        let entry = self.logical_share_entry(share_id);
-        let mut entry = entry.borrow_mut();
-        entry.versions.push(new_input);
-        entry.current_version = ShareVersion((entry.versions.len() - 1) as u32);
-        entry.pending_mapping = Some(mapping);
-        entry.current_version
-    }
-
-    pub(in crate::optimizer) fn logical_share_pending_mapping(
-        &self,
-        share_id: ShareId,
-    ) -> ColIndexMapping {
-        self.logical_share_entry(share_id)
-            .borrow()
-            .pending_mapping
-            .clone()
-            .unwrap_or_else(|| panic!("logical share {share_id:?} has no pending mapping"))
-    }
-
-    pub(in crate::optimizer) fn clear_logical_share_pending_mappings(&self) {
-        for entry in self.logical_share_table.borrow().entries.values() {
-            if let Some(entry) = entry.upgrade() {
-                entry.borrow_mut().pending_mapping = None;
-            }
-        }
-    }
-
-    pub(in crate::optimizer) fn snapshot_logical_shares(&self) -> LogicalShareTableSnapshot {
-        LogicalShareTableSnapshot {
-            entries: self
-                .logical_share_table
-                .borrow()
-                .entries
-                .iter()
-                .filter_map(|(&share_id, weak_entry)| {
-                    let entry = weak_entry.upgrade()?;
-                    let snapshot = entry.borrow().clone();
-                    Some((share_id, (entry, snapshot)))
-                })
-                .collect(),
-        }
-    }
-
-    pub(in crate::optimizer) fn restore_logical_shares(&self, snapshot: LogicalShareTableSnapshot) {
-        let mut entries = HashMap::with_capacity(snapshot.entries.len());
-        for (share_id, (entry, state)) in snapshot.entries {
-            *entry.borrow_mut() = state;
-            entries.insert(share_id, Rc::downgrade(&entry));
-        }
-        self.logical_share_table.borrow_mut().entries = entries;
+    ) {
+        Self::update_share(&self.logical_share_table, share_id, new_input, "logical");
     }
 
     pub(in crate::optimizer) fn register_stream_share(
         &self,
         input: StreamPlanRef,
-    ) -> (ShareId, ShareEntryRef<StreamPlanRef>) {
-        let share_id = self.next_share_id();
-        let entry = Rc::new(RefCell::new(ShareEntry {
-            versions: vec![input],
-            current_version: ShareVersion(0),
-            plan_node_id: self.next_plan_node_id(),
-            pending_mapping: None,
-        }));
-        self.stream_share_table
-            .borrow_mut()
-            .entries
-            .try_insert(share_id, Rc::downgrade(&entry))
-            .expect("share id must be unique");
-        (share_id, entry)
-    }
-
-    pub(in crate::optimizer) fn stream_share_entry(
-        &self,
-        share_id: ShareId,
-    ) -> ShareEntryRef<StreamPlanRef> {
-        self.stream_share_table
-            .borrow()
-            .entries
-            .get(&share_id)
-            .unwrap_or_else(|| panic!("stream share {share_id:?} is not registered"))
-            .upgrade()
-            .unwrap_or_else(|| panic!("stream share {share_id:?} is no longer live"))
-    }
-
-    pub(in crate::optimizer) fn resolve_stream_share(
-        &self,
-        share_id: ShareId,
-        version: ShareVersion,
-    ) -> StreamPlanRef {
-        self.stream_share_entry(share_id)
-            .borrow()
-            .versions
-            .get(version.0 as usize)
-            .unwrap_or_else(|| panic!("stream share {share_id:?} has no version {version:?}"))
-            .clone()
-    }
-
-    pub(in crate::optimizer) fn current_stream_share_version(
-        &self,
-        share_id: ShareId,
-    ) -> ShareVersion {
-        self.stream_share_entry(share_id).borrow().current_version
-    }
-
-    pub(in crate::optimizer) fn stream_share_plan_node_id(&self, share_id: ShareId) -> PlanNodeId {
-        self.stream_share_entry(share_id).borrow().plan_node_id
+    ) -> Share<StreamPlanRef> {
+        self.register_share(&self.stream_share_table, input)
     }
 
     pub(in crate::optimizer) fn update_stream_share(
         &self,
         share_id: ShareId,
-        base_version: ShareVersion,
         new_input: StreamPlanRef,
-    ) -> ShareVersion {
-        let old_input = self.resolve_stream_share(share_id, base_version);
-        debug_assert!(
-            old_input.schema().type_eq(new_input.schema()),
-            "replacing stream share {share_id:?} must preserve its schema: old={:?}, new={:?}",
-            old_input.schema(),
-            new_input.schema(),
-        );
-        let entry = self.stream_share_entry(share_id);
-        let mut entry = entry.borrow_mut();
-        if entry.current_version != base_version {
-            let current_input = &entry.versions[entry.current_version.0 as usize];
-            assert_eq!(
-                current_input, &new_input,
-                "conflicting rewrites of stream share {share_id:?}"
-            );
-            return entry.current_version;
-        }
-        entry.versions.push(new_input);
-        entry.current_version = ShareVersion((entry.versions.len() - 1) as u32);
-        entry.current_version
+    ) {
+        Self::update_share(&self.stream_share_table, share_id, new_input, "stream");
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {

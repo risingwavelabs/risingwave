@@ -56,7 +56,7 @@ use super::property::{
 };
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::property::StreamKind;
-use crate::optimizer::{PlanVisitor, ShareId, ShareVersion};
+use crate::optimizer::{PlanVisitor, ShareId};
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -77,7 +77,6 @@ pub trait ShareNode<C: ConventionMarker>:
     AnyPlanNodeMeta<C> + PlanTreeNodeUnary<C> + 'static
 {
     fn share_id(&self) -> ShareId;
-    fn share_version(&self) -> ShareVersion;
     fn new_share(share: generic::Share<PlanRef<C>>) -> PlanRef<C>;
     fn replace_input(&self, plan: PlanRef<C>) -> PlanRef<C>;
     fn fork_with_input(&self, plan: PlanRef<C>) -> PlanRef<C>;
@@ -87,10 +86,6 @@ pub struct NoShareNode<C: ConventionMarker>(!, PhantomData<C>);
 
 impl<C: ConventionMarker> ShareNode<C> for NoShareNode<C> {
     fn share_id(&self) -> ShareId {
-        unreachable!()
-    }
-
-    fn share_version(&self) -> ShareVersion {
         unreachable!()
     }
 

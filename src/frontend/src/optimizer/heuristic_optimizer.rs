@@ -39,7 +39,7 @@ pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
     rules: &'a [BoxedRule<C>],
     stats: Stats,
-    share_cache: HashMap<ShareId, PlanRef<C>>,
+    share_cache: HashMap<ShareId, (PlanRef<C>, bool)>,
 }
 
 impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
@@ -92,18 +92,12 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
 
     fn optimize_recursively(&mut self, plan: PlanRef<C>) -> Result<(PlanRef<C>, bool)> {
         if let Some(share_id) = plan.as_share_node().map(ShareNode::share_id) {
-            if let Some(cached) = self.share_cache.get(&share_id) {
-                let unchanged = cached.as_share_node().is_some_and(|cached_share| {
-                    let original_share = plan
-                        .as_share_node()
-                        .expect("the cache is only consulted for a share");
-                    cached_share.share_id() == original_share.share_id()
-                        && cached_share.share_version() == original_share.share_version()
-                });
-                return Ok((cached.clone(), !unchanged));
+            if let Some((cached, changed)) = self.share_cache.get(&share_id) {
+                return Ok((cached.clone(), *changed));
             }
             let (optimized, changed) = self.optimize_uncached(plan)?;
-            self.share_cache.insert(share_id, optimized.clone());
+            self.share_cache
+                .insert(share_id, (optimized.clone(), changed));
             return Ok((optimized, changed));
         }
 

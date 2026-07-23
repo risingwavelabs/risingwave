@@ -125,14 +125,12 @@ impl PredicatePushdownContext {
     pub(in crate::optimizer) fn run(&mut self, root: PlanRef, predicate: Condition) -> PlanRef {
         self.dag.reset(root.clone());
         let optimizer_ctx = root.ctx();
-        let transaction = LogicalShareTableTransaction::new(optimizer_ctx.clone());
 
         self.dag.set_phase(ShareDagPhase::Collect);
         let collected = root.predicate_pushdown_inner(predicate.clone(), self);
         let rebuild_order = self.dag.rebuild_order();
         if rebuild_order.is_empty() {
             self.dag.finish();
-            transaction.commit();
             return collected;
         }
 
@@ -141,14 +139,12 @@ impl PredicatePushdownContext {
             let original_input = self.dag.original_input(share_id);
             let merged_predicate = self.dag.merged_requirement(share_id).0;
             let rebuilt_input = original_input.predicate_pushdown(merged_predicate, self);
-            let current_version = optimizer_ctx.current_logical_share_version(share_id);
-            optimizer_ctx.update_logical_share(share_id, current_version, rebuilt_input);
+            optimizer_ctx.update_logical_share(share_id, rebuilt_input);
         }
 
         self.dag.set_phase(ShareDagPhase::Adapt);
         let result = root.predicate_pushdown(predicate, self);
         self.dag.finish();
-        transaction.commit();
         result
     }
 }

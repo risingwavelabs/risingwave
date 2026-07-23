@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
     ToStreamContext,
 };
-use crate::optimizer::{OptimizerContextRef, ShareId, ShareVersion};
+use crate::optimizer::{OptimizerContextRef, ShareId};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalShare` operator is used to represent reusing of existing operators.
@@ -57,7 +57,8 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        let core = generic::Share::new(input);
+        let ctx = input.ctx();
+        let core = ctx.register_logical_share(input);
         Self::with_core(core)
     }
 
@@ -67,7 +68,7 @@ impl LogicalShare {
     }
 
     pub(in crate::optimizer) fn from_share_id(ctx: OptimizerContextRef, share_id: ShareId) -> Self {
-        Self::with_core(generic::Share::from_share_id(ctx, share_id))
+        Self::with_core(ctx.logical_share(share_id))
     }
 
     pub fn create(input: PlanRef) -> PlanRef {
@@ -118,20 +119,22 @@ impl ShareNode<Logical> for LogicalShare {
         self.core.share_id()
     }
 
-    fn share_version(&self) -> ShareVersion {
-        self.core.version()
-    }
-
     fn new_share(core: Share<PlanRef>) -> PlanRef {
         Self::with_core(core).into()
     }
 
     fn replace_input(&self, plan: PlanRef) -> PlanRef {
-        Self::with_core(self.core.update_input(plan)).into()
+        debug_assert!(
+            self.schema().type_eq(plan.schema()),
+            "replacing a logical share input must preserve its schema"
+        );
+        self.ctx()
+            .update_logical_share(self.share_id(), plan.clone());
+        Self::with_core(self.core.with_input(plan)).into()
     }
 
     fn fork_with_input(&self, plan: PlanRef) -> PlanRef {
-        Self::with_core(self.core.fork_with_input(plan)).into()
+        Self::new(plan).into()
     }
 }
 
@@ -177,8 +180,7 @@ impl ToStream for LogicalShare {
         match ctx.get_to_stream_result(self.share_id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let core = generic::Share::new(new_input);
-                let stream_share_ref: StreamPlanRef = StreamShare::new(core).into();
+                let stream_share_ref: StreamPlanRef = StreamShare::new_from_input(new_input).into();
                 ctx.add_to_stream_result(self.share_id(), stream_share_ref.clone());
                 Ok(stream_share_ref)
             }
@@ -214,8 +216,7 @@ mod tests {
     use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{
-        LogicalFilter, LogicalJoin, LogicalProject, LogicalShareTableTransaction, LogicalUnion,
-        LogicalValues, PlanTreeNodeBinary,
+        LogicalFilter, LogicalJoin, LogicalProject, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
     };
 
     #[tokio::test]
@@ -338,17 +339,10 @@ mod tests {
 
         let result = root.prune_col(&[0], &mut ColumnPruningContext::new(root.clone()));
 
-        // The old plan remains a valid immutable snapshot even though the context now points at a
-        // newer, narrower generation of the same share identity.
+        // The wrapper keeps its immutable input while the registry advances to the rebuilt input.
         assert_eq!(inner.as_logical_share().unwrap().input().schema().len(), 3);
-        assert_eq!(
-            ctx.resolve_current_logical_share(inner_id).schema().len(),
-            2
-        );
-        assert_eq!(
-            ctx.resolve_current_logical_share(outer_id).schema().len(),
-            2
-        );
+        assert_eq!(ctx.logical_share(inner_id).input().schema().len(), 2);
+        assert_eq!(ctx.logical_share(outer_id).input().schema().len(), 2);
 
         fn collect_share_schemas(plan: PlanRef, shares: &mut Vec<(ShareId, usize)>) {
             if let Some(share) = plan.as_logical_share() {
@@ -382,40 +376,5 @@ mod tests {
         assert!(weak_ctx.upgrade().is_some());
         drop(share);
         assert!(weak_ctx.upgrade().is_none());
-    }
-
-    #[tokio::test]
-    async fn test_share_table_transaction_rolls_back() {
-        let ctx = OptimizerContext::mock();
-        let schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v2"),
-        ]);
-        let values: PlanRef = LogicalValues::new(vec![], schema, ctx.clone()).into();
-        let share = LogicalShare::create(values);
-        let share_id = share.as_logical_share().unwrap().share_id();
-
-        {
-            let _transaction = LogicalShareTableTransaction::new(ctx.clone());
-            let pruned = LogicalProject::with_out_col_idx(
-                share.as_logical_share().unwrap().input(),
-                [0].into_iter(),
-            )
-            .into();
-            ctx.update_logical_share_for_dag(
-                share_id,
-                pruned,
-                ColIndexMapping::with_remaining_columns(&[0], 2),
-            );
-            assert_eq!(
-                ctx.resolve_current_logical_share(share_id).schema().len(),
-                1
-            );
-        }
-
-        assert_eq!(
-            ctx.resolve_current_logical_share(share_id).schema().len(),
-            2
-        );
     }
 }
