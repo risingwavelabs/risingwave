@@ -202,18 +202,17 @@ impl<'a> tiberius::FromSql<'a> for TimestamptzTiberiusWrapper {
         let instant = time::OffsetDateTime::from_sql(value)?;
         instant
             .map(|instant| {
-                let micros = instant
+                let timestamptz = instant
                     .unix_timestamp_nanos()
                     .checked_div(1000)
                     .and_then(|micros| i64::try_from(micros).ok())
+                    .and_then(Timestamptz::from_micros)
                     .ok_or_else(|| {
                         tiberius::error::Error::Conversion(
                             "datetimeoffset is out of range for RisingWave timestamptz".into(),
                         )
                     })?;
-                Ok(TimestamptzTiberiusWrapper::from(Timestamptz::from_micros(
-                    micros,
-                )))
+                Ok(TimestamptzTiberiusWrapper::from(timestamptz))
             })
             .transpose()
     }
