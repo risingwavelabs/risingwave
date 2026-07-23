@@ -385,13 +385,13 @@ impl CreatingStreamingJobControl {
     /// ```text
     /// snapshot epoch: 60
     /// changelog after snapshot: [61, 62, 63, 64] + 65
-    /// pending upstream barriers: 65 -> 66 checkpoint, 66 -> 67 barrier,
-    ///                            67 -> 68 barrier, 68 -> 69 barrier,
-    ///                            69 -> 70 barrier
+    /// pending upstream barriers: 66 -> 67 barrier, 67 -> 68 barrier,
+    ///                            68 -> 69 barrier, 69 -> 70 barrier
     /// new create barrier: 70 -> 71
     ///
     /// injected: 60 -> 61 checkpoint, 61 -> 62 barrier, ..., 64 -> 65 barrier,
-    ///           65 -> 66 checkpoint, 66 -> 67 barrier, ..., 69 -> 70 barrier
+    ///           65 -> 66 checkpoint, 66 -> 67 barrier, 67 -> 68 barrier, ...,
+    ///           69 -> 70 barrier
     /// current create barrier later injects: 70 -> 71 checkpoint
     /// ```
     ///
@@ -472,18 +472,29 @@ impl CreatingStreamingJobControl {
                 },
             );
         } else {
-            for (index, pending_barrier) in pending_upstream_barriers.enumerate() {
+            let first_pending_barrier = pending_upstream_barriers
+                .peek()
+                .expect("first pending upstream barrier should exist after peek");
+            assert!(
+                first_pending_barrier.prev_epoch() > prev_epoch,
+                "first pending upstream barrier should be newer than the latest resolved changelog epoch"
+            );
+            emit_barrier(
+                &mut initial_barrier,
+                &mut barriers,
+                BarrierInfo {
+                    prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                    curr_epoch: TracedEpoch::new(Epoch(first_pending_barrier.prev_epoch())),
+                    kind: BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers)),
+                },
+            );
+            prev_epoch = first_pending_barrier.prev_epoch();
+            for pending_barrier in pending_upstream_barriers {
                 assert_eq!(
                     pending_barrier.prev_epoch(),
                     prev_epoch,
                     "pending upstream barriers should continue from resolved changelog epochs"
                 );
-                if index == 0 {
-                    assert!(
-                        pending_barrier.kind.is_checkpoint(),
-                        "first pending upstream barrier should checkpoint from the latest resolved changelog epoch"
-                    );
-                }
                 pending_non_checkpoint_barriers.push(prev_epoch);
                 emit_barrier(
                     &mut initial_barrier,
@@ -1155,14 +1166,14 @@ mod tests {
         let upstream_log_epochs = vec![(vec![45, 50], 55)];
         let pending_upstream_barriers = [
             BarrierInfo {
-                prev_epoch: TracedEpoch::new(Epoch(55)),
-                curr_epoch: TracedEpoch::new(Epoch(60)),
-                kind: BarrierKind::Checkpoint(vec![55]),
+                prev_epoch: TracedEpoch::new(Epoch(60)),
+                curr_epoch: TracedEpoch::new(Epoch(65)),
+                kind: BarrierKind::Barrier,
             },
             BarrierInfo {
-                prev_epoch: TracedEpoch::new(Epoch(60)),
+                prev_epoch: TracedEpoch::new(Epoch(65)),
                 curr_epoch: TracedEpoch::new(Epoch(70)),
-                kind: BarrierKind::Barrier,
+                kind: BarrierKind::Checkpoint(vec![60, 65]),
             },
         ];
 
@@ -1185,14 +1196,17 @@ mod tests {
                 .iter()
                 .map(|barrier| (barrier.prev_epoch(), barrier.curr_epoch()))
                 .collect::<Vec<_>>(),
-            vec![(45, 50), (50, 55), (55, 60), (60, 70)]
+            vec![(45, 50), (50, 55), (55, 60), (60, 65), (65, 70)]
         );
         assert_eq!(
             barriers
                 .iter()
-                .map(|barrier| barrier.kind.is_checkpoint())
+                .map(|barrier| match &barrier.kind {
+                    BarrierKind::Checkpoint(epochs) => Some(epochs.clone()),
+                    _ => None,
+                })
                 .collect::<Vec<_>>(),
-            vec![false, false, true, false]
+            vec![None, None, Some(vec![45, 50]), None, Some(vec![60, 65])]
         );
     }
 
@@ -1200,11 +1214,6 @@ mod tests {
     fn test_resolve_since_timestamp_upstream_log_epochs_with_gap_before_pending_barriers() {
         let upstream_log_epochs = vec![(vec![61, 62, 63, 64], 65)];
         let pending_upstream_barriers = [
-            BarrierInfo {
-                prev_epoch: TracedEpoch::new(Epoch(65)),
-                curr_epoch: TracedEpoch::new(Epoch(66)),
-                kind: BarrierKind::Checkpoint(vec![65]),
-            },
             BarrierInfo {
                 prev_epoch: TracedEpoch::new(Epoch(66)),
                 curr_epoch: TracedEpoch::new(Epoch(67)),
@@ -1261,9 +1270,22 @@ mod tests {
         assert_eq!(
             barriers
                 .iter()
-                .map(|barrier| barrier.kind.is_checkpoint())
+                .map(|barrier| match &barrier.kind {
+                    BarrierKind::Checkpoint(epochs) => Some(epochs.clone()),
+                    _ => None,
+                })
                 .collect::<Vec<_>>(),
-            vec![false, false, false, false, true, false, false, false, false]
+            vec![
+                None,
+                None,
+                None,
+                None,
+                Some(vec![61, 62, 63, 64]),
+                None,
+                None,
+                None,
+                None
+            ]
         );
     }
 
