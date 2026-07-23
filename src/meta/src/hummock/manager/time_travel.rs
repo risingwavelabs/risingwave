@@ -75,6 +75,15 @@ impl HummockManager {
             .start_timer();
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         let sql_store = self.env.meta_store_ref();
+        let live_time_travel_table_ids: Vec<_> = self
+            .metadata_manager
+            .catalog_controller
+            .list_time_travel_table_ids()
+            .await
+            .map_err(|e| Error::Internal(e.into()))?
+            .into_iter()
+            .map(|table_id| i64::from(table_id.as_raw_id()))
+            .collect();
         let txn = sql_store.conn.begin().await?;
 
         let epoch_watermark_model =
@@ -119,6 +128,39 @@ impl HummockManager {
                 pinned_snapshot_version_ids.insert(epoch_to_version.version_id);
             }
         }
+        let mut anchor_epoch_rows = HashSet::new();
+        let mut anchor_version_ids = HashSet::new();
+        if !live_time_travel_table_ids.is_empty() {
+            let anchor_epochs: Vec<(i64, risingwave_meta_model::Epoch)> =
+                hummock_epoch_to_version::Entity::find()
+                    .filter(hummock_epoch_to_version::Column::Epoch.lt(epoch_watermark_model))
+                    .filter(
+                        hummock_epoch_to_version::Column::TableId.is_in(live_time_travel_table_ids),
+                    )
+                    .select_only()
+                    .column(hummock_epoch_to_version::Column::TableId)
+                    .column_as(hummock_epoch_to_version::Column::Epoch.max(), "epoch")
+                    .group_by(hummock_epoch_to_version::Column::TableId)
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+            for (table_id, epoch) in anchor_epochs {
+                let Some(epoch_to_version) =
+                    hummock_epoch_to_version::Entity::find_by_id((epoch, table_id))
+                        .one(&txn)
+                        .await?
+                else {
+                    tracing::warn!(
+                        table_id,
+                        ?epoch,
+                        "time travel anchor epoch mapping not found, skip anchoring"
+                    );
+                    continue;
+                };
+                anchor_epoch_rows.insert((epoch_to_version.epoch, epoch_to_version.table_id));
+                anchor_version_ids.insert(epoch_to_version.version_id);
+            }
+        }
 
         let mut pinned_replay_version_ids = HashSet::new();
         let mut pinned_delta_ids = HashSet::new();
@@ -156,6 +198,16 @@ impl HummockManager {
             .into_tuple::<HummockVersionId>()
             .one(&txn)
             .await?;
+        let version_watermark = anchor_version_ids.iter().copied().min().map_or(
+            version_watermark,
+            |anchor_version_id| {
+                Some(
+                    version_watermark.map_or(anchor_version_id, |version_watermark| {
+                        std::cmp::min(version_watermark, anchor_version_id)
+                    }),
+                )
+            },
+        );
         // metadata BELOW watermark_version_id will be truncated.
         let mut watermark_version_id = version_watermark.map_or(min_pinned_version_id, |id| {
             std::cmp::min(id, min_pinned_version_id)
@@ -190,7 +242,7 @@ impl HummockManager {
         }
         let mut delete_epoch_rows = hummock_epoch_to_version::Entity::delete_many()
             .filter(hummock_epoch_to_version::Column::Epoch.lt(epoch_watermark_model));
-        for (epoch, table_id) in &pinned_epoch_rows {
+        for (epoch, table_id) in pinned_epoch_rows.iter().chain(anchor_epoch_rows.iter()) {
             delete_epoch_rows = delete_epoch_rows.filter(
                 Condition::any()
                     .add(hummock_epoch_to_version::Column::Epoch.ne(*epoch))

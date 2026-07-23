@@ -3831,6 +3831,160 @@ async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
 }
 
 #[tokio::test]
+async fn test_time_travel_vacuum_preserves_live_table_epoch_anchor() {
+    use chrono::Utc;
+    use risingwave_meta_model::object::ObjectType;
+    use risingwave_meta_model::table::{HandleConflictBehavior, TableType};
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_time_travel_version, object, table,
+    };
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
+
+    async fn insert_live_table(env: &MetaSrvEnv, table_id: TableId) {
+        let now = Utc::now().naive_utc();
+        object::Entity::insert(object::ActiveModel {
+            oid: Set(table_id.as_object_id()),
+            obj_type: Set(ObjectType::Table),
+            owner_id: Set(1.into()),
+            schema_id: Set(None),
+            database_id: Set(None),
+            initialized_at: Set(now),
+            created_at: Set(now),
+            initialized_at_cluster_version: Set(None),
+            created_at_cluster_version: Set(None),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+        table::Entity::insert(table::ActiveModel {
+            table_id: Set(table_id),
+            name: Set(format!("t{}", table_id.as_raw_id())),
+            optional_associated_source_id: Set(None),
+            table_type: Set(TableType::Table),
+            belongs_to_job_id: Set(None),
+            columns: Set(vec![].into()),
+            pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            stream_key: Set(Vec::<i32>::new().into()),
+            append_only: Set(false),
+            fragment_id: Set(None),
+            vnode_col_index: Set(None),
+            row_id_index: Set(None),
+            value_indices: Set(Vec::<i32>::new().into()),
+            definition: Set(format!("CREATE TABLE t{}()", table_id.as_raw_id())),
+            handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+            version_column_indices: Set(None),
+            read_prefix_len_hint: Set(0),
+            watermark_indices: Set(Vec::<i32>::new().into()),
+            dist_key_in_pk: Set(Vec::<i32>::new().into()),
+            dml_fragment_id: Set(None),
+            cardinality: Set(None),
+            cleaned_by_watermark: Set(false),
+            description: Set(None),
+            version: Set(None),
+            retention_seconds: Set(None),
+            cdc_table_id: Set(None),
+            vnode_count: Set(1),
+            webhook_info: Set(None),
+            engine: Set(None),
+            clean_watermark_index_in_pk: Set(None),
+            clean_watermark_indices: Set(None),
+            refreshable: Set(false),
+            vector_index_info: Set(None),
+            cdc_table_type: Set(None),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_version(env: &MetaSrvEnv, id: u64) {
+        let mut version = HummockVersion::default();
+        version.id = id.into();
+        hummock_time_travel_version::Entity::insert(hummock_time_travel_version::ActiveModel {
+            version_id: Set(version.id),
+            version: Set((&version.to_protobuf()).into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_epoch_mapping(env: &MetaSrvEnv, table_id: TableId, epoch: u64, version: u64) {
+        hummock_epoch_to_version::Entity::insert(hummock_epoch_to_version::ActiveModel {
+            epoch: Set(epoch.try_into().unwrap()),
+            table_id: Set(i64::from(table_id.as_raw_id())),
+            version_id: Set(version.into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    let (env, hummock_manager, _, _) = setup_compute_env(80).await;
+    let live_table = TableId::new(10_001);
+    let dropped_table = TableId::new(10_002);
+    insert_live_table(&env, live_table).await;
+    insert_version(&env, 10).await;
+    insert_version(&env, 11).await;
+    insert_version(&env, 12).await;
+    insert_epoch_mapping(&env, live_table, 100, 10).await;
+    insert_epoch_mapping(&env, dropped_table, 150, 10).await;
+
+    hummock_manager
+        .truncate_time_travel_metadata(250, HashMap::new())
+        .await
+        .unwrap();
+
+    let epoch_rows = hummock_epoch_to_version::Entity::find()
+        .order_by_asc(hummock_epoch_to_version::Column::Epoch)
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        epoch_rows
+            .iter()
+            .map(|row| {
+                (
+                    TableId::new(row.table_id as _),
+                    u64::try_from(row.epoch).unwrap(),
+                )
+            })
+            .collect_vec(),
+        vec![(live_table, 100)]
+    );
+    let version_ids: Vec<risingwave_meta_model::HummockVersionId> =
+        hummock_time_travel_version::Entity::find()
+            .select_only()
+            .column(hummock_time_travel_version::Column::VersionId)
+            .order_by_asc(hummock_time_travel_version::Column::VersionId)
+            .into_tuple()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        version_ids.iter().map(|id| id.as_raw_id()).collect_vec(),
+        vec![10, 11, 12]
+    );
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(225, live_table)
+            .await
+            .unwrap()
+            .id
+            .as_raw_id(),
+        10
+    );
+    assert!(
+        hummock_manager
+            .epoch_to_version(225, dropped_table)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     use risingwave_hummock_sdk::level::Levels;
     use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
