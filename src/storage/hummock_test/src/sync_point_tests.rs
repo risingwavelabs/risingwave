@@ -50,22 +50,62 @@ use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::gen_key_from_bytes;
 
+#[cfg(feature = "sync_point")]
+struct SyncPointActionGuard(sync_point::SyncPoint);
+
+#[cfg(feature = "sync_point")]
+impl Drop for SyncPointActionGuard {
+    fn drop(&mut self) {
+        sync_point::remove_action(self.0);
+    }
+}
+
+#[tokio::test]
+async fn test_get_from_sstable_info_success_settles_nested_stats_once() {
+    let sstable_store = mock_sstable_store().await;
+    let (_sstable, sstable_info) = gen_test_sstable(
+        default_builder_opt_for_test(),
+        0,
+        (0..10).map(|idx| (test_key_of(idx), HummockValue::put(test_value_of(idx)))),
+        sstable_store.clone(),
+    )
+    .await;
+    let mut parent_stats = StoreLocalStatistic {
+        cache_data_block_total: 7,
+        ..Default::default()
+    };
+    let full_key = test_key_of(0);
+    let read_options = risingwave_storage::store::ReadOptions::default();
+
+    let iter = get_from_sstable_info(
+        sstable_store,
+        &sstable_info,
+        full_key.to_ref(),
+        &read_options,
+        None,
+        &mut parent_stats,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    drop(iter);
+
+    assert_eq!(parent_stats.cache_data_block_total, 8);
+}
+
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
 async fn test_get_from_sstable_info_cancellation_settles_nested_stats() {
     const PAUSE: &str = "SSTABLE_ITERATOR::SEEK::BEFORE_NEXT_BLOCK";
+    const PAUSED: &str = "SSTABLE_ITERATOR::SEEK::BEFORE_NEXT_BLOCK::PAUSED";
 
     sync_point::reset();
-    let paused = Arc::new(tokio::sync::Notify::new());
-    let paused_hook = paused.clone();
-    sync_point::hook(PAUSE, move || {
-        let paused = paused_hook.clone();
-        async move {
-            paused.notify_one();
-            futures::future::pending::<()>().await;
-        }
+    sync_point::hook(PAUSE, || async {
+        sync_point::on(PAUSED).await;
+        futures::future::pending::<()>().await;
     });
+    let _pause_cleanup = SyncPointActionGuard(PAUSE);
 
     let sstable_store = mock_sstable_store().await;
     let (_sstable, sstable_info) = gen_test_sstable(
@@ -88,11 +128,12 @@ async fn test_get_from_sstable_info_cancellation_settles_nested_stats() {
     ));
 
     tokio::select! {
-        () = paused.notified() => {}
+        result = sync_point::wait_timeout(PAUSED, Duration::from_secs(10)) => {
+            result.expect("GET did not reach the cancellation hook");
+        }
         _ = get.as_mut() => panic!("GET completed before cancellation"),
     }
     drop(get);
-    sync_point::remove_action(PAUSE);
 
     assert_eq!(parent_stats.cache_data_block_total, 1);
 }
