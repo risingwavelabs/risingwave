@@ -30,5 +30,6 @@ mod recovery;
 mod scale;
 mod sink;
 mod storage;
+mod table_cache_refill;
 mod throttle;
 mod utils;
