@@ -235,7 +235,8 @@ impl<T: AsRef<[u8]>> ChangeLogValue<T> {
 pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
 pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
 
-pub const CHANGE_LOG_PREFETCH_LIMIT: u32 = 64;
+pub const DEFAULT_CHANGE_LOG_PREFETCH_LIMIT: u32 =
+    risingwave_common::config::storage::default::storage::table_change_log_prefetch_limit();
 
 #[derive(Clone)]
 pub struct NextEpochOptions {

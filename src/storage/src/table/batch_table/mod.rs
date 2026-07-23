@@ -55,7 +55,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{ColumnMapping, find_columns_by_ids};
 use crate::store::timeout_auto_rebuild::iter_with_timeout_rebuild;
 use crate::store::{
-    CHANGE_LOG_PREFETCH_LIMIT, NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions,
+    DEFAULT_CHANGE_LOG_PREFETCH_LIMIT, NewReadSnapshotOptions, NextEpochOptions, PrefetchOptions,
     ReadLogOptions, ReadOptions, StateStoreGet, StateStoreIter, StateStoreIterExt, StateStoreRead,
     TryWaitEpochOptions,
 };
@@ -1306,7 +1306,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
         let read_options = ReadLogOptions {
             table_id: self.table_id,
-            table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
+            table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
         };
         let iter = BatchTableInnerIterLogInner::<S, SD>::new(
             &self.store,

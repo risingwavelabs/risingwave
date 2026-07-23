@@ -216,6 +216,10 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::table_change_log_cache_capacity")]
     pub table_change_log_cache_capacity: u64,
 
+    /// Maximum number of table change logs to prefetch for a read-log scan.
+    #[serde(default = "default::storage::table_change_log_prefetch_limit")]
+    pub table_change_log_prefetch_limit: u32,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -1129,6 +1133,10 @@ pub mod default {
 
         pub fn table_change_log_cache_capacity() -> u64 {
             60
+        }
+
+        pub const fn table_change_log_prefetch_limit() -> u32 {
+            64
         }
 
         pub fn sst_skip_bloom_filter_in_serde() -> bool {

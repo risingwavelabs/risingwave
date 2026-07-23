@@ -1737,7 +1737,7 @@ mod tests {
                     (Unbounded, Unbounded),
                     ReadLogOptions {
                         table_id,
-                        table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
                     },
                 )
                 .await
@@ -1783,7 +1783,7 @@ mod tests {
                     (Unbounded, Unbounded),
                     ReadLogOptions {
                         table_id,
-                        table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
                     },
                 )
                 .await
@@ -1809,7 +1809,7 @@ mod tests {
                     (Unbounded, Unbounded),
                     ReadLogOptions {
                         table_id,
-                        table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
                     },
                 )
                 .await
@@ -1829,7 +1829,7 @@ mod tests {
                     (Unbounded, Unbounded),
                     ReadLogOptions {
                         table_id,
-                        table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
                     },
                 )
                 .await
