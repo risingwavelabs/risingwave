@@ -60,7 +60,7 @@
 
 use std::collections::VecDeque;
 use std::future::pending;
-use std::mem::{replace, size_of};
+use std::mem::replace;
 use std::pin::Pin;
 
 use anyhow::anyhow;
@@ -1134,19 +1134,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
+#[derive(EstimateSize)]
 enum SyncedLogStoreBufferItem {
     LogStore(LogStoreBufferItem),
     Watermark(Watermark),
-}
-
-impl SyncedLogStoreBufferItem {
-    fn estimated_size(&self) -> usize {
-        size_of::<Self>()
-            + match self {
-                Self::LogStore(item) => item.estimated_heap_size(),
-                Self::Watermark(watermark) => watermark.val.estimated_heap_size(),
-            }
-    }
 }
 
 pub(crate) struct SyncedLogStoreBuffer {
@@ -1651,9 +1642,15 @@ mod tests {
             U+ 10  10",
         );
 
+        let chunk_3 = StreamChunk::from_pretty(
+            "   I   T
+            +  11  12",
+        );
+
         tx.push_chunk(chunk_1.clone());
-        tx.push_int64_watermark(0, 7);
         tx.push_chunk(chunk_2.clone());
+        tx.push_int64_watermark(0, 7);
+        tx.push_chunk(chunk_3.clone());
 
         tx.push_barrier(test_epoch(2), false);
 
@@ -1670,7 +1667,20 @@ mod tests {
 
         match stream.next().await {
             Some(Ok(Message::Chunk(actual))) => {
-                assert_stream_chunk_eq!(actual, chunk_1);
+                let expected = StreamChunk::from_pretty(
+                    "   I   T
+                    +   5  10
+                    +   6  10
+                    +   8  10
+                    +   9  10
+                    +  10  11
+                    -   5  10
+                    -   6  10
+                    -   8  10
+                    U- 10  11
+                    U+ 10  10",
+                );
+                assert_stream_chunk_eq!(actual, expected);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
         }
@@ -1684,7 +1694,7 @@ mod tests {
 
         match stream.next().await {
             Some(Ok(Message::Chunk(actual))) => {
-                assert_stream_chunk_eq!(actual, chunk_2);
+                assert_stream_chunk_eq!(actual, chunk_3);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
         }
