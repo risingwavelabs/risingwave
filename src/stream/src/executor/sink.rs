@@ -864,16 +864,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                         Err(anyhow!("fail to rewind log reader after alter sink config notification").into())
                                     }
                                 }
-                            } else if !config_has_changes {
-                                info!(
-                                    executor_id = %sink_writer_param.executor_id,
-                                    sink_id = %sink_param.sink_id,
-                                    "skip alter sink config because properties are unchanged"
-                                );
-                                Ok(())
                             } else {
-                                sink_param.properties.extend(config.into_iter());
-                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                                if config_has_changes {
+                                    sink_param.properties.extend(config.into_iter());
+                                    sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                                } else {
+                                    info!(
+                                        executor_id = %sink_writer_param.executor_id,
+                                        sink_id = %sink_param.sink_id,
+                                        "skip rebuilding sink because properties are unchanged"
+                                    );
+                                }
                                 Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }
                             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
@@ -985,17 +986,35 @@ mod test {
         }
     }
 
-    struct RewindableTestLogStoreFactory;
+    struct TestLogStoreFactory<const CAN_REWIND: bool>;
 
-    impl LogStoreFactory for RewindableTestLogStoreFactory {
+    impl<const CAN_REWIND: bool> LogStoreFactory for TestLogStoreFactory<CAN_REWIND> {
         type Reader = RewindRequiredLogReader;
         type Writer = BoundedInMemLogStoreWriter;
 
-        const ALLOW_REWIND: bool = true;
+        const ALLOW_REWIND: bool = CAN_REWIND;
         const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
 
         async fn build(self) -> (Self::Reader, Self::Writer) {
             unreachable!()
+        }
+    }
+
+    fn sink_param_for_config_update_test() -> SinkParam {
+        SinkParam {
+            sink_id: 0.into(),
+            sink_name: "test".into(),
+            properties: BTreeMap::from([
+                ("connector".to_owned(), "blackhole".to_owned()),
+                ("commit_checkpoint_interval".to_owned(), "1".to_owned()),
+            ]),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         }
     }
 
@@ -1022,22 +1041,7 @@ mod test {
 
     #[tokio::test]
     async fn test_no_op_sink_config_update_rewinds_log_reader() {
-        let properties = BTreeMap::from([
-            ("connector".to_owned(), "blackhole".to_owned()),
-            ("commit_checkpoint_interval".to_owned(), "1".to_owned()),
-        ]);
-        let sink_param = SinkParam {
-            sink_id: 0.into(),
-            sink_name: "test".into(),
-            properties,
-            columns: vec![],
-            downstream_pk: None,
-            sink_type: SinkType::AppendOnly,
-            ignore_delete: false,
-            format_desc: None,
-            db_name: "test".into(),
-            sink_from_name: "test".into(),
-        };
+        let sink_param = sink_param_for_config_update_test();
         let sink = BlackHoleSink::try_from(sink_param.clone()).unwrap();
         let state = Arc::new(RewindRequiredLogReaderState::default());
         let log_reader = RewindRequiredLogReader {
@@ -1047,7 +1051,7 @@ mod test {
         let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
         let (rebuild_sink_tx, rebuild_sink_rx) = unbounded_channel();
 
-        let consume_log = SinkExecutor::<RewindableTestLogStoreFactory>::execute_consume_log(
+        let consume_log = SinkExecutor::<TestLogStoreFactory<true>>::execute_consume_log(
             sink,
             log_reader,
             vec![],
@@ -1078,6 +1082,52 @@ mod test {
         }
 
         assert_eq!(state.rewind_count.load(Ordering::SeqCst), 1);
+        drop(rate_limit_tx);
+    }
+
+    #[tokio::test]
+    async fn test_no_op_sink_config_update_triggers_recovery_without_rewind() {
+        let sink_param = sink_param_for_config_update_test();
+        let sink = BlackHoleSink::try_from(sink_param.clone()).unwrap();
+        let state = Arc::new(RewindRequiredLogReaderState::default());
+        let log_reader = RewindRequiredLogReader {
+            is_reset: false,
+            state: state.clone(),
+        };
+        let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+        let (rebuild_sink_tx, rebuild_sink_rx) = unbounded_channel();
+
+        let consume_log = SinkExecutor::<TestLogStoreFactory<false>>::execute_consume_log(
+            sink,
+            log_reader,
+            vec![],
+            sink_param,
+            SinkWriterParam::for_test(),
+            None,
+            ActorContext::for_test(0),
+            rate_limit_rx,
+            rebuild_sink_rx,
+        );
+        tokio::pin!(consume_log);
+
+        tokio::select! {
+            result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
+            () = state.wait_for_start_count(1) => {},
+        }
+
+        rebuild_sink_tx
+            .send(RebuildSinkMessage::UpdateConfig(HashMap::from([(
+                "commit_checkpoint_interval".to_owned(),
+                "1".to_owned(),
+            )])))
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), consume_log)
+            .await
+            .expect("log consumer should trigger recovery")
+            .expect_err("log consumer should return an error");
+        assert_eq!(state.start_count.load(Ordering::SeqCst), 1);
+        assert_eq!(state.rewind_count.load(Ordering::SeqCst), 0);
         drop(rate_limit_tx);
     }
 
