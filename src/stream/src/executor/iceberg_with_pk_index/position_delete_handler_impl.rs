@@ -53,6 +53,7 @@ use risingwave_connector::source::iceberg::parquet_file_handler::ParquetFileRead
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::ActorId;
 use risingwave_rpc_client::MetaClient;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -465,7 +466,7 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
             if let Err(e) = &result {
                 // The handle is only awaited at the first flush with pending deletes, which may be far
                 // in the future (or never on an idle shard); log here so a failed seed is visible.
-                tracing::warn!(%sink_id, error = ?e, "iceberg pk-index merger background seed failed; will surface at next flush");
+                tracing::warn!(%sink_id, error = ?e.as_report(), "iceberg pk-index merger background seed failed; will surface at next flush");
             }
             result
         }));

@@ -508,18 +508,40 @@ impl GlobalBarrierWorkerContextImpl {
                         pb_sink.id
                     )
                 })?;
+            let state_table_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_sink_state_table_ids(pb_sink.id)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "no state table found while re-registering iceberg v3 sink {}",
+                        pb_sink.id
+                    )
+                })?;
+            let recovered_epoch = self
+                .hummock_manager
+                .on_current_version(|version| version.table_committed_epoch(state_table_id))
+                .await
+                .ok_or_else(|| {
+                    anyhow!(
+                        "cannot get committed epoch for iceberg v3 sink {} state table {}",
+                        pb_sink.id,
+                        state_table_id
+                    )
+                })?;
             let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
-                (
-                    pb_sink.id,
-                    manager
-                        .register_sink(
-                            pb_sink.id,
-                            to_partial_graph_id(pb_sink.database_id, None),
-                            config,
-                        )
-                        .await,
-                )
+                let partial_graph_id = to_partial_graph_id(pb_sink.database_id, None);
+                let result = manager
+                    .register_sink(pb_sink.id, partial_graph_id, config)
+                    .await;
+                if result.is_ok() {
+                    manager.advance_committed_epochs([(partial_graph_id, recovered_epoch)]);
+                }
+                (pb_sink.id, result)
             });
         }
 
