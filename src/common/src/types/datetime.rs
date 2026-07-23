@@ -250,6 +250,8 @@ enum ErrorKind {
     Date { days: i32 },
     #[error("Invalid time: secs: {secs}, nanoseconds: {nsecs}")]
     Time { secs: u32, nsecs: u32 },
+    #[error("Invalid time: {value} {unit} is out of range for a time of day")]
+    TimeOfDay { value: u64, unit: &'static str },
     #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
     #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
@@ -275,6 +277,10 @@ impl InvalidParamsError {
 
     pub fn time(secs: u32, nsecs: u32) -> Self {
         ErrorKind::Time { secs, nsecs }.into()
+    }
+
+    pub fn time_of_day(value: u64, unit: &'static str) -> Self {
+        ErrorKind::TimeOfDay { value, unit }.into()
     }
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
@@ -424,6 +430,10 @@ impl Date {
     }
 }
 
+/// Exclusive upper bounds of a time of day.
+const NANOS_PER_DAY: u64 = 86_400 * 1_000_000_000;
+const MICROS_PER_DAY: u64 = 86_400 * 1_000_000;
+
 impl Time {
     pub fn with_secs_nano(secs: u32, nano: u32) -> Result<Self> {
         Ok(Time::new(
@@ -451,15 +461,21 @@ impl Time {
     }
 
     pub fn with_nano(nano: u64) -> Result<Self> {
-        let secs = (nano / 1_000_000_000) as u32;
-        let nano = (nano % 1_000_000_000) as u32;
-        Self::with_secs_nano(secs, nano)
+        // Rejecting out-of-day values here also keeps the casts below lossless.
+        if nano >= NANOS_PER_DAY {
+            return Err(InvalidParamsError::time_of_day(nano, "nanoseconds"));
+        }
+        Self::with_secs_nano((nano / 1_000_000_000) as u32, (nano % 1_000_000_000) as u32)
     }
 
     pub fn with_micro(micro: u64) -> Result<Self> {
-        let secs = (micro / 1_000_000) as u32;
-        let nano = ((micro % 1_000_000) * 1_000) as u32;
-        Self::with_secs_nano(secs, nano)
+        if micro >= MICROS_PER_DAY {
+            return Err(InvalidParamsError::time_of_day(micro, "microseconds"));
+        }
+        Self::with_secs_nano(
+            (micro / 1_000_000) as u32,
+            ((micro % 1_000_000) * 1_000) as u32,
+        )
     }
 
     pub fn with_milli(milli: u32) -> Result<Self> {
@@ -867,5 +883,24 @@ mod tests {
         Date::from_str("1999-01-08AA").unwrap_err();
         Time::from_str("AA04:05:06").unwrap_err();
         Timestamp::from_str("1999-01-08 04:05:06AA").unwrap_err();
+    }
+
+    #[test]
+    fn time_of_day_bounds() {
+        assert_eq!(
+            Time::with_micro(86_399_999_999).unwrap(),
+            Time::from_hms_micro_uncheck(23, 59, 59, 999_999)
+        );
+        assert_eq!(
+            Time::with_nano(86_399_999_999_999).unwrap(),
+            Time::from_hms_nano_uncheck(23, 59, 59, 999_999_999)
+        );
+
+        Time::with_micro(86_400_000_000).unwrap_err();
+        Time::with_nano(86_400_000_000_000).unwrap_err();
+
+        // A seconds count at a multiple of 2^32 used to wrap into the valid range.
+        Time::with_micro(4_294_967_296_000_000).unwrap_err();
+        Time::with_nano(4_294_967_296_000_000_000).unwrap_err();
     }
 }
