@@ -622,14 +622,14 @@ impl DataCacheRefillTaskGenerator<'_> {
             return tasks;
         }
 
+        if self.delta.insert_sst_infos.is_empty() {
+            return tasks;
+        }
+
         let has_parent_ssts = !self.delta.delete_sst_object_ids.is_empty();
         // CN-written SSTs are appended to L0 without replacing parent SSTs. Other inserted SSTs
         // need delete-side evidence for recent and inheritance filtering.
-        if self.delta.insert_sst_infos.is_empty()
-            || (!has_parent_ssts && self.delta.insert_sst_level != 0)
-        {
-            return tasks;
-        }
+        debug_assert!(has_parent_ssts || self.delta.insert_sst_level == 0);
 
         // Return if the target level is not in the refill levels
         if !self
@@ -1642,21 +1642,6 @@ mod tests {
                 "{name}"
             );
         }
-
-        let mut non_l0_delta = delta;
-        non_l0_delta.insert_sst_level = 1;
-        let context = fixture.context(
-            CacheRefillPolicy::Serving,
-            None,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            |config| {
-                config.data_refill_levels.insert(1);
-            },
-        );
-        assert!(
-            fixture.generate(&context, &non_l0_delta).await.is_empty(),
-            "insert-only refill is limited to CN-written L0 SSTs"
-        );
     }
 
     #[tokio::test]
