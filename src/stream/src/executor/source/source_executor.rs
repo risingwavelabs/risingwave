@@ -21,7 +21,7 @@ use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
@@ -60,6 +60,36 @@ fn lsn_u128_to_i64(lsn: u128) -> i64 {
     lsn.min(i64::MAX as u128) as i64
 }
 
+struct CdcStateTableMetrics {
+    pg_lsn: LabelGuardedIntGauge,
+    mysql_binlog_file_seq: LabelGuardedIntGauge,
+    mysql_binlog_position: LabelGuardedIntGauge,
+    sqlserver_change_lsn: LabelGuardedIntGauge,
+    sqlserver_commit_lsn: LabelGuardedIntGauge,
+}
+
+impl CdcStateTableMetrics {
+    fn new(metrics: &StreamingMetrics, source_id: &str) -> Self {
+        Self {
+            pg_lsn: metrics
+                .pg_cdc_state_table_lsn
+                .with_guarded_label_values(&[source_id]),
+            mysql_binlog_file_seq: metrics
+                .mysql_cdc_state_binlog_file_seq
+                .with_guarded_label_values(&[source_id]),
+            mysql_binlog_position: metrics
+                .mysql_cdc_state_binlog_position
+                .with_guarded_label_values(&[source_id]),
+            sqlserver_change_lsn: metrics
+                .sqlserver_cdc_state_change_lsn
+                .with_guarded_label_values(&[source_id]),
+            sqlserver_commit_lsn: metrics
+                .sqlserver_cdc_state_commit_lsn
+                .with_guarded_label_values(&[source_id]),
+        }
+    }
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -82,6 +112,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
+
+    cdc_state_table_metrics: Option<CdcStateTableMetrics>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -105,6 +137,7 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
+            cdc_state_table_metrics: None,
         }
     }
 
@@ -136,6 +169,7 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id: core.source_id,
             source_name: core.source_name.clone(),
             metrics,
+            cdc_commit_metrics: HashMap::new(),
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -441,9 +475,8 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
-        let core = &mut self.stream_source_core;
-
-        let cache = core
+        let cache = self
+            .stream_source_core
             .updated_splits_in_epoch
             .values()
             .map(|split_impl| split_impl.to_owned())
@@ -453,63 +486,60 @@ impl<S: StateStore> SourceExecutor<S> {
             tracing::debug!(state = ?cache, "take snapshot");
 
             // Record metrics for CDC sources before moving cache
-            let source_id = core.source_id.to_string();
+            if cache.iter().any(SplitImpl::is_cdc_split) && self.cdc_state_table_metrics.is_none() {
+                let source_id = self.stream_source_core.source_id.to_string();
+                self.cdc_state_table_metrics =
+                    Some(CdcStateTableMetrics::new(&self.metrics, &source_id));
+            }
+            let cdc_metrics = self.cdc_state_table_metrics.as_ref();
             for split_impl in &cache {
                 // Extract and record CDC-specific metrics based on split type
                 match split_impl {
                     SplitImpl::PostgresCdc(pg_split) => {
                         if let Some(lsn_value) = pg_split.pg_lsn() {
-                            let pg_cdc_state_table_lsn = self
-                                .metrics
-                                .pg_cdc_state_table_lsn
-                                .with_guarded_label_values(&[&source_id]);
-                            pg_cdc_state_table_lsn.set(lsn_value as i64);
+                            cdc_metrics.unwrap().pg_lsn.set(lsn_value as i64);
                         }
                     }
                     SplitImpl::MysqlCdc(mysql_split) => {
                         if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
-                            let mysql_cdc_state_binlog_file_seq = self
-                                .metrics
-                                .mysql_cdc_state_binlog_file_seq
-                                .with_guarded_label_values(&[&source_id]);
-                            mysql_cdc_state_binlog_file_seq.set(file_seq as i64);
-
-                            let mysql_cdc_state_binlog_position = self
-                                .metrics
-                                .mysql_cdc_state_binlog_position
-                                .with_guarded_label_values(&[&source_id]);
-                            mysql_cdc_state_binlog_position.set(position as i64);
+                            let metrics = cdc_metrics.unwrap();
+                            metrics.mysql_binlog_file_seq.set(file_seq as i64);
+                            metrics.mysql_binlog_position.set(position as i64);
                         }
                     }
                     SplitImpl::SqlServerCdc(sqlserver_split) => {
                         if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
-                            let sqlserver_cdc_state_change_lsn = self
-                                .metrics
-                                .sqlserver_cdc_state_change_lsn
-                                .with_guarded_label_values(&[&source_id]);
-                            sqlserver_cdc_state_change_lsn.set(lsn_u128_to_i64(lsn));
+                            cdc_metrics
+                                .unwrap()
+                                .sqlserver_change_lsn
+                                .set(lsn_u128_to_i64(lsn));
                         }
                         if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
-                            let sqlserver_cdc_state_commit_lsn = self
-                                .metrics
-                                .sqlserver_cdc_state_commit_lsn
-                                .with_guarded_label_values(&[&source_id]);
-                            sqlserver_cdc_state_commit_lsn.set(lsn_u128_to_i64(lsn));
+                            cdc_metrics
+                                .unwrap()
+                                .sqlserver_commit_lsn
+                                .set(lsn_u128_to_i64(lsn));
                         }
                     }
                     _ => {}
                 }
             }
 
-            core.split_state_store.set_states(cache).await?;
+            self.stream_source_core
+                .split_state_store
+                .set_states(cache)
+                .await?;
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.commit(epoch).await?;
+        self.stream_source_core
+            .split_state_store
+            .commit(epoch)
+            .await?;
 
-        let updated_splits = core.updated_splits_in_epoch.clone();
+        let updated_splits = self.stream_source_core.updated_splits_in_epoch.clone();
 
-        core.updated_splits_in_epoch.clear();
+        self.stream_source_core.updated_splits_in_epoch.clear();
 
         Ok(updated_splits)
     }
@@ -1201,6 +1231,26 @@ struct WaitCheckpointWorker<S: StateStore> {
     source_id: SourceId,
     source_name: String,
     metrics: Arc<StreamingMetrics>,
+    cdc_commit_metrics: HashMap<u64, CdcCommitMetrics>,
+}
+
+struct CdcCommitMetrics {
+    postgres_lsn: LabelGuardedIntGauge,
+    sqlserver_lsn: LabelGuardedIntGauge,
+}
+
+impl CdcCommitMetrics {
+    fn new(metrics: &StreamingMetrics, source_id: u64) -> Self {
+        let source_id = source_id.to_string();
+        Self {
+            postgres_lsn: metrics
+                .pg_cdc_jni_commit_offset_lsn
+                .with_guarded_label_values(&[&source_id]),
+            sqlserver_lsn: metrics
+                .sqlserver_cdc_jni_commit_offset_lsn
+                .with_guarded_label_values(&[&source_id]),
+        }
+    }
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -1232,30 +1282,24 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
                             // Run task with callback to record LSN after successful commit
+                            let metric_vecs = self.metrics.clone();
                             task.run_with_on_commit_success(
                                 self.source_id,
                                 &self.source_name,
                                 |source_id: u64, offset| {
+                                    let metrics =
+                                        self.cdc_commit_metrics.entry(source_id).or_insert_with(
+                                            || CdcCommitMetrics::new(&metric_vecs, source_id),
+                                        );
                                     if let Some(lsn_value) =
                                         extract_postgres_lsn_from_offset_str(offset)
                                     {
-                                        let source_id = source_id.to_string();
-                                        let pg_cdc_jni_commit_offset_lsn = self
-                                            .metrics
-                                            .pg_cdc_jni_commit_offset_lsn
-                                            .with_guarded_label_values(&[&source_id]);
-                                        pg_cdc_jni_commit_offset_lsn.set(lsn_value as i64);
+                                        metrics.postgres_lsn.set(lsn_value as i64);
                                     }
                                     if let Some(lsn_value) =
                                         extract_sql_server_commit_lsn_from_offset_str(offset)
                                     {
-                                        let source_id = source_id.to_string();
-                                        let sqlserver_cdc_jni_commit_offset_lsn = self
-                                            .metrics
-                                            .sqlserver_cdc_jni_commit_offset_lsn
-                                            .with_guarded_label_values(&[&source_id]);
-                                        sqlserver_cdc_jni_commit_offset_lsn
-                                            .set(lsn_u128_to_i64(lsn_value));
+                                        metrics.sqlserver_lsn.set(lsn_u128_to_i64(lsn_value));
                                     }
                                 },
                             )

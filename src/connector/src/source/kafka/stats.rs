@@ -12,19 +12,81 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use prometheus::Registry;
 use rdkafka::Statistics;
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
-use risingwave_common::metrics::{LabelGuardedIntGaugeVec, LabelGuardedUintGaugeVec};
+use risingwave_common::metrics::{
+    LabelGuardedIntGauge, LabelGuardedIntGaugeVec, LabelGuardedUintGauge, LabelGuardedUintGaugeVec,
+};
 use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 
 macro_rules! set_guarded_metric {
-    ($metric_vec:expr, $labels:expr, $value:expr $(,)?) => {{
-        let metric = $metric_vec.with_guarded_label_values($labels);
-        metric.set($value);
+    ($guards:expr, $metric_vec:expr, $labels:expr, $value:expr $(,)?) => {{
+        $metric_vec.set_retained($guards, $labels, $value);
     }};
+}
+
+type MetricGuardKey = (usize, Box<[String]>);
+
+#[derive(Debug, Default)]
+pub struct RdKafkaStatsGuard {
+    int_gauges: HashMap<MetricGuardKey, LabelGuardedIntGauge>,
+    uint_gauges: HashMap<MetricGuardKey, LabelGuardedUintGauge>,
+    previous_int_gauges: HashMap<MetricGuardKey, LabelGuardedIntGauge>,
+    previous_uint_gauges: HashMap<MetricGuardKey, LabelGuardedUintGauge>,
+}
+
+impl RdKafkaStatsGuard {
+    fn begin_report(&mut self) {
+        debug_assert!(self.previous_int_gauges.is_empty());
+        debug_assert!(self.previous_uint_gauges.is_empty());
+        self.previous_int_gauges = std::mem::take(&mut self.int_gauges);
+        self.previous_uint_gauges = std::mem::take(&mut self.uint_gauges);
+    }
+
+    fn finish_report(&mut self) {
+        self.previous_int_gauges.clear();
+        self.previous_uint_gauges.clear();
+    }
+}
+
+fn metric_guard_key<T>(metric_vec: &T, labels: &[&str]) -> MetricGuardKey {
+    (
+        metric_vec as *const T as usize,
+        labels.iter().map(|label| (*label).to_owned()).collect(),
+    )
+}
+
+trait RetainedGaugeVec<Value> {
+    fn set_retained(&self, guards: &mut RdKafkaStatsGuard, labels: &[&str], value: Value);
+}
+
+impl RetainedGaugeVec<i64> for LabelGuardedIntGaugeVec {
+    fn set_retained(&self, guards: &mut RdKafkaStatsGuard, labels: &[&str], value: i64) {
+        let key = metric_guard_key(self, labels);
+        let metric = guards
+            .previous_int_gauges
+            .remove(&key)
+            .unwrap_or_else(|| self.with_guarded_label_values(labels));
+        metric.set(value);
+        guards.int_gauges.insert(key, metric);
+    }
+}
+
+impl RetainedGaugeVec<u64> for LabelGuardedUintGaugeVec {
+    fn set_retained(&self, guards: &mut RdKafkaStatsGuard, labels: &[&str], value: u64) {
+        let key = metric_guard_key(self, labels);
+        let metric = guards
+            .previous_uint_gauges
+            .remove(&key)
+            .unwrap_or_else(|| self.with_guarded_label_values(labels));
+        metric.set(value);
+        guards.uint_gauges.insert(key, metric);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -170,13 +232,24 @@ impl ConsumerGroupStats {
         }
     }
 
-    pub fn report(&self, id: &str, client_id: &str, stats: &ConsumerGroup) {
+    pub fn report(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        stats: &ConsumerGroup,
+    ) {
         let state = stats.state.as_str();
         let labels = [id, client_id, state];
-        set_guarded_metric!(self.state_age, &labels, stats.stateage);
-        set_guarded_metric!(self.rebalance_age, &labels, stats.rebalance_age);
-        set_guarded_metric!(self.rebalance_cnt, &labels, stats.rebalance_cnt);
-        set_guarded_metric!(self.assignment_size, &labels, stats.assignment_size as i64,);
+        set_guarded_metric!(guards, self.state_age, &labels, stats.stateage);
+        set_guarded_metric!(guards, self.rebalance_age, &labels, stats.rebalance_age);
+        set_guarded_metric!(guards, self.rebalance_cnt, &labels, stats.rebalance_cnt);
+        set_guarded_metric!(
+            guards,
+            self.assignment_size,
+            &labels,
+            stats.assignment_size as i64,
+        );
     }
 }
 
@@ -301,21 +374,29 @@ impl StatsWindow {
         }
     }
 
-    pub fn report(&self, id: &str, client_id: &str, broker: &str, topic: &str, stats: &Window) {
+    pub fn report(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        broker: &str,
+        topic: &str,
+        stats: &Window,
+    ) {
         let labels = [id, client_id, broker, topic];
 
-        set_guarded_metric!(self.min, &labels, stats.min);
-        set_guarded_metric!(self.max, &labels, stats.max);
-        set_guarded_metric!(self.avg, &labels, stats.avg);
-        set_guarded_metric!(self.sum, &labels, stats.sum);
-        set_guarded_metric!(self.cnt, &labels, stats.cnt);
-        set_guarded_metric!(self.stddev, &labels, stats.stddev);
-        set_guarded_metric!(self.hdr_size, &labels, stats.hdrsize);
-        set_guarded_metric!(self.p50, &labels, stats.p50);
-        set_guarded_metric!(self.p75, &labels, stats.p75);
-        set_guarded_metric!(self.p90, &labels, stats.p90);
-        set_guarded_metric!(self.p99_99, &labels, stats.p99_99);
-        set_guarded_metric!(self.out_of_range, &labels, stats.outofrange);
+        set_guarded_metric!(guards, self.min, &labels, stats.min);
+        set_guarded_metric!(guards, self.max, &labels, stats.max);
+        set_guarded_metric!(guards, self.avg, &labels, stats.avg);
+        set_guarded_metric!(guards, self.sum, &labels, stats.sum);
+        set_guarded_metric!(guards, self.cnt, &labels, stats.cnt);
+        set_guarded_metric!(guards, self.stddev, &labels, stats.stddev);
+        set_guarded_metric!(guards, self.hdr_size, &labels, stats.hdrsize);
+        set_guarded_metric!(guards, self.p50, &labels, stats.p50);
+        set_guarded_metric!(guards, self.p75, &labels, stats.p75);
+        set_guarded_metric!(guards, self.p90, &labels, stats.p90);
+        set_guarded_metric!(guards, self.p99_99, &labels, stats.p99_99);
+        set_guarded_metric!(guards, self.out_of_range, &labels, stats.outofrange);
     }
 }
 
@@ -340,23 +421,37 @@ impl TopicStats {
         }
     }
 
-    pub fn report(&self, id: &str, client_id: &str, stats: &Statistics) {
+    pub fn report(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        stats: &Statistics,
+    ) {
         for (topic, topic_stats) in &stats.topics {
-            self.report_inner(id, client_id, topic, topic_stats);
+            self.report_inner(guards, id, client_id, topic, topic_stats);
         }
     }
 
-    fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Topic) {
+    fn report_inner(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        topic: &str,
+        stats: &Topic,
+    ) {
         set_guarded_metric!(
+            guards,
             self.metadata_age,
             &[id, client_id, topic],
             stats.metadata_age
         );
         self.batch_size
-            .report(id, client_id, "", topic, &stats.batchsize);
+            .report(guards, id, client_id, "", topic, &stats.batchsize);
         self.batch_cnt
-            .report(id, client_id, "", topic, &stats.batchcnt);
-        self.partitions.report(id, client_id, topic, stats)
+            .report(guards, id, client_id, "", topic, &stats.batchcnt);
+        self.partitions.report(guards, id, client_id, topic, stats)
     }
 }
 
@@ -608,41 +703,65 @@ impl PartitionStats {
         }
     }
 
-    pub fn report(&self, id: &str, client_id: &str, topic: &str, stats: &Topic) {
+    pub fn report(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        topic: &str,
+        stats: &Topic,
+    ) {
         for partition_stats in stats.partitions.values() {
-            self.report_inner(id, client_id, topic, partition_stats);
+            self.report_inner(guards, id, client_id, topic, partition_stats);
         }
     }
 
-    fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Partition) {
+    fn report_inner(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        topic: &str,
+        stats: &Partition,
+    ) {
         let labels = [id, client_id, topic, &stats.partition.to_string()];
 
-        set_guarded_metric!(self.msgq_cnt, &labels, stats.msgq_cnt);
-        set_guarded_metric!(self.msgq_bytes, &labels, stats.msgq_bytes);
-        set_guarded_metric!(self.xmit_msgq_cnt, &labels, stats.xmit_msgq_cnt);
-        set_guarded_metric!(self.xmit_msgq_bytes, &labels, stats.xmit_msgq_bytes);
-        set_guarded_metric!(self.fetchq_cnt, &labels, stats.fetchq_cnt);
-        set_guarded_metric!(self.fetchq_size, &labels, stats.fetchq_size);
-        set_guarded_metric!(self.query_offset, &labels, stats.query_offset);
-        set_guarded_metric!(self.next_offset, &labels, stats.next_offset);
-        set_guarded_metric!(self.app_offset, &labels, stats.app_offset);
-        set_guarded_metric!(self.stored_offset, &labels, stats.stored_offset);
-        set_guarded_metric!(self.committed_offset, &labels, stats.committed_offset);
-        set_guarded_metric!(self.eof_offset, &labels, stats.eof_offset);
-        set_guarded_metric!(self.lo_offset, &labels, stats.lo_offset);
-        set_guarded_metric!(self.hi_offset, &labels, stats.hi_offset);
-        set_guarded_metric!(self.consumer_lag, &labels, stats.consumer_lag);
-        set_guarded_metric!(self.consumer_lag_store, &labels, stats.consumer_lag_stored);
-        set_guarded_metric!(self.txmsgs, &labels, stats.txmsgs);
-        set_guarded_metric!(self.txbytes, &labels, stats.txbytes);
-        set_guarded_metric!(self.rxmsgs, &labels, stats.rxmsgs);
-        set_guarded_metric!(self.rxbytes, &labels, stats.rxbytes);
-        set_guarded_metric!(self.msgs, &labels, stats.msgs);
-        set_guarded_metric!(self.rx_ver_drops, &labels, stats.rx_ver_drops);
-        set_guarded_metric!(self.msgs_inflight, &labels, stats.msgs_inflight);
-        set_guarded_metric!(self.next_ack_seq, &labels, stats.next_ack_seq);
-        set_guarded_metric!(self.next_err_seq, &labels, stats.next_err_seq);
-        set_guarded_metric!(self.acked_msgid, &labels, stats.acked_msgid);
+        set_guarded_metric!(guards, self.msgq_cnt, &labels, stats.msgq_cnt);
+        set_guarded_metric!(guards, self.msgq_bytes, &labels, stats.msgq_bytes);
+        set_guarded_metric!(guards, self.xmit_msgq_cnt, &labels, stats.xmit_msgq_cnt);
+        set_guarded_metric!(guards, self.xmit_msgq_bytes, &labels, stats.xmit_msgq_bytes);
+        set_guarded_metric!(guards, self.fetchq_cnt, &labels, stats.fetchq_cnt);
+        set_guarded_metric!(guards, self.fetchq_size, &labels, stats.fetchq_size);
+        set_guarded_metric!(guards, self.query_offset, &labels, stats.query_offset);
+        set_guarded_metric!(guards, self.next_offset, &labels, stats.next_offset);
+        set_guarded_metric!(guards, self.app_offset, &labels, stats.app_offset);
+        set_guarded_metric!(guards, self.stored_offset, &labels, stats.stored_offset);
+        set_guarded_metric!(
+            guards,
+            self.committed_offset,
+            &labels,
+            stats.committed_offset
+        );
+        set_guarded_metric!(guards, self.eof_offset, &labels, stats.eof_offset);
+        set_guarded_metric!(guards, self.lo_offset, &labels, stats.lo_offset);
+        set_guarded_metric!(guards, self.hi_offset, &labels, stats.hi_offset);
+        set_guarded_metric!(guards, self.consumer_lag, &labels, stats.consumer_lag);
+        set_guarded_metric!(
+            guards,
+            self.consumer_lag_store,
+            &labels,
+            stats.consumer_lag_stored
+        );
+        set_guarded_metric!(guards, self.txmsgs, &labels, stats.txmsgs);
+        set_guarded_metric!(guards, self.txbytes, &labels, stats.txbytes);
+        set_guarded_metric!(guards, self.rxmsgs, &labels, stats.rxmsgs);
+        set_guarded_metric!(guards, self.rxbytes, &labels, stats.rxbytes);
+        set_guarded_metric!(guards, self.msgs, &labels, stats.msgs);
+        set_guarded_metric!(guards, self.rx_ver_drops, &labels, stats.rx_ver_drops);
+        set_guarded_metric!(guards, self.msgs_inflight, &labels, stats.msgs_inflight);
+        set_guarded_metric!(guards, self.next_ack_seq, &labels, stats.next_ack_seq);
+        set_guarded_metric!(guards, self.next_err_seq, &labels, stats.next_err_seq);
+        set_guarded_metric!(guards, self.acked_msgid, &labels, stats.acked_msgid);
     }
 }
 
@@ -806,33 +925,40 @@ impl RdKafkaStats {
         }
     }
 
-    pub fn report(&self, id: &str, stats: &Statistics) {
+    pub fn report(&self, guards: &mut RdKafkaStatsGuard, id: &str, stats: &Statistics) {
+        guards.begin_report();
         let client_id = stats.name.as_str();
         let labels = [id, client_id];
-        set_guarded_metric!(self.ts, &labels, stats.ts);
-        set_guarded_metric!(self.time, &labels, stats.time);
-        set_guarded_metric!(self.age, &labels, stats.age);
-        set_guarded_metric!(self.replyq, &labels, stats.replyq);
-        set_guarded_metric!(self.msg_cnt, &labels, stats.msg_cnt);
-        set_guarded_metric!(self.msg_size, &labels, stats.msg_size);
-        set_guarded_metric!(self.msg_max, &labels, stats.msg_max);
-        set_guarded_metric!(self.msg_size_max, &labels, stats.msg_size_max);
-        set_guarded_metric!(self.tx, &labels, stats.tx);
-        set_guarded_metric!(self.tx_bytes, &labels, stats.tx_bytes);
-        set_guarded_metric!(self.rx, &labels, stats.rx);
-        set_guarded_metric!(self.rx_bytes, &labels, stats.rx_bytes);
-        set_guarded_metric!(self.tx_msgs, &labels, stats.txmsgs);
-        set_guarded_metric!(self.tx_msgs_bytes, &labels, stats.txmsg_bytes);
-        set_guarded_metric!(self.rx_msgs, &labels, stats.rxmsgs);
-        set_guarded_metric!(self.rx_msgs_bytes, &labels, stats.rxmsg_bytes);
-        set_guarded_metric!(self.simple_cnt, &labels, stats.simple_cnt);
-        set_guarded_metric!(self.metadata_cache_cnt, &labels, stats.metadata_cache_cnt);
+        set_guarded_metric!(guards, self.ts, &labels, stats.ts);
+        set_guarded_metric!(guards, self.time, &labels, stats.time);
+        set_guarded_metric!(guards, self.age, &labels, stats.age);
+        set_guarded_metric!(guards, self.replyq, &labels, stats.replyq);
+        set_guarded_metric!(guards, self.msg_cnt, &labels, stats.msg_cnt);
+        set_guarded_metric!(guards, self.msg_size, &labels, stats.msg_size);
+        set_guarded_metric!(guards, self.msg_max, &labels, stats.msg_max);
+        set_guarded_metric!(guards, self.msg_size_max, &labels, stats.msg_size_max);
+        set_guarded_metric!(guards, self.tx, &labels, stats.tx);
+        set_guarded_metric!(guards, self.tx_bytes, &labels, stats.tx_bytes);
+        set_guarded_metric!(guards, self.rx, &labels, stats.rx);
+        set_guarded_metric!(guards, self.rx_bytes, &labels, stats.rx_bytes);
+        set_guarded_metric!(guards, self.tx_msgs, &labels, stats.txmsgs);
+        set_guarded_metric!(guards, self.tx_msgs_bytes, &labels, stats.txmsg_bytes);
+        set_guarded_metric!(guards, self.rx_msgs, &labels, stats.rxmsgs);
+        set_guarded_metric!(guards, self.rx_msgs_bytes, &labels, stats.rxmsg_bytes);
+        set_guarded_metric!(guards, self.simple_cnt, &labels, stats.simple_cnt);
+        set_guarded_metric!(
+            guards,
+            self.metadata_cache_cnt,
+            &labels,
+            stats.metadata_cache_cnt
+        );
 
-        self.broker_stats.report(id, client_id, stats);
-        self.topic_stats.report(id, client_id, stats);
+        self.broker_stats.report(guards, id, client_id, stats);
+        self.topic_stats.report(guards, id, client_id, stats);
         if let Some(cgrp) = &stats.cgrp {
-            self.cgrp.report(id, client_id, cgrp)
+            self.cgrp.report(guards, id, client_id, cgrp)
         }
+        guards.finish_report();
     }
 }
 
@@ -1036,65 +1162,84 @@ impl BrokerStats {
         }
     }
 
-    pub fn report(&self, id: &str, client_id: &str, stats: &Statistics) {
+    pub fn report(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        stats: &Statistics,
+    ) {
         for broker_stats in stats.brokers.values() {
-            self.report_inner(id, client_id, broker_stats);
+            self.report_inner(guards, id, client_id, broker_stats);
         }
     }
 
-    fn report_inner(&self, id: &str, client_id: &str, stats: &Broker) {
+    fn report_inner(
+        &self,
+        guards: &mut RdKafkaStatsGuard,
+        id: &str,
+        client_id: &str,
+        stats: &Broker,
+    ) {
         let broker = stats.nodename.as_str();
         let state = stats.state.as_str();
         let labels = [id, client_id, broker, state];
 
-        set_guarded_metric!(self.state_age, &labels, stats.stateage);
-        set_guarded_metric!(self.outbuf_cnt, &labels, stats.outbuf_cnt);
-        set_guarded_metric!(self.outbuf_msg_cnt, &labels, stats.outbuf_msg_cnt);
-        set_guarded_metric!(self.waitresp_cnt, &labels, stats.waitresp_cnt);
-        set_guarded_metric!(self.waitresp_msg_cnt, &labels, stats.waitresp_msg_cnt);
-        set_guarded_metric!(self.tx, &labels, stats.tx);
-        set_guarded_metric!(self.tx_bytes, &labels, stats.txbytes);
-        set_guarded_metric!(self.tx_errs, &labels, stats.txerrs);
-        set_guarded_metric!(self.tx_retries, &labels, stats.txretries);
-        set_guarded_metric!(self.tx_idle, &labels, stats.txidle);
-        set_guarded_metric!(self.req_timeouts, &labels, stats.req_timeouts);
-        set_guarded_metric!(self.rx, &labels, stats.rx);
-        set_guarded_metric!(self.rx_bytes, &labels, stats.rxbytes);
-        set_guarded_metric!(self.rx_errs, &labels, stats.rxerrs);
-        set_guarded_metric!(self.rx_corriderrs, &labels, stats.rxcorriderrs);
-        set_guarded_metric!(self.rx_partial, &labels, stats.rxpartial);
-        set_guarded_metric!(self.rx_idle, &labels, stats.rxidle);
+        set_guarded_metric!(guards, self.state_age, &labels, stats.stateage);
+        set_guarded_metric!(guards, self.outbuf_cnt, &labels, stats.outbuf_cnt);
+        set_guarded_metric!(guards, self.outbuf_msg_cnt, &labels, stats.outbuf_msg_cnt);
+        set_guarded_metric!(guards, self.waitresp_cnt, &labels, stats.waitresp_cnt);
+        set_guarded_metric!(
+            guards,
+            self.waitresp_msg_cnt,
+            &labels,
+            stats.waitresp_msg_cnt
+        );
+        set_guarded_metric!(guards, self.tx, &labels, stats.tx);
+        set_guarded_metric!(guards, self.tx_bytes, &labels, stats.txbytes);
+        set_guarded_metric!(guards, self.tx_errs, &labels, stats.txerrs);
+        set_guarded_metric!(guards, self.tx_retries, &labels, stats.txretries);
+        set_guarded_metric!(guards, self.tx_idle, &labels, stats.txidle);
+        set_guarded_metric!(guards, self.req_timeouts, &labels, stats.req_timeouts);
+        set_guarded_metric!(guards, self.rx, &labels, stats.rx);
+        set_guarded_metric!(guards, self.rx_bytes, &labels, stats.rxbytes);
+        set_guarded_metric!(guards, self.rx_errs, &labels, stats.rxerrs);
+        set_guarded_metric!(guards, self.rx_corriderrs, &labels, stats.rxcorriderrs);
+        set_guarded_metric!(guards, self.rx_partial, &labels, stats.rxpartial);
+        set_guarded_metric!(guards, self.rx_idle, &labels, stats.rxidle);
         for (req_type, req_cnt) in &stats.req {
             set_guarded_metric!(
+                guards,
                 self.req,
                 &[id, client_id, broker, state, req_type],
                 *req_cnt
             );
         }
-        set_guarded_metric!(self.zbuf_grow, &labels, stats.zbuf_grow);
-        set_guarded_metric!(self.buf_grow, &labels, stats.buf_grow);
+        set_guarded_metric!(guards, self.zbuf_grow, &labels, stats.zbuf_grow);
+        set_guarded_metric!(guards, self.buf_grow, &labels, stats.buf_grow);
         if let Some(wakeups) = stats.wakeups {
-            set_guarded_metric!(self.wakeups, &labels, wakeups);
+            set_guarded_metric!(guards, self.wakeups, &labels, wakeups);
         }
         if let Some(connects) = stats.connects {
-            set_guarded_metric!(self.connects, &labels, connects);
+            set_guarded_metric!(guards, self.connects, &labels, connects);
         }
         if let Some(disconnects) = stats.disconnects {
-            set_guarded_metric!(self.disconnects, &labels, disconnects);
+            set_guarded_metric!(guards, self.disconnects, &labels, disconnects);
         }
         if let Some(int_latency) = &stats.int_latency {
             self.int_latency
-                .report(id, client_id, broker, "", int_latency);
+                .report(guards, id, client_id, broker, "", int_latency);
         }
         if let Some(outbuf_latency) = &stats.outbuf_latency {
             self.outbuf_latency
-                .report(id, client_id, broker, "", outbuf_latency);
+                .report(guards, id, client_id, broker, "", outbuf_latency);
         }
         if let Some(rtt) = &stats.rtt {
-            self.rtt.report(id, client_id, broker, "", rtt);
+            self.rtt.report(guards, id, client_id, broker, "", rtt);
         }
         if let Some(throttle) = &stats.throttle {
-            self.throttle.report(id, client_id, broker, "", throttle);
+            self.throttle
+                .report(guards, id, client_id, broker, "", throttle);
         }
     }
 }

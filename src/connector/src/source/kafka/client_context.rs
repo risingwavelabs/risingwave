@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock};
 use anyhow::{Context, anyhow};
 use aws_config::Region;
 use aws_sdk_s3::config::SharedCredentialsProvider;
+use parking_lot::Mutex;
 use rdkafka::client::{BrokerAddr, OAuthToken};
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::message::DeliveryResult;
@@ -26,7 +27,7 @@ use rdkafka::{ClientContext, Statistics};
 use tokio::runtime::Runtime;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
-use super::stats::RdKafkaStats;
+use super::stats::{RdKafkaStats, RdKafkaStatsGuard};
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 
@@ -45,6 +46,7 @@ pub struct KafkaContextCommon {
     // identifier and metrics should be set at the same time
     identifier: Option<String>,
     metrics: Option<Arc<RdKafkaStats>>,
+    metric_guards: Mutex<RdKafkaStatsGuard>,
 
     /// Credential and region for AWS MSK
     auth: Option<IamAuthEnv>,
@@ -83,6 +85,7 @@ impl KafkaContextCommon {
             addr_rewriter,
             identifier,
             metrics,
+            metric_guards: Mutex::new(RdKafkaStatsGuard::default()),
             auth,
         })
     }
@@ -105,7 +108,7 @@ impl KafkaContextCommon {
         if let Some(metrics) = &self.metrics
             && let Some(id) = &self.identifier
         {
-            metrics.report(id.as_str(), &statistics);
+            metrics.report(&mut self.metric_guards.lock(), id.as_str(), &statistics);
         }
     }
 
