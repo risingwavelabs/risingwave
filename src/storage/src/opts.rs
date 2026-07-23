@@ -168,6 +168,7 @@ pub struct StorageOpts {
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
     pub table_change_log_cache_capacity: u64,
+    pub table_change_log_prefetch_limit: u32,
 
     pub iceberg_compaction_enable_validate: bool,
     pub iceberg_compaction_max_record_batch_rows: usize,
@@ -322,6 +323,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_concurrent_uploading_sst_count,
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             table_change_log_cache_capacity: c.storage.table_change_log_cache_capacity,
+            table_change_log_prefetch_limit: c.storage.table_change_log_prefetch_limit,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
 
@@ -374,5 +376,22 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             vector_meta_cache_shard_num: s.vector_meta_cache_shard_num,
             vector_meta_cache_eviction_config: s.vector_meta_cache_eviction_config.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_table_change_log_prefetch_limit_from_config() {
+        let mut config = RwConfig::default();
+        config.storage.table_change_log_prefetch_limit = 17;
+        let system_params: SystemParamsReader = system_params_for_test().into();
+        let storage_memory_config = extract_storage_memory_config(&config);
+
+        let opts = StorageOpts::from((&config, &system_params, &storage_memory_config));
+
+        assert_eq!(opts.table_change_log_prefetch_limit, 17);
     }
 }

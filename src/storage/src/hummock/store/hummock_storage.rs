@@ -874,6 +874,13 @@ impl StateStoreReadLog for HummockStorage {
         key_range: TableKeyRange,
         options: ReadLogOptions,
     ) -> StorageResult<Self::ChangeLogIter> {
+        let options = ReadLogOptions {
+            table_change_log_prefetch_limit: self
+                .context
+                .storage_opts
+                .table_change_log_prefetch_limit,
+            ..options
+        };
         let iter = self
             .hummock_version_reader
             .iter_log(

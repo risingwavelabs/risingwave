@@ -549,8 +549,8 @@ mod tests {
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableStore};
     use crate::memory::MemoryStateStore;
     use crate::store::{
-        CHECK_BYTES_EQUAL, ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions,
-        StateStoreReadLog,
+        CHECK_BYTES_EQUAL, ChangeLogValue, DEFAULT_CHANGE_LOG_PREFETCH_LIMIT, NewLocalOptions,
+        OpConsistencyLevel, ReadLogOptions, StateStoreReadLog,
     };
     use crate::{StateStore, StateStoreIter};
 
@@ -746,7 +746,10 @@ mod tests {
                     .iter_log(
                         epoch_range,
                         (Unbounded, Unbounded),
-                        ReadLogOptions { table_id },
+                        ReadLogOptions {
+                            table_id,
+                            table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
+                        },
                     )
                     .await
                     .unwrap();
