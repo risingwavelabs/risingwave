@@ -203,8 +203,9 @@ where
             Err(e) => {
                 // If the iterator returns error, we should clear the heap, so that this
                 // iterator becomes invalid.
-                node.pop();
-                self.heap.clear();
+                let node = node.pop();
+                self.unused_iters.push_back(node);
+                self.unused_iters.extend(self.heap.drain());
                 return Err(e);
             }
         }
