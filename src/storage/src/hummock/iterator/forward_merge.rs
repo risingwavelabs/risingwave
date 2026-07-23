@@ -240,6 +240,12 @@ mod test {
         assert!(merge.next().await.is_err());
         assert!(!merge.is_valid());
 
+        merge.seek(iterator_test_key_of(0).to_ref()).await.unwrap();
+        assert!(
+            !merge.is_valid(),
+            "error-retired children must not be retried by a later seek"
+        );
+
         let mut stats = StoreLocalStatistic::default();
         merge.collect_local_statistic(&mut stats);
         assert_eq!(
