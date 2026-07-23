@@ -573,15 +573,12 @@ impl SourceManager {
         let core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.get(&source_id) {
             // Clear the cached splits to force re-discovery
-            {
-                let mut splits_guard = handle.splits.lock().await;
-                tracing::info!(
-                    %source_id,
-                    prev_splits = ?splits_guard.splits.as_ref().map(|s| s.len()),
-                    "Clearing cached splits"
-                );
-                splits_guard.splits = None;
-            }
+            let prev_splits = handle.splits.take();
+            tracing::info!(
+                %source_id,
+                prev_splits = ?prev_splits.as_ref().map(|s| s.len()),
+                "Clearing cached splits"
+            );
 
             // Force a tick to re-discover splits
             tracing::info!(
