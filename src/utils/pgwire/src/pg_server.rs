@@ -201,8 +201,8 @@ struct Jwks {
 struct Jwk {
     kid: String,         // Key ID
     alg: Option<String>, // Algorithm (OPTIONAL per RFC 7517 section 4.4)
-    n: String,           // Modulus
-    e: String,           // Exponent
+    n: Option<String>,   // RSA modulus
+    e: Option<String>,   // RSA exponent
 }
 
 /// Algorithms we accept for JWT signature verification.
@@ -277,7 +277,15 @@ fn validate_jwt_with_jwks(
     }
 
     // 3. Decode the JWT and validate the claims.
-    let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
+    let n = jwk
+        .n
+        .as_deref()
+        .ok_or_else(|| format!("JWK for kid '{}' missing RSA modulus 'n'", kid))?;
+    let e = jwk
+        .e
+        .as_deref()
+        .ok_or_else(|| format!("JWK for kid '{}' missing RSA exponent 'e'", kid))?;
+    let decoding_key = DecodingKey::from_rsa_components(n, e)?;
     let mut validation = Validation::new(alg);
     validation.set_issuer(&[issuer]);
     validation.set_audience(&[audience_from_cluster_id(cluster_id)]); // JWT 'aud' claim must match cluster_id
@@ -687,8 +695,8 @@ mod tests {
                 keys: vec![Jwk {
                     kid: kid.to_owned(),
                     alg: alg.map(ToOwned::to_owned),
-                    n,
-                    e,
+                    n: Some(n),
+                    e: Some(e),
                 }],
             }
         }
@@ -866,6 +874,37 @@ mod tests {
         }
 
         #[test]
+        fn test_jwt_with_empty_jwks_reports_no_matching_key() {
+            let (private_key, _) = create_test_rsa_keys();
+            let jwks = Jwks { keys: vec![] };
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "missing-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &HashMap::new(),
+            );
+
+            let error = result.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("No matching key found in JWKS for kid: 'missing-kid'")
+            );
+        }
+
+        #[test]
         fn test_jwt_with_expired_token() {
             let (private_key, public_key) = create_test_rsa_keys();
             let jwks = create_test_jwks(&public_key, "test-kid", Some("RS256"));
@@ -1022,6 +1061,67 @@ mod tests {
             );
 
             assert!(result.unwrap());
+        }
+
+        #[test]
+        fn test_jwt_with_mixed_jwks_ignores_non_matching_ec_key() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let mut jwks = create_test_jwks(&public_key, "rsa-kid", Some("RS256"));
+            jwks.keys.push(Jwk {
+                kid: "ec-kid".to_owned(),
+                alg: Some("ES256".to_owned()),
+                n: None,
+                e: None,
+            });
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "rsa-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &HashMap::new(),
+            );
+
+            assert!(result.unwrap());
+        }
+
+        #[test]
+        fn test_jwks_deserializes_mixed_rsa_and_ec_keys() {
+            let jwks: Jwks = serde_json::from_value(json!({
+                "keys": [
+                    {
+                        "kid": "rsa-kid",
+                        "alg": "RS256",
+                        "kty": "RSA",
+                        "n": "modulus",
+                        "e": "AQAB"
+                    },
+                    {
+                        "kid": "ec-kid",
+                        "alg": "ES256",
+                        "kty": "EC",
+                        "crv": "P-256",
+                        "x": "x-coordinate",
+                        "y": "y-coordinate"
+                    }
+                ]
+            }))
+            .unwrap();
+
+            assert_eq!(jwks.keys.len(), 2);
+            assert_eq!(jwks.keys[0].n.as_deref(), Some("modulus"));
+            assert!(jwks.keys[1].n.is_none());
+            assert!(jwks.keys[1].e.is_none());
         }
 
         #[test]
