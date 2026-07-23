@@ -169,7 +169,7 @@ pub trait ToArrow {
 
     #[inline]
     fn date_to_arrow(&self, array: &DateArray) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::Date32Array::from(array)))
+        Ok(Arc::new(arrow_array::Date32Array::try_from(array)?))
     }
 
     #[inline]
@@ -202,9 +202,9 @@ pub trait ToArrow {
         &self,
         array: &IntervalArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::IntervalMonthDayNanoArray::from(
+        Ok(Arc::new(arrow_array::IntervalMonthDayNanoArray::try_from(
             array,
-        )))
+        )?))
     }
 
     #[inline]
@@ -824,7 +824,7 @@ pub trait FromArrow {
     }
 
     fn from_date32_array(&self, array: &arrow_array::Date32Array) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Date(array.into()))
+        Ok(ArrayImpl::Date(array.try_into()?))
     }
 
     fn from_time32s_array(
@@ -914,7 +914,7 @@ pub trait FromArrow {
         &self,
         array: &arrow_array::IntervalMonthDayNanoArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Interval(array.into()))
+        Ok(ArrayImpl::Interval(array.try_into()?))
     }
 
     fn from_utf8_array(&self, array: &arrow_array::StringArray) -> Result<ArrayImpl, ArrayError> {
@@ -1134,6 +1134,38 @@ macro_rules! converts {
             }
         }
     };
+    // convert values using TryFromIntoArrow
+    ($ArrayType:ty, $ArrowType:ty, @try_map) => {
+        impl TryFrom<&$ArrayType> for $ArrowType {
+            type Error = ArrayError;
+
+            fn try_from(array: &$ArrayType) -> Result<Self, Self::Error> {
+                // Collecting `Result`s loses the iterator's size hint, so build with an
+                // explicit capacity instead.
+                let mut builder = <$ArrowType>::builder(array.len());
+                for o in array.iter() {
+                    builder.append_option(o.map(|v| v.try_into_arrow()).transpose()?);
+                }
+                Ok(builder.finish())
+            }
+        }
+        impl TryFrom<&$ArrowType> for $ArrayType {
+            type Error = ArrayError;
+
+            fn try_from(array: &$ArrowType) -> Result<Self, Self::Error> {
+                use arrow_array::Array as _;
+
+                let mut builder = <$ArrayType as Array>::Builder::new(array.len());
+                for o in array.iter() {
+                    builder.append(
+                        o.map(<<$ArrayType as Array>::RefItem<'_> as TryFromIntoArrow>::try_from_arrow)
+                            .transpose()?,
+                    );
+                }
+                Ok(builder.finish())
+            }
+        }
+    };
 }
 
 /// Used to convert different types.
@@ -1217,8 +1249,8 @@ converts!(BytesArray, arrow_array::LargeBinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
 converts!(Utf8Array, arrow_array::StringViewArray);
-converts!(DateArray, arrow_array::Date32Array, @map);
-converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
+converts!(DateArray, arrow_array::Date32Array, @try_map);
+converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @try_map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
 
 converts_with_type!(I16Array, arrow_array::Int8Array, i16, i8);
@@ -1247,6 +1279,15 @@ trait FromIntoArrow {
     type ArrowType;
     fn from_arrow(value: Self::ArrowType) -> Self;
     fn into_arrow(self) -> Self::ArrowType;
+}
+
+/// Like [`FromIntoArrow`], for values whose Arrow representation does not cover the whole
+/// RisingWave domain, or vice versa.
+trait TryFromIntoArrow: Sized {
+    /// The corresponding element type in the Arrow array.
+    type ArrowType;
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError>;
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError>;
 }
 
 /// Converts a RisingWave temporal scalar to and from Arrow's physical primitive
@@ -1312,16 +1353,18 @@ impl FromIntoArrow for F64 {
     }
 }
 
-impl FromIntoArrow for Date {
+impl TryFromIntoArrow for Date {
     type ArrowType = i32;
 
     #[allow(deprecated)]
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Date(arrow_array::types::Date32Type::to_naive_date(value))
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError> {
+        arrow_array::types::Date32Type::to_naive_date_opt(value)
+            .map(Date)
+            .ok_or_else(|| ArrayError::from_arrow(format!("invalid Arrow date {value}")))
     }
 
-    fn into_arrow(self) -> Self::ArrowType {
-        arrow_array::types::Date32Type::from_naive_date(self.0)
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError> {
+        Ok(arrow_array::types::Date32Type::from_naive_date(self.0))
     }
 }
 
@@ -1367,14 +1410,8 @@ impl TemporalArrowConvert<i64> for Time {
 
     fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> i64 {
         match time_unit {
-            TimeUnit::Microsecond => {
-                self.0.num_seconds_from_midnight() as i64 * 1_000_000
-                    + self.0.nanosecond() as i64 / 1_000
-            }
-            TimeUnit::Nanosecond => {
-                self.0.num_seconds_from_midnight() as i64 * 1_000_000_000
-                    + self.0.nanosecond() as i64
-            }
+            TimeUnit::Microsecond => self.micros_of_day() as i64,
+            TimeUnit::Nanosecond => self.nanos_of_day() as i64,
             unit => unreachable!("{unit:?} is not a Time64 unit"),
         }
     }
@@ -1389,10 +1426,7 @@ impl TemporalArrowConvert<i64> for Timestamp {
                 .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
             TimeUnit::Microsecond => Timestamp::with_micros(value)
                 .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
-            // Every `i64` nanosecond count is representable, so there is nothing to check.
-            TimeUnit::Nanosecond => {
-                Ok(Timestamp(DateTime::from_timestamp_nanos(value).naive_utc()))
-            }
+            TimeUnit::Nanosecond => Ok(Timestamp::with_nanos(value)),
         }
     }
 
@@ -1413,9 +1447,11 @@ impl TemporalArrowConvert<i64> for Timestamptz {
                 .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
             TimeUnit::Millisecond => Timestamptz::from_millis(value)
                 .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
-            TimeUnit::Microsecond => Ok(Timestamptz::from_micros(value)),
-            TimeUnit::Nanosecond => Timestamptz::from_nanos(value)
+            // `Timestamptz::from_micros` does not validate; see #26397.
+            TimeUnit::Microsecond => DateTime::from_timestamp_micros(value)
+                .map(Timestamptz::from)
                 .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Nanosecond => Ok(Timestamptz::from_nanos(value)),
         }
     }
 
@@ -1435,20 +1471,29 @@ fn invalid_arrow_temporal_value<T: std::fmt::Display>(value: T, time_unit: TimeU
     ))
 }
 
-impl FromIntoArrow for Interval {
+impl TryFromIntoArrow for Interval {
     type ArrowType = ArrowIntervalType;
 
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Interval::from_month_day_usec(value.months, value.days, value.nanoseconds / 1000)
+    /// RisingWave's `interval` is microsecond-precision, so nanoseconds are truncated.
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError> {
+        Ok(Interval::from_month_day_usec(
+            value.months,
+            value.days,
+            value.nanoseconds / 1_000,
+        ))
     }
 
-    fn into_arrow(self) -> Self::ArrowType {
-        ArrowIntervalType {
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError> {
+        Ok(ArrowIntervalType {
             months: self.months(),
             days: self.days(),
-            // TODO: this may overflow and we need `try_into`
-            nanoseconds: self.usecs() * 1000,
-        }
+            nanoseconds: self.usecs().checked_mul(1_000).ok_or_else(|| {
+                ArrayError::to_arrow(format!(
+                    "interval with {} microseconds is out of range for Arrow",
+                    self.usecs()
+                ))
+            })?,
+        })
     }
 }
 
@@ -2082,8 +2127,8 @@ mod tests {
             Date::with_days_since_ce(12345).ok(),
             Date::with_days_since_ce(-12345).ok(),
         ]);
-        let arrow = arrow_array::Date32Array::from(&array);
-        assert_eq!(DateArray::from(&arrow), array);
+        let arrow = arrow_array::Date32Array::try_from(&array).unwrap();
+        assert_eq!(DateArray::try_from(&arrow).unwrap(), array);
     }
 
     #[test]
@@ -2317,9 +2362,53 @@ mod tests {
         let invalid_second = arrow_array::TimestampSecondArray::from(vec![Some(i64::MAX)]);
         let invalid_millisecond =
             arrow_array::TimestampMillisecondArray::from(vec![Some(i64::MAX)]);
+        let invalid_microsecond =
+            arrow_array::TimestampMicrosecondArray::from(vec![Some(i64::MAX)]);
+        // Within `checked_mul` range, but past what chrono can represent.
+        let unrepresentable_second =
+            arrow_array::TimestampSecondArray::from(vec![Some(9_000_000_000_000)]);
 
         assert_from_arrow_error(TimestamptzArray::try_from(&invalid_second));
         assert_from_arrow_error(TimestamptzArray::try_from(&invalid_millisecond));
+        assert_from_arrow_error(TimestamptzArray::try_from(&invalid_microsecond));
+        assert_from_arrow_error(TimestamptzArray::try_from(&unrepresentable_second));
+    }
+
+    #[test]
+    fn date_rejects_out_of_range_arrow_value() {
+        let valid = arrow_array::Date32Array::from(vec![Some(0), None]);
+        assert_eq!(
+            DateArray::try_from(&valid).unwrap(),
+            DateArray::from_iter([Date::with_days_since_unix_epoch(0).ok(), None])
+        );
+
+        // chrono's `NaiveDate` tops out well below `i32::MAX` days from the epoch.
+        let out_of_range = arrow_array::Date32Array::from(vec![Some(1_000_000_000)]);
+        assert_from_arrow_error(DateArray::try_from(&out_of_range));
+    }
+
+    #[test]
+    fn interval_rejects_out_of_range_microseconds() {
+        let array = IntervalArray::from_iter([Interval::from_month_day_usec(0, 0, i64::MAX)]);
+        let err = arrow_array::IntervalMonthDayNanoArray::try_from(&array).unwrap_err();
+        assert!(matches!(err, ArrayError::ToArrow(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn interval_truncates_sub_microsecond_nanos() {
+        let arrow = arrow_array::IntervalMonthDayNanoArray::from(vec![
+            Some(ArrowIntervalType::new(0, 0, 1_999)),
+            Some(ArrowIntervalType::new(0, 0, -1)),
+            Some(ArrowIntervalType::new(0, 0, -1_999)),
+        ]);
+        assert_eq!(
+            IntervalArray::try_from(&arrow).unwrap(),
+            IntervalArray::from_iter([
+                Interval::from_month_day_usec(0, 0, 1),
+                Interval::from_month_day_usec(0, 0, 0),
+                Interval::from_month_day_usec(0, 0, -1),
+            ])
+        );
     }
 
     fn assert_from_arrow_error<T>(result: Result<T, ArrayError>) {
@@ -2345,8 +2434,8 @@ mod tests {
                 -1_000_000_000,
             )),
         ]);
-        let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
-        assert_eq!(IntervalArray::from(&arrow), array);
+        let arrow = arrow_array::IntervalMonthDayNanoArray::try_from(&array).unwrap();
+        assert_eq!(IntervalArray::try_from(&arrow).unwrap(), array);
     }
 
     #[test]
