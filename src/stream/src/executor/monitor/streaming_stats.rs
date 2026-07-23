@@ -22,8 +22,8 @@ use prometheus::{
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedHistogramVec, LabelGuardedIntCounter, LabelGuardedIntCounterVec,
-    LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
+    CachedLabelGuardedIntGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
+    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -217,17 +217,17 @@ pub struct StreamingMetrics {
     pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
 
     // PostgreSQL CDC LSN monitoring
-    pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
-    pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+    pub pg_cdc_state_table_lsn: CachedLabelGuardedIntGaugeVec,
+    pub pg_cdc_jni_commit_offset_lsn: CachedLabelGuardedIntGaugeVec,
 
     // MySQL CDC binlog monitoring
-    pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
-    pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
+    pub mysql_cdc_state_binlog_file_seq: CachedLabelGuardedIntGaugeVec,
+    pub mysql_cdc_state_binlog_position: CachedLabelGuardedIntGaugeVec,
 
     // SQL Server CDC LSN monitoring
-    pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
-    pub sqlserver_cdc_state_commit_lsn: LabelGuardedIntGaugeVec,
-    pub sqlserver_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_change_lsn: CachedLabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_commit_lsn: CachedLabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_jni_commit_offset_lsn: CachedLabelGuardedIntGaugeVec,
 
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
@@ -267,7 +267,8 @@ impl StreamingMetrics {
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let source_split_change_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_split_change_event_count",
@@ -275,7 +276,8 @@ impl StreamingMetrics {
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let source_backfill_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_source_backfill_rows_counts",
@@ -283,7 +285,8 @@ impl StreamingMetrics {
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
@@ -291,7 +294,8 @@ impl StreamingMetrics {
             &["sink_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sink_input_bytes = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_bytes",
@@ -299,7 +303,8 @@ impl StreamingMetrics {
             &["sink_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let materialize_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_mview_input_row_count",
@@ -325,7 +330,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let pg_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_pg_cdc_jni_commit_offset_lsn",
@@ -333,7 +339,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let mysql_cdc_state_binlog_file_seq = register_guarded_int_gauge_vec_with_registry!(
             "stream_mysql_cdc_state_binlog_file_seq",
@@ -341,7 +348,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
             "stream_mysql_cdc_state_binlog_position",
@@ -349,7 +357,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sqlserver_cdc_state_change_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_sqlserver_cdc_state_change_lsn",
@@ -357,7 +366,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sqlserver_cdc_state_commit_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_sqlserver_cdc_state_commit_lsn",
@@ -365,7 +375,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sqlserver_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_sqlserver_cdc_jni_commit_offset_lsn",
@@ -373,7 +384,8 @@ impl StreamingMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
@@ -381,7 +393,8 @@ impl StreamingMetrics {
             &["sink_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
         let actor_output_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
                 "stream_actor_output_buffer_blocking_duration_ns",
@@ -410,7 +423,8 @@ impl StreamingMetrics {
             &["fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -418,7 +432,8 @@ impl StreamingMetrics {
             &["up_fragment_id", "down_fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let actor_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_poll_duration",
@@ -507,7 +522,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
@@ -515,7 +531,8 @@ impl StreamingMetrics {
             &["fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let merge_barrier_align_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_merge_barrier_align_duration_ns",
@@ -532,7 +549,8 @@ impl StreamingMetrics {
             &["side", "join_table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let join_lookup_total_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
@@ -540,7 +558,8 @@ impl StreamingMetrics {
             &["side", "join_table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let join_insert_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
@@ -548,7 +567,8 @@ impl StreamingMetrics {
             &["side", "join_table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let join_actor_input_waiting_duration_ns = register_guarded_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
@@ -556,7 +576,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let join_match_duration_ns = register_guarded_int_counter_vec_with_registry!(
             "stream_join_match_duration_ns",
@@ -564,7 +585,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "side"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let barrier_align_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_barrier_align_duration_ns",
@@ -581,7 +603,8 @@ impl StreamingMetrics {
             &["actor_id", "fragment_id", "side"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let join_matched_join_keys_opts = histogram_opts!(
             "stream_join_matched_join_keys",
@@ -603,7 +626,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_total_lookup_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_lookup_total_count",
@@ -611,7 +635,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_distinct_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_distinct_cache_miss_count",
@@ -619,7 +644,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_distinct_total_cache_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_distinct_total_cache_count",
@@ -627,7 +653,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_distinct_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_agg_distinct_cached_entry_count",
@@ -635,7 +662,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_dirty_groups_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_agg_dirty_groups_count",
@@ -643,7 +671,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_dirty_groups_heap_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_agg_dirty_groups_heap_size",
@@ -651,7 +680,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_state_cache_lookup_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_state_cache_lookup_count",
@@ -659,7 +689,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_state_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_state_cache_miss_count",
@@ -667,7 +698,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let group_top_n_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_group_top_n_cache_miss_count",
@@ -675,7 +707,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let group_top_n_total_query_cache_count = register_guarded_int_counter_vec_with_registry!(
             "stream_group_top_n_total_query_cache_count",
@@ -683,7 +716,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let group_top_n_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_group_top_n_cached_entry_count",
@@ -691,7 +725,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let group_top_n_appendonly_cache_miss_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -700,7 +735,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let group_top_n_appendonly_total_query_cache_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -709,7 +745,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let group_top_n_appendonly_cached_entry_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -718,7 +755,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let lookup_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_lookup_cache_miss_count",
@@ -726,7 +764,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let lookup_total_query_cache_count = register_guarded_int_counter_vec_with_registry!(
             "stream_lookup_total_query_cache_count",
@@ -734,7 +773,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let lookup_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_lookup_cached_entry_count",
@@ -742,7 +782,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let temporal_join_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_temporal_join_cache_miss_count",
@@ -750,7 +791,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let temporal_join_total_query_cache_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -759,7 +801,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let temporal_join_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_temporal_join_cached_entry_count",
@@ -767,7 +810,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_agg_cached_entry_count",
@@ -775,7 +819,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_chunk_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_miss_count",
@@ -783,7 +828,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let agg_chunk_total_lookup_count = register_guarded_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_total_count",
@@ -791,7 +837,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let backfill_snapshot_read_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_snapshot_read_row_count",
@@ -799,7 +846,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let backfill_upstream_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_upstream_output_row_count",
@@ -807,7 +855,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let cdc_backfill_snapshot_read_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_cdc_backfill_snapshot_read_row_count",
@@ -815,7 +864,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let cdc_backfill_upstream_output_row_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -824,7 +874,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let snapshot_backfill_consume_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_snapshot_backfill_consume_snapshot_row_count",
@@ -832,7 +883,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "stage"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
@@ -840,7 +892,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_cache_lookup_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_cache_lookup_count",
@@ -848,7 +901,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_cache_miss_count",
@@ -856,7 +910,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_range_cache_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_over_window_range_cache_entry_count",
@@ -864,7 +919,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_range_cache_lookup_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_range_cache_lookup_count",
@@ -872,7 +928,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_range_cache_left_miss_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -881,7 +938,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let over_window_range_cache_right_miss_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -890,7 +948,8 @@ impl StreamingMetrics {
                 &["table_id", "actor_id", "fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let over_window_accessed_entry_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_accessed_entry_count",
@@ -898,7 +957,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_compute_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_compute_count",
@@ -906,7 +966,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let over_window_same_output_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_same_output_count",
@@ -914,7 +975,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
@@ -950,7 +1012,8 @@ impl StreamingMetrics {
             &["actor_id", "target", "fragment_id", "relation"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sync_kv_log_store_read_count = register_guarded_int_counter_vec_with_registry!(
             "sync_kv_log_store_read_count",
@@ -958,7 +1021,8 @@ impl StreamingMetrics {
             &["type", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sync_kv_log_store_read_size = register_guarded_int_counter_vec_with_registry!(
             "sync_kv_log_store_read_size",
@@ -966,7 +1030,8 @@ impl StreamingMetrics {
             &["type", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sync_kv_log_store_write_pause_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
@@ -975,7 +1040,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let sync_kv_log_store_state = register_guarded_int_counter_vec_with_registry!(
             "sync_kv_log_store_state",
@@ -983,7 +1049,8 @@ impl StreamingMetrics {
             &["state", "actor_id", "target", "fragment_id", "relation"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sync_kv_log_store_storage_write_count =
             register_guarded_int_counter_vec_with_registry!(
@@ -992,7 +1059,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let sync_kv_log_store_storage_write_size = register_guarded_int_counter_vec_with_registry!(
             "sync_kv_log_store_storage_write_size",
@@ -1000,7 +1068,8 @@ impl StreamingMetrics {
             &["actor_id", "target", "fragment_id", "relation"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let sync_kv_log_store_buffer_unconsumed_item_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1009,7 +1078,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let sync_kv_log_store_buffer_unconsumed_row_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1018,7 +1088,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let sync_kv_log_store_buffer_unconsumed_epoch_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1027,7 +1098,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let sync_kv_log_store_buffer_unconsumed_min_epoch =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1036,7 +1108,8 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
         let sync_kv_log_store_buffer_memory_bytes =
             register_guarded_int_gauge_vec_with_registry!(
                 "sync_kv_log_store_buffer_memory_bytes",
@@ -1044,7 +1117,7 @@ impl StreamingMetrics {
                 &["actor_id", "target", "fragment_id", "relation"],
                 registry
             )
-            .unwrap();
+            .unwrap().into();
 
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
@@ -1052,7 +1125,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_storage_write_size = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_size",
@@ -1060,7 +1134,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_storage_read_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_read_count",
@@ -1068,7 +1143,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name", "read_type"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_storage_read_size = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_read_size",
@@ -1076,7 +1152,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name", "read_type"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_rewind_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_rewind_count",
@@ -1084,7 +1161,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_rewind_delay_opts = {
             assert_eq!(2, REWIND_BACKOFF_FACTOR);
@@ -1109,7 +1187,8 @@ impl StreamingMetrics {
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_buffer_unconsumed_item_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1118,7 +1197,8 @@ impl StreamingMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let kv_log_store_buffer_unconsumed_row_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1127,7 +1207,8 @@ impl StreamingMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let kv_log_store_buffer_unconsumed_epoch_count =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1136,7 +1217,8 @@ impl StreamingMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let kv_log_store_buffer_unconsumed_min_epoch =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1145,7 +1227,8 @@ impl StreamingMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            .into();
 
         let crossdb_last_consumed_min_epoch = register_guarded_int_gauge_vec_with_registry!(
             "crossdb_last_consumed_min_epoch",
@@ -1153,7 +1236,8 @@ impl StreamingMetrics {
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         let kv_log_store_buffer_memory_bytes =
             register_guarded_int_gauge_vec_with_registry!(
@@ -1162,7 +1246,7 @@ impl StreamingMetrics {
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
-            .unwrap();
+            .unwrap().into();
 
         let lru_runtime_loop_count = register_int_counter_with_registry!(
             "lru_runtime_loop_count",

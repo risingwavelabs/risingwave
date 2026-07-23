@@ -470,8 +470,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         if let Some(metrics) = metrics.clone() {
             metrics
                 .iceberg_read_bytes
-                .with_guarded_label_values(&[&table_name])
-                .inc_by(read_bytes as _);
+                .with_metric(&[&table_name], |metric| metric.inc_by(read_bytes as _));
         }
     });
 
@@ -547,22 +546,21 @@ pub async fn scan_task_to_chunk_with_deletes(
         // File read duration.
         metrics
             .iceberg_source_file_read_duration_seconds
-            .with_guarded_label_values(&label_values)
-            .observe(file_start.elapsed().as_secs_f64());
+            .with_metric(&label_values, |metric| {
+                metric.observe(file_start.elapsed().as_secs_f64())
+            });
 
         // Rows read.
         if total_rows_read > 0 {
             metrics
                 .iceberg_source_rows_read_total
-                .with_guarded_label_values(&label_values)
-                .inc_by(total_rows_read);
+                .with_metric(&label_values, |metric| metric.inc_by(total_rows_read));
         }
 
         // File read count.
         metrics
             .iceberg_source_files_read_total
-            .with_guarded_label_values(&[table_name.as_str(), "data"])
-            .inc();
+            .with_metric(&[table_name.as_str(), "data"], |metric| metric.inc());
 
         // APPROXIMATE: Estimate delete rows applied. The delta between expected_record_count
         // and actual rows read may also include predicate pushdown / row-group pruning effects,
@@ -576,8 +574,9 @@ pub async fn scan_task_to_chunk_with_deletes(
             if deleted > 0 {
                 metrics
                     .iceberg_source_delete_rows_applied_total
-                    .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
-                    .inc_by(deleted);
+                    .with_metric(&[table_name.as_str(), "sdk_applied_approx"], |metric| {
+                        metric.inc_by(deleted)
+                    });
             }
         }
     }

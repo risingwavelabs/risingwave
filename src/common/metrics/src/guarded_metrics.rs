@@ -161,6 +161,69 @@ pub type LabelGuardedGauge = LabelGuardedMetric<Gauge>;
 pub type LabelGuardedLocalHistogram = LabelGuardedMetric<LocalHistogram>;
 pub type LabelGuardedLocalIntCounter = LabelGuardedMetric<LocalIntCounter>;
 
+pub type CachedLabelGuardedHistogramVec = CachedLabelGuardedMetricVec<VecBuilderOfHistogram>;
+pub type CachedLabelGuardedIntCounterVec =
+    CachedLabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>>;
+pub type CachedLabelGuardedIntGaugeVec = CachedLabelGuardedMetricVec<VecBuilderOfGauge<AtomicI64>>;
+pub type CachedLabelGuardedUintGaugeVec = CachedLabelGuardedMetricVec<VecBuilderOfGauge<AtomicU64>>;
+pub type CachedLabelGuardedGaugeVec = CachedLabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>>;
+
+#[derive(Clone)]
+pub struct CachedLabelGuardedMetricVec<T: MetricVecBuilder> {
+    metric_vec: LabelGuardedMetricVec<T>,
+    metrics: Arc<Mutex<HashMap<Box<[String]>, LabelGuardedMetric<T::M>>>>,
+}
+
+impl<T: MetricVecBuilder> CachedLabelGuardedMetricVec<T> {
+    pub fn new(metric_vec: LabelGuardedMetricVec<T>) -> Self {
+        Self {
+            metric_vec,
+            metrics: Default::default(),
+        }
+    }
+
+    pub fn with_metric<V, R>(
+        &self,
+        labels: &[V],
+        update: impl FnOnce(&LabelGuardedMetric<T::M>) -> R,
+    ) -> R
+    where
+        V: AsRef<str> + std::fmt::Debug,
+    {
+        let key = labels
+            .iter()
+            .map(|label| label.as_ref().to_owned())
+            .collect::<Box<[_]>>();
+        let mut metrics = self.metrics.lock();
+        let metric = metrics
+            .entry(key)
+            .or_insert_with(|| self.metric_vec.with_guarded_label_values(labels));
+        update(metric)
+    }
+
+    pub fn with_guarded_label_values<V: AsRef<str> + std::fmt::Debug>(
+        &self,
+        labels: &[V],
+    ) -> LabelGuardedMetric<T::M> {
+        self.metric_vec.with_guarded_label_values(labels)
+    }
+}
+
+impl<T: MetricVecBuilder> From<LabelGuardedMetricVec<T>> for CachedLabelGuardedMetricVec<T> {
+    fn from(metric_vec: LabelGuardedMetricVec<T>) -> Self {
+        Self::new(metric_vec)
+    }
+}
+
+impl<T: MetricVecBuilder> Debug for CachedLabelGuardedMetricVec<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(format!("CachedLabelGuardedMetricVec<{}>", type_name::<T>()).as_str())
+            .field("metric_vec", &self.metric_vec)
+            .field("metrics", &self.metrics)
+            .finish()
+    }
+}
+
 fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
     (0..N)

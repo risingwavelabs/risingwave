@@ -41,7 +41,7 @@ use tower_service::Service;
 use tracing::{trace, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{LabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
+use crate::{CachedLabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
 
 #[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {
@@ -340,7 +340,7 @@ pub struct ConnectionMetrics {
     write_rate: IntCounterVec,
     writer_count: IntGaugeVec,
 
-    io_err_rate: LabelGuardedIntCounterVec,
+    io_err_rate: CachedLabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
@@ -411,7 +411,8 @@ impl ConnectionMetrics {
             &["connection_type", "uri", "op_type", "error_kind"],
             registry,
         )
-        .unwrap();
+        .unwrap()
+        .into();
 
         Self {
             connection_count,
@@ -797,17 +798,15 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_read_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
-        GLOBAL_CONNECTION_METRICS
-            .io_err_rate
-            .with_guarded_label_values(&[
+        GLOBAL_CONNECTION_METRICS.io_err_rate.with_metric(
+            &[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "read",
                 err.kind().to_string().as_str(),
-            ])
-            .inc();
+            ],
+            |metric| metric.inc(),
+        );
     }
 
     fn on_write(&mut self, size: usize) {
@@ -828,16 +827,14 @@ impl MonitorAsyncReadWrite for MonitorAsyncReadWriteImpl {
     }
 
     fn on_write_err(&mut self, err: &Error) {
-        // No need to store the value returned from `with_guarded_label_values`
-        // because it is reporting a single error.
-        GLOBAL_CONNECTION_METRICS
-            .io_err_rate
-            .with_guarded_label_values(&[
+        GLOBAL_CONNECTION_METRICS.io_err_rate.with_metric(
+            &[
                 self.connection_type.as_str(),
                 self.endpoint.as_str(),
                 "write",
                 err.kind().to_string().as_str(),
-            ])
-            .inc();
+            ],
+            |metric| metric.inc(),
+        );
     }
 }

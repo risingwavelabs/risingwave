@@ -293,13 +293,15 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                     iceberg_metrics
                         .iceberg_source_scan_errors_total
-                        .with_guarded_label_values(&[
-                            metrics_labels[0],
-                            metrics_labels[1],
-                            metrics_labels[2],
-                            "fetch_error",
-                        ])
-                        .inc();
+                        .with_metric(
+                            &[
+                                metrics_labels[0],
+                                metrics_labels[1],
+                                metrics_labels[2],
+                                "fetch_error",
+                            ],
+                            |metric| metric.inc(),
+                        );
 
                     let in_flight_count = state.in_flight_files.len();
                     state.handle_error_recovery();
@@ -364,8 +366,9 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                             iceberg_metrics
                                 .iceberg_source_inflight_file_count
-                                .with_guarded_label_values(&metrics_labels)
-                                .set(state.splits_on_fetch as i64);
+                                .with_metric(&metrics_labels, |metric| {
+                                    metric.set(state.splits_on_fetch as i64)
+                                });
                         }
                     }
 
@@ -384,8 +387,9 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                     iceberg_metrics
                         .iceberg_source_inflight_file_count
-                        .with_guarded_label_values(&metrics_labels)
-                        .set(state.splits_on_fetch as i64);
+                        .with_metric(&metrics_labels, |metric| {
+                            metric.set(state.splits_on_fetch as i64)
+                        });
 
                     for chunk in &chunks {
                         let pruned = prune_additional_cols(

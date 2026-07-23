@@ -1470,8 +1470,9 @@ impl DdlService for DdlServiceImpl {
                 let latency_timer = self
                     .meta_metrics
                     .auto_schema_change_latency
-                    .with_guarded_label_values(&[&table.id.to_string(), &table.name])
-                    .start_timer();
+                    .with_metric(&[&table.id.to_string(), &table.name], |metric| {
+                        metric.start_timer()
+                    });
                 // send a request to the frontend to get the ReplaceJobPlan
                 // will retry with exponential backoff if the request fails
                 let resp = client
@@ -1511,11 +1512,10 @@ impl DdlService for DdlServiceImpl {
 
                                     self.meta_metrics
                                         .auto_schema_change_success_cnt
-                                        .with_guarded_label_values(&[
-                                            &table.id.to_string(),
-                                            &table.name,
-                                        ])
-                                        .inc();
+                                        .with_metric(
+                                            &[&table.id.to_string(), &table.name],
+                                            |metric| metric.inc(),
+                                        );
                                     latency_timer.observe_duration();
                                 }
                                 Err(e) => {
@@ -1928,8 +1928,7 @@ fn add_auto_schema_change_fail_event_log(
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
-        .with_guarded_label_values(&[&table_id.to_string(), &table_name])
-        .inc();
+        .with_metric(&[&table_id.to_string(), &table_name], |metric| metric.inc());
     let event = event_log::EventAutoSchemaChangeFail {
         table_id,
         table_name,

@@ -788,8 +788,7 @@ impl IcebergSinkCommitter {
         let metrics_labels = [&self.param.sink_name, &catalog_name, &table_name];
         GLOBAL_SINK_METRICS
             .iceberg_snapshot_num
-            .with_guarded_label_values(&metrics_labels)
-            .set(snapshot_num as i64);
+            .with_metric(&metrics_labels, |metric| metric.set(snapshot_num as i64));
 
         tracing::debug!(
             iceberg_component = "sink_committer",

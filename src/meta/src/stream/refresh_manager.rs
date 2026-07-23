@@ -198,8 +198,7 @@ impl GlobalRefreshManager {
         if job.current_status != RefreshState::Idle {
             GLOBAL_META_METRICS
                 .refresh_cron_job_miss_cnt
-                .with_guarded_label_values(&[&job.table_id.to_string()])
-                .inc();
+                .with_metric(&[&job.table_id.to_string()], |metric| metric.inc());
             tracing::warn!(table_id = %job.table_id, "skip scheduled refresh: current status is not idle: {:?}", job.current_status);
             return Ok(());
         }
@@ -260,8 +259,7 @@ impl GlobalRefreshManager {
         let table_id_str = job.table_id.to_string();
         GLOBAL_META_METRICS
             .refresh_cron_job_trigger_cnt
-            .with_guarded_label_values(&[&table_id_str])
-            .inc();
+            .with_metric(&[&table_id_str], |metric| metric.inc());
         tracing::info!(table_id = %job.table_id, "trigger scheduled refresh at interval {:?}", interval);
 
         self.ensure_refreshable(job.table_id, associated_source_id)
@@ -428,12 +426,12 @@ impl GlobalRefreshManager {
             let status = status.to_owned();
             GLOBAL_META_METRICS
                 .refresh_job_duration
-                .with_guarded_label_values(&[&table_id.to_string(), &status])
-                .set(entry.start_time.elapsed().as_secs());
+                .with_metric(&[&table_id.to_string(), &status], |metric| {
+                    metric.set(entry.start_time.elapsed().as_secs())
+                });
             GLOBAL_META_METRICS
                 .refresh_job_finish_cnt
-                .with_guarded_label_values(&[&table_id.to_string(), &status])
-                .inc();
+                .with_metric(&[&table_id.to_string(), &status], |metric| metric.inc());
         }
         guard.table_id_by_database_id.values_mut().for_each(|set| {
             set.remove(&table_id);

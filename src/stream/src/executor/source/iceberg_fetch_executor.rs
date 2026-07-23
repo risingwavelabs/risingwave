@@ -356,8 +356,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         .await?;
         iceberg_metrics
             .iceberg_source_inflight_file_count
-            .with_guarded_label_values(&metrics_labels)
-            .set(splits_on_fetch as i64);
+            .with_metric(&metrics_labels, |metric| metric.set(splits_on_fetch as i64));
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -365,18 +364,19 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
                     iceberg_metrics
                         .iceberg_source_scan_errors_total
-                        .with_guarded_label_values(&[
-                            metrics_labels[0],
-                            metrics_labels[1],
-                            metrics_labels[2],
-                            "fetch_error",
-                        ])
-                        .inc();
+                        .with_metric(
+                            &[
+                                metrics_labels[0],
+                                metrics_labels[1],
+                                metrics_labels[2],
+                                "fetch_error",
+                            ],
+                            |metric| metric.inc(),
+                        );
                     splits_on_fetch = 0;
                     iceberg_metrics
                         .iceberg_source_inflight_file_count
-                        .with_guarded_label_values(&metrics_labels)
-                        .set(0);
+                        .with_metric(&metrics_labels, |metric| metric.set(0));
                 }
                 Ok(msg) => {
                     match msg {
@@ -447,8 +447,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         .await?;
                                         iceberg_metrics
                                             .iceberg_source_inflight_file_count
-                                            .with_guarded_label_values(&metrics_labels)
-                                            .set(splits_on_fetch as i64);
+                                            .with_metric(&metrics_labels, |metric| {
+                                                metric.set(splits_on_fetch as i64)
+                                            });
                                     }
                                 }
                                 // Receiving file assignments from upstream list executor,
@@ -481,8 +482,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                 state_store_handler.delete(&data_file_path).await?;
                                 iceberg_metrics
                                     .iceberg_source_inflight_file_count
-                                    .with_guarded_label_values(&metrics_labels)
-                                    .set(splits_on_fetch as i64);
+                                    .with_metric(&metrics_labels, |metric| {
+                                        metric.set(splits_on_fetch as i64)
+                                    });
                             }
 
                             for chunk in &chunks {

@@ -461,35 +461,34 @@ impl<S: StateStore> SourceExecutor<S> {
                         if let Some(lsn_value) = pg_split.pg_lsn() {
                             self.metrics
                                 .pg_cdc_state_table_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_value as i64);
+                                .with_metric(&[&source_id], |metric| metric.set(lsn_value as i64));
                         }
                     }
                     SplitImpl::MysqlCdc(mysql_split) => {
                         if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
                             self.metrics
                                 .mysql_cdc_state_binlog_file_seq
-                                .with_guarded_label_values(&[&source_id])
-                                .set(file_seq as i64);
+                                .with_metric(&[&source_id], |metric| metric.set(file_seq as i64));
 
                             self.metrics
                                 .mysql_cdc_state_binlog_position
-                                .with_guarded_label_values(&[&source_id])
-                                .set(position as i64);
+                                .with_metric(&[&source_id], |metric| metric.set(position as i64));
                         }
                     }
                     SplitImpl::SqlServerCdc(sqlserver_split) => {
                         if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
                             self.metrics
                                 .sqlserver_cdc_state_change_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_u128_to_i64(lsn));
+                                .with_metric(&[&source_id], |metric| {
+                                    metric.set(lsn_u128_to_i64(lsn))
+                                });
                         }
                         if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
                             self.metrics
                                 .sqlserver_cdc_state_commit_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_u128_to_i64(lsn));
+                                .with_metric(&[&source_id], |metric| {
+                                    metric.set(lsn_u128_to_i64(lsn))
+                                });
                         }
                     }
                     _ => {}
@@ -1236,16 +1235,18 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                                     {
                                         self.metrics
                                             .pg_cdc_jni_commit_offset_lsn
-                                            .with_guarded_label_values(&[&source_id.to_string()])
-                                            .set(lsn_value as i64);
+                                            .with_metric(&[&source_id.to_string()], |metric| {
+                                                metric.set(lsn_value as i64)
+                                            });
                                     }
                                     if let Some(lsn_value) =
                                         extract_sql_server_commit_lsn_from_offset_str(offset)
                                     {
                                         self.metrics
                                             .sqlserver_cdc_jni_commit_offset_lsn
-                                            .with_guarded_label_values(&[&source_id.to_string()])
-                                            .set(lsn_u128_to_i64(lsn_value));
+                                            .with_metric(&[&source_id.to_string()], |metric| {
+                                                metric.set(lsn_u128_to_i64(lsn_value))
+                                            });
                                     }
                                 },
                             )
