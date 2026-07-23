@@ -243,6 +243,16 @@ mod tests {
             .await?
             .unwrap();
 
+        let pb_view = PbView {
+            schema_id,
+            database_id: TEST_DATABASE_ID,
+            name: "schema_view".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sql: "SELECT schema1.t.id FROM schema1.t".to_owned(),
+            ..Default::default()
+        };
+        mgr.create_view(pb_view, HashSet::new()).await?;
+
         mgr.alter_name(ObjectType::Schema, schema_id, "schema2")
             .await?;
         let schema = Schema::find_by_id(schema_id)
@@ -250,6 +260,14 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(schema.name, "schema2");
+        let view = View::find()
+            .filter(view::Column::Name.eq("schema_view"))
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(view.definition, "SELECT schema2.t.id FROM schema2.t");
+        mgr.drop_object(ObjectType::View, view.view_id, DropMode::Restrict)
+            .await?;
         mgr.drop_object(ObjectType::Schema, schema_id, DropMode::Restrict)
             .await?;
 
