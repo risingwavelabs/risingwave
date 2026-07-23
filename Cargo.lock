@@ -12909,6 +12909,7 @@ dependencies = [
  "madsim",
  "madsim-rdkafka",
  "madsim-tokio",
+ "madsim-tonic",
  "maplit",
  "paste",
  "pin-project",

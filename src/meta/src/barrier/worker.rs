@@ -65,6 +65,7 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
     rendered_layout_matches_current,
@@ -308,6 +309,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
@@ -324,6 +326,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             scale_controller,
             env.clone(),
@@ -412,9 +415,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            // Keep the bootstrap recovery future boxed so the outer barrier worker future
+            // stays below clippy's large-futures threshold.
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap)
+                    .instrument(span),
+            )
+            .await;
         }
 
         Box::pin(self.run_inner(shutdown_rx)).await
@@ -673,9 +680,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     }
                                     Ok(None) => {
                                         info!(%database_id, "database removed after reloading empty runtime info");
-                                        // mark ready to unblock subsequent request
-                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
+                                        self.context
+                                            .refresh_table_refill_runtime_state_after_recovery()
+                                            .await?;
+                                        // Mark ready only after the refill runtime state is refreshed.
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     }
                                     Err(e) => {
                                         entering_initializing.fail_reload_runtime_info(e);
@@ -683,8 +693,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
-                                self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
+                                let database_id = entering_running.database_id();
                                 entering_running.enter();
+                                self.context
+                                    .refresh_table_refill_runtime_state_after_recovery()
+                                    .await?;
+                                self.context
+                                    .mark_ready(MarkReadyOptions::Database(database_id));
                             }
                             CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
                                 self.handle_batch_refresh_trigger(database_id, job_id).await?;
@@ -1321,6 +1336,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     checkpoint_frequency,
                     database_infos,
                 );
+
+                self.context
+                    .refresh_table_refill_runtime_state_after_recovery()
+                    .await?;
 
                 Ok((
                     active_streaming_nodes,
