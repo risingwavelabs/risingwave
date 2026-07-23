@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
+
 use risingwave_common::config::streaming::OverWindowCachePolicy;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
@@ -26,6 +29,14 @@ use crate::prelude::*;
 async fn create_executor<S: StateStore>(
     calls: Vec<WindowFuncCall>,
     store: S,
+) -> (MessageSender, BoxedMessageStream) {
+    create_executor_with_watermark(calls, store, Arc::new(AtomicU64::new(0))).await
+}
+
+async fn create_executor_with_watermark<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+    watermark_epoch: Arc<AtomicU64>,
 ) -> (MessageSender, BoxedMessageStream) {
     let input_schema = Schema::new(vec![
         Field::unnamed(DataType::Int64),   // order key
@@ -91,7 +102,7 @@ async fn create_executor<S: StateStore>(
         order_key_indices,
         order_key_order_types,
         state_table,
-        watermark_epoch: Arc::new(AtomicU64::new(0)),
+        watermark_epoch,
         metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
         cache_policy: OverWindowCachePolicy::Recent,
@@ -387,6 +398,95 @@ async fn test_over_window_lag_lead_with_updates() {
         snapshot_options(),
     )
     .await;
+}
+
+/// Test that force-evicting the partition cache between chunks (in the middle of an epoch)
+/// doesn't affect the results. The unbounded frame start forces `CachePolicy::Full`, and the
+/// evicted partition must be reloaded from the state table on the next access.
+#[tokio::test]
+async fn test_over_window_evict_between_chunks() {
+    let store = MemoryStateStore::new();
+    let watermark = Arc::new(AtomicU64::new(0));
+    let calls = vec![
+        // sum(x) over (partition by .. order by .. rows unbounded preceding)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
+            return_type: DataType::Int64,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow),
+        },
+    ];
+    let (mut tx, mut stream) =
+        create_executor_with_watermark(calls, store, watermark.clone()).await;
+
+    tx.push_barrier(test_epoch(1), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p1 100 10
+        + 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  I
+            + 1 p1 100 10 10
+            + 2 p1 101 16 26",
+        )
+    );
+
+    tx.push_barrier(test_epoch(2), false);
+    stream.expect_barrier().await;
+
+    // Demand eviction of all cache entries. `p1` is not accessed in the current epoch, so
+    // it will be evicted at the next chunk boundary.
+    watermark.store(u64::MAX, Ordering::Relaxed);
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p2 200 5",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 1 p2 200 5 5",
+        )
+    );
+
+    // Still in the same epoch, `p1` must be reloaded from the state table and produce
+    // correct running sums.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 3 p1 102 4",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 3 p1 102 4 30",
+        )
+    );
+
+    // Append to `p1` again in the same epoch. The partition, now containing a row not
+    // yet committed, is evicted again at the last chunk boundary, and the reload must
+    // see the uncommitted row through the state table.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 4 p1 103 2",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i I
+            + 4 p1 103 2 32",
+        )
+    );
+
+    tx.push_barrier(test_epoch(3), false);
+    stream.expect_barrier().await;
 }
 
 #[tokio::test]
