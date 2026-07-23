@@ -299,6 +299,10 @@ for_all_wrapped_id_fields! (
         DropMaterializedViewRequest {
             table_id: TableId,
         }
+        DropOwnedRequest {
+            owner_ids: UserId,
+            database_id: DatabaseId,
+        }
         DropSchemaRequest {
             schema_id: SchemaId,
         }
@@ -329,6 +333,11 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        ReassignOwnedRequest {
+            old_owner_ids: UserId,
+            new_owner_id: UserId,
+            database_id: DatabaseId,
         }
         ReplaceJobPlan.ReplaceSink {
             old_sink_id: SinkId,
