@@ -549,8 +549,8 @@ mod tests {
     use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator, MemTableStore};
     use crate::memory::MemoryStateStore;
     use crate::store::{
-        CHECK_BYTES_EQUAL, ChangeLogValue, NewLocalOptions, OpConsistencyLevel, ReadLogOptions,
-        StateStoreReadLog,
+        CHANGE_LOG_PREFETCH_LIMIT, CHECK_BYTES_EQUAL, ChangeLogValue, NewLocalOptions,
+        OpConsistencyLevel, ReadLogOptions, StateStoreReadLog,
     };
     use crate::{StateStore, StateStoreIter};
 
@@ -748,7 +748,7 @@ mod tests {
                         (Unbounded, Unbounded),
                         ReadLogOptions {
                             table_id,
-                            table_change_log_prefetch_limit: None,
+                            table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
                         },
                     )
                     .await

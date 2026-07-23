@@ -1201,32 +1201,25 @@ impl HummockVersionReader {
     ) -> HummockResult<ChangeLogIterator> {
         // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
         let change_log: Vec<_> = {
-            let table_change_logs =
-                if let Some(prefetch_limit) = options.table_change_log_prefetch_limit {
-                    let prefetch_table_change_logs = table_change_log_manager
-                        .fetch_table_change_logs(
-                            options.table_id,
-                            (epoch_range.0, u64::MAX),
-                            false,
-                            Some(prefetch_limit),
-                        )
-                        .await?;
-                    if table_change_logs_cover_epoch_range(
-                        &prefetch_table_change_logs,
-                        options.table_id,
-                        epoch_range,
-                    ) {
-                        prefetch_table_change_logs
-                    } else {
-                        table_change_log_manager
-                            .fetch_table_change_logs(options.table_id, epoch_range, false, None)
-                            .await?
-                    }
-                } else {
-                    table_change_log_manager
-                        .fetch_table_change_logs(options.table_id, epoch_range, false, None)
-                        .await?
-                };
+            let prefetch_table_change_logs = table_change_log_manager
+                .fetch_table_change_logs(
+                    options.table_id,
+                    (epoch_range.0, u64::MAX),
+                    false,
+                    Some(options.table_change_log_prefetch_limit),
+                )
+                .await?;
+            let table_change_logs = if table_change_logs_cover_epoch_range(
+                &prefetch_table_change_logs,
+                options.table_id,
+                epoch_range,
+            ) {
+                prefetch_table_change_logs
+            } else {
+                table_change_log_manager
+                    .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                    .await?
+            };
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {

@@ -1541,7 +1541,7 @@ async fn test_iter_log() {
                             key_range.clone(),
                             ReadLogOptions {
                                 table_id,
-                                table_change_log_prefetch_limit: None,
+                                table_change_log_prefetch_limit: CHANGE_LOG_PREFETCH_LIMIT,
                             },
                         )
                         .await
