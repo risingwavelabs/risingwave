@@ -69,40 +69,44 @@ use crate::mem_table::ImmutableMemtable;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::ReadOptions;
 
-struct GetSstableIteratorStatsGuard<'a> {
-    iter: Option<SstableIterator>,
-    local_stats: &'a mut StoreLocalStatistic,
+pub(in crate::hummock) struct IteratorStatsGuard<'a, TI: HummockIterator> {
+    iter: Option<TI>,
+    parent_stats: &'a mut StoreLocalStatistic,
 }
 
-impl<'a> GetSstableIteratorStatsGuard<'a> {
-    fn new(iter: SstableIterator, local_stats: &'a mut StoreLocalStatistic) -> Self {
+impl<'a, TI: HummockIterator> IteratorStatsGuard<'a, TI> {
+    pub(in crate::hummock) fn new(iter: TI, parent_stats: &'a mut StoreLocalStatistic) -> Self {
         Self {
             iter: Some(iter),
-            local_stats,
+            parent_stats,
         }
     }
 
-    fn iter(&self) -> &SstableIterator {
+    pub(in crate::hummock) fn iter(&self) -> &TI {
         self.iter.as_ref().expect("iterator must be present")
     }
 
-    fn iter_mut(&mut self) -> &mut SstableIterator {
+    pub(in crate::hummock) fn iter_mut(&mut self) -> &mut TI {
         self.iter.as_mut().expect("iterator must be present")
     }
 
     fn collect(&mut self) {
         if let Some(iter) = &self.iter {
-            iter.collect_local_statistic(self.local_stats);
+            iter.collect_local_statistic(self.parent_stats);
         }
     }
 
-    fn into_inner(mut self) -> SstableIterator {
+    pub(in crate::hummock) fn handoff(mut self) -> TI {
+        self.iter.take().expect("iterator must be present")
+    }
+
+    pub(in crate::hummock) fn collect_and_take(mut self) -> TI {
         self.collect();
         self.iter.take().expect("iterator must be present")
     }
 }
 
-impl Drop for GetSstableIteratorStatsGuard<'_> {
+impl<TI: HummockIterator> Drop for IteratorStatsGuard<'_, TI> {
     fn drop(&mut self) {
         self.collect();
     }
@@ -134,7 +138,7 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    let mut iter = GetSstableIteratorStatsGuard::new(
+    let mut iter = IteratorStatsGuard::new(
         SstableIterator::create(
             sstable,
             sstable_store_ref.clone(),
@@ -152,7 +156,7 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.iter().key().user_key == full_key.user_key {
-        Some(iter.into_inner())
+        Some(iter.collect_and_take())
     } else {
         None
     };
