@@ -223,6 +223,9 @@ const ALLOWED_JWT_ALGORITHMS: &[Algorithm] = &[
     Algorithm::PS512,
 ];
 const RSA_JWK_KEY_TYPE: &str = "RSA";
+/// Optional expected JWT `aud`; matched case-insensitively because SQL folds unquoted
+/// identifiers.
+const OAUTH_ALLOWED_AUDIENCE_KEY: &str = "allowedAudience";
 
 async fn validate_jwt(
     jwt: &str,
@@ -237,6 +240,24 @@ async fn validate_jwt(
 
 fn audience_from_cluster_id(cluster_id: &str) -> String {
     format!("urn:risingwave:cluster:{}", cluster_id)
+}
+
+fn oauth_allowed_audience(
+    metadata: &HashMap<String, String>,
+    cluster_id: &str,
+) -> Result<String, BoxedError> {
+    let Some((_, configured_audience)) = metadata
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(OAUTH_ALLOWED_AUDIENCE_KEY))
+    else {
+        return Ok(audience_from_cluster_id(cluster_id));
+    };
+
+    let allowed_audience = configured_audience.trim();
+    if allowed_audience.is_empty() {
+        return Err(format!("OAuth option `{OAUTH_ALLOWED_AUDIENCE_KEY}` cannot be empty").into());
+    }
+    Ok(allowed_audience.to_owned())
 }
 
 fn validate_jwt_with_jwks(
@@ -291,14 +312,19 @@ fn validate_jwt_with_jwks(
     let decoding_key = DecodingKey::from_rsa_components(n, e)?;
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
-    validation.set_audience(&[audience_from_cluster_id(cluster_id)]); // JWT 'aud' claim must match cluster_id
+    let allowed_audience = oauth_allowed_audience(metadata, cluster_id)?;
+    validation.set_audience(&[allowed_audience]);
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
     // 4. Check if the metadata in the token matches.
-    if !metadata.iter().all(
-        |(k, v)| matches!(token_data.claims.get(k), Some(serde_json::Value::String(s)) if s == v),
-    ) {
+    if !metadata
+        .iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case(OAUTH_ALLOWED_AUDIENCE_KEY))
+        .all(
+            |(key, value)| matches!(token_data.claims.get(key), Some(serde_json::Value::String(claim)) if claim == value),
+        )
+    {
         return Err("metadata in jwt does not match with metadata declared with user".into());
     }
     Ok(true)
@@ -679,7 +705,9 @@ mod tests {
         use rsa::{RsaPrivateKey, RsaPublicKey};
         use serde_json::json;
 
-        use crate::pg_server::{Jwk, Jwks, validate_jwt_with_jwks};
+        use crate::pg_server::{
+            Jwk, Jwks, OAUTH_ALLOWED_AUDIENCE_KEY, oauth_allowed_audience, validate_jwt_with_jwks,
+        };
 
         fn create_test_rsa_keys() -> (RsaPrivateKey, RsaPublicKey) {
             let mut rng = rand::thread_rng();
@@ -784,6 +812,48 @@ mod tests {
 
             let error = result.unwrap_err();
             assert!(error.to_string().contains("InvalidAudience"));
+        }
+
+        #[test]
+        fn test_jwt_with_configured_audience() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", Some("RS256"));
+
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                OAUTH_ALLOWED_AUDIENCE_KEY.to_ascii_lowercase(),
+                "urn:sn:cloud:o-for6u".to_owned(),
+            );
+
+            let mut additional_claims = HashMap::new();
+            additional_claims.insert("aud".to_owned(), json!(["urn:sn:cloud:o-for6u"]));
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                None,
+                get_future_timestamp(),
+                additional_claims,
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &metadata,
+            );
+
+            assert!(result.unwrap());
+        }
+
+        #[test]
+        fn test_empty_configured_audience() {
+            let metadata =
+                HashMap::from([(OAUTH_ALLOWED_AUDIENCE_KEY.to_owned(), "  ".to_owned())]);
+            let error = oauth_allowed_audience(&metadata, "test-cluster-id").unwrap_err();
+            assert!(error.to_string().contains("cannot be empty"));
         }
 
         #[test]
