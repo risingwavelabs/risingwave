@@ -615,7 +615,7 @@ impl HashKeySer<'_> for Timestamptz {
 
 impl HashKeyDe for Timestamptz {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
-        Timestamptz::from_micros(buf.get_i64_ne())
+        Timestamptz::from_micros_uncheck(buf.get_i64_ne())
     }
 }
 

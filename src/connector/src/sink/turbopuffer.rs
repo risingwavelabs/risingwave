@@ -1408,9 +1408,9 @@ mod tests {
                 1_781_582_706,
                 123_456_789,
             ))),
-            Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(
-                1_781_598_707_000_000,
-            ))),
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_micros(1_781_598_707_000_000).unwrap(),
+            )),
             Some(ScalarImpl::Int64(12345)),
             Some(ScalarImpl::Int64(67890)),
             Some(ScalarImpl::List(ListValue::from_iter([
