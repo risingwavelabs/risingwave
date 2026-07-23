@@ -37,6 +37,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::sstable::SstableMetaHandle;
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
@@ -444,14 +445,11 @@ impl CacheRefillTask {
         }
 
         for psst in parent_ssts {
-            for pblk in 0..psst.block_count() {
-                let pleft = &psst.meta.block_metas[pblk].smallest_key;
-                let pright = if pblk + 1 == psst.block_count() {
-                    // `largest_key` can be included or excluded, both are treated as included here
-                    &psst.meta.largest_key
-                } else {
-                    &psst.meta.block_metas[pblk + 1].smallest_key
-                };
+            let meta_handle = SstableMetaHandle::v2(&psst);
+            for pblk in 0..meta_handle.block_count() {
+                let pleft = &meta_handle.block_meta(pblk).smallest_key;
+                // `largest_key` can be included or excluded, both are treated as included here.
+                let pright = meta_handle.block_upper_bound_key(pblk + 1);
 
                 // partition point: unit.right < pblk.left
                 let uleft = units.partition_point(|unit| {
@@ -538,7 +536,7 @@ impl CacheRefillTask {
             .inc_by(
                 holders
                     .iter()
-                    .map(|sst| sst.block_count() as u64)
+                    .map(|sst| SstableMetaHandle::v2(sst).block_count() as u64)
                     .sum::<u64>(),
             );
 
@@ -559,8 +557,9 @@ impl CacheRefillTask {
         let mut futures = vec![];
 
         for sst in &holders {
-            for blk_start in (0..sst.block_count()).step_by(unit) {
-                let blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
+            let block_count = SstableMetaHandle::v2(sst).block_count();
+            for blk_start in (0..block_count).step_by(unit) {
+                let blk_end = std::cmp::min(block_count, blk_start + unit);
                 let unit = SstableUnit {
                     sst_obj_id: sst.id,
                     blks: blk_start..blk_end,
@@ -630,13 +629,14 @@ impl CacheRefillTask {
         recent_filter.insert((sst.id, usize::MAX));
 
         let blocks = unit.blks.size().unwrap();
+        let meta_handle = SstableMetaHandle::v2(sst);
 
         let mut tasks = vec![];
         let mut contexts = Vec::with_capacity(blocks);
         let mut admits = 0;
 
-        let (range_first, _) = sst.calculate_block_info(unit.blks.start);
-        let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
+        let (range_first, _) = meta_handle.block_range(unit.blks.start);
+        let (range_last, _) = meta_handle.block_range(unit.blks.end - 1);
         let range = range_first.start..range_last.end;
 
         let size = range.size().unwrap();
@@ -646,7 +646,7 @@ impl CacheRefillTask {
             .inc_by(size as _);
 
         for blk in unit.blks {
-            let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
+            let (range, uncompressed_capacity) = meta_handle.block_range(blk);
             let key = SstableBlockIndex {
                 sst_id: sst.id,
                 block_idx: blk as u64,
@@ -755,26 +755,26 @@ struct Unit<'a> {
 
 impl<'a> Unit<'a> {
     fn new(sst: &'a Sstable, unit: usize, uidx: usize) -> Self {
-        let blks = unit * uidx..std::cmp::min(unit * (uidx + 1), sst.block_count());
+        let meta_handle = SstableMetaHandle::v2(sst);
+        let blks = unit * uidx..std::cmp::min(unit * (uidx + 1), meta_handle.block_count());
         Self { sst, blks }
     }
 
     fn smallest_key(&self) -> &Vec<u8> {
-        &self.sst.meta.block_metas[self.blks.start].smallest_key
+        &SstableMetaHandle::v2(self.sst)
+            .block_meta(self.blks.start)
+            .smallest_key
     }
 
     // `largest_key` can be included or excluded, both are treated as included here
     fn largest_key(&self) -> &Vec<u8> {
-        if self.blks.end == self.sst.block_count() {
-            &self.sst.meta.largest_key
-        } else {
-            &self.sst.meta.block_metas[self.blks.end].smallest_key
-        }
+        SstableMetaHandle::v2(self.sst).block_upper_bound_key(self.blks.end)
     }
 
     fn units(sst: &Sstable, unit: usize) -> usize {
-        sst.block_count() / unit
-            + if sst.block_count().is_multiple_of(unit) {
+        let block_count = SstableMetaHandle::v2(sst).block_count();
+        block_count / unit
+            + if block_count.is_multiple_of(unit) {
                 0
             } else {
                 1
