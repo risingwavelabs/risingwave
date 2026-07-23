@@ -405,7 +405,7 @@ impl BindContext {
     /// Resolve the relation range for a `table_name` in the current bind scope.
     ///
     /// Alias matches are prioritized over base relation name matches.
-    fn resolve_relation_range(
+    pub(super) fn resolve_relation_range(
         &self,
         table_name: &String,
         schema_name: &Option<String>,
