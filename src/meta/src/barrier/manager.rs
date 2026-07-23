@@ -41,6 +41,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
@@ -187,6 +188,7 @@ impl GlobalBarrierManager {
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
@@ -202,6 +204,7 @@ impl GlobalBarrierManager {
             env,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             sink_manager,
             iceberg_compaction_manager,
