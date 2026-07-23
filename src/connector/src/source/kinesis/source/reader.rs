@@ -23,6 +23,7 @@ use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult as Result;
@@ -53,7 +54,11 @@ pub struct KinesisSplitReader {
     eof_retry_interval: Duration,
     error_retry_interval: Duration,
 
-    metrics_labels: [String; 4],
+    kinesis_throughput_exceeded_count: LabelGuardedIntCounter,
+    kinesis_timeout_count: LabelGuardedIntCounter,
+    kinesis_rebuild_shard_iter_count: LabelGuardedIntCounter,
+    kinesis_early_terminate_shard_count: LabelGuardedIntCounter,
+    kinesis_lag_latency_ms: LabelGuardedHistogram,
 }
 
 #[async_trait]
@@ -112,6 +117,26 @@ impl SplitReader for KinesisSplitReader {
             source_ctx.fragment_id.to_string(),
             split.shard_id.to_string(),
         ];
+        let kinesis_throughput_exceeded_count = source_ctx
+            .metrics
+            .kinesis_throughput_exceeded_count
+            .with_guarded_label_values(&metrics_labels);
+        let kinesis_timeout_count = source_ctx
+            .metrics
+            .kinesis_timeout_count
+            .with_guarded_label_values(&metrics_labels);
+        let kinesis_rebuild_shard_iter_count = source_ctx
+            .metrics
+            .kinesis_rebuild_shard_iter_count
+            .with_guarded_label_values(&metrics_labels);
+        let kinesis_early_terminate_shard_count = source_ctx
+            .metrics
+            .kinesis_early_terminate_shard_count
+            .with_guarded_label_values(&metrics_labels);
+        let kinesis_lag_latency_ms = source_ctx
+            .metrics
+            .kinesis_lag_latency_ms
+            .with_guarded_label_values(&metrics_labels);
 
         let split_id = split.id();
         Ok(Self {
@@ -131,7 +156,11 @@ impl SplitReader for KinesisSplitReader {
             error_retry_interval: Duration::from_millis(
                 properties.reader_config.error_retry_interval_ms,
             ),
-            metrics_labels,
+            kinesis_throughput_exceeded_count,
+            kinesis_timeout_count,
+            kinesis_rebuild_shard_iter_count,
+            kinesis_early_terminate_shard_count,
+            kinesis_lag_latency_ms,
         })
     }
 
@@ -160,12 +189,8 @@ impl KinesisSplitReader {
             }
             match self.get_records().await {
                 Ok(resp) => {
-                    self.source_ctx
-                        .metrics
-                        .kinesis_lag_latency_ms
-                        .with_metric(&self.metrics_labels, |metric| {
-                            metric.observe(resp.millis_behind_latest().unwrap_or(0) as f64)
-                        });
+                    self.kinesis_lag_latency_ms
+                        .observe(resp.millis_behind_latest().unwrap_or(0) as f64);
 
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
                     let chunk = (resp.records().iter())
@@ -198,10 +223,7 @@ impl KinesisSplitReader {
                             "shard {:?} reaches the end and is inactive, stop reading",
                             self.shard_id
                         );
-                        self.source_ctx
-                            .metrics
-                            .kinesis_early_terminate_shard_count
-                            .with_metric(&self.metrics_labels, |metric| metric.inc());
+                        self.kinesis_early_terminate_shard_count.inc();
 
                         break;
                     }
@@ -237,10 +259,7 @@ impl KinesisSplitReader {
                 Err(SdkError::ServiceError(e))
                     if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
-                    self.source_ctx
-                        .metrics
-                        .kinesis_throughput_exceeded_count
-                        .with_metric(&self.metrics_labels, |metric| metric.inc());
+                    self.kinesis_throughput_exceeded_count.inc();
 
                     if let Some(start_time) = provisioned_throughput_exceeded_start_time
                         && start_time.elapsed() > Duration::from_secs(5)
@@ -280,10 +299,7 @@ impl KinesisSplitReader {
                     continue;
                 }
                 Err(SdkError::TimeoutError(_)) => {
-                    self.source_ctx
-                        .metrics
-                        .kinesis_timeout_count
-                        .with_metric(&self.metrics_labels, |metric| metric.inc());
+                    self.kinesis_timeout_count.inc();
 
                     // according to sdk doc:
                     // The request failed due to a timeout. The request MAY have been sent and received.
@@ -377,10 +393,7 @@ impl KinesisSplitReader {
             .await?,
         );
 
-        self.source_ctx
-            .metrics
-            .kinesis_rebuild_shard_iter_count
-            .with_metric(&self.metrics_labels, |metric| metric.inc());
+        self.kinesis_rebuild_shard_iter_count.inc();
 
         tracing::info!(
             "resetting kinesis to: stream {:?} shard {:?} starting from {:?}",

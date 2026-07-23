@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock};
 
 use prometheus::{Registry, exponential_buckets, histogram_opts};
 use risingwave_common::metrics::{
-    CachedLabelGuardedHistogramVec, CachedLabelGuardedIntCounterVec, CachedLabelGuardedIntGaugeVec,
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -27,45 +27,45 @@ use risingwave_common::{
 #[derive(Clone)]
 pub struct IcebergScanMetrics {
     // -- Existing --
-    pub iceberg_read_bytes: CachedLabelGuardedIntCounterVec,
+    pub iceberg_read_bytes: LabelGuardedIntCounterVec,
 
     // -- Snapshot & Discovery (List Executor) --
     /// Time difference (seconds) between the latest available snapshot and
     /// the last ingested snapshot.
-    pub iceberg_source_snapshot_lag_seconds: CachedLabelGuardedIntGaugeVec,
+    pub iceberg_source_snapshot_lag_seconds: LabelGuardedIntGaugeVec,
 
     /// Total number of snapshots discovered via incremental scan.
-    pub iceberg_source_snapshots_discovered_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_snapshots_discovered_total: LabelGuardedIntCounterVec,
 
     /// Time spent planning files from a snapshot (metadata operation).
-    pub iceberg_source_list_duration_seconds: CachedLabelGuardedHistogramVec,
+    pub iceberg_source_list_duration_seconds: LabelGuardedHistogramVec,
 
     /// Files discovered per scan, labeled by `file_type` (data, `eq_delete`, `pos_delete`).
-    pub iceberg_source_files_discovered_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_files_discovered_total: LabelGuardedIntCounterVec,
 
     // -- Data Reading (used in scan_task_to_chunk_with_deletes, labeled by table_name) --
     /// Per-file read duration.
-    pub iceberg_source_file_read_duration_seconds: CachedLabelGuardedHistogramVec,
+    pub iceberg_source_file_read_duration_seconds: LabelGuardedHistogramVec,
 
     /// Total rows read from Iceberg source.
-    pub iceberg_source_rows_read_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_rows_read_total: LabelGuardedIntCounterVec,
 
     /// Total files read from Iceberg source, labeled by `file_type`.
-    pub iceberg_source_files_read_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_files_read_total: LabelGuardedIntCounterVec,
 
     // -- Delete Handling --
     /// Rows removed by delete processing, labeled by `delete_type`.
-    pub iceberg_source_delete_rows_applied_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_delete_rows_applied_total: LabelGuardedIntCounterVec,
 
     /// Histogram of delete files attached per data file scan task.
-    pub iceberg_source_delete_files_per_data_file: CachedLabelGuardedHistogramVec,
+    pub iceberg_source_delete_files_per_data_file: LabelGuardedHistogramVec,
 
     // -- Operational Health --
     /// Number of files currently being fetched by the active reader.
-    pub iceberg_source_inflight_file_count: CachedLabelGuardedIntGaugeVec,
+    pub iceberg_source_inflight_file_count: LabelGuardedIntGaugeVec,
 
     /// Categorized scan error counter.
-    pub iceberg_source_scan_errors_total: CachedLabelGuardedIntCounterVec,
+    pub iceberg_source_scan_errors_total: LabelGuardedIntCounterVec,
 }
 
 impl IcebergScanMetrics {
@@ -76,8 +76,7 @@ impl IcebergScanMetrics {
             &["table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let iceberg_source_snapshot_lag_seconds = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_source_snapshot_lag_seconds",
@@ -85,8 +84,7 @@ impl IcebergScanMetrics {
             &["source_id", "source_name", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let iceberg_source_snapshots_discovered_total =
             register_guarded_int_counter_vec_with_registry!(
@@ -95,14 +93,13 @@ impl IcebergScanMetrics {
                 &["source_id", "source_name", "table_name"],
                 registry
             )
-            .unwrap()
-            .into();
+            .unwrap();
 
         let iceberg_source_list_duration_seconds = register_guarded_histogram_vec_with_registry!(
             histogram_opts!(
                 "iceberg_source_list_duration_seconds",
                 "Time spent planning files from a snapshot",
-                exponential_buckets(0.01, 2.0, 15).unwrap().into() // 10ms to ~164s
+                exponential_buckets(0.01, 2.0, 15).unwrap() // 10ms to ~164s
             ),
             &["source_id", "source_name", "table_name"],
             registry
@@ -116,8 +113,7 @@ impl IcebergScanMetrics {
                 &["source_id", "source_name", "table_name", "file_type"],
                 registry
             )
-            .unwrap()
-            .into();
+            .unwrap();
 
         // Note: file-read metrics use ["table_name"] labels (matching iceberg_read_bytes)
         // because the scan function doesn't have source-level context.
@@ -126,7 +122,7 @@ impl IcebergScanMetrics {
                 histogram_opts!(
                     "iceberg_source_file_read_duration_seconds",
                     "Per-file read duration",
-                    exponential_buckets(0.01, 2.0, 15).unwrap().into() // 10ms to ~164s
+                    exponential_buckets(0.01, 2.0, 15).unwrap() // 10ms to ~164s
                 ),
                 &["table_name"],
                 registry
@@ -139,8 +135,7 @@ impl IcebergScanMetrics {
             &["table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let iceberg_source_files_read_total = register_guarded_int_counter_vec_with_registry!(
             "iceberg_source_files_read_total",
@@ -148,8 +143,7 @@ impl IcebergScanMetrics {
             &["table_name", "file_type"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let iceberg_source_delete_rows_applied_total =
             register_guarded_int_counter_vec_with_registry!(
@@ -158,8 +152,7 @@ impl IcebergScanMetrics {
                 &["table_name", "delete_type"],
                 registry
             )
-            .unwrap()
-            .into();
+            .unwrap();
 
         let iceberg_source_delete_files_per_data_file =
             register_guarded_histogram_vec_with_registry!(
@@ -167,7 +160,7 @@ impl IcebergScanMetrics {
                     "iceberg_source_delete_files_per_data_file",
                     "Number of delete files attached per data file scan task",
                     // 1, 2, 4, 8, 16, 32, 64, 128
-                    exponential_buckets(1.0, 2.0, 8).unwrap().into()
+                    exponential_buckets(1.0, 2.0, 8).unwrap()
                 ),
                 &["source_id", "source_name", "table_name"],
                 registry
@@ -180,8 +173,7 @@ impl IcebergScanMetrics {
             &["source_id", "source_name", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let iceberg_source_scan_errors_total = register_guarded_int_counter_vec_with_registry!(
             "iceberg_source_scan_errors_total",
@@ -189,22 +181,19 @@ impl IcebergScanMetrics {
             &["source_id", "source_name", "table_name", "error_type"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         Self {
             iceberg_read_bytes,
             iceberg_source_snapshot_lag_seconds,
             iceberg_source_snapshots_discovered_total,
-            iceberg_source_list_duration_seconds: iceberg_source_list_duration_seconds.into(),
+            iceberg_source_list_duration_seconds,
             iceberg_source_files_discovered_total,
-            iceberg_source_file_read_duration_seconds: iceberg_source_file_read_duration_seconds
-                .into(),
+            iceberg_source_file_read_duration_seconds,
             iceberg_source_rows_read_total,
             iceberg_source_files_read_total,
             iceberg_source_delete_rows_applied_total,
-            iceberg_source_delete_files_per_data_file: iceberg_source_delete_files_per_data_file
-                .into(),
+            iceberg_source_delete_files_per_data_file,
             iceberg_source_inflight_file_count,
             iceberg_source_scan_errors_total,
         }

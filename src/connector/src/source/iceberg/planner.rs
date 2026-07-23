@@ -104,43 +104,37 @@ impl IcebergScanMetricsLabels {
     }
 
     pub fn record_scan_error(&self, error_kind: &str) {
-        GLOBAL_ICEBERG_SCAN_METRICS
+        let scan_errors_total = GLOBAL_ICEBERG_SCAN_METRICS
             .iceberg_source_scan_errors_total
-            .with_metric(
-                &[
-                    self.source_id.as_str(),
-                    self.source_name.as_str(),
-                    self.table_name.as_str(),
-                    error_kind,
-                ],
-                |metric| metric.inc(),
-            );
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+                error_kind,
+            ]);
+        scan_errors_total.inc();
     }
 
     pub fn record_snapshot_discovered(&self) {
-        GLOBAL_ICEBERG_SCAN_METRICS
+        let snapshots_discovered_total = GLOBAL_ICEBERG_SCAN_METRICS
             .iceberg_source_snapshots_discovered_total
-            .with_metric(
-                &[
-                    self.source_id.as_str(),
-                    self.source_name.as_str(),
-                    self.table_name.as_str(),
-                ],
-                |metric| metric.inc(),
-            );
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ]);
+        snapshots_discovered_total.inc();
     }
 
     pub fn record_snapshot_lag(&self, lag_secs: i64) {
-        GLOBAL_ICEBERG_SCAN_METRICS
+        let snapshot_lag_seconds = GLOBAL_ICEBERG_SCAN_METRICS
             .iceberg_source_snapshot_lag_seconds
-            .with_metric(
-                &[
-                    self.source_id.as_str(),
-                    self.source_name.as_str(),
-                    self.table_name.as_str(),
-                ],
-                |metric| metric.set(lag_secs),
-            );
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ]);
+        snapshot_lag_seconds.set(lag_secs);
     }
 
     pub fn record_caught_up(&self) {
@@ -148,29 +142,25 @@ impl IcebergScanMetricsLabels {
     }
 
     fn record_list_duration(&self, duration: Duration) {
-        GLOBAL_ICEBERG_SCAN_METRICS
+        let list_duration_seconds = GLOBAL_ICEBERG_SCAN_METRICS
             .iceberg_source_list_duration_seconds
-            .with_metric(
-                &[
-                    self.source_id.as_str(),
-                    self.source_name.as_str(),
-                    self.table_name.as_str(),
-                ],
-                |metric| metric.observe(duration.as_secs_f64()),
-            );
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ]);
+        list_duration_seconds.observe(duration.as_secs_f64());
     }
 
     fn record_delete_files_per_data_file(&self, delete_file_count: usize) {
-        GLOBAL_ICEBERG_SCAN_METRICS
+        let delete_files_per_data_file = GLOBAL_ICEBERG_SCAN_METRICS
             .iceberg_source_delete_files_per_data_file
-            .with_metric(
-                &[
-                    self.source_id.as_str(),
-                    self.source_name.as_str(),
-                    self.table_name.as_str(),
-                ],
-                |metric| metric.observe(delete_file_count as f64),
-            );
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ]);
+        delete_files_per_data_file.observe(delete_file_count as f64);
     }
 
     fn record_file_counts(&self, stats: &IcebergScanPlanStats) {
@@ -180,17 +170,15 @@ impl IcebergScanMetricsLabels {
             ("pos_delete", stats.pos_delete_count),
         ] {
             if count > 0 {
-                GLOBAL_ICEBERG_SCAN_METRICS
+                let files_discovered_total = GLOBAL_ICEBERG_SCAN_METRICS
                     .iceberg_source_files_discovered_total
-                    .with_metric(
-                        &[
-                            self.source_id.as_str(),
-                            self.source_name.as_str(),
-                            self.table_name.as_str(),
-                            file_type,
-                        ],
-                        |metric| metric.inc_by(count),
-                    );
+                    .with_guarded_label_values(&[
+                        self.source_id.as_str(),
+                        self.source_name.as_str(),
+                        self.table_name.as_str(),
+                        file_type,
+                    ]);
+                files_discovered_total.inc_by(count);
             }
         }
     }

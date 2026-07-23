@@ -80,8 +80,8 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
-    CachedLabelGuardedIntGaugeVec, LabelGuardedHistogram, LabelGuardedHistogramVec,
-    LabelGuardedIntCounter, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedHistogram, LabelGuardedHistogramVec, LabelGuardedIntCounter,
+    LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::{LocalSecretManager, SecretError};
@@ -490,7 +490,7 @@ pub struct SinkMetrics {
     pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec,
     pub iceberg_partition_num: LabelGuardedIntGaugeVec,
     pub iceberg_write_bytes: LabelGuardedIntCounterVec,
-    pub iceberg_snapshot_num: CachedLabelGuardedIntGaugeVec,
+    pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
 
 impl SinkMetrics {
@@ -622,8 +622,7 @@ impl SinkMetrics {
             &["sink_name", "catalog_name", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         Self {
             sink_commit_duration,

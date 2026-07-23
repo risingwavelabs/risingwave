@@ -1467,12 +1467,11 @@ impl DdlService for DdlServiceImpl {
                     continue;
                 }
 
-                let latency_timer = self
+                let auto_schema_change_latency = self
                     .meta_metrics
                     .auto_schema_change_latency
-                    .with_metric(&[&table.id.to_string(), &table.name], |metric| {
-                        metric.start_timer()
-                    });
+                    .with_guarded_label_values(&[&table.id.to_string(), &table.name]);
+                let latency_timer = auto_schema_change_latency.start_timer();
                 // send a request to the frontend to get the ReplaceJobPlan
                 // will retry with exponential backoff if the request fails
                 let resp = client
@@ -1510,12 +1509,14 @@ impl DdlService for DdlServiceImpl {
                                         cdc_table_id = table.cdc_table_id,
                                         "Table replaced success");
 
-                                    self.meta_metrics
+                                    let auto_schema_change_success_cnt = self
+                                        .meta_metrics
                                         .auto_schema_change_success_cnt
-                                        .with_metric(
-                                            &[&table.id.to_string(), &table.name],
-                                            |metric| metric.inc(),
-                                        );
+                                        .with_guarded_label_values(&[
+                                            &table.id.to_string(),
+                                            &table.name,
+                                        ]);
+                                    auto_schema_change_success_cnt.inc();
                                     latency_timer.observe_duration();
                                 }
                                 Err(e) => {
@@ -1926,9 +1927,10 @@ fn add_auto_schema_change_fail_event_log(
     event_log_manager: &EventLogManagerRef,
     fail_info: String,
 ) {
-    meta_metrics
+    let auto_schema_change_failure_cnt = meta_metrics
         .auto_schema_change_failure_cnt
-        .with_metric(&[&table_id.to_string(), &table_name], |metric| metric.inc());
+        .with_guarded_label_values(&[&table_id.to_string(), &table_name]);
+    auto_schema_change_failure_cnt.inc();
     let event = event_log::EventAutoSchemaChangeFail {
         table_id,
         table_name,

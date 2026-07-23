@@ -459,36 +459,42 @@ impl<S: StateStore> SourceExecutor<S> {
                 match split_impl {
                     SplitImpl::PostgresCdc(pg_split) => {
                         if let Some(lsn_value) = pg_split.pg_lsn() {
-                            self.metrics
+                            let pg_cdc_state_table_lsn = self
+                                .metrics
                                 .pg_cdc_state_table_lsn
-                                .with_metric(&[&source_id], |metric| metric.set(lsn_value as i64));
+                                .with_guarded_label_values(&[&source_id]);
+                            pg_cdc_state_table_lsn.set(lsn_value as i64);
                         }
                     }
                     SplitImpl::MysqlCdc(mysql_split) => {
                         if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
-                            self.metrics
+                            let mysql_cdc_state_binlog_file_seq = self
+                                .metrics
                                 .mysql_cdc_state_binlog_file_seq
-                                .with_metric(&[&source_id], |metric| metric.set(file_seq as i64));
+                                .with_guarded_label_values(&[&source_id]);
+                            mysql_cdc_state_binlog_file_seq.set(file_seq as i64);
 
-                            self.metrics
+                            let mysql_cdc_state_binlog_position = self
+                                .metrics
                                 .mysql_cdc_state_binlog_position
-                                .with_metric(&[&source_id], |metric| metric.set(position as i64));
+                                .with_guarded_label_values(&[&source_id]);
+                            mysql_cdc_state_binlog_position.set(position as i64);
                         }
                     }
                     SplitImpl::SqlServerCdc(sqlserver_split) => {
                         if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
-                            self.metrics
+                            let sqlserver_cdc_state_change_lsn = self
+                                .metrics
                                 .sqlserver_cdc_state_change_lsn
-                                .with_metric(&[&source_id], |metric| {
-                                    metric.set(lsn_u128_to_i64(lsn))
-                                });
+                                .with_guarded_label_values(&[&source_id]);
+                            sqlserver_cdc_state_change_lsn.set(lsn_u128_to_i64(lsn));
                         }
                         if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
-                            self.metrics
+                            let sqlserver_cdc_state_commit_lsn = self
+                                .metrics
                                 .sqlserver_cdc_state_commit_lsn
-                                .with_metric(&[&source_id], |metric| {
-                                    metric.set(lsn_u128_to_i64(lsn))
-                                });
+                                .with_guarded_label_values(&[&source_id]);
+                            sqlserver_cdc_state_commit_lsn.set(lsn_u128_to_i64(lsn));
                         }
                     }
                     _ => {}
@@ -1233,20 +1239,23 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                                     if let Some(lsn_value) =
                                         extract_postgres_lsn_from_offset_str(offset)
                                     {
-                                        self.metrics
+                                        let source_id = source_id.to_string();
+                                        let pg_cdc_jni_commit_offset_lsn = self
+                                            .metrics
                                             .pg_cdc_jni_commit_offset_lsn
-                                            .with_metric(&[&source_id.to_string()], |metric| {
-                                                metric.set(lsn_value as i64)
-                                            });
+                                            .with_guarded_label_values(&[&source_id]);
+                                        pg_cdc_jni_commit_offset_lsn.set(lsn_value as i64);
                                     }
                                     if let Some(lsn_value) =
                                         extract_sql_server_commit_lsn_from_offset_str(offset)
                                     {
-                                        self.metrics
+                                        let source_id = source_id.to_string();
+                                        let sqlserver_cdc_jni_commit_offset_lsn = self
+                                            .metrics
                                             .sqlserver_cdc_jni_commit_offset_lsn
-                                            .with_metric(&[&source_id.to_string()], |metric| {
-                                                metric.set(lsn_u128_to_i64(lsn_value))
-                                            });
+                                            .with_guarded_label_values(&[&source_id]);
+                                        sqlserver_cdc_jni_commit_offset_lsn
+                                            .set(lsn_u128_to_i64(lsn_value));
                                     }
                                 },
                             )

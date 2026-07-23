@@ -19,8 +19,7 @@ use prometheus::{
     register_int_counter_vec_with_registry,
 };
 use risingwave_common::metrics::{
-    CachedLabelGuardedHistogramVec, CachedLabelGuardedIntCounterVec, LabelGuardedHistogramVec,
-    LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -91,8 +90,7 @@ impl EnumeratorMetrics {
             &["source_id", "partition"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kafka_consumer_group_delete_failure_count = register_int_counter_vec_with_registry!(
             "source_kafka_consumer_group_delete_failure_count",
@@ -108,8 +106,7 @@ impl EnumeratorMetrics {
             &["source_id", "slot_name"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let pg_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
             "pg_cdc_upstream_max_lsn",
@@ -117,8 +114,7 @@ impl EnumeratorMetrics {
             &["source_id", "slot_name"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let mysql_cdc_binlog_file_seq_min = register_guarded_int_gauge_vec_with_registry!(
             "mysql_cdc_binlog_file_seq_min",
@@ -126,8 +122,7 @@ impl EnumeratorMetrics {
             &["hostname", "port"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let mysql_cdc_binlog_file_seq_max = register_guarded_int_gauge_vec_with_registry!(
             "mysql_cdc_binlog_file_seq_max",
@@ -135,8 +130,7 @@ impl EnumeratorMetrics {
             &["hostname", "port"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
             "sqlserver_cdc_upstream_min_lsn",
@@ -144,8 +138,7 @@ impl EnumeratorMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let sqlserver_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
             "sqlserver_cdc_upstream_max_lsn",
@@ -153,8 +146,7 @@ impl EnumeratorMetrics {
             &["source_id"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         EnumeratorMetrics {
             high_watermark,
@@ -200,11 +192,11 @@ pub struct SourceMetrics {
     pub file_source_failed_split_count: LabelGuardedIntCounterVec,
 
     // kinesis source
-    pub kinesis_throughput_exceeded_count: CachedLabelGuardedIntCounterVec,
-    pub kinesis_timeout_count: CachedLabelGuardedIntCounterVec,
-    pub kinesis_rebuild_shard_iter_count: CachedLabelGuardedIntCounterVec,
-    pub kinesis_early_terminate_shard_count: CachedLabelGuardedIntCounterVec,
-    pub kinesis_lag_latency_ms: CachedLabelGuardedHistogramVec,
+    pub kinesis_throughput_exceeded_count: LabelGuardedIntCounterVec,
+    pub kinesis_timeout_count: LabelGuardedIntCounterVec,
+    pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
+    pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
+    pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
 
     /// Total connector ack failures after checkpoint commit by bounded failure category.
     connector_ack_failure_count: IntCounterVec,
@@ -246,8 +238,7 @@ impl SourceMetrics {
             ],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let partition_input_bytes = register_guarded_int_counter_vec_with_registry!(
             "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
@@ -260,32 +251,28 @@ impl SourceMetrics {
             ],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let latest_message_id = register_guarded_int_gauge_vec_with_registry!(
             "source_latest_message_id",
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_eof_count",
             "Total number of EOF events received from specific partition",
             &["source_id", "partition", "source_name", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let partition_eof_offset = register_guarded_int_gauge_vec_with_registry!(
             "source_partition_eof_offset",
             "Latest resolved EOF offset for specific partition",
             &["source_id", "partition", "source_name", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let opts = histogram_opts!(
             "source_cdc_event_lag_duration_milliseconds",
@@ -299,13 +286,10 @@ impl SourceMetrics {
             &["actor_id", "source_id", "source_name", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let direct_cdc_event_lag_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_name"], registry)
-                .unwrap()
-                .into();
+            register_guarded_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
 
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
 
@@ -315,24 +299,21 @@ impl SourceMetrics {
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let file_source_dirty_split_count = register_guarded_int_gauge_vec_with_registry!(
             "file_source_dirty_split_count",
             "Current number of dirty file splits in file source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let file_source_failed_split_count = register_guarded_int_counter_vec_with_registry!(
             "file_source_failed_split_count",
             "Total number of file splits marked dirty in file source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kinesis_throughput_exceeded_count = register_guarded_int_counter_vec_with_registry!(
             "kinesis_throughput_exceeded_count",
@@ -340,8 +321,7 @@ impl SourceMetrics {
             &["source_id", "source_name", "fragment_id", "shard_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kinesis_timeout_count = register_guarded_int_counter_vec_with_registry!(
             "kinesis_timeout_count",
@@ -349,8 +329,7 @@ impl SourceMetrics {
             &["source_id", "source_name", "fragment_id", "shard_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kinesis_rebuild_shard_iter_count = register_guarded_int_counter_vec_with_registry!(
             "kinesis_rebuild_shard_iter_count",
@@ -358,8 +337,7 @@ impl SourceMetrics {
             &["source_id", "source_name", "fragment_id", "shard_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kinesis_early_terminate_shard_count = register_guarded_int_counter_vec_with_registry!(
             "kinesis_early_terminate_shard_count",
@@ -367,8 +345,7 @@ impl SourceMetrics {
             &["source_id", "source_name", "fragment_id", "shard_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let kinesis_lag_latency_ms = register_guarded_histogram_vec_with_registry!(
             "kinesis_lag_latency_ms",
@@ -376,8 +353,7 @@ impl SourceMetrics {
             &["source_id", "source_name", "fragment_id", "shard_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let connector_ack_failure_count = register_int_counter_vec_with_registry!(
             "source_connector_ack_failure_count",

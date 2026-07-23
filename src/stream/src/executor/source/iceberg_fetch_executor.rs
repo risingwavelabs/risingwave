@@ -329,6 +329,17 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             source_name_str.as_str(),
             iceberg_table_name.as_str(),
         ];
+        let inflight_file_count = iceberg_metrics
+            .iceberg_source_inflight_file_count
+            .with_guarded_label_values(&metrics_labels);
+        let scan_errors_total = iceberg_metrics
+            .iceberg_source_scan_errors_total
+            .with_guarded_label_values(&[
+                metrics_labels[0],
+                metrics_labels[1],
+                metrics_labels[2],
+                "fetch_error",
+            ]);
 
         let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
@@ -354,29 +365,15 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             self.streaming_config.clone(),
         )
         .await?;
-        iceberg_metrics
-            .iceberg_source_inflight_file_count
-            .with_metric(&metrics_labels, |metric| metric.set(splits_on_fetch as i64));
+        inflight_file_count.set(splits_on_fetch as i64);
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
-                    iceberg_metrics
-                        .iceberg_source_scan_errors_total
-                        .with_metric(
-                            &[
-                                metrics_labels[0],
-                                metrics_labels[1],
-                                metrics_labels[2],
-                                "fetch_error",
-                            ],
-                            |metric| metric.inc(),
-                        );
+                    scan_errors_total.inc();
                     splits_on_fetch = 0;
-                    iceberg_metrics
-                        .iceberg_source_inflight_file_count
-                        .with_metric(&metrics_labels, |metric| metric.set(0));
+                    inflight_file_count.set(0);
                 }
                 Ok(msg) => {
                     match msg {
@@ -445,11 +442,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             self.streaming_config.clone(),
                                         )
                                         .await?;
-                                        iceberg_metrics
-                                            .iceberg_source_inflight_file_count
-                                            .with_metric(&metrics_labels, |metric| {
-                                                metric.set(splits_on_fetch as i64)
-                                            });
+                                        inflight_file_count.set(splits_on_fetch as i64);
                                     }
                                 }
                                 // Receiving file assignments from upstream list executor,
@@ -480,11 +473,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             if true {
                                 splits_on_fetch = splits_on_fetch.saturating_sub(1);
                                 state_store_handler.delete(&data_file_path).await?;
-                                iceberg_metrics
-                                    .iceberg_source_inflight_file_count
-                                    .with_metric(&metrics_labels, |metric| {
-                                        metric.set(splits_on_fetch as i64)
-                                    });
+                                inflight_file_count.set(splits_on_fetch as i64);
                             }
 
                             for chunk in &chunks {

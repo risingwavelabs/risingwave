@@ -27,9 +27,8 @@ use prometheus::{
 };
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::metrics::{
-    CachedLabelGuardedHistogramVec, CachedLabelGuardedIntCounterVec,
-    CachedLabelGuardedUintGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
-    LabelGuardedIntGaugeVec,
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -245,9 +244,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: CachedLabelGuardedIntCounterVec,
-    pub auto_schema_change_success_cnt: CachedLabelGuardedIntCounterVec,
-    pub auto_schema_change_latency: CachedLabelGuardedHistogramVec,
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -257,10 +256,10 @@ pub struct MetaMetrics {
     pub compaction_group_throughput: IntGaugeVec,
 
     // ********************************** Refresh Manager ************************************
-    pub refresh_job_duration: CachedLabelGuardedUintGaugeVec,
-    pub refresh_job_finish_cnt: CachedLabelGuardedIntCounterVec,
-    pub refresh_cron_job_trigger_cnt: CachedLabelGuardedIntCounterVec,
-    pub refresh_cron_job_miss_cnt: CachedLabelGuardedIntCounterVec,
+    pub refresh_job_duration: LabelGuardedUintGaugeVec,
+    pub refresh_job_finish_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_trigger_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_miss_cnt: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -283,8 +282,7 @@ impl MetaMetrics {
         );
         let barrier_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
-                .unwrap()
-                .into();
+                .unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
@@ -301,8 +299,7 @@ impl MetaMetrics {
         );
         let barrier_send_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
-                .unwrap()
-                .into();
+                .unwrap();
         let barrier_interval_by_database = register_gauge_vec_with_registry!(
             "meta_barrier_interval_by_database",
             "barrier interval of each database",
@@ -317,24 +314,21 @@ impl MetaMetrics {
             &["database_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let in_flight_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
             &["database_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let last_committed_barrier_time = register_guarded_int_gauge_vec_with_registry!(
             "last_committed_barrier_time",
             "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
             &["database_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         // snapshot backfill metrics
         let opts = histogram_opts!(
@@ -347,8 +341,7 @@ impl MetaMetrics {
             &["table_id", "barrier_type"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
@@ -356,16 +349,14 @@ impl MetaMetrics {
             &["table_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let snapshot_backfill_inflight_barrier_num = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_inflight_barrier_num",
             "snapshot backfill inflight_barrier_num",
             &["table_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let max_committed_epoch = register_int_gauge_with_registry!(
             "storage_max_committed_epoch",
@@ -706,8 +697,7 @@ impl MetaMetrics {
             &["table_id", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let auto_schema_change_success_cnt = register_guarded_int_counter_vec_with_registry!(
             "auto_schema_change_success_cnt",
@@ -715,8 +705,7 @@ impl MetaMetrics {
             &["table_id", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let opts = histogram_opts!(
             "auto_schema_change_latency",
@@ -728,8 +717,7 @@ impl MetaMetrics {
             &["table_id", "table_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
@@ -737,8 +725,7 @@ impl MetaMetrics {
             &["source_id", "source_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let opts = histogram_opts!(
             "source_worker_tick_duration_seconds",
             "Duration of a source worker tick (list_splits + on_tick) in seconds",
@@ -749,8 +736,7 @@ impl MetaMetrics {
             &["source_id", "source_name"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let source_enumerator_monitor_error_count =
             register_guarded_int_counter_vec_with_registry!(
                 "source_enumerator_monitor_error_count",
@@ -758,8 +744,7 @@ impl MetaMetrics {
                 &["source_id", "source_name"],
                 registry
             )
-            .unwrap()
-            .into();
+            .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
@@ -986,32 +971,28 @@ impl MetaMetrics {
             &["table_id", "status"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let refresh_job_finish_cnt = register_guarded_int_counter_vec_with_registry!(
             "meta_refresh_job_finish_cnt",
             "The number of finished refresh jobs",
             &["table_id", "status"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let refresh_cron_job_trigger_cnt = register_guarded_int_counter_vec_with_registry!(
             "meta_refresh_cron_job_trigger_cnt",
             "The number of cron refresh jobs triggered",
             &["table_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let refresh_cron_job_miss_cnt = register_guarded_int_counter_vec_with_registry!(
             "meta_refresh_cron_job_miss_cnt",
             "The number of cron refresh jobs missed",
             &["table_id"],
             registry
         )
-        .unwrap()
-        .into();
+        .unwrap();
 
         Self {
             grpc_latency,

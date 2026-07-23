@@ -269,6 +269,17 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             source_name_str.as_str(),
             iceberg_table_name.as_str(),
         ];
+        let inflight_file_count = iceberg_metrics
+            .iceberg_source_inflight_file_count
+            .with_guarded_label_values(&metrics_labels);
+        let scan_errors_total = iceberg_metrics
+            .iceberg_source_scan_errors_total
+            .with_guarded_label_values(&[
+                metrics_labels[0],
+                metrics_labels[1],
+                metrics_labels[2],
+                "fetch_error",
+            ]);
 
         // Initialize state and stream reader
         let mut state = FetchState::new();
@@ -291,17 +302,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         self.associated_table_id.to_string(),
                     ]);
 
-                    iceberg_metrics
-                        .iceberg_source_scan_errors_total
-                        .with_metric(
-                            &[
-                                metrics_labels[0],
-                                metrics_labels[1],
-                                metrics_labels[2],
-                                "fetch_error",
-                            ],
-                            |metric| metric.inc(),
-                        );
+                    scan_errors_total.inc();
 
                     let in_flight_count = state.in_flight_files.len();
                     state.handle_error_recovery();
@@ -364,11 +365,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 &self.streaming_config,
                             )?;
 
-                            iceberg_metrics
-                                .iceberg_source_inflight_file_count
-                                .with_metric(&metrics_labels, |metric| {
-                                    metric.set(state.splits_on_fetch as i64)
-                                });
+                            inflight_file_count.set(state.splits_on_fetch as i64);
                         }
                     }
 
@@ -385,11 +382,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 Ok(Either::Right(ChunksWithState { chunks, .. })) => {
                     state.mark_file_fetched();
 
-                    iceberg_metrics
-                        .iceberg_source_inflight_file_count
-                        .with_metric(&metrics_labels, |metric| {
-                            metric.set(state.splits_on_fetch as i64)
-                        });
+                    inflight_file_count.set(state.splits_on_fetch as i64);
 
                     for chunk in &chunks {
                         let pruned = prune_additional_cols(
