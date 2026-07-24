@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::{Logical, LogicalShare, PlanTreeNode, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{Logical, PlanTreeNode};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
@@ -53,12 +53,6 @@ impl LogicalPlanVisitor for DataFusionExecuteChecker {
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValueBehavior
-    }
-
-    fn visit_logical_share(&mut self, plan: &LogicalShare) -> Self::Result {
-        // The default empty result is unsupported, so a repeated share edge cannot use it as a
-        // neutral value. DataFusion plans are trees and may visit the shared input again.
-        self.visit(plan.input())
     }
 
     fn visit_logical_agg(
