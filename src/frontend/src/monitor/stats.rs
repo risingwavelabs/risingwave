@@ -23,8 +23,9 @@ use prometheus::{
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_with_registry, register_int_gauge_with_registry,
 };
-use risingwave_common::metrics::TrAdderGauge;
+use risingwave_common::metrics::{LabelGuardedHistogramVec, TrAdderGauge};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_histogram_vec_with_registry;
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "datafusion")]
@@ -35,6 +36,10 @@ use crate::session::SessionMapRef;
 pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
+    /// Per-MV serving latency for local-execution queries, labeled by `table_id`.
+    /// Labels are reclaimed after each scrape via the guarded-metric pattern so the cardinality
+    /// stays bounded by the set of MVs hit since the previous scrape.
+    pub latency_local_execution_per_mv: LabelGuardedHistogramVec,
     #[cfg(feature = "datafusion")]
     pub datafusion: DataFusionMetrics,
     pub active_sessions: IntGauge,
@@ -60,6 +65,16 @@ impl FrontendMetrics {
         );
         let latency_local_execution = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let latency_local_execution_per_mv = register_guarded_histogram_vec_with_registry!(
+            "frontend_latency_local_execution_per_mv",
+            "Per-table_id latency of local execution mode for RisingWave batch engine. \
+             Label is reclaimed each scrape so cardinality is bounded by recently queried MVs.",
+            &["table_id"],
+            exponential_buckets(0.01, 2.0, 23).unwrap(),
+            registry
+        )
+        .unwrap();
+
         #[cfg(feature = "datafusion")]
         let datafusion = DataFusionMetrics::new(registry);
 
@@ -83,6 +98,7 @@ impl FrontendMetrics {
         Self {
             query_counter_local_execution,
             latency_local_execution,
+            latency_local_execution_per_mv,
             #[cfg(feature = "datafusion")]
             datafusion,
             active_sessions,
