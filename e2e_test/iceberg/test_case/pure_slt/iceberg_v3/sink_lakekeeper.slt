@@ -39,6 +39,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    refresh.interval.sec = '1',
     enable_pk_index = 'true'
 );
 

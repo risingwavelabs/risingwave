@@ -149,6 +149,7 @@ pub trait CatalogWriter: Send + Sync {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()>;
 
     async fn replace_sink(
@@ -498,6 +499,7 @@ impl CatalogWriter for CatalogWriterImpl {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -508,6 +510,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 resource_type,
                 if_not_exists,
                 since_timestamp_epoch,
+                refresh_interval_sec,
             )
             .await?;
         self.wait_version(version).await

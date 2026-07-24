@@ -43,7 +43,7 @@ use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::{MV_REFRESH_INTERVAL_SEC_KEY, ordinal};
+use crate::utils::{BATCH_REFRESH_INTERVAL_SEC_KEY, ordinal};
 use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -357,7 +357,7 @@ pub(crate) fn gen_create_mv_graph(
 )> {
     let mut with_options = get_with_options(handler_args.clone());
     let refresh_interval_sec = with_options.refresh_interval_sec()?;
-    with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
+    with_options.remove(BATCH_REFRESH_INTERVAL_SEC_KEY);
     let resource_type =
         resolve_streaming_job_resource_type(handler_args.session.as_ref(), &mut with_options)?;
 

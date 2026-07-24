@@ -111,6 +111,7 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
                table.name = 't', \
                is_exactly_once = 'true', \
                enable_pk_index = 'true', \
+               refresh.interval.sec = 1, \
                format_version = '3', \
                type = 'upsert' \
              )",

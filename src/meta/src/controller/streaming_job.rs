@@ -487,7 +487,7 @@ impl CatalogController {
                     resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
-                    None, // refresh_interval_sec: only for MV
+                    refresh_interval_sec,
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
@@ -524,7 +524,7 @@ impl CatalogController {
                     resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
-                    None, // refresh_interval_sec: only for MV
+                    None, // refresh_interval_sec: only for batch refresh jobs
                 )
                 .await?;
                 let job_id = streaming_job_model.job_id;
@@ -589,7 +589,7 @@ impl CatalogController {
                     resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
-                    None, // refresh_interval_sec: only for MV
+                    None, // refresh_interval_sec: only for batch refresh jobs
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -627,7 +627,7 @@ impl CatalogController {
                     resource_type.clone(),
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
-                    None, // refresh_interval_sec: only for MV
+                    None, // refresh_interval_sec: only for batch refresh jobs
                 )
                 .await?;
                 src.id = streaming_job_model.job_id.as_shared_source_id();

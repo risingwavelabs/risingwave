@@ -461,6 +461,7 @@ impl DdlService for DdlServiceImpl {
             .and_then(|resource_type| resource_type.resource_type)
             .unwrap_or_else(Self::default_streaming_job_resource_type);
         let since_timestamp_epoch = req.since_timestamp_epoch;
+        let refresh_interval_sec = req.refresh_interval_sec;
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -470,7 +471,7 @@ impl DdlService for DdlServiceImpl {
             dependencies,
             resource_type,
             if_not_exists: req.if_not_exists,
-            refresh_interval_sec: None,
+            refresh_interval_sec,
             replace_sink: None,
             since_timestamp_epoch,
         };

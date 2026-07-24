@@ -92,7 +92,7 @@ use crate::optimizer::plan_visitor::{
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::{
-    ColIndexMappingRewriteExt, MV_REFRESH_INTERVAL_SEC_KEY, WithOptionsSecResolved,
+    BATCH_REFRESH_INTERVAL_SEC_KEY, ColIndexMappingRewriteExt, WithOptionsSecResolved,
 };
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -654,17 +654,17 @@ impl LogicalPlanRoot {
             && session_ctx.config().streaming_use_snapshot_backfill();
         if !snapshot_backfill_enabled {
             return Err(ErrorCode::NotSupported(
-                "Batch refresh materialized view requires snapshot backfill".to_owned(),
+                "Batch refresh job requires snapshot backfill".to_owned(),
                 format!(
                     "Please enable snapshot backfill or remove `{}` from the WITH clause.",
-                    MV_REFRESH_INTERVAL_SEC_KEY
+                    BATCH_REFRESH_INTERVAL_SEC_KEY
                 ),
             )
             .into());
         }
         if let Some(reason) = self.plan.forbid_snapshot_backfill() {
             return Err(ErrorCode::NotSupported(
-                format!("Batch refresh materialized view requires snapshot backfill, but {reason}"),
+                format!("Batch refresh job requires snapshot backfill, but {reason}"),
                 "Please rewrite the query to avoid operators that forbid snapshot backfill."
                     .to_owned(),
             )
@@ -1169,13 +1169,29 @@ impl LogicalPlanRoot {
         format_desc: Option<SinkFormatDesc>,
         without_snapshot: bool,
         since_timestamp: bool,
+        batch_refresh: bool,
         is_iceberg_engine_internal: bool,
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<StreamSink> {
-        let backfill_type = if since_timestamp {
+        let backfill_type = if batch_refresh {
+            if since_timestamp {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "since_timestamp is not allowed for batch refresh sink".to_owned(),
+                )
+                .into());
+            }
+            if without_snapshot {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "batch refresh sink requires snapshot backfill".to_owned(),
+                )
+                .into());
+            }
+            self.require_snapshot_backfill_for_batch_refresh()?;
+            BackfillType::SnapshotBackfill
+        } else if since_timestamp {
             assert!(
                 target_table.is_none(),
                 "should not allow since_timestamp for sink-into-table"
@@ -1234,6 +1250,7 @@ impl LogicalPlanRoot {
             target_columns_to_plan_mapping,
             definition,
             properties,
+            batch_refresh,
             format_desc,
             partition_info,
             auto_refresh_schema_from_table,
