@@ -16,7 +16,7 @@ mod barrier_control;
 mod status;
 
 use std::cmp::max;
-use std::collections::{HashMap, HashSet, hash_map};
+use std::collections::{HashMap, HashSet, VecDeque, hash_map};
 use std::mem::take;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::time::Duration;
@@ -62,6 +62,12 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
+const MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR: usize = 2;
+
+fn effective_snapshot_backfill_barrier_amplification_factor(factor: usize) -> usize {
+    factor.max(MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR)
+}
+
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
@@ -84,6 +90,7 @@ pub(crate) struct CreatingStreamingJobControl {
     max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
     max_lagged_barrier_num: usize,
+    barrier_amplification_factor: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -214,6 +221,13 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
+        let barrier_amplification_factor = effective_snapshot_backfill_barrier_amplification_factor(
+            partial_graph_manager
+                .control_stream_manager()
+                .env
+                .opts
+                .snapshot_backfill_barrier_amplification_factor,
+        );
 
         let IndependentCheckpointJobControl::CreatingStreamingJob(job) = entry.insert(
             IndependentCheckpointJobControl::CreatingStreamingJob(Self {
@@ -224,6 +238,7 @@ impl CreatingStreamingJobControl {
                 snapshot_epoch,
                 status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
                 max_lagged_barrier_num,
+                barrier_amplification_factor,
                 upstream_lag: GLOBAL_META_METRICS
                     .snapshot_backfill_lag
                     .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -280,7 +295,7 @@ impl CreatingStreamingJobControl {
                         snapshot_backfill_actors.iter().cloned(),
                         upstream_lag,
                     ),
-                    barriers_to_inject: Some(log_store_barriers_to_inject),
+                    pending_barriers: log_store_barriers_to_inject.into(),
                 };
             } else {
                 assert!(pending_non_checkpoint_barriers.is_empty());
@@ -581,13 +596,16 @@ impl CreatingStreamingJobControl {
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
-        let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
+        let mut pending_barriers: VecDeque<_> = Self::resolve_upstream_log_epochs(
             &info.snapshot_backfill_upstream_tables,
             upstream_table_log_epochs,
             committed_epoch,
             upstream_barrier_info,
-        )?;
-        let mut first_barrier = barriers_to_inject.remove(0);
+        )?
+        .into();
+        let mut first_barrier = pending_barriers
+            .pop_front()
+            .expect("resolved upstream log epochs should not be empty");
         assert!(first_barrier.kind.is_checkpoint());
         first_barrier.kind = BarrierKind::Initial;
 
@@ -596,12 +614,12 @@ impl CreatingStreamingJobControl {
                 tracking_job: TrackingJob::recovered(job_id, &info.fragment_infos),
                 log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                     InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
-                    barriers_to_inject
-                        .last()
+                    pending_barriers
+                        .back()
                         .map(|info| info.prev_epoch() - committed_epoch)
                         .unwrap_or(0),
                 ),
-                barriers_to_inject: Some(barriers_to_inject),
+                pending_barriers,
                 info,
             },
             first_barrier,
@@ -708,6 +726,13 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
+        let barrier_amplification_factor = effective_snapshot_backfill_barrier_amplification_factor(
+            partial_graph_recoverer
+                .control_stream_manager()
+                .env
+                .opts
+                .snapshot_backfill_barrier_amplification_factor,
+        );
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -729,6 +754,7 @@ impl CreatingStreamingJobControl {
             max_committed_epoch: Some(committed_epoch),
             status,
             max_lagged_barrier_num,
+            barrier_amplification_factor,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -876,10 +902,11 @@ impl CreatingStreamingJobControl {
             None => (None, vec![]),
         };
         {
-            for (barrier_to_inject, mutation) in self
-                .status
-                .on_new_upstream_epoch(barrier_info, mutation.take())
-            {
+            for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(
+                barrier_info,
+                mutation.take(),
+                self.barrier_amplification_factor,
+            ) {
                 Self::inject_barrier(
                     self.partial_graph_id,
                     partial_graph_manager,
@@ -914,10 +941,10 @@ impl CreatingStreamingJobControl {
     fn is_ready_to_merge(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
-            barriers_to_inject,
+            pending_barriers,
             ..
         } = &self.status
-            && barriers_to_inject.is_none()
+            && pending_barriers.is_empty()
             && log_store_progress_tracker.is_finished()
         {
             true
@@ -1127,6 +1154,22 @@ impl CreatingStreamingJobControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_effective_snapshot_backfill_barrier_amplification_factor() {
+        assert_eq!(
+            effective_snapshot_backfill_barrier_amplification_factor(0),
+            MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR
+        );
+        assert_eq!(
+            effective_snapshot_backfill_barrier_amplification_factor(1),
+            MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR
+        );
+        assert_eq!(
+            effective_snapshot_backfill_barrier_amplification_factor(100),
+            100
+        );
+    }
 
     #[test]
     fn test_resolve_since_timestamp_upstream_log_epochs() {

@@ -41,6 +41,11 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
 
+    /// The maximum number of pending barriers injected into a snapshot backfill job for each new
+    /// upstream barrier. Values below 2 are treated as 2.
+    #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
+    pub snapshot_backfill_barrier_amplification_factor: usize,
+
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -395,6 +400,10 @@ pub mod default {
         }
 
         pub fn snapshot_backfill_finish_max_lagged_barriers() -> usize {
+            100
+        }
+
+        pub fn snapshot_backfill_barrier_amplification_factor() -> usize {
             100
         }
 
