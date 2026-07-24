@@ -489,6 +489,68 @@ async fn test_over_window_evict_between_chunks() {
     stream.expect_barrier().await;
 }
 
+/// Regression test: deleting all rows of a fully-cached partition (no sentinels in the
+/// cache) leaves the range cache with zero entries. `PartitionCache::shrink` with
+/// `CachePolicy::Recent` used to panic on such an empty cache at the next barrier.
+///
+/// Note that the insert and the delete must happen within the same barrier interval:
+/// `shrink` only runs for partitions registered in `recently_accessed_ranges`, and a
+/// chunk that deletes all rows of a partition doesn't register it (empty affected
+/// ranges), so the registration must come from the insert chunk.
+#[tokio::test]
+async fn test_over_window_delete_all_rows_of_partition() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // lag(x, 1), doesn't force `CachePolicy::Full`
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+        },
+    ];
+    let (mut tx, mut stream) = create_executor(calls, store).await;
+
+    tx.push_barrier(test_epoch(1), false);
+    stream.expect_barrier().await;
+
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        + 1 p1 100 10
+        + 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  i
+            + 1 p1 100 10 .
+            + 2 p1 101 16 10",
+        )
+    );
+
+    // Delete all rows of `p1` in the same epoch, emptying the range cache.
+    tx.push_chunk(StreamChunk::from_pretty(
+        " I T  I   i
+        - 1 p1 100 10
+        - 2 p1 101 16",
+    ));
+    assert_eq!(
+        stream.expect_chunk().await,
+        StreamChunk::from_pretty(
+            " I T  I   i  i
+            - 1 p1 100 10 .
+            - 2 p1 101 16 10",
+        )
+    );
+
+    tx.push_barrier(test_epoch(2), false);
+    stream.expect_barrier().await;
+    // Poll once more to run the post-barrier cache shrinking, which used to panic on
+    // the emptied `p1` cache.
+    stream.next_unwrap_pending();
+}
+
 #[tokio::test]
 async fn test_over_window_sum() {
     let store = MemoryStateStore::new();
