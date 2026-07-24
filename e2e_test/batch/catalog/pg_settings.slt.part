@@ -20,6 +20,7 @@ postmaster pause_on_next_bootstrap
 postmaster per_database_isolation
 postmaster time_travel_retention_ms
 user application_name
+user auto_locality_backfill_min_size
 user backfill_rate_limit
 user background_ddl
 user batch_enable_distributed_dml
