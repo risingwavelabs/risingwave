@@ -322,8 +322,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         dirty_split_count_metrics.set(0);
 
         // pulsar's `message_id_data_idx` is not used in this executor, so we don't need to get it.
-        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_split_offset_col_idx(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
         // Initialize state table.

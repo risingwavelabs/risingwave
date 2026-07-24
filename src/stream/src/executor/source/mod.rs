@@ -87,13 +87,21 @@ pub fn get_split_offset_mapping_from_chunk(
     Some(split_offset_mapping)
 }
 
-/// Get the indices of the split, offset, and pulsar message id columns.
-pub fn get_split_offset_col_idx(
-    column_descs: &[SourceColumnDesc],
-) -> (Option<usize>, Option<usize>, Option<usize>) {
+/// Indices of internal source-state columns carried in source executor chunks.
+#[derive(Debug, Eq, PartialEq)]
+pub struct SourceStateColumnIndices {
+    pub split_idx: Option<usize>,
+    pub offset_idx: Option<usize>,
+    pub pulsar_message_id_idx: Option<usize>,
+    pub rabbitmq_ack_data_idx: Option<usize>,
+}
+
+/// Get the indices of internal source-state columns.
+pub fn get_split_offset_col_idx(column_descs: &[SourceColumnDesc]) -> SourceStateColumnIndices {
     let mut split_idx = None;
     let mut offset_idx = None;
     let mut pulsar_message_id_idx = None;
+    let mut rabbitmq_ack_data_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
         match column.additional_column {
             AdditionalColumn {
@@ -111,10 +119,20 @@ pub fn get_split_offset_col_idx(
             } => {
                 pulsar_message_id_idx = Some(idx);
             }
+            AdditionalColumn {
+                column_type: Some(ColumnType::RabbitmqAckData(_)),
+            } => {
+                rabbitmq_ack_data_idx = Some(idx);
+            }
             _ => (),
         }
     }
-    (split_idx, offset_idx, pulsar_message_id_idx)
+    SourceStateColumnIndices {
+        split_idx,
+        offset_idx,
+        pulsar_message_id_idx,
+        rabbitmq_ack_data_idx,
+    }
 }
 
 pub fn prune_additional_cols(
@@ -262,4 +280,49 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
         .factor(BACKOFF_FACTOR)
         .max_delay(MAX_DELAY)
         .map(jitter)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::{
+        AdditionalColumnPulsarMessageIdData, AdditionalColumnRabbitmqAckData,
+    };
+
+    use super::*;
+
+    fn additional_column_desc(name: &str, column_type: ColumnType) -> SourceColumnDesc {
+        let mut desc = SourceColumnDesc::simple(name, DataType::Bytea, ColumnId::placeholder());
+        desc.additional_column = AdditionalColumn {
+            column_type: Some(column_type),
+        };
+        desc.is_hidden_addition_col = true;
+        desc
+    }
+
+    #[test]
+    fn source_state_column_indices_include_rabbitmq_ack_data() {
+        let columns = vec![
+            SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
+            additional_column_desc(
+                "_rw_pulsar_message_id_data",
+                ColumnType::PulsarMessageIdData(AdditionalColumnPulsarMessageIdData {}),
+            ),
+            additional_column_desc(
+                "_rw_rabbitmq_ack_data",
+                ColumnType::RabbitmqAckData(AdditionalColumnRabbitmqAckData {}),
+            ),
+        ];
+
+        assert_eq!(
+            get_split_offset_col_idx(&columns),
+            SourceStateColumnIndices {
+                split_idx: None,
+                offset_idx: None,
+                pulsar_message_id_idx: Some(1),
+                rabbitmq_ack_data_idx: Some(2),
+            }
+        );
+    }
 }

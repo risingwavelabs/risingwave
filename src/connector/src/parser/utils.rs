@@ -161,6 +161,16 @@ pub fn extract_pulsar_message_id_data_from_meta(meta: &SourceMeta) -> Option<Dat
     }
 }
 
+pub fn extract_rabbitmq_ack_data_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Rabbitmq(rabbitmq_meta) => rabbitmq_meta
+            .ack_data
+            .as_ref()
+            .map(|ack_data| Some(ScalarRefImpl::Bytea(ack_data))),
+        _ => None,
+    }
+}
+
 pub fn extract_header_inner_from_meta<'a>(
     meta: &'a SourceMeta,
     inner_field: &str,
@@ -177,5 +187,32 @@ pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
     match meta {
         SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use risingwave_common::types::ScalarRefImpl;
+
+    use super::extract_rabbitmq_ack_data_from_meta;
+    use crate::source::SourceMeta;
+    use crate::source::rabbitmq::source::RabbitmqMeta;
+
+    #[test]
+    fn rabbitmq_ack_data_extracted_from_source_meta() {
+        let ack_data = vec![1, 2, 3, 4];
+        let meta = SourceMeta::Rabbitmq(RabbitmqMeta {
+            ack_data: Some(ack_data.clone()),
+        });
+
+        let datum = extract_rabbitmq_ack_data_from_meta(&meta);
+
+        assert_matches!(datum, Some(Some(ScalarRefImpl::Bytea(bytes))) if bytes == ack_data.as_slice());
+    }
+
+    #[test]
+    fn rabbitmq_ack_data_extraction_ignores_non_rabbitmq_meta() {
+        assert!(extract_rabbitmq_ack_data_from_meta(&SourceMeta::Empty).is_none());
     }
 }

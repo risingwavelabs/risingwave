@@ -622,11 +622,15 @@ impl<S: StateStore> SourceExecutor<S> {
         )
         .await?;
 
-        let (Some(split_idx), Some(offset_idx), pulsar_message_id_idx) =
-            get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_split_offset_col_idx(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
+        let pulsar_message_id_idx = source_state_column_indices.pulsar_message_id_idx;
+        let rabbitmq_ack_data_idx = source_state_column_indices.rabbitmq_ack_data_idx;
 
         core.split_state_store.init_epoch(first_epoch).await?;
         {
@@ -1017,21 +1021,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     };
 
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
-                            task_builder.update_task_on_chunk(
-                                source_id,
-                                &latest_state,
-                                pulsar_message_id_col.clone(),
-                            );
-                        } else {
-                            let offset_col = chunk.column_at(offset_idx);
-                            task_builder.update_task_on_chunk(
-                                source_id,
-                                &latest_state,
-                                offset_col.clone(),
-                            );
-                        }
+                        let source_state_col_idx = checkpoint_source_state_col_idx(
+                            &task_builder.building_task,
+                            offset_idx,
+                            pulsar_message_id_idx,
+                            rabbitmq_ack_data_idx,
+                        );
+                        task_builder.update_task_on_chunk(
+                            source_id,
+                            &latest_state,
+                            chunk.column_at(source_state_col_idx).clone(),
+                        );
                     }
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused.
@@ -1061,12 +1061,13 @@ impl<S: StateStore> SourceExecutor<S> {
                         continue;
                     }
                     source_output_row_count.inc_by(card as u64);
-                    let to_remove_col_indices =
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            vec![split_idx, offset_idx, pulsar_message_id_idx]
-                        } else {
-                            vec![split_idx, offset_idx]
-                        };
+                    let mut to_remove_col_indices = vec![split_idx, offset_idx];
+                    if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                        to_remove_col_indices.push(pulsar_message_id_idx);
+                    }
+                    if let Some(rabbitmq_ack_data_idx) = rabbitmq_ack_data_idx {
+                        to_remove_col_indices.push(rabbitmq_ack_data_idx);
+                    }
                     let chunk =
                         prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
                     yield Message::Chunk(chunk);
@@ -1108,6 +1109,23 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
+fn checkpoint_source_state_col_idx(
+    task: &WaitCheckpointTask,
+    offset_idx: usize,
+    pulsar_message_id_idx: Option<usize>,
+    rabbitmq_ack_data_idx: Option<usize>,
+) -> usize {
+    match task {
+        WaitCheckpointTask::AckPulsarMessage(_) => {
+            pulsar_message_id_idx.expect("Pulsar message id column must be set.")
+        }
+        WaitCheckpointTask::AckRabbitmqMessage(_) => {
+            rabbitmq_ack_data_idx.expect("RabbitMQ ack data column must be set.")
+        }
+        _ => offset_idx,
+    }
+}
+
 struct WaitCheckpointTaskBuilder {
     wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
     building_task: WaitCheckpointTask,
@@ -1118,20 +1136,23 @@ impl WaitCheckpointTaskBuilder {
         &mut self,
         source_id: SourceId,
         latest_state: &HashMap<SplitId, SplitImpl>,
-        offset_col: ArrayRef,
+        source_state_col: ArrayRef,
     ) {
         match &mut self.building_task {
             WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
-                arrays.push(offset_col);
+                arrays.push(source_state_col);
             }
             WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
-                arrays.push(offset_col);
+                arrays.push(source_state_col);
             }
             WaitCheckpointTask::AckPulsarMessage(arrays) => {
                 // each pulsar chunk will only contain one split
                 let split_id = latest_state.keys().next().unwrap();
                 let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
-                arrays.push((pulsar_ack_channel_id, offset_col));
+                arrays.push((pulsar_ack_channel_id, source_state_col));
+            }
+            WaitCheckpointTask::AckRabbitmqMessage(arrays) => {
+                arrays.push(source_state_col);
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
@@ -1270,6 +1291,33 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::array::{Array, ArrayImpl, BytesArray, Utf8Array};
+
+    #[test]
+    fn rabbitmq_checkpoint_state_column_uses_ack_data_not_offset() {
+        let offset_idx = 0;
+        let rabbitmq_ack_data_idx = 1;
+        let offset_col = Arc::new(ArrayImpl::from(Utf8Array::from_iter([Some(
+            "wrong-offset-token",
+        )])));
+        let ack_data_col = Arc::new(ArrayImpl::from(BytesArray::from_iter([Some(
+            &[1, 2, 3, 4][..],
+        )])));
+        let columns = [offset_col, ack_data_col];
+        let task = WaitCheckpointTask::AckRabbitmqMessage(vec![]);
+
+        let selected_idx =
+            checkpoint_source_state_col_idx(&task, offset_idx, None, Some(rabbitmq_ack_data_idx));
+
+        assert_eq!(selected_idx, rabbitmq_ack_data_idx);
+        assert_eq!(
+            columns[selected_idx].as_bytea().value_at(0),
+            Some(&[1, 2, 3, 4][..])
+        );
+    }
+
     use maplit::{btreemap, convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field};
     use risingwave_common::id::SourceId;
