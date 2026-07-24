@@ -78,7 +78,7 @@ async fn test_batch_refresh_recovery() -> Result<()> {
 
     // Step 4: Trigger recovery and verify progress survives.
     eprintln!("=== Step 4: triggering recovery during backfill...");
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
     eprintln!("=== Step 4: recovery done");
 
     let progress_after = session
@@ -127,7 +127,7 @@ async fn test_batch_refresh_recovery() -> Result<()> {
 
     // Step 9: Trigger another recovery while the batch refresh job is idle.
     eprintln!("=== Step 9: triggering recovery while idle...");
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
     eprintln!("=== Step 9: recovery done");
 
     // Step 10: Verify that the MV is still queryable after idle recovery.
@@ -197,7 +197,7 @@ async fn test_batch_refresh_periodic_update() -> Result<()> {
     wait_for_batch_mv_count(&mut session, "100", "first periodic refresh").await?;
 
     // ── Recover while job is idle / between refresh cycles. ──────────────────
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
 
     // ── Second cycle: changes after recovery must still be picked up. ────────
     session
@@ -207,7 +207,7 @@ async fn test_batch_refresh_periodic_update() -> Result<()> {
     wait_for_batch_mv_count(&mut session, "200", "periodic refresh after CN recovery").await?;
 
     // ── Recover using meta + CN together, then run another cycle. ────────────
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    kill_cn_and_meta_and_wait_recover(&mut cluster).await;
 
     session.run("DELETE FROM t WHERE v1 <= 50;").await?;
     session.flush().await?;
