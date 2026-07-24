@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::optimizer::LogicalPlanRef as PlanRef;
+use crate::optimizer::plan_visitor::ShareParentCounter;
+use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 pub trait ColPrunable {
@@ -33,46 +34,51 @@ pub trait ColPrunable {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef;
 }
 
-#[derive(Clone, Debug)]
-struct RequiredColumns(Vec<usize>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColumnPruningPhase {
+    Idle,
+    Collect,
+    Rewrite,
+}
 
-impl ShareRequirement for RequiredColumns {
-    fn merge(requirements: Vec<Self>) -> Self {
-        Self(
-            requirements
-                .into_iter()
-                .flat_map(|required| required.0)
-                .sorted()
-                .dedup()
-                .collect(),
-        )
-    }
+#[derive(Debug, Clone)]
+struct ShareColumnPruning {
+    original_input: PlanRef,
+    required_cols: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
-    dag: ShareDagContext<RequiredColumns>,
+    pending_required_cols: HashMap<ShareId, Vec<Vec<usize>>>,
+    collected_shares: HashMap<ShareId, ShareColumnPruning>,
+    share_parent_counter: ShareParentCounter,
     share_mappings: HashMap<ShareId, ColIndexMapping>,
+    phase: ColumnPruningPhase,
 }
 
 impl ColumnPruningContext {
     pub fn new(root: PlanRef) -> Self {
+        let mut share_parent_counter = ShareParentCounter::default();
+        share_parent_counter.visit(root);
         Self {
-            dag: ShareDagContext::new(root),
+            pending_required_cols: HashMap::new(),
+            collected_shares: HashMap::new(),
+            share_parent_counter,
             share_mappings: HashMap::new(),
+            phase: ColumnPruningPhase::Idle,
         }
     }
 
     pub(in crate::optimizer) fn is_running(&self) -> bool {
-        self.dag.is_running()
+        self.phase != ColumnPruningPhase::Idle
     }
 
-    pub(in crate::optimizer) fn phase(&self) -> ShareDagPhase {
-        self.dag.phase()
+    pub(in crate::optimizer) fn is_collecting(&self) -> bool {
+        self.phase == ColumnPruningPhase::Collect
     }
 
     pub(in crate::optimizer) fn get_parent_num(&self, share: &LogicalShare) -> usize {
-        self.dag.parent_num(share)
+        self.share_parent_counter.get_parent_num(share)
     }
 
     pub(in crate::optimizer) fn add_required_cols(
@@ -80,9 +86,37 @@ impl ColumnPruningContext {
         share: &LogicalShare,
         required_cols: Vec<usize>,
     ) -> Option<Vec<usize>> {
-        self.dag
-            .record_requirement(share, RequiredColumns(required_cols))
-            .map(|required| required.0)
+        let share_id = share.share_id();
+        let parent_num = self.share_parent_counter.get_parent_num_by_id(share_id);
+        let pending = self.pending_required_cols.entry(share_id).or_default();
+        pending.push(required_cols);
+        assert!(
+            pending.len() <= parent_num,
+            "share {share_id:?} received more column requirements than parents"
+        );
+        if pending.len() != parent_num {
+            return None;
+        }
+
+        let merged_required_cols = self
+            .pending_required_cols
+            .remove(&share_id)
+            .expect("column requirements must exist")
+            .into_iter()
+            .flatten()
+            .sorted()
+            .dedup()
+            .collect_vec();
+        self.collected_shares
+            .try_insert(
+                share_id,
+                ShareColumnPruning {
+                    original_input: share.input(),
+                    required_cols: merged_required_cols.clone(),
+                },
+            )
+            .expect("column requirements must be merged once per share");
+        Some(merged_required_cols)
     }
 
     pub(in crate::optimizer) fn share_mapping(&self, share: &LogicalShare) -> ColIndexMapping {
@@ -97,36 +131,48 @@ impl ColumnPruningContext {
             .clone()
     }
 
-    pub(in crate::optimizer) fn run(&mut self, root: PlanRef, required_cols: &[usize]) -> PlanRef {
-        self.dag.reset(root.clone());
-        self.share_mappings.clear();
-        let optimizer_ctx = root.ctx();
+    /// Rebuilds one shared definition on first use. Nested shares recursively rebuild first, so
+    /// the call stack provides the child-before-parent order without a separate dependency graph.
+    pub(in crate::optimizer) fn ensure_share_rebuilt(&mut self, share: &LogicalShare) {
+        let share_id = share.share_id();
+        if self.share_mappings.contains_key(&share_id) {
+            return;
+        }
+        assert_eq!(self.phase, ColumnPruningPhase::Rewrite);
 
-        self.dag.set_phase(ShareDagPhase::Collect);
+        let Some(ShareColumnPruning {
+            original_input,
+            required_cols,
+        }) = self.collected_shares.remove(&share_id)
+        else {
+            panic!("share {share_id:?} has no collected column requirements");
+        };
+        let old_schema_len = original_input.schema().len();
+        let rebuilt_input = original_input.prune_col(&required_cols, self);
+        let mapping = ColIndexMapping::with_remaining_columns(&required_cols, old_schema_len);
+        debug_assert_eq!(mapping.target_size(), rebuilt_input.schema().len());
+
+        share.ctx().update_logical_share(share_id, rebuilt_input);
+        self.share_mappings
+            .try_insert(share_id, mapping)
+            .expect("a logical share must be rebuilt once");
+    }
+
+    pub(in crate::optimizer) fn run(&mut self, root: PlanRef, required_cols: &[usize]) -> PlanRef {
+        self.phase = ColumnPruningPhase::Collect;
         let collected = root.prune_col_inner(required_cols, self);
-        let rebuild_order = self.dag.rebuild_order();
-        if rebuild_order.is_empty() {
-            self.dag.finish();
+        assert!(
+            self.pending_required_cols.is_empty(),
+            "all shares must receive column requirements from every parent"
+        );
+        if self.collected_shares.is_empty() {
+            self.phase = ColumnPruningPhase::Idle;
             return collected;
         }
 
-        self.dag.set_phase(ShareDagPhase::Rebuild);
-        for share_id in rebuild_order {
-            let original_input = self.dag.original_input(share_id);
-            let required = self.dag.merged_requirement(share_id).0;
-            let old_schema_len = original_input.schema().len();
-            let rebuilt_input = original_input.prune_col(&required, self);
-            let mapping = ColIndexMapping::with_remaining_columns(&required, old_schema_len);
-            debug_assert_eq!(mapping.target_size(), rebuilt_input.schema().len());
-            self.share_mappings
-                .try_insert(share_id, mapping)
-                .expect("a logical share must be rebuilt once");
-            optimizer_ctx.update_logical_share(share_id, rebuilt_input);
-        }
-
-        self.dag.set_phase(ShareDagPhase::Adapt);
-        let result = root.prune_col(required_cols, self);
-        self.dag.finish();
+        self.phase = ColumnPruningPhase::Rewrite;
+        let result = root.prune_col_inner(required_cols, self);
+        self.phase = ColumnPruningPhase::Idle;
         result
     }
 }

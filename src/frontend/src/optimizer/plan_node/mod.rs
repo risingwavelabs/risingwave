@@ -466,42 +466,39 @@ impl LogicalPlanRef {
                 return logical_share.input().prune_col(required_cols, ctx);
             }
 
-            match ctx.phase() {
-                ShareDagPhase::Collect => {
-                    if let Some(merged_required_cols) =
-                        ctx.add_required_cols(logical_share, required_cols.to_vec())
-                    {
-                        // Continue collection below the share only after every parent has
-                        // contributed its requirement. The returned plan is intentionally ignored;
-                        // the input is rebuilt in dependency order in the next phase.
-                        let _ = logical_share.input().prune_col(&merged_required_cols, ctx);
-                    }
+            if ctx.is_collecting() {
+                if let Some(merged_required_cols) =
+                    ctx.add_required_cols(logical_share, required_cols.to_vec())
+                {
+                    // Continue collection below the share only after every parent has
+                    // contributed its requirement. Rewriting happens in the next phase.
+                    let _ = logical_share.input().prune_col(&merged_required_cols, ctx);
+                }
 
-                    let mapping =
-                        ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-                    LogicalProject::with_mapping(self.clone(), mapping).into()
-                }
-                ShareDagPhase::Rebuild | ShareDagPhase::Adapt => {
-                    let share_mapping = ctx.share_mapping(logical_share);
-                    let new_required_cols = required_cols
-                        .iter()
-                        .map(|&column| {
-                            share_mapping.try_map(column).unwrap_or_else(|| {
-                                panic!(
-                                    "column {column} is absent from the collected mapping for share {:?}",
-                                    logical_share.share_id()
-                                )
-                            })
+                let mapping =
+                    ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+                LogicalProject::with_mapping(self.clone(), mapping).into()
+            } else {
+                ctx.ensure_share_rebuilt(logical_share);
+                let share_mapping = ctx.share_mapping(logical_share);
+                let new_required_cols = required_cols
+                    .iter()
+                    .map(|&column| {
+                        share_mapping.try_map(column).unwrap_or_else(|| {
+                            panic!(
+                                "column {column} is absent from the collected mapping for share {:?}",
+                                logical_share.share_id()
+                            )
                         })
-                        .collect_vec();
-                    let refreshed_share: LogicalPlanRef =
-                        LogicalShare::from_share_id(self.ctx(), logical_share.share_id()).into();
-                    let mapping = ColIndexMapping::with_remaining_columns(
-                        &new_required_cols,
-                        refreshed_share.schema().len(),
-                    );
-                    LogicalProject::with_mapping(refreshed_share, mapping).into()
-                }
+                    })
+                    .collect_vec();
+                let refreshed_share: LogicalPlanRef =
+                    LogicalShare::from_share_id(self.ctx(), logical_share.share_id()).into();
+                let mapping = ColIndexMapping::with_remaining_columns(
+                    &new_required_cols,
+                    refreshed_share.schema().len(),
+                );
+                LogicalProject::with_mapping(refreshed_share, mapping).into()
             }
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -521,24 +518,21 @@ impl LogicalPlanRef {
                 return logical_share.input().predicate_pushdown(predicate, ctx);
             }
 
-            match ctx.phase() {
-                ShareDagPhase::Collect => {
-                    if let Some(merged_predicate) =
-                        ctx.add_predicate(logical_share, predicate.clone())
-                    {
-                        // Continue collection below the share only after every parent has
-                        // contributed. Rebuilding happens later in dependency order.
-                        let _ = logical_share
-                            .input()
-                            .predicate_pushdown(merged_predicate, ctx);
-                    }
-                    LogicalFilter::create(self.clone(), predicate)
+            if ctx.is_collecting() {
+                if let Some(merged_predicate) = ctx.add_predicate(logical_share, predicate.clone())
+                {
+                    // Continue collection below the share only after every parent has
+                    // contributed. Rewriting happens in the next phase.
+                    let _ = logical_share
+                        .input()
+                        .predicate_pushdown(merged_predicate, ctx);
                 }
-                ShareDagPhase::Rebuild | ShareDagPhase::Adapt => {
-                    let refreshed_share: LogicalPlanRef =
-                        LogicalShare::from_share_id(self.ctx(), logical_share.share_id()).into();
-                    LogicalFilter::create(refreshed_share, predicate)
-                }
+                LogicalFilter::create(self.clone(), predicate)
+            } else {
+                ctx.ensure_share_rebuilt(logical_share);
+                let refreshed_share: LogicalPlanRef =
+                    LogicalShare::from_share_id(self.ctx(), logical_share.share_id()).into();
+                LogicalFilter::create(refreshed_share, predicate)
             }
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -991,8 +985,6 @@ mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
-mod share_dag;
-pub use share_dag::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
 

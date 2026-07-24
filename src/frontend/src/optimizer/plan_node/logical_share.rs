@@ -314,6 +314,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_nested_share_predicate_pushdown() {
+        let ctx = OptimizerContext::mock();
+        let schema = Schema::new(vec![Field::with_name(DataType::Int32, "v")]);
+        let values: PlanRef = LogicalValues::new(vec![], schema, ctx.clone()).into();
+
+        let inner = LogicalShare::create(values);
+        let inner_id = inner.as_logical_share().unwrap().share_id();
+        let outer = LogicalShare::create(inner.clone());
+        let outer_id = outer.as_logical_share().unwrap().share_id();
+
+        let eq_const = |value| {
+            ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                        ExprImpl::Literal(Box::new(Literal::new(
+                            Some(ScalarImpl::from(value)),
+                            DataType::Int32,
+                        ))),
+                    ],
+                )
+                .unwrap(),
+            ))
+        };
+        let outer_left = LogicalFilter::create_with_expr(outer.clone(), eq_const(100));
+        let outer_right = LogicalFilter::create_with_expr(outer, eq_const(200));
+        let inner_direct = LogicalFilter::create_with_expr(inner, eq_const(300));
+        let root = LogicalUnion::create(true, vec![outer_left, outer_right, inner_direct]);
+
+        let _ = root.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(root.clone()),
+        );
+
+        let outer_input = ctx.logical_share(outer_id).input();
+        let outer_filter = outer_input.as_logical_filter().unwrap();
+        assert_eq!(
+            outer_filter.predicate().conjunctions[0]
+                .as_or_disjunctions()
+                .unwrap()
+                .len(),
+            2
+        );
+        let rebuilt_inner = outer_filter.input();
+        let rebuilt_inner_share = rebuilt_inner.as_logical_share().unwrap();
+        assert_eq!(rebuilt_inner_share.share_id(), inner_id);
+        assert_eq!(
+            rebuilt_inner_share
+                .input()
+                .as_logical_filter()
+                .unwrap()
+                .predicate()
+                .conjunctions[0]
+                .as_or_disjunctions()
+                .unwrap()
+                .len(),
+            3
+        );
+
+        let inner_input = ctx.logical_share(inner_id).input();
+        let inner_filter = inner_input.as_logical_filter().unwrap();
+        assert_eq!(
+            inner_filter.predicate().conjunctions[0]
+                .as_or_disjunctions()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[tokio::test]
     async fn test_nested_share_column_pruning() {
         let ctx = OptimizerContext::mock();
         let schema = Schema::new(vec![
