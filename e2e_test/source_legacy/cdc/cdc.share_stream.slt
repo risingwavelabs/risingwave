@@ -924,6 +924,7 @@ order by id;
 ----
 1 still_plain_text_1 (USD,66.66) (USD,20.00) (USD,7.66) (foo_updated,"(9,t,baz)")
 3 QmFzZTY0P2J1dF9wbGFpbg== (JPY,1234.56) (JPY,2000.00) (JPY,765.44) (baz,"(3,f,delta)")
+4 toast_marker_update (AUD,4.40) (AUD,5.50) (AUD,1.10) (toast,"(4,t,large_array)")
 
 query IITTTTT retry 8 backoff 1s
 select id, note_varchar, total, listed_price, listed_discount, complex_col
@@ -932,6 +933,7 @@ order by id;
 ----
 1 still_plain_text_1 (USD,66.66) (USD,20.00) (USD,7.66) (foo_updated,"(9,t,baz)")
 3 QmFzZTY0P2J1dF9wbGFpbg== (JPY,1234.56) (JPY,2000.00) (JPY,765.44) (baz,"(3,f,delta)")
+4 toast_marker_update (AUD,4.40) (AUD,5.50) (AUD,1.10) (toast,"(4,t,large_array)")
 
 statement ok
 CREATE TABLE test_pg_default_value (
