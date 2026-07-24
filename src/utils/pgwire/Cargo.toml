@@ -19,7 +19,7 @@ ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-
 openssl = { workspace = true }
 panic-message = "0.3"
 parking_lot = { workspace = true }
-peekable = { version = "0.4", features = ["tokio"] }
+peekable = { version = "0.6", features = ["tokio"] }
 postgres-types = { version = "0.2.6" }
 reqwest = "0.12.2"
 risingwave_common = { workspace = true }
