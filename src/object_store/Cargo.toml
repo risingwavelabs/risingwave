@@ -44,7 +44,7 @@ pin-project-lite = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
-spin = "0.10"
+spin = "0.12"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
