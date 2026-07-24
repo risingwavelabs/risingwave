@@ -55,7 +55,7 @@ pub const LOCAL_PHASE_VNODE_COLUMN_NAME: &str = "_vnode";
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
-#[allow(clippy::manual_non_exhaustive)]
+#[expect(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
     /// Mapping from expr index to field name. May not contain all exprs.

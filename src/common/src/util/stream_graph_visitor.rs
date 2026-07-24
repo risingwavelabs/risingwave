@@ -18,6 +18,13 @@ use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{SourceBackfillNode, StreamNode, StreamScanNode, agg_call_state};
 
+#[macro_export]
+macro_rules! dispatch_stream_node_body {
+    ($body:expr, $node_body:ident, $node:ident => $call:expr) => {
+        ::risingwave_pb::__dispatch_stream_node_body!($body, $node_body, $node => $call)
+    };
+}
+
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
 pub fn visit_stream_node_mut(stream_node: &mut StreamNode, mut f: impl FnMut(&mut NodeBody)) {
     visit_stream_node_cont_mut(stream_node, |stream_node| {
@@ -247,6 +254,10 @@ pub fn visit_stream_node_tables_inner<F>(
             // EOWC over window
             NodeBody::EowcOverWindow(node) => {
                 always!(node.state_table, "EowcOverWindow");
+                optional!(
+                    node.intermediate_state_table,
+                    "EowcOverWindowIntermediateState"
+                );
             }
 
             NodeBody::OverWindow(node) => {
@@ -269,7 +280,6 @@ pub fn visit_stream_node_tables_inner<F>(
             }
 
             NodeBody::EowcGapFill(node) => {
-                always!(node.buffer_table, "EowcGapFillBufferTable");
                 always!(node.prev_row_table, "EowcGapFillPrevRowTable");
             }
 
@@ -322,6 +332,11 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "LocalityProviderState");
                 always!(node.progress_table, "LocalityProviderProgress");
             }
+
+            NodeBody::IcebergWithPkIndexWriter(node) => {
+                always!(node.pk_index_table, "IcebergWithPkIndexWriter");
+            }
+
             _ => {}
         }
     };

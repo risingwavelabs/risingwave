@@ -91,6 +91,7 @@ impl Frame {
         use risingwave_pb::expr::window_frame::PbType;
         let bounds = match frame.get_type()? {
             PbType::Unspecified => bail!("unspecified type of `WindowFrame`"),
+            #[expect(deprecated)]
             PbType::RowsLegacy => {
                 #[expect(deprecated)]
                 {

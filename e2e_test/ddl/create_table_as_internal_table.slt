@@ -1,0 +1,25 @@
+control substitution on
+
+statement ok
+create table internal_ctas_t (v1 int);
+
+statement ok
+create materialized view internal_ctas_source as select * from internal_ctas_t;
+
+let internal_streamscan_table
+SELECT name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'internal_ctas_source'
+  AND name LIKE '%streamscan%'
+ORDER BY id
+LIMIT 1
+
+statement error CREATE TABLE AS does not support internal table
+create table internal_ctas_target as
+select * from ${internal_streamscan_table};
+
+statement ok
+drop materialized view internal_ctas_source;
+
+statement ok
+drop table internal_ctas_t;

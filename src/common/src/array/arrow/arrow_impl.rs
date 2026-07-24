@@ -46,7 +46,7 @@ use arrow_array::array;
 use arrow_array::cast::AsArray;
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::TimeUnit;
-use chrono::{DateTime, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, Timelike as _};
 use itertools::Itertools;
 
 use super::arrow_schema::IntervalUnit;
@@ -169,7 +169,7 @@ pub trait ToArrow {
 
     #[inline]
     fn date_to_arrow(&self, array: &DateArray) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::Date32Array::from(array)))
+        Ok(Arc::new(arrow_array::Date32Array::try_from(array)?))
     }
 
     #[inline]
@@ -202,9 +202,9 @@ pub trait ToArrow {
         &self,
         array: &IntervalArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        Ok(Arc::new(arrow_array::IntervalMonthDayNanoArray::from(
+        Ok(Arc::new(arrow_array::IntervalMonthDayNanoArray::try_from(
             array,
-        )))
+        )?))
     }
 
     #[inline]
@@ -287,15 +287,20 @@ pub trait ToArrow {
         let arrow_schema::DataType::Struct(fields) = data_type else {
             return Err(ArrayError::to_arrow("Invalid struct type"));
         };
-        Ok(Arc::new(arrow_array::StructArray::new(
-            fields.clone(),
-            array
-                .fields()
-                .zip_eq_fast(fields)
-                .map(|(arr, field)| self.to_array(field.data_type(), arr))
-                .try_collect::<_, _, ArrayError>()?,
-            Some(array.null_bitmap().into()),
-        )))
+        // Use `try_new_with_length` so that empty-field structs keep their row count;
+        // `StructArray::new` panics for empty `fields` because it derives length from
+        // the child arrays.
+        let len = array.len();
+        let child_arrays = array
+            .fields()
+            .zip_eq_fast(fields)
+            .map(|(arr, field)| self.to_array(field.data_type(), arr))
+            .try_collect::<_, _, ArrayError>()?;
+        let nulls = Some(array.null_bitmap().into());
+        Ok(Arc::new(
+            arrow_array::StructArray::try_new_with_length(fields.clone(), child_arrays, nulls, len)
+                .map_err(ArrayError::from_arrow)?,
+        ))
     }
 
     #[inline]
@@ -551,7 +556,9 @@ pub trait FromArrow {
             Decimal128(_, _) => DataType::Decimal,
             Decimal256(_, _) => DataType::Int256,
             Date32 => DataType::Date,
-            Time64(Microsecond) => DataType::Time,
+            Time32(Second) | Time32(Millisecond) | Time64(Microsecond) | Time64(Nanosecond) => {
+                DataType::Time
+            }
             Timestamp(Microsecond, None) => DataType::Timestamp,
             Timestamp(Microsecond, Some(_)) => DataType::Timestamptz,
             Timestamp(Second, None) => DataType::Timestamp,
@@ -564,6 +571,9 @@ pub trait FromArrow {
             Utf8 => DataType::Varchar,
             Utf8View => DataType::Varchar,
             Binary => DataType::Bytea,
+            // Iceberg `uuid` maps to `FixedSizeBinary(16)` and `fixed[L]` maps to
+            // `FixedSizeBinary(L)`. Both are represented as `Bytea` in RisingWave.
+            FixedSizeBinary(_) => self.from_fixed_size_binary()?,
             LargeUtf8 => self.from_large_utf8()?,
             LargeBinary => self.from_large_binary()?,
             List(field) => DataType::list(self.from_field(field)?),
@@ -589,6 +599,11 @@ pub trait FromArrow {
 
     /// Converts Arrow `LargeBinary` type to RisingWave data type.
     fn from_large_binary(&self) -> Result<DataType, ArrayError> {
+        Ok(DataType::Bytea)
+    }
+
+    /// Converts Arrow `FixedSizeBinary` type to RisingWave data type.
+    fn from_fixed_size_binary(&self) -> Result<DataType, ArrayError> {
         Ok(DataType::Bytea)
     }
 
@@ -658,7 +673,10 @@ pub trait FromArrow {
             Float32 => self.from_float32_array(array.as_any().downcast_ref().unwrap()),
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
             Date32 => self.from_date32_array(array.as_any().downcast_ref().unwrap()),
+            Time32(Second) => self.from_time32s_array(array.as_any().downcast_ref().unwrap()),
+            Time32(Millisecond) => self.from_time32ms_array(array.as_any().downcast_ref().unwrap()),
             Time64(Microsecond) => self.from_time64us_array(array.as_any().downcast_ref().unwrap()),
+            Time64(Nanosecond) => self.from_time64ns_array(array.as_any().downcast_ref().unwrap()),
             Timestamp(Second, None) => {
                 self.from_timestampsecond_array(array.as_any().downcast_ref().unwrap())
             }
@@ -689,6 +707,9 @@ pub trait FromArrow {
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Utf8View => self.from_utf8_view_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
+            FixedSizeBinary(_) => {
+                self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap())
+            }
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
@@ -803,76 +824,97 @@ pub trait FromArrow {
     }
 
     fn from_date32_array(&self, array: &arrow_array::Date32Array) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Date(array.into()))
+        Ok(ArrayImpl::Date(array.try_into()?))
+    }
+
+    fn from_time32s_array(
+        &self,
+        array: &arrow_array::Time32SecondArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Time(array.try_into()?))
+    }
+
+    fn from_time32ms_array(
+        &self,
+        array: &arrow_array::Time32MillisecondArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Time(array.try_into()?))
     }
 
     fn from_time64us_array(
         &self,
         array: &arrow_array::Time64MicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Time(array.into()))
+        Ok(ArrayImpl::Time(array.try_into()?))
+    }
+
+    fn from_time64ns_array(
+        &self,
+        array: &arrow_array::Time64NanosecondArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Time(array.try_into()?))
     }
 
     fn from_timestampsecond_array(
         &self,
         array: &arrow_array::TimestampSecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::Timestamp(array.try_into()?))
     }
     fn from_timestampsecond_some_array(
         &self,
         array: &arrow_array::TimestampSecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamptz(array.into()))
+        Ok(ArrayImpl::Timestamptz(array.try_into()?))
     }
 
     fn from_timestampms_array(
         &self,
         array: &arrow_array::TimestampMillisecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::Timestamp(array.try_into()?))
     }
 
     fn from_timestampms_some_array(
         &self,
         array: &arrow_array::TimestampMillisecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamptz(array.into()))
+        Ok(ArrayImpl::Timestamptz(array.try_into()?))
     }
 
     fn from_timestampus_array(
         &self,
         array: &arrow_array::TimestampMicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::Timestamp(array.try_into()?))
     }
 
     fn from_timestampus_some_array(
         &self,
         array: &arrow_array::TimestampMicrosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamptz(array.into()))
+        Ok(ArrayImpl::Timestamptz(array.try_into()?))
     }
 
     fn from_timestampns_array(
         &self,
         array: &arrow_array::TimestampNanosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::Timestamp(array.try_into()?))
     }
 
     fn from_timestampns_some_array(
         &self,
         array: &arrow_array::TimestampNanosecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamptz(array.into()))
+        Ok(ArrayImpl::Timestamptz(array.try_into()?))
     }
 
     fn from_interval_array(
         &self,
         array: &arrow_array::IntervalMonthDayNanoArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Interval(array.into()))
+        Ok(ArrayImpl::Interval(array.try_into()?))
     }
 
     fn from_utf8_array(&self, array: &arrow_array::StringArray) -> Result<ArrayImpl, ArrayError> {
@@ -902,6 +944,13 @@ pub trait FromArrow {
         array: &arrow_array::LargeBinaryArray,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Bytea(array.into()))
+    }
+
+    fn from_fixed_size_binary_array(
+        &self,
+        array: &arrow_array::FixedSizeBinaryArray,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Bytea(array.iter().collect()))
     }
 
     fn from_list_array(&self, array: &arrow_array::ListArray) -> Result<ArrayImpl, ArrayError> {
@@ -1085,6 +1134,38 @@ macro_rules! converts {
             }
         }
     };
+    // convert values using TryFromIntoArrow
+    ($ArrayType:ty, $ArrowType:ty, @try_map) => {
+        impl TryFrom<&$ArrayType> for $ArrowType {
+            type Error = ArrayError;
+
+            fn try_from(array: &$ArrayType) -> Result<Self, Self::Error> {
+                // Collecting `Result`s loses the iterator's size hint, so build with an
+                // explicit capacity instead.
+                let mut builder = <$ArrowType>::builder(array.len());
+                for o in array.iter() {
+                    builder.append_option(o.map(|v| v.try_into_arrow()).transpose()?);
+                }
+                Ok(builder.finish())
+            }
+        }
+        impl TryFrom<&$ArrowType> for $ArrayType {
+            type Error = ArrayError;
+
+            fn try_from(array: &$ArrowType) -> Result<Self, Self::Error> {
+                use arrow_array::Array as _;
+
+                let mut builder = <$ArrayType as Array>::Builder::new(array.len());
+                for o in array.iter() {
+                    builder.append(
+                        o.map(<<$ArrayType as Array>::RefItem<'_> as TryFromIntoArrow>::try_from_arrow)
+                            .transpose()?,
+                    );
+                }
+                Ok(builder.finish())
+            }
+        }
+    };
 }
 
 /// Used to convert different types.
@@ -1118,40 +1199,42 @@ macro_rules! converts_with_type {
     };
 }
 
-macro_rules! converts_with_timeunit {
-    ($ArrayType:ty, $ArrowType:ty, $time_unit:expr, @map) => {
-
-        impl From<&$ArrayType> for $ArrowType {
+macro_rules! converts_with_time_unit {
+    ($ArrayType:ty, $ArrowType:ident, $time_unit:ident) => {
+        impl From<&$ArrayType> for arrow_array::$ArrowType {
             fn from(array: &$ArrayType) -> Self {
-                array.iter().map(|o| o.map(|v| v.into_arrow_with_unit($time_unit))).collect()
-            }
-        }
-
-        impl From<&$ArrowType> for $ArrayType {
-            fn from(array: &$ArrowType) -> Self {
-                array.iter().map(|o| {
-                    o.map(|v| {
-                        let timestamp = <<$ArrayType as Array>::RefItem<'_> as FromIntoArrowWithUnit>::from_arrow_with_unit(v, $time_unit);
-                        timestamp
-                    })
-                }).collect()
-            }
-        }
-
-        impl From<&[$ArrowType]> for $ArrayType {
-            fn from(arrays: &[$ArrowType]) -> Self {
-                arrays
+                array
                     .iter()
-                    .flat_map(|a| a.iter())
-                    .map(|o| {
-                        o.map(|v| {
-                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrowWithUnit>::from_arrow_with_unit(v, $time_unit)
-                        })
-                    })
+                    .map(|o| o.map(|v| into_arrow_temporal_value(v, TimeUnit::$time_unit)))
                     .collect()
             }
         }
 
+        impl TryFrom<&arrow_array::$ArrowType> for $ArrayType {
+            type Error = ArrayError;
+
+            fn try_from(array: &arrow_array::$ArrowType) -> Result<Self, Self::Error> {
+                Self::try_from(std::slice::from_ref(array))
+            }
+        }
+
+        impl TryFrom<&[arrow_array::$ArrowType]> for $ArrayType {
+            type Error = ArrayError;
+
+            fn try_from(arrays: &[arrow_array::$ArrowType]) -> Result<Self, Self::Error> {
+                use arrow_array::Array as _;
+
+                let mut builder =
+                    <$ArrayType as Array>::Builder::new(arrays.iter().map(|a| a.len()).sum());
+                for o in arrays.iter().flat_map(|a| a.iter()) {
+                    builder.append(
+                        o.map(|v| try_from_arrow_temporal_value(v, TimeUnit::$time_unit))
+                            .transpose()?,
+                    );
+                }
+                Ok(builder.finish())
+            }
+        }
     };
 }
 
@@ -1166,9 +1249,8 @@ converts!(BytesArray, arrow_array::LargeBinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
 converts!(Utf8Array, arrow_array::StringViewArray);
-converts!(DateArray, arrow_array::Date32Array, @map);
-converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
-converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
+converts!(DateArray, arrow_array::Date32Array, @try_map);
+converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @try_map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
 
 converts_with_type!(I16Array, arrow_array::Int8Array, i16, i8);
@@ -1176,15 +1258,20 @@ converts_with_type!(I16Array, arrow_array::UInt8Array, i16, u8);
 converts_with_type!(I32Array, arrow_array::UInt16Array, i32, u16);
 converts_with_type!(I64Array, arrow_array::UInt32Array, i64, u32);
 
-converts_with_timeunit!(TimestampArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
-converts_with_timeunit!(TimestampArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
-converts_with_timeunit!(TimestampArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
-converts_with_timeunit!(TimestampArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+converts_with_time_unit!(TimeArray, Time32SecondArray, Second);
+converts_with_time_unit!(TimeArray, Time32MillisecondArray, Millisecond);
+converts_with_time_unit!(TimeArray, Time64MicrosecondArray, Microsecond);
+converts_with_time_unit!(TimeArray, Time64NanosecondArray, Nanosecond);
 
-converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
-converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMillisecondArray,TimeUnit::Millisecond, @map);
-converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
-converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+converts_with_time_unit!(TimestampArray, TimestampSecondArray, Second);
+converts_with_time_unit!(TimestampArray, TimestampMillisecondArray, Millisecond);
+converts_with_time_unit!(TimestampArray, TimestampMicrosecondArray, Microsecond);
+converts_with_time_unit!(TimestampArray, TimestampNanosecondArray, Nanosecond);
+
+converts_with_time_unit!(TimestamptzArray, TimestampSecondArray, Second);
+converts_with_time_unit!(TimestamptzArray, TimestampMillisecondArray, Millisecond);
+converts_with_time_unit!(TimestamptzArray, TimestampMicrosecondArray, Microsecond);
+converts_with_time_unit!(TimestamptzArray, TimestampNanosecondArray, Nanosecond);
 
 /// Converts RisingWave value from and into Arrow value.
 trait FromIntoArrow {
@@ -1194,14 +1281,40 @@ trait FromIntoArrow {
     fn into_arrow(self) -> Self::ArrowType;
 }
 
-/// Converts RisingWave value from and into Arrow value.
-/// Specifically used for converting timestamp types according to timeunit.
-trait FromIntoArrowWithUnit {
+/// Like [`FromIntoArrow`], for values whose Arrow representation does not cover the whole
+/// RisingWave domain, or vice versa.
+trait TryFromIntoArrow: Sized {
+    /// The corresponding element type in the Arrow array.
     type ArrowType;
-    /// The timestamp type used to distinguish different time units, only utilized when the Arrow type is a timestamp.
-    type TimestampType;
-    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self;
-    fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType;
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError>;
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError>;
+}
+
+/// Converts a RisingWave temporal scalar to and from Arrow's physical primitive
+/// value using an Arrow time unit.
+trait TemporalArrowConvert<ArrowNative>: Sized {
+    fn try_from_arrow_with_time_unit(
+        value: ArrowNative,
+        time_unit: TimeUnit,
+    ) -> Result<Self, ArrayError>;
+    fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> ArrowNative;
+}
+
+fn try_from_arrow_temporal_value<Value, ArrowNative>(
+    value: ArrowNative,
+    time_unit: TimeUnit,
+) -> Result<Value, ArrayError>
+where
+    Value: TemporalArrowConvert<ArrowNative>,
+{
+    Value::try_from_arrow_with_time_unit(value, time_unit)
+}
+
+fn into_arrow_temporal_value<Value, ArrowNative>(value: Value, time_unit: TimeUnit) -> ArrowNative
+where
+    Value: TemporalArrowConvert<ArrowNative>,
+{
+    value.into_arrow_with_time_unit(time_unit)
 }
 
 impl FromIntoArrow for Serial {
@@ -1240,59 +1353,84 @@ impl FromIntoArrow for F64 {
     }
 }
 
-impl FromIntoArrow for Date {
+impl TryFromIntoArrow for Date {
     type ArrowType = i32;
 
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Date(arrow_array::types::Date32Type::to_naive_date(value))
+    #[allow(deprecated)]
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError> {
+        arrow_array::types::Date32Type::to_naive_date_opt(value)
+            .map(Date)
+            .ok_or_else(|| ArrayError::from_arrow(format!("invalid Arrow date {value}")))
     }
 
-    fn into_arrow(self) -> Self::ArrowType {
-        arrow_array::types::Date32Type::from_naive_date(self.0)
-    }
-}
-
-impl FromIntoArrow for Time {
-    type ArrowType = i64;
-
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Time(
-            NaiveTime::from_num_seconds_from_midnight_opt(
-                (value / 1_000_000) as _,
-                (value % 1_000_000 * 1000) as _,
-            )
-            .unwrap(),
-        )
-    }
-
-    fn into_arrow(self) -> Self::ArrowType {
-        self.0
-            .signed_duration_since(NaiveTime::default())
-            .num_microseconds()
-            .unwrap()
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError> {
+        Ok(arrow_array::types::Date32Type::from_naive_date(self.0))
     }
 }
 
-impl FromIntoArrowWithUnit for Timestamp {
-    type ArrowType = i64;
-    type TimestampType = TimeUnit;
+/// Arrow `Time32` arrays are defined only for second and millisecond units.
+impl TemporalArrowConvert<i32> for Time {
+    fn try_from_arrow_with_time_unit(value: i32, time_unit: TimeUnit) -> Result<Self, ArrayError> {
+        u32::try_from(value)
+            .ok()
+            .and_then(|v| match time_unit {
+                TimeUnit::Second => Time::with_secs_nano(v, 0).ok(),
+                TimeUnit::Millisecond => Time::with_milli(v).ok(),
+                unit => unreachable!("{unit:?} is not a Time32 unit"),
+            })
+            .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit))
+    }
 
-    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
+    fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> i32 {
         match time_unit {
-            TimeUnit::Second => {
-                Timestamp(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
-            }
+            TimeUnit::Second => self.0.num_seconds_from_midnight() as i32,
             TimeUnit::Millisecond => {
-                Timestamp(DateTime::from_timestamp_millis(value).unwrap().naive_utc())
+                (self.0.num_seconds_from_midnight() * 1_000 + self.0.nanosecond() / 1_000_000)
+                    as i32
             }
-            TimeUnit::Microsecond => {
-                Timestamp(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
-            }
-            TimeUnit::Nanosecond => Timestamp(DateTime::from_timestamp_nanos(value).naive_utc()),
+            unit => unreachable!("{unit:?} is not a Time32 unit"),
+        }
+    }
+}
+
+/// Arrow `Time64` arrays are defined only for microsecond and nanosecond units.
+///
+/// RisingWave's `time` is microsecond-precision, so nanoseconds are truncated.
+impl TemporalArrowConvert<i64> for Time {
+    fn try_from_arrow_with_time_unit(value: i64, time_unit: TimeUnit) -> Result<Self, ArrayError> {
+        u64::try_from(value)
+            .ok()
+            .and_then(|v| match time_unit {
+                TimeUnit::Microsecond => Time::with_micro(v).ok(),
+                TimeUnit::Nanosecond => Time::with_micro(v / 1_000).ok(),
+                unit => unreachable!("{unit:?} is not a Time64 unit"),
+            })
+            .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit))
+    }
+
+    fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> i64 {
+        match time_unit {
+            TimeUnit::Microsecond => self.micros_of_day() as i64,
+            TimeUnit::Nanosecond => self.nanos_of_day() as i64,
+            unit => unreachable!("{unit:?} is not a Time64 unit"),
+        }
+    }
+}
+
+impl TemporalArrowConvert<i64> for Timestamp {
+    fn try_from_arrow_with_time_unit(value: i64, time_unit: TimeUnit) -> Result<Self, ArrayError> {
+        match time_unit {
+            TimeUnit::Second => Timestamp::with_secs_nsecs(value, 0)
+                .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Millisecond => Timestamp::with_millis(value)
+                .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Microsecond => Timestamp::with_micros(value)
+                .map_err(|_| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Nanosecond => Ok(Timestamp::with_nanos(value)),
         }
     }
 
-    fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType {
+    fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> i64 {
         match time_unit {
             TimeUnit::Second => self.0.and_utc().timestamp(),
             TimeUnit::Millisecond => self.0.and_utc().timestamp_millis(),
@@ -1302,20 +1440,22 @@ impl FromIntoArrowWithUnit for Timestamp {
     }
 }
 
-impl FromIntoArrowWithUnit for Timestamptz {
-    type ArrowType = i64;
-    type TimestampType = TimeUnit;
-
-    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
+impl TemporalArrowConvert<i64> for Timestamptz {
+    fn try_from_arrow_with_time_unit(value: i64, time_unit: TimeUnit) -> Result<Self, ArrayError> {
         match time_unit {
-            TimeUnit::Second => Timestamptz::from_secs(value).unwrap_or_default(),
-            TimeUnit::Millisecond => Timestamptz::from_millis(value).unwrap_or_default(),
-            TimeUnit::Microsecond => Timestamptz::from_micros(value),
-            TimeUnit::Nanosecond => Timestamptz::from_nanos(value).unwrap_or_default(),
+            TimeUnit::Second => Timestamptz::from_secs(value)
+                .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Millisecond => Timestamptz::from_millis(value)
+                .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
+            // `Timestamptz::from_micros` does not validate; see #26397.
+            TimeUnit::Microsecond => DateTime::from_timestamp_micros(value)
+                .map(Timestamptz::from)
+                .ok_or_else(|| invalid_arrow_temporal_value(value, time_unit)),
+            TimeUnit::Nanosecond => Ok(Timestamptz::from_nanos(value)),
         }
     }
 
-    fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType {
+    fn into_arrow_with_time_unit(self, time_unit: TimeUnit) -> i64 {
         match time_unit {
             TimeUnit::Second => self.timestamp(),
             TimeUnit::Millisecond => self.timestamp_millis(),
@@ -1325,20 +1465,35 @@ impl FromIntoArrowWithUnit for Timestamptz {
     }
 }
 
-impl FromIntoArrow for Interval {
+fn invalid_arrow_temporal_value<T: std::fmt::Display>(value: T, time_unit: TimeUnit) -> ArrayError {
+    ArrayError::from_arrow(format!(
+        "invalid Arrow temporal value {value} for unit {time_unit:?}"
+    ))
+}
+
+impl TryFromIntoArrow for Interval {
     type ArrowType = ArrowIntervalType;
 
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Interval::from_month_day_usec(value.months, value.days, value.nanoseconds / 1000)
+    /// RisingWave's `interval` is microsecond-precision, so nanoseconds are truncated.
+    fn try_from_arrow(value: Self::ArrowType) -> Result<Self, ArrayError> {
+        Ok(Interval::from_month_day_usec(
+            value.months,
+            value.days,
+            value.nanoseconds / 1_000,
+        ))
     }
 
-    fn into_arrow(self) -> Self::ArrowType {
-        ArrowIntervalType {
+    fn try_into_arrow(self) -> Result<Self::ArrowType, ArrayError> {
+        Ok(ArrowIntervalType {
             months: self.months(),
             days: self.days(),
-            // TODO: this may overflow and we need `try_into`
-            nanoseconds: self.usecs() * 1000,
-        }
+            nanoseconds: self.usecs().checked_mul(1_000).ok_or_else(|| {
+                ArrayError::to_arrow(format!(
+                    "interval with {} microseconds is out of range for Arrow",
+                    self.usecs()
+                ))
+            })?,
+        })
     }
 }
 
@@ -1625,7 +1780,10 @@ pub fn is_parquet_schema_match_source_schema(
         | (ArrowType::Time32(_) | ArrowType::Time64(_), RwType::Time)
         | (ArrowType::Interval(arrow_schema::IntervalUnit::MonthDayNano), RwType::Interval)
         | (ArrowType::Utf8 | ArrowType::LargeUtf8, RwType::Varchar)
-        | (ArrowType::Binary | ArrowType::LargeBinary, RwType::Bytea) => true,
+        | (
+            ArrowType::Binary | ArrowType::LargeBinary | ArrowType::FixedSizeBinary(_),
+            RwType::Bytea,
+        ) => true,
 
         // Struct type recursive matching
         // Arrow's Struct matches RisingWave's Struct if all expected field names exist and types
@@ -1969,15 +2127,213 @@ mod tests {
             Date::with_days_since_ce(12345).ok(),
             Date::with_days_since_ce(-12345).ok(),
         ]);
-        let arrow = arrow_array::Date32Array::from(&array);
-        assert_eq!(DateArray::from(&arrow), array);
+        let arrow = arrow_array::Date32Array::try_from(&array).unwrap();
+        assert_eq!(DateArray::try_from(&arrow).unwrap(), array);
     }
 
     #[test]
     fn time() {
         let array = TimeArray::from_iter([None, Time::with_micro(24 * 3600 * 1_000_000 - 1).ok()]);
         let arrow = arrow_array::Time64MicrosecondArray::from(&array);
-        assert_eq!(TimeArray::from(&arrow), array);
+        assert_eq!(TimeArray::try_from(&arrow).unwrap(), array);
+    }
+
+    #[test]
+    fn time_arrow_units_round_trip() {
+        let second_array = TimeArray::from_iter([
+            None,
+            Time::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(2, 0).ok(),
+        ]);
+        let arrow = arrow_array::Time32SecondArray::from(&second_array);
+        assert_eq!(
+            arrow,
+            arrow_array::Time32SecondArray::from(vec![None, Some(1), Some(2)])
+        );
+        assert_eq!(TimeArray::try_from(&arrow).unwrap(), second_array);
+
+        let millisecond_array = TimeArray::from_iter([
+            None,
+            Time::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(2, 123_000_000).ok(),
+        ]);
+        let arrow = arrow_array::Time32MillisecondArray::from(&millisecond_array);
+        assert_eq!(
+            arrow,
+            arrow_array::Time32MillisecondArray::from(vec![None, Some(1_000), Some(2_123)])
+        );
+        assert_eq!(TimeArray::try_from(&arrow).unwrap(), millisecond_array);
+
+        let microsecond_array = TimeArray::from_iter([
+            None,
+            Time::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(2, 123_456_000).ok(),
+        ]);
+        let arrow = arrow_array::Time64MicrosecondArray::from(&microsecond_array);
+        assert_eq!(
+            arrow,
+            arrow_array::Time64MicrosecondArray::from(vec![None, Some(1_000_000), Some(2_123_456)])
+        );
+        assert_eq!(TimeArray::try_from(&arrow).unwrap(), microsecond_array);
+
+        let nanosecond_array = TimeArray::from_iter([
+            None,
+            Time::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(2, 123_456_000).ok(),
+        ]);
+        let arrow = arrow_array::Time64NanosecondArray::from(&nanosecond_array);
+        assert_eq!(
+            arrow,
+            arrow_array::Time64NanosecondArray::from(vec![
+                None,
+                Some(1_000_000_000),
+                Some(2_123_456_000)
+            ])
+        );
+        assert_eq!(TimeArray::try_from(&arrow).unwrap(), nanosecond_array);
+    }
+
+    #[test]
+    fn time_arrow_units_truncate_sub_unit_precision() {
+        let array = TimeArray::from_iter([Time::with_secs_nano(2, 123_456_789).ok()]);
+
+        assert_eq!(
+            arrow_array::Time32SecondArray::from(&array),
+            arrow_array::Time32SecondArray::from(vec![Some(2)])
+        );
+        assert_eq!(
+            arrow_array::Time32MillisecondArray::from(&array),
+            arrow_array::Time32MillisecondArray::from(vec![Some(2_123)])
+        );
+        assert_eq!(
+            arrow_array::Time64MicrosecondArray::from(&array),
+            arrow_array::Time64MicrosecondArray::from(vec![Some(2_123_456)])
+        );
+
+        // RisingWave's `time` is microsecond-precision.
+        let arrow = arrow_array::Time64NanosecondArray::from(vec![Some(2_123_456_789)]);
+        assert_eq!(
+            TimeArray::try_from(&arrow).unwrap(),
+            TimeArray::from_iter([Time::with_secs_nano(2, 123_456_000).ok()])
+        );
+    }
+
+    #[test]
+    fn time_arrow_units_from_arrow() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        for arrow_type in [
+            ArrowType::Time32(arrow_schema::TimeUnit::Second),
+            ArrowType::Time32(arrow_schema::TimeUnit::Millisecond),
+            ArrowType::Time64(arrow_schema::TimeUnit::Microsecond),
+            ArrowType::Time64(arrow_schema::TimeUnit::Nanosecond),
+        ] {
+            let field = ArrowField::new("t", arrow_type, true);
+            assert!(is_parquet_schema_match_source_schema(
+                field.data_type(),
+                &RwType::Time
+            ));
+            assert_eq!(Dummy.from_field(&field).unwrap(), RwType::Time);
+        }
+
+        let cases: Vec<(arrow_array::ArrayRef, TimeArray)> = vec![
+            (
+                Arc::new(arrow_array::Time32SecondArray::from(vec![
+                    None,
+                    Some(1),
+                    Some(2),
+                ])),
+                TimeArray::from_iter([
+                    None,
+                    Time::with_secs_nano(1, 0).ok(),
+                    Time::with_secs_nano(2, 0).ok(),
+                ]),
+            ),
+            (
+                Arc::new(arrow_array::Time32MillisecondArray::from(vec![
+                    None,
+                    Some(1_000),
+                    Some(2_123),
+                ])),
+                TimeArray::from_iter([
+                    None,
+                    Time::with_secs_nano(1, 0).ok(),
+                    Time::with_secs_nano(2, 123_000_000).ok(),
+                ]),
+            ),
+            (
+                Arc::new(arrow_array::Time64MicrosecondArray::from(vec![
+                    None,
+                    Some(1_000_000),
+                    Some(2_123_456),
+                ])),
+                TimeArray::from_iter([
+                    None,
+                    Time::with_secs_nano(1, 0).ok(),
+                    Time::with_secs_nano(2, 123_456_000).ok(),
+                ]),
+            ),
+            (
+                Arc::new(arrow_array::Time64NanosecondArray::from(vec![
+                    None,
+                    Some(1_000_000_000),
+                    Some(2_123_456_789),
+                ])),
+                TimeArray::from_iter([
+                    None,
+                    Time::with_secs_nano(1, 0).ok(),
+                    Time::with_secs_nano(2, 123_456_000).ok(),
+                ]),
+            ),
+        ];
+
+        for (array, expected) in cases {
+            let field = ArrowField::new("t", array.data_type().clone(), true);
+            let ArrayImpl::Time(actual) = Dummy.from_array(&field, &array).unwrap() else {
+                panic!("expected RW TimeArray");
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn time_arrow_units_reject_invalid_values() {
+        use std::sync::Arc;
+
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        let cases: Vec<arrow_array::ArrayRef> = vec![
+            Arc::new(arrow_array::Time32SecondArray::from(vec![Some(-1)])),
+            Arc::new(arrow_array::Time32SecondArray::from(vec![Some(86_400)])),
+            Arc::new(arrow_array::Time32MillisecondArray::from(vec![Some(-1)])),
+            Arc::new(arrow_array::Time32MillisecondArray::from(vec![Some(
+                86_400_000,
+            )])),
+            Arc::new(arrow_array::Time64MicrosecondArray::from(vec![Some(-1)])),
+            Arc::new(arrow_array::Time64MicrosecondArray::from(vec![Some(
+                86_400_000_000,
+            )])),
+            Arc::new(arrow_array::Time64NanosecondArray::from(vec![Some(-1)])),
+            Arc::new(arrow_array::Time64NanosecondArray::from(vec![Some(
+                86_400_000_000_000,
+            )])),
+            // Seconds counts at a multiple of 2^32 used to wrap into the valid range.
+            Arc::new(arrow_array::Time64MicrosecondArray::from(vec![Some(
+                4_294_967_296_000_000,
+            )])),
+            Arc::new(arrow_array::Time64NanosecondArray::from(vec![Some(
+                4_294_967_296_000_000_000,
+            )])),
+        ];
+
+        for array in cases {
+            let field = ArrowField::new("t", array.data_type().clone(), true);
+            assert_from_arrow_error(Dummy.from_array(&field, &array));
+        }
     }
 
     #[test]
@@ -1985,7 +2341,82 @@ mod tests {
         let array =
             TimestampArray::from_iter([None, Timestamp::with_micros(123456789012345678).ok()]);
         let arrow = arrow_array::TimestampMicrosecondArray::from(&array);
-        assert_eq!(TimestampArray::from(&arrow), array);
+        assert_eq!(TimestampArray::try_from(&arrow).unwrap(), array);
+    }
+
+    #[test]
+    fn timestamp_arrow_units_reject_invalid_values() {
+        let invalid_second = arrow_array::TimestampSecondArray::from(vec![Some(i64::MAX)]);
+        let invalid_millisecond =
+            arrow_array::TimestampMillisecondArray::from(vec![Some(i64::MAX)]);
+        let invalid_microsecond =
+            arrow_array::TimestampMicrosecondArray::from(vec![Some(i64::MAX)]);
+
+        assert_from_arrow_error(TimestampArray::try_from(&invalid_second));
+        assert_from_arrow_error(TimestampArray::try_from(&invalid_millisecond));
+        assert_from_arrow_error(TimestampArray::try_from(&invalid_microsecond));
+    }
+
+    #[test]
+    fn timestamptz_arrow_units_reject_invalid_values() {
+        let invalid_second = arrow_array::TimestampSecondArray::from(vec![Some(i64::MAX)]);
+        let invalid_millisecond =
+            arrow_array::TimestampMillisecondArray::from(vec![Some(i64::MAX)]);
+        let invalid_microsecond =
+            arrow_array::TimestampMicrosecondArray::from(vec![Some(i64::MAX)]);
+        // Within `checked_mul` range, but past what chrono can represent.
+        let unrepresentable_second =
+            arrow_array::TimestampSecondArray::from(vec![Some(9_000_000_000_000)]);
+
+        assert_from_arrow_error(TimestamptzArray::try_from(&invalid_second));
+        assert_from_arrow_error(TimestamptzArray::try_from(&invalid_millisecond));
+        assert_from_arrow_error(TimestamptzArray::try_from(&invalid_microsecond));
+        assert_from_arrow_error(TimestamptzArray::try_from(&unrepresentable_second));
+    }
+
+    #[test]
+    fn date_rejects_out_of_range_arrow_value() {
+        let valid = arrow_array::Date32Array::from(vec![Some(0), None]);
+        assert_eq!(
+            DateArray::try_from(&valid).unwrap(),
+            DateArray::from_iter([Date::with_days_since_unix_epoch(0).ok(), None])
+        );
+
+        // chrono's `NaiveDate` tops out well below `i32::MAX` days from the epoch.
+        let out_of_range = arrow_array::Date32Array::from(vec![Some(1_000_000_000)]);
+        assert_from_arrow_error(DateArray::try_from(&out_of_range));
+    }
+
+    #[test]
+    fn interval_rejects_out_of_range_microseconds() {
+        let array = IntervalArray::from_iter([Interval::from_month_day_usec(0, 0, i64::MAX)]);
+        let err = arrow_array::IntervalMonthDayNanoArray::try_from(&array).unwrap_err();
+        assert!(matches!(err, ArrayError::ToArrow(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn interval_truncates_sub_microsecond_nanos() {
+        let arrow = arrow_array::IntervalMonthDayNanoArray::from(vec![
+            Some(ArrowIntervalType::new(0, 0, 1_999)),
+            Some(ArrowIntervalType::new(0, 0, -1)),
+            Some(ArrowIntervalType::new(0, 0, -1_999)),
+        ]);
+        assert_eq!(
+            IntervalArray::try_from(&arrow).unwrap(),
+            IntervalArray::from_iter([
+                Interval::from_month_day_usec(0, 0, 1),
+                Interval::from_month_day_usec(0, 0, 0),
+                Interval::from_month_day_usec(0, 0, -1),
+            ])
+        );
+    }
+
+    fn assert_from_arrow_error<T>(result: Result<T, ArrayError>) {
+        match result {
+            Err(ArrayError::FromArrow(_)) => {}
+            Err(err) => panic!("expected FromArrow error, got {err:?}"),
+            Ok(_) => panic!("expected FromArrow error, got Ok"),
+        }
     }
 
     #[test]
@@ -2003,8 +2434,8 @@ mod tests {
                 -1_000_000_000,
             )),
         ]);
-        let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
-        assert_eq!(IntervalArray::from(&arrow), array);
+        let arrow = arrow_array::IntervalMonthDayNanoArray::try_from(&array).unwrap();
+        assert_eq!(IntervalArray::try_from(&arrow).unwrap(), array);
     }
 
     #[test]
@@ -2019,6 +2450,32 @@ mod tests {
         let array = BytesArray::from_iter([None, Some("array".as_bytes())]);
         let arrow = arrow_array::BinaryArray::from(&array);
         assert_eq!(BytesArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn fixed_size_binary() {
+        struct Dummy;
+        impl FromArrow for Dummy {}
+
+        let uuid = [
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc,
+            0xde, 0xf0,
+        ];
+        let arrow_array = arrow_array::FixedSizeBinaryArray::try_from_sparse_iter_with_size(
+            [None, Some(uuid)].into_iter(),
+            16,
+        )
+        .unwrap();
+        let field =
+            arrow_schema::Field::new("u", arrow_schema::DataType::FixedSizeBinary(16), true);
+
+        assert_eq!(Dummy.from_field(&field).unwrap(), DataType::Bytea);
+
+        let rw_array = Dummy
+            .from_array(&field, &(Arc::new(arrow_array) as arrow_array::ArrayRef))
+            .unwrap();
+        let expected = BytesArray::from_iter([None, Some(uuid.as_slice())]);
+        assert_eq!(rw_array.as_bytea(), &expected);
     }
 
     #[test]

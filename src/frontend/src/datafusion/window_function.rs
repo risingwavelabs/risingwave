@@ -14,12 +14,11 @@
 
 use datafusion::functions_window::lead_lag::{lag_udwf, lead_udwf};
 use datafusion::functions_window::row_number::row_number_udwf;
-use datafusion::logical_expr::expr::{WindowFunction, WindowFunctionParams};
+use datafusion::logical_expr::expr::{NullTreatment, WindowFunction, WindowFunctionParams};
 use datafusion::logical_expr::{
     WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunctionDefinition,
 };
 use datafusion::prelude::Expr as DFExpr;
-use datafusion::sql::sqlparser::ast::NullTreatment;
 use datafusion_common::ScalarValue;
 use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::window_function::{FrameBound, FrameBounds, RangeFrameOffset, WindowFuncKind};

@@ -1,5 +1,7 @@
 control substitution on
 
+# Validate Kafka startup from `scan.startup.timestamp_millis` when records after the
+# timestamp already exist before the table is created.
 system ok
 rpk topic create test_kafka_start_millis;
 
@@ -8,3 +10,16 @@ python e2e_test/source_inline/kafka/kafka_startup_millis.py --db-name $__DATABAS
 
 system ok
 rpk topic delete test_kafka_start_millis;
+
+# Issue #22387: when the requested timestamp is greater than all existing message
+# timestamps, Kafka `offsets_for_times` returns the partition end. RisingWave must
+# start from the correct high-watermark and consume records produced after table
+# creation instead of resetting to earliest.
+system ok
+rpk topic create test_topic_issue_22387;
+
+system ok
+python e2e_test/source_inline/kafka/kafka_startup_millis.py --db-name $__DATABASE__ --topic test_topic_issue_22387 --produce-after-table
+
+system ok
+rpk topic delete test_topic_issue_22387;

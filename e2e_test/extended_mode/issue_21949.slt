@@ -6,4 +6,4 @@ db error: ERROR: Failed to prepare the statement
 
 Caused by these errors (recent errors listed first):
   1: Failed to bind expression: now()
-  2: Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+  2: Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: None. Please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information

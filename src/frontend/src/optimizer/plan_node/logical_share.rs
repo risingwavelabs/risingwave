@@ -186,7 +186,7 @@ mod tests {
     #[tokio::test]
     async fn test_share_predicate_pushdown() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
@@ -201,7 +201,7 @@ mod tests {
                 Type::Equal,
                 vec![
                     ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty))),
                 ],
             )
             .unwrap(),

@@ -475,7 +475,7 @@ mod test {
         // output: [projected_row_id, v3, v2, generate_series(v1, v2, v3)],
         // FD: v2 --> v3
 
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

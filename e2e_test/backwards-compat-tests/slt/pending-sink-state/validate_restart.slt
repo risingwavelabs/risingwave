@@ -1,0 +1,25 @@
+# Validate that the upgrade succeeded despite the dropped Iceberg sink's leaked
+# `pending_sink_state` rows.
+#
+# Reaching this point already proves the most important property: the new meta
+# node started, which means the upgrade migration cleaned up the orphaned rows
+# and added the foreign key without erroring out. The queries below just confirm
+# the catalog is consistent and the cluster is serving.
+#
+# See https://github.com/risingwavelabs/risingwave/issues/26044.
+
+query I
+SELECT 1;
+----
+1
+
+# The dropped sink and its table must not reappear after the upgrade.
+query I
+SELECT count(*) FROM rw_sinks WHERE name = 'pending_sink_state_sink';
+----
+0
+
+query I
+SELECT count(*) FROM rw_tables WHERE name = 'pending_sink_state_src';
+----
+0

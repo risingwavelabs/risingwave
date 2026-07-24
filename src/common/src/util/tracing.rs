@@ -64,7 +64,8 @@ impl TracingContext {
 
     /// Attach the given span as a child of the context. Returns the attached span.
     pub fn attach(&self, span: tracing::Span) -> tracing::Span {
-        span.set_parent(self.0.clone());
+        // `set_parent` may fail if the subscriber doesn't support OpenTelemetry.
+        let _ = span.set_parent(self.0.clone());
         span
     }
 

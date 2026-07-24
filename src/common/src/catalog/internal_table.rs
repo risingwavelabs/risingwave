@@ -39,7 +39,11 @@ pub fn generate_internal_table_name_with_type(
 pub fn is_backfill_table(table_name: &str) -> bool {
     let parts: Vec<&str> = table_name.split('_').collect();
     let parts_len = parts.len();
-    parts_len >= 2 && parts[parts_len - 2] == "streamscan"
+    parts_len >= 2
+        && matches!(
+            parts[parts_len - 2],
+            "streamscan" | "localityproviderprogress"
+        )
 }
 
 pub fn is_source_backfill_table(table_name: &str) -> bool {

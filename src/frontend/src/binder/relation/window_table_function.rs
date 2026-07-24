@@ -102,16 +102,15 @@ impl Binder {
                     Ok((c.is_hidden, c.field))
                 }
             })
-            .chain(
-                [
-                    Ok((false, Field::with_name(output_type.clone(), "window_start"))),
-                    Ok((false, Field::with_name(output_type, "window_end"))),
-                ]
-                .into_iter(),
-            ).collect::<Result<Vec<_>>>()?;
+            .chain([
+                Ok((false, Field::with_name(output_type.clone(), "window_start"))),
+                Ok((false, Field::with_name(output_type, "window_end"))),
+            ])
+            .collect::<Result<Vec<_>>>()?;
 
-        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
-        self.bind_table_to_context(columns, table_name, alias)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
+        self.bind_table_to_context(columns, table_name, schema_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`
         let exprs: Vec<_> = args

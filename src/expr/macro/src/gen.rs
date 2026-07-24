@@ -165,6 +165,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -172,6 +177,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
@@ -201,6 +207,7 @@ impl FunctionAttr {
             true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
             false => format_ident!("{}", utils::to_camel_case(&self.ident_name())),
         };
+        let async_struct_name = format_ident!("Async{}", struct_name);
 
         // we divide all arguments into two groups: prebuilt and non-prebuilt.
         // prebuilt arguments are collected from the "prebuild" field.
@@ -250,11 +257,13 @@ impl FunctionAttr {
         let arg_arrays = children_indices
             .iter()
             .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
+        let arg_arrays = arg_arrays.collect_vec();
         let arg_types = children_indices.iter().map(|i| {
             types::ref_type(&self.args[*i])
                 .parse::<TokenStream2>()
                 .unwrap()
         });
+        let arg_types = arg_types.collect_vec();
         let annotation: TokenStream2 = match user_fn.core_return_type.as_str() {
             // add type annotation for functions that return generic types
             "T" | "T1" | "T2" | "T3" => format!(": Option<{}>", types::owned_type(&self.ret))
@@ -293,10 +302,10 @@ impl FunctionAttr {
                     let #prebuilt_inputs = match &#prebuilt_inputs {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return null if any const argument is null
-                        None => return Ok(Box::new(risingwave_expr::expr::LiteralExpression::new(
+                        None => return Ok(risingwave_expr::expr::LiteralExpression::new(
                             return_type,
                             None,
-                        ))),
+                        ).boxed()),
                     };
                 )*
                 #prebuilt_arg_value
@@ -311,8 +320,18 @@ impl FunctionAttr {
             false => quote! { risingwave_expr::ensure!(children.len() == #num_args); },
         };
 
-        // evaluate variadic arguments in `eval`
-        let eval_variadic = variadic.then(|| {
+        // evaluate variadic arguments in sync `eval`
+        let eval_variadic_sync = variadic.then(|| {
+            quote! {
+                let mut columns = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
+                    columns.push(child.eval(input)?);
+                }
+                let variadic_input = DataChunk::new(columns, input.visibility().clone());
+            }
+        });
+        // evaluate variadic arguments in async `eval`
+        let eval_variadic_async = variadic.then(|| {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
@@ -321,8 +340,18 @@ impl FunctionAttr {
                 let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
         });
-        // evaluate variadic arguments in `eval_row`
-        let eval_row_variadic = variadic.then(|| {
+        // evaluate variadic arguments in sync `eval_row`
+        let eval_row_variadic_sync = variadic.then(|| {
+            quote! {
+                let mut row = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
+                    row.push(child.eval_row(input)?);
+                }
+                let variadic_row = OwnedRow::new(row);
+            }
+        });
+        // evaluate variadic arguments in async `eval_row`
+        let eval_row_variadic_async = variadic.then(|| {
             quote! {
                 let mut row = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
@@ -591,6 +620,72 @@ impl FunctionAttr {
             }
         };
 
+        let sync_impl = if user_fn.async_ {
+            quote! {}
+        } else {
+            quote! {
+                #[derive(Debug)]
+                struct #struct_name {
+                    context: Context,
+                    children: Vec<Arc<dyn risingwave_expr::expr::SyncExpression>>,
+                    prebuilt_arg: #prebuilt_arg_type,
+                }
+                impl risingwave_expr::expr::ExpressionInfo for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.context.return_type.clone()
+                    }
+                }
+                impl risingwave_expr::expr::SyncExpression for #struct_name {
+                    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+                        #(
+                            let #array_refs = self.children[#children_indices].eval(input)?;
+                            let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+                        #eval_variadic_sync
+                        let mut errors = vec![];
+                        let array = { #eval };
+                        if errors.is_empty() {
+                            Ok(array)
+                        } else {
+                            Err(ExprError::Multiple(array, errors.into()))
+                        }
+                    }
+                    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+                        #(
+                            let #datums = self.children[#children_indices].eval_row(input)?;
+                            let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+                        )*
+                        #eval_row_variadic_sync
+                        let mut errors: Vec<ExprError> = vec![];
+                        let output = #row_output;
+                        if let Some(err) = errors.into_iter().next() {
+                            Err(err.into())
+                        } else {
+                            Ok(output)
+                        }
+                    }
+                }
+            }
+        };
+        let build_sync = if user_fn.async_ {
+            quote! {}
+        } else {
+            quote! {
+                use risingwave_expr::expr::try_into_sync_exprs;
+
+                let children = match try_into_sync_exprs(children) {
+                    Ok(children) => {
+                        return Ok(#struct_name {
+                            context,
+                            children,
+                            prebuilt_arg,
+                        }.boxed());
+                    }
+                    Err(children) => children,
+                };
+            }
+        };
+
         Ok(quote! {
             |return_type: DataType, children: Vec<risingwave_expr::expr::BoxedExpression>|
                 -> risingwave_expr::Result<risingwave_expr::expr::BoxedExpression>
@@ -602,7 +697,7 @@ impl FunctionAttr {
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
 
-                use risingwave_expr::expr::{Context, BoxedExpression};
+                use risingwave_expr::expr::{Context, BoxedExpression, SyncExpressionBoxExt, AsyncExpressionBoxExt};
                 use risingwave_expr::{ExprError, Result};
                 use risingwave_expr::codegen::*;
 
@@ -614,23 +709,26 @@ impl FunctionAttr {
                     variadic: #variadic,
                 };
 
+                #sync_impl
+
                 #[derive(Debug)]
-                struct #struct_name {
+                struct #async_struct_name {
                     context: Context,
                     children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait]
-                impl risingwave_expr::expr::Expression for #struct_name {
+                impl risingwave_expr::expr::ExpressionInfo for #async_struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
                     }
+                }
+                impl risingwave_expr::expr::AsyncExpression for #async_struct_name {
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(
                             let #array_refs = self.children[#children_indices].eval(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
-                        #eval_variadic
+                        #eval_variadic_async
                         let mut errors = vec![];
                         let array = { #eval };
                         if errors.is_empty() {
@@ -644,7 +742,7 @@ impl FunctionAttr {
                             let #datums = self.children[#children_indices].eval_row(input).await?;
                             let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
                         )*
-                        #eval_row_variadic
+                        #eval_row_variadic_async
                         let mut errors: Vec<ExprError> = vec![];
                         let output = #row_output;
                         if let Some(err) = errors.into_iter().next() {
@@ -655,11 +753,13 @@ impl FunctionAttr {
                     }
                 }
 
-                Ok(Box::new(#struct_name {
+                #build_sync
+
+                Ok(#async_struct_name {
                     context,
                     children,
                     prebuilt_arg,
-                }))
+                }.boxed())
             }
         })
     }
@@ -724,6 +824,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -731,6 +836,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::agg_call::PbKind::#pb_kind.into(),
                     inputs_type: vec![#(#args),*],
@@ -1056,6 +1162,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -1063,6 +1174,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],

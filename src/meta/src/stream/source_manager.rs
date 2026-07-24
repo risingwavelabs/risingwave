@@ -24,18 +24,20 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::ObjectId;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
-    SplitMetaData, fill_adaptive_split,
+    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
+pub use split_assignment::{SplitDiffOptions, SplitState, align_splits, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -45,15 +47,54 @@ use tokio::{select, time};
 pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
-use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
 pub type SourceManagerRef = Arc<SourceManager>;
+/// Actor-level split assignment, used inside the barrier worker after actor rendering.
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
-pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
+
+/// Source-level split assignment: maps source ID to the discovered splits enum.
+/// Unlike [`SplitAssignment`], this does not include fragment- or actor-level assignment.
+/// The [`DiscoveredSplits`] enum is preserved all the way through to the barrier
+/// command, and only resolved to concrete per-fragment, per-actor splits when the
+/// barrier worker performs the actual split assignment.
+pub type SourceSplitAssignment = HashMap<SourceId, DiscoveredSplits>;
+
+/// Discovered splits from the source enumerator.
+///
+/// For adaptive splits, the single template split is returned and must be expanded
+/// to per-actor splits after actor rendering inside the barrier worker.
+#[derive(Debug, Clone)]
+pub enum DiscoveredSplits {
+    /// Fixed splits discovered from the external source.
+    Fixed(BTreeMap<Arc<str>, SplitImpl>),
+    /// A single adaptive split template that needs to be expanded per actor.
+    /// The `fill_adaptive_split` function should be called after actor rendering.
+    Adaptive(SplitImpl),
+}
+
+/// Describes how splits should be resolved for a replace stream job.
+///
+/// This is determined during Phase 1 (before the barrier command) and stored in
+/// [`ReplaceStreamJobPlan`](crate::barrier::ReplaceStreamJobPlan).
+/// The barrier worker uses this to decide the split resolution strategy in Phase 2.
+#[derive(Debug, Clone)]
+pub enum ReplaceJobSplitPlan {
+    /// Fresh discovered splits. Used when the replace job has no existing downstream
+    /// consumers (i.e., `replace_upstream` is empty), or the job is not a source.
+    /// Resolved via [`SourceManager::resolve_fragment_to_actor_splits`] in Phase 2.
+    Discovered(SourceSplitAssignment),
+    /// Splits need to be aligned with the previous source fragment in Phase 2.
+    /// This happens when replacing a source that has existing downstream consumers.
+    /// Resolved via [`SourceManager::resolve_replace_source_splits`] in Phase 2.
+    ///
+    /// Contains the no-shuffle mapping needed for split alignment.
+    AlignFromPrevious,
+}
 
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
@@ -295,7 +336,12 @@ impl SourceManager {
         {
             let sources = metadata_manager.list_sources().await?;
             for source in sources {
-                create_source_worker_async(source, &mut managed_sources, metrics.clone())?
+                create_source_worker_async(
+                    source,
+                    &mut managed_sources,
+                    metrics.clone(),
+                    env.await_tree_reg().clone(),
+                )?
             }
         }
 
@@ -348,9 +394,7 @@ impl SourceManager {
                 .await
                 .context("failed to create SplitEnumerator")?;
 
-            let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
-                .await
-                .context("failed to list splits")??;
+            validate_enumerator_once(&mut *enumerator).await?;
         }
         Ok(())
     }
@@ -410,9 +454,13 @@ impl SourceManager {
             return Ok(());
         }
 
-        let handle = create_source_worker(source, self.metrics.clone())
-            .await
-            .context("failed to create source worker")?;
+        let handle = create_source_worker(
+            source,
+            self.metrics.clone(),
+            core.env.await_tree_reg().clone(),
+        )
+        .await
+        .context("failed to create source worker")?;
 
         core.managed_sources.insert(source_id, handle);
 
@@ -496,18 +544,18 @@ impl SourceManager {
         let core = self.core.lock().await;
         for source_id in updated_source_ids {
             if let Some(handle) = core.managed_sources.get(&source_id) {
-                tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
+                tracing::info!("forcing tick for updated source {}", source_id);
                 if let Err(e) = handle.force_tick().await {
                     tracing::warn!(
                         error = %e.as_report(),
                         "failed to force tick for source {} after properties update",
-                        source_id.as_raw_id()
+                        source_id
                     );
                 }
             } else {
                 tracing::warn!(
                     "source {} not found when trying to force tick after update",
-                    source_id.as_raw_id()
+                    source_id
                 );
             }
         }
@@ -518,46 +566,39 @@ impl SourceManager {
     /// cause data duplication or loss depending on the connector.
     pub async fn reset_source_splits(&self, source_id: SourceId) -> MetaResult<()> {
         tracing::warn!(
-            source_id = source_id.as_raw_id(),
+            %source_id,
             "UNSAFE: Resetting source splits - clearing cached state and triggering re-discovery"
         );
 
         let core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.get(&source_id) {
             // Clear the cached splits to force re-discovery
-            {
-                let mut splits_guard = handle.splits.lock().await;
-                tracing::info!(
-                    source_id = source_id.as_raw_id(),
-                    prev_splits = ?splits_guard.splits.as_ref().map(|s| s.len()),
-                    "Clearing cached splits"
-                );
-                splits_guard.splits = None;
-            }
+            let prev_splits = handle.splits.take();
+            tracing::info!(
+                %source_id,
+                prev_splits = ?prev_splits.as_ref().map(|s| s.len()),
+                "Clearing cached splits"
+            );
 
             // Force a tick to re-discover splits
             tracing::info!(
-                source_id = source_id.as_raw_id(),
+                %source_id,
                 "Triggering split re-discovery via force_tick"
             );
             handle.force_tick().await.with_context(|| {
                 format!(
                     "failed to force tick for source {} after split reset",
-                    source_id.as_raw_id()
+                    source_id
                 )
             })?;
 
             tracing::info!(
-                source_id = source_id.as_raw_id(),
+                %source_id,
                 "Split reset completed - new splits will be assigned on next tick"
             );
             Ok(())
         } else {
-            Err(anyhow::anyhow!(
-                "source {} not found in source manager",
-                source_id.as_raw_id()
-            )
-            .into())
+            Err(anyhow::anyhow!("source {} not found in source manager", source_id).into())
         }
     }
 
@@ -579,7 +620,7 @@ impl SourceManager {
             let _ = core.managed_sources.get(&source_id).ok_or_else(|| {
                 MetaError::invalid_parameter(format!(
                     "source {} not found in source manager",
-                    source_id.as_raw_id()
+                    source_id
                 ))
             })?;
 
@@ -600,7 +641,7 @@ impl SourceManager {
         if fragment_ids.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "source {} has no running fragments",
-                source_id.as_raw_id()
+                source_id
             )));
         }
 
@@ -627,20 +668,27 @@ impl SourceManager {
         if !invalid_splits.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "invalid split IDs for source {}: {:?}. Valid splits are: {:?}",
-                source_id.as_raw_id(),
+                source_id,
                 invalid_splits,
                 assigned_split_ids.iter().collect::<Vec<_>>()
             )));
         }
 
         tracing::info!(
-            source_id = source_id.as_raw_id(),
+            source_id = %source_id,
             num_splits = split_offsets.len(),
             "Validated inject source offsets request"
         );
 
         Ok(split_offsets.keys().cloned().collect())
     }
+}
+
+async fn validate_enumerator_once(enumerator: &mut dyn AnySplitEnumerator) -> MetaResult<()> {
+    let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+        .await
+        .context("failed to list splits")??;
+    Ok(())
 }
 
 #[derive(strum::Display, Debug)]

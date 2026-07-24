@@ -25,6 +25,8 @@ use crate::executor::{MaterializeExecutor, RefreshableMaterializeArgs};
 
 pub struct MaterializeExecutorBuilder;
 
+impl_stream_node_body!(Materialize(MaterializeNode) => MaterializeExecutorBuilder);
+
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     type Node = MaterializeNode;
 
@@ -135,6 +137,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 }
 
 pub struct ArrangeExecutorBuilder;
+
+impl_stream_node_body!(Arrange(ArrangeNode) => ArrangeExecutorBuilder);
 
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     type Node = ArrangeNode;

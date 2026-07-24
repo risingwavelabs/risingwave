@@ -24,13 +24,15 @@ use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
 
+impl_stream_node_body!(Dml(DmlNode) => DmlExecutorBuilder);
+
 impl ExecutorBuilder for DmlExecutorBuilder {
     type Node = DmlNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        _store: impl StateStore,
+        store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         let table_id = node.table_id;
@@ -45,6 +47,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             column_descs,
             params.config.developer.chunk_size,
             node.rate_limit.into(),
+            store,
         );
         Ok((params.info, exec).into())
     }

@@ -83,17 +83,12 @@ def _(outer_panels: Panels):
                             "barrier_wait_commit_avg",
                         ),
                     ]
+                    # Retain this query for compatibility with pre-v3.0 clusters, where the metric
+                    # is still produced.
                     + quantile(
                         lambda quantile, legend: panels.target(
                             f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_wait_commit_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id))",
                             f"snapshot_backfill_barrier_wait_commit_latency_p{legend} table_id[{{{{table_id}}}}]",
-                        ),
-                        [50, 90, 99, 999, "max"],
-                    )
-                    + quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_upstream_wait_progress_latency_bucket')}[$__rate_interval])) by (le, table_id))",
-                            f"snapshot_backfill_upstream_wait_progress_latency_p{legend} table_id[{{{{table_id}}}}]",
                         ),
                         [50, 90, 99, 999, "max"],
                     ),

@@ -19,6 +19,8 @@ use crate::executor::BarrierRecvExecutor;
 
 pub struct BarrierRecvExecutorBuilder;
 
+impl_stream_node_body!(BarrierRecv(BarrierRecvNode) => BarrierRecvExecutorBuilder);
+
 impl ExecutorBuilder for BarrierRecvExecutorBuilder {
     type Node = BarrierRecvNode;
 

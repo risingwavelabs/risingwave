@@ -14,16 +14,57 @@
 
 use std::sync::LazyLock;
 
+use bytes::Buf;
+use risingwave_common::array::Finite32;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Decimal, ScalarImpl, VectorVal};
 use thiserror_ext::AsReport;
+use tokio_postgres::types::{FromSql, Type};
 
 use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::utils::log_error;
 
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+
+/// Adapter for PostgreSQL `vector` type in CDC snapshot reads.
+/// It parses pgvector binary format.
+struct PgVectorAdapter(Vec<f32>);
+
+impl<'a> FromSql<'a> for PgVectorAdapter {
+    fn accepts(ty: &Type) -> bool {
+        ty.name() == "vector"
+    }
+
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Self::parse_binary(raw)
+    }
+}
+
+impl PgVectorAdapter {
+    fn parse_binary(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        // Binary format from pgvector extension:
+        // int16 dimension, int16 unused, repeated float4 values.
+        if raw.len() < 4 {
+            return Err("invalid vector binary payload".into());
+        }
+        let mut buf = raw;
+        let dim = buf.get_u16() as usize;
+        let _unused = buf.get_u16();
+        if buf.remaining() != dim * std::mem::size_of::<f32>() {
+            return Err("invalid vector binary payload length".into());
+        }
+        let mut elems = Vec::with_capacity(dim);
+        for _ in 0..dim {
+            elems.push(buf.get_f32());
+        }
+        Ok(Self(elems))
+    }
+}
 
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
@@ -96,6 +137,41 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         }
+        DataType::Vector(expected_size) => {
+            let res = row.try_get::<_, Option<PgVectorAdapter>>(i);
+            match res {
+                Ok(Some(PgVectorAdapter(v))) => {
+                    if v.len() != *expected_size {
+                        log_error!(
+                            name,
+                            anyhow::anyhow!(
+                                "vector dimension mismatch: expected {}, got {}",
+                                expected_size,
+                                v.len()
+                            ),
+                            "parse column failed"
+                        );
+                        return None;
+                    }
+                    let finite = v
+                        .into_iter()
+                        .map(Finite32::try_from)
+                        .collect::<Result<Vec<_>, _>>();
+                    match finite {
+                        Ok(finite) => Some(ScalarImpl::Vector(VectorVal::from(finite))),
+                        Err(err) => {
+                            log_error!(name, anyhow::anyhow!(err), "parse column failed");
+                            None
+                        }
+                    }
+                }
+                Ok(None) => None,
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            }
+        }
         DataType::List(list) => match list.elem() {
             // TODO(Kexiang): allow DataType::List(_)
             elem @ (DataType::Struct(_) | DataType::List(_) | DataType::Serial) => {
@@ -116,7 +192,7 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Vector(_) | DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
             // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");
@@ -129,9 +205,25 @@ pub fn postgres_cell_to_scalar_impl(
 mod tests {
     use tokio_postgres::NoTls;
 
+    use crate::parser::postgres::PgVectorAdapter;
     use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
     const USER: &str = "kexiang";
+
+    #[test]
+    fn test_pg_vector_adapter_parse_binary() {
+        let mut raw = vec![];
+        // dim = 3
+        raw.extend_from_slice(&(3u16.to_be_bytes()));
+        // unused
+        raw.extend_from_slice(&(0u16.to_be_bytes()));
+        raw.extend_from_slice(&1.5f32.to_be_bytes());
+        raw.extend_from_slice(&(-2.25f32).to_be_bytes());
+        raw.extend_from_slice(&3.0f32.to_be_bytes());
+
+        let v = PgVectorAdapter::parse_binary(&raw).unwrap();
+        assert_eq!(v.0, vec![1.5, -2.25, 3.0]);
+    }
 
     #[ignore]
     #[tokio::test]

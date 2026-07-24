@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -58,6 +59,8 @@ pub struct SstDumpArgs {
     print_level: bool,
     #[clap(short = 't', long = "print-table")]
     print_table: bool,
+    #[clap(short = 'v', long = "print-vnode-stats")]
+    print_vnode_stats: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
     #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
@@ -86,7 +89,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             for sstable_info in &level.table_infos {
                 if let Some(object_id) = &args.object_id {
                     if *object_id == sstable_info.object_id {
-                        print_level(level, sstable_info);
+                        print_level(level, sstable_info, &args);
                         sst_dump_via_sstable_store(
                             &sstable_store,
                             sstable_info.object_id,
@@ -99,7 +102,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                         return Ok(());
                     }
                 } else {
-                    print_level(level, sstable_info);
+                    print_level(level, sstable_info, &args);
                     sst_dump_via_sstable_store(
                         &sstable_store,
                         sstable_info.object_id,
@@ -171,7 +174,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     Ok(())
 }
 
-fn print_level(level: &Level, sst_info: &SstableInfo) {
+fn print_level(level: &Level, sst_info: &SstableInfo, args: &SstDumpArgs) {
     println!("Level Type: {}", level.level_type.as_str_name());
     println!("Level Idx: {}", level.level_idx);
     if level.level_idx == 0 {
@@ -179,6 +182,13 @@ fn print_level(level: &Level, sst_info: &SstableInfo) {
     }
     println!("SST id: {}", sst_info.sst_id);
     println!("SST table_ids: {:?}", sst_info.table_ids);
+    if args.print_vnode_stats {
+        if let Some(ref stats) = sst_info.vnode_statistics {
+            println!("Vnode Statistics: {:?}", stats);
+        } else {
+            println!("Vnode Statistics: None");
+        }
+    }
 }
 
 fn print_object(obj: &ObjectMetadata) {
@@ -224,8 +234,10 @@ pub async fn sst_dump_via_sstable_store(
         max_epoch: 0,
         uncompressed_file_size: 0,
         range_tombstone_count: 0,
-        bloom_filter_kind: Default::default(),
+        filter_type: PbSstableFilterType::SstableFilterNone,
+        filter_layout: PbSstableFilterLayout::Unspecified,
         sst_size: 0,
+        vnode_statistics: None,
     }
     .into();
     let sstable_cache = sstable_store
@@ -238,7 +250,7 @@ pub async fn sst_dump_via_sstable_store(
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable.estimate_size());
+    println!("File Size: {}", sstable_meta.estimated_size);
 
     println!("Key Range:");
     println!(

@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
@@ -72,12 +73,18 @@ impl<R: Row> JoinRow<R> {
     /// later, so a pk prefix will be added.
     ///
     /// * `state_order_key_indices` - the order key of `row`
+    /// * `degree_inequality_idx` - optional index of inequality column in row for degree table
     pub fn to_table_rows<'a>(
         &'a self,
         state_order_key_indices: &'a [usize],
+        degree_inequality_idx: Option<usize>,
     ) -> (&'a R, impl Row + 'a) {
-        let order_key = (&self.row).project(state_order_key_indices);
-        let degree = build_degree_row(order_key, self.degree);
+        let degree = build_degree_row(
+            state_order_key_indices,
+            self.degree,
+            degree_inequality_idx,
+            &self.row,
+        );
         (&self.row, degree)
     }
 
@@ -89,8 +96,20 @@ impl<R: Row> JoinRow<R> {
 
 pub type DegreeType = u64;
 
-fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
-    order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
+pub(crate) fn build_degree_row<R: Row>(
+    order_key_indices: &[usize],
+    degree: DegreeType,
+    inequality_idx: Option<usize>,
+    row: &R,
+) -> impl Row {
+    let order_key = row.project(order_key_indices);
+    let inequality = inequality_idx.map(|idx| row.datum_at(idx).to_owned_datum());
+    let base = order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))));
+    if let Some(ineq) = inequality {
+        Either::Right(base.chain(row::once(ineq)))
+    } else {
+        Either::Left(base)
+    }
 }
 
 pub trait CachedJoinRow: EstimateSize + Default + Send + Sync {

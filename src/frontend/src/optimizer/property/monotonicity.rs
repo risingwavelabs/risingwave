@@ -126,7 +126,7 @@ impl MonotonicityAnalyzer {
             ExprImpl::InputRef(inner) => FollowingInput(inner.index()),
             ExprImpl::Literal(_) => Inherent(Constant),
             ExprImpl::Now(_) => Inherent(NonDecreasing),
-            ExprImpl::UserDefinedFunction(_) => Inherent(Unknown),
+            ExprImpl::UserDefinedFunction(_) | ExprImpl::SecretRef(_) => Inherent(Unknown),
 
             // recursively visit children
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
@@ -178,10 +178,7 @@ impl MonotonicityAnalyzer {
         use monotonicity_variants::*;
 
         fn time_zone_is_without_dst(time_zone: Option<&str>) -> bool {
-            #[allow(clippy::let_and_return)] // to make it more readable
-            let tz_is_utc =
-                time_zone.is_some_and(|time_zone| time_zone.eq_ignore_ascii_case("UTC"));
-            tz_is_utc // conservative
+            time_zone.is_some_and(|time_zone| time_zone.eq_ignore_ascii_case("UTC")) // conservative
         }
 
         match func_call.func_type() {

@@ -24,7 +24,7 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
-use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX};
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_compaction_group;
 mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
@@ -58,6 +59,7 @@ mod alter_source_with_sr;
 mod alter_streaming_config;
 mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
+mod alter_subscription_retention;
 mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
@@ -66,6 +68,8 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod alter_watermark;
+mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
@@ -86,6 +90,7 @@ pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
 pub mod declare_cursor;
+mod delete_meta_snapshot;
 pub mod describe;
 pub mod discard;
 mod drop_connection;
@@ -244,8 +249,14 @@ impl HandlerArgs {
                 *if_not_exists = false;
             }
             Statement::CreateSink {
-                stmt: CreateSinkStatement { if_not_exists, .. },
+                stmt:
+                    CreateSinkStatement {
+                        or_replace,
+                        if_not_exists,
+                        ..
+                    },
             } => {
+                *or_replace = false;
                 *if_not_exists = false;
             }
             Statement::CreateSubscription {
@@ -281,7 +292,15 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        } => {
+            Box::pin(explain::handle_explain(
+                handler_args,
+                *statement,
+                options,
+                analyze,
+            ))
+            .await
+        }
         Statement::ExplainAnalyzeStreamJob {
             target,
             duration_secs,
@@ -419,7 +438,7 @@ pub async fn handle(
                 .await;
             }
             let format_encode = format_encode.map(|s| s.into_v2_with_warning());
-            create_table::handle_create_table(
+            Box::pin(create_table::handle_create_table(
                 handler_args,
                 name,
                 columns,
@@ -438,7 +457,7 @@ pub async fn handle(
                 include_column_options,
                 webhook_info,
                 engine,
-            )
+            ))
             .await
         }
         Statement::CreateDatabase {
@@ -645,7 +664,11 @@ pub async fn handle(
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
-        Statement::Wait => wait::handle_wait(handler_args).await,
+        Statement::Wait(target) => wait::handle_wait(handler_args, target).await,
+        Statement::Backup => backup::handle_backup(handler_args).await,
+        Statement::DeleteMetaSnapshots { snapshot_ids } => {
+            delete_meta_snapshot::handle_delete_meta_snapshots(handler_args, snapshot_ids).await
+        }
         Statement::Recover => recover::handle_recover(handler_args).await,
         Statement::SetVariable {
             local: _,
@@ -782,6 +805,18 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_database_param::handle_alter_database_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
+                    deferred,
+                )
+                .await
+            }
         },
         Statement::AlterSchema { name, operation } => match operation {
             AlterSchemaOperation::RenameSchema { schema_name } => {
@@ -811,7 +846,26 @@ pub async fn handle(
             AlterTableOperation::AddColumn { .. }
             | AlterTableOperation::DropColumn { .. }
             | AlterTableOperation::AlterColumn { .. } => {
-                alter_table_column::handle_alter_table_column(handler_args, name, operation).await
+                Box::pin(alter_table_column::handle_alter_table_column(
+                    handler_args,
+                    name,
+                    operation,
+                ))
+                .await
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                Box::pin(alter_watermark::handle_alter_watermark(
+                    handler_args,
+                    name,
+                    column_name,
+                    expr,
+                    with_ttl,
+                ))
+                .await
             }
             AlterTableOperation::RenameTable { table_name } => {
                 alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
@@ -864,7 +918,11 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::RefreshSchema => {
-                alter_table_with_sr::handle_refresh_schema(handler_args, name).await
+                Box::pin(alter_table_with_sr::handle_refresh_schema(
+                    handler_args,
+                    name,
+                ))
+                .await
             }
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -877,8 +935,13 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::DropConnector => {
-                alter_table_drop_connector::handle_alter_table_drop_connector(handler_args, name)
-                    .await
+                Box::pin(
+                    alter_table_drop_connector::handle_alter_table_drop_connector(
+                        handler_args,
+                        name,
+                    ),
+                )
+                .await
             }
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -966,6 +1029,19 @@ pub async fn handle(
                     handler_args,
                     name,
                     parallelism,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
                     StatementType::ALTER_INDEX,
                     deferred,
                 )
@@ -1202,6 +1278,19 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                alter_resource_group::handle_alter_resource_group(
+                    handler_args,
+                    name,
+                    resource_group,
+                    StatementType::ALTER_SINK,
+                    deferred,
+                )
+                .await
+            }
             AlterSinkOperation::SetConfig { entries } => {
                 alter_streaming_config::handle_alter_streaming_set_config(
                     handler_args,
@@ -1280,6 +1369,14 @@ pub async fn handle(
                     new_schema_name,
                     StatementType::ALTER_SUBSCRIPTION,
                     None,
+                )
+                .await
+            }
+            AlterSubscriptionOperation::SetRetention { retention } => {
+                alter_subscription_retention::handle_alter_subscription_retention(
+                    handler_args,
+                    name,
+                    retention,
                 )
                 .await
             }
@@ -1516,10 +1613,21 @@ pub async fn handle(
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }
-        Statement::StartTransaction { modes } => {
-            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            alter_compaction_group::handle_alter_compaction_group(
+                handler_args,
+                group_ids,
+                operation,
+            )
+            .await
         }
-        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::StartTransaction { modes } => {
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes)
+        }
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes),
         Statement::Commit { chain } => {
             transaction::handle_commit(handler_args, COMMIT, chain).await
         }
@@ -1531,7 +1639,7 @@ pub async fn handle(
             modes,
             snapshot,
             session,
-        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        } => transaction::handle_set(handler_args, modes, snapshot, session),
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
         Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
@@ -1544,9 +1652,9 @@ pub async fn handle(
             name,
             data_types,
             statement,
-        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        } => prepared_statement::handle_prepare(name, data_types, statement),
         Statement::Deallocate { name, prepare } => {
-            prepared_statement::handle_deallocate(name, prepare).await
+            prepared_statement::handle_deallocate(name, prepare)
         }
         Statement::Vacuum { object_name, full } => {
             vacuum::handle_vacuum(handler_args, object_name, full).await
@@ -1562,109 +1670,125 @@ fn check_ban_ddl_for_iceberg_engine_table(
     session: Arc<SessionImpl>,
     stmt: &Statement,
 ) -> Result<()> {
-    match stmt {
-        Statement::AlterTable {
-            name,
-            operation:
-                operation @ (AlterTableOperation::AddColumn { .. }
-                | AlterTableOperation::DropColumn { .. }),
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE {} is not supported for iceberg table: {}.{}",
-                    operation,
-                    schema_name,
-                    name
-                );
-            }
-        }
+    if let Statement::AlterTable { name, operation } = stmt {
+        let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+        if table.is_iceberg_engine_table() {
+            let has_auto_refresh_schema_sink = if matches!(
+                operation,
+                AlterTableOperation::AddColumn { .. } | AlterTableOperation::DropColumn { .. }
+            ) {
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                let db_name = session.database();
+                let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name());
+                let sink = catalog_reader
+                    .get_schema_by_name(&db_name, &schema_name)
+                    .ok()
+                    .and_then(|schema| schema.get_created_sink_by_name(&sink_name));
+                sink.and_then(|s| s.auto_refresh_schema_from_table)
+                    .is_some()
+            } else {
+                false
+            };
 
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::RenameTable { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
+            check_ban_alter_table_operation_for_iceberg_engine_table(
+                operation,
+                &schema_name,
+                name,
+                has_auto_refresh_schema_sink,
+            )?;
         }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetParallelism { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetBackfillParallelism { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetSchema { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::RefreshSchema,
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::SetSourceRateLimit { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        _ => {}
     }
 
+    Ok(())
+}
+
+fn check_ban_alter_table_operation_for_iceberg_engine_table(
+    operation: &AlterTableOperation,
+    schema_name: &str,
+    table_name: &ObjectName,
+    has_auto_refresh_schema_sink: bool,
+) -> Result<()> {
+    match operation {
+        AlterTableOperation::AddColumn { .. } => {
+            if !has_auto_refresh_schema_sink {
+                bail!(
+                    "ALTER TABLE {} is not supported for iceberg table without auto schema change sink: {}.{}",
+                    operation,
+                    schema_name,
+                    table_name
+                );
+            }
+        }
+        AlterTableOperation::DropColumn { .. } => {
+            if !has_auto_refresh_schema_sink {
+                bail!(
+                    "ALTER TABLE {} is not supported for iceberg table without auto schema change sink: {}.{}",
+                    operation,
+                    schema_name,
+                    table_name
+                );
+            }
+        }
+        AlterTableOperation::RenameColumn { .. }
+        | AlterTableOperation::ChangeColumn { .. }
+        | AlterTableOperation::AlterColumn { .. } => {
+            bail!(
+                "ALTER TABLE {} is not supported for iceberg table: {}.{}. Existing column schema mutation is not supported currently",
+                operation,
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::RenameTable { .. } => {
+            bail!(
+                "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetParallelism { .. } => {
+            bail!(
+                "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetBackfillParallelism { .. } => {
+            bail!(
+                "ALTER TABLE SET BACKFILL PARALLELISM is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetSchema { .. } => {
+            bail!(
+                "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::RefreshSchema => {
+            bail!(
+                "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::SetSourceRateLimit { .. } => {
+            bail!(
+                "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::AlterWatermark { .. } => {
+            bail!(
+                "ALTER TABLE ALTER WATERMARK is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        _ => {}
+    }
     Ok(())
 }

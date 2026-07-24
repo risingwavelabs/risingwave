@@ -1,0 +1,219 @@
+control substitution on
+
+# =============================================================================
+# Regression test for issue #24829 / #24717.
+#
+# Kafka transactional producers write invisible control records (commit/abort
+# markers). Under read_committed isolation, librdkafka skips them, but
+# high_watermark includes their offsets. Before the fix, source backfill and
+# batch scan would hang forever when the last offset in a partition was a
+# control record. The fix uses enable.partition.eof to detect end-of-partition.
+# =============================================================================
+
+statement ok
+set background_ddl = false;
+
+# ---------------------------------------------------------------------------
+# Scenario 1: Single partition, transactional producer -- backfill + batch
+# ---------------------------------------------------------------------------
+
+system ok
+rpk topic delete test_txn_24829_s1 || true
+
+system ok
+rpk topic create test_txn_24829_s1 -p 1
+
+statement ok
+create source txn_src_s1 (k varchar, v int)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_txn_24829_s1',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+
+# check for empty topic (backfill & batch)
+statement ok
+create materialized view txn_mv_s1_empty as select * from txn_src_s1;
+
+
+query I
+select count(*) from txn_src_s1;
+----
+0
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_txn_24829_s1 --partitions 0 --messages-per-partition 3
+
+
+# Backfill: MV creation is blocking DDL. Without the fix, this hangs forever.
+statement ok
+create materialized view txn_mv_s1 as select * from txn_src_s1;
+
+query I
+select count(*) from txn_mv_s1;
+----
+3
+
+# Batch: direct SELECT from source. Also hangs without the fix.
+query I
+select count(*) from txn_src_s1;
+----
+3
+
+query TI rowsort
+select k, v from txn_src_s1;
+----
+0-0-0 0
+0-0-1 1
+0-0-2 2
+
+statement ok
+drop materialized view txn_mv_s1_empty;
+
+statement ok
+drop materialized view txn_mv_s1;
+
+statement ok
+drop source txn_src_s1;
+
+# ---------------------------------------------------------------------------
+# Scenario 2: Multiple partitions, mixed data distribution
+# Partitions 0 and 2 get data; partition 1 is truly empty (no produce to it).
+# ---------------------------------------------------------------------------
+
+system ok
+rpk topic delete test_txn_24829_s2 || true
+
+system ok
+rpk topic create test_txn_24829_s2 -p 3
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_txn_24829_s2 --partitions 0,2 --messages-per-partition 2
+
+statement ok
+create source txn_src_s2 (k varchar, v int)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_txn_24829_s2',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Backfill: should complete even with mixed empty/non-empty partitions
+statement ok
+create materialized view txn_mv_s2 as select * from txn_src_s2;
+
+# 2 partitions x 2 messages = 4 data messages
+query I
+select count(*) from txn_mv_s2;
+----
+4
+
+# Batch path
+query I
+select count(*) from txn_src_s2;
+----
+4
+
+statement ok
+drop materialized view txn_mv_s2;
+
+statement ok
+drop source txn_src_s2;
+
+# ---------------------------------------------------------------------------
+# Scenario 3: Empty topic -- edge case
+# ---------------------------------------------------------------------------
+
+system ok
+rpk topic delete test_txn_24829_s3 || true
+
+system ok
+rpk topic create test_txn_24829_s3 -p 2
+
+statement ok
+create source txn_src_s3 (k varchar, v int)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_txn_24829_s3',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Batch: empty topic should return 0 rows, not hang or error
+query I
+select count(*) from txn_src_s3;
+----
+0
+
+# Backfill on empty topic: should complete immediately
+statement ok
+create materialized view txn_mv_s3 as select * from txn_src_s3;
+
+query I
+select count(*) from txn_mv_s3;
+----
+0
+
+statement ok
+drop materialized view txn_mv_s3;
+
+statement ok
+drop source txn_src_s3;
+
+# ---------------------------------------------------------------------------
+# Scenario 4: Multiple transactions on single partition
+# 3 transactions x 2 messages = 6 data messages + 3 commit markers
+# Last offset is always a control record.
+# ---------------------------------------------------------------------------
+
+system ok
+rpk topic delete test_txn_24829_s4 || true
+
+system ok
+rpk topic create test_txn_24829_s4 -p 1
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_txn_24829_s4 --partitions 0 --messages-per-partition 2 --num-transactions 3
+
+statement ok
+create source txn_src_s4 (k varchar, v int)
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_txn_24829_s4',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create materialized view txn_mv_s4 as select * from txn_src_s4;
+
+query I
+select count(*) from txn_mv_s4;
+----
+6
+
+query I
+select count(*) from txn_src_s4;
+----
+6
+
+statement ok
+drop materialized view txn_mv_s4;
+
+statement ok
+drop source txn_src_s4;
+
+# ---------------------------------------------------------------------------
+# Cleanup topics
+# ---------------------------------------------------------------------------
+
+system ok
+rpk topic delete test_txn_24829_s1 || true
+
+system ok
+rpk topic delete test_txn_24829_s2 || true
+
+system ok
+rpk topic delete test_txn_24829_s3 || true
+
+system ok
+rpk topic delete test_txn_24829_s4 || true

@@ -45,16 +45,6 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "CDC Source Errors",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
                     "Auto Schema Change Failure Count",
                     "Total number of failed auto schema change attempts of CDC Table",
                     [
@@ -105,6 +95,20 @@ def _(outer_panels: Panels):
                             f"{metric('pg_cdc_confirmed_flush_lsn')}",
                             "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
                         ),
+                        panels.target(
+                            f"{metric('pg_cdc_upstream_max_lsn')}",
+                            "slot {{slot_name}} source_id {{source_id}} - Upstream Max LSN",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "PostgreSQL CDC Slot WAL Lag (bytes)",
+                    "Upstream WAL lag in bytes: pg_current_wal_lsn - confirmed_flush_lsn (computed in PromQL).",
+                    [
+                        panels.target(
+                            f"{metric('pg_cdc_upstream_max_lsn')} - {metric('pg_cdc_confirmed_flush_lsn')}",
+                            "slot {{slot_name}} source_id {{source_id}} - WAL Lag",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -126,6 +130,42 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"{metric('mysql_cdc_binlog_file_seq_max')}",
                             "{{hostname}}:{{port}} - Upstream Binlog File Max Seq (newest)",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "SQL Server CDC LSN Progression",
+                    "LSN progression through the SQL Server CDC pipeline by source_id",
+                    [
+                        panels.target(
+                            f"{metric('stream_sqlserver_cdc_state_change_lsn')}",
+                            "source_id {{source_id}} - State Table Change LSN",
+                        ),
+                        panels.target(
+                            f"{metric('stream_sqlserver_cdc_state_commit_lsn')}",
+                            "source_id {{source_id}} - State Table Commit LSN",
+                        ),
+                        panels.target(
+                            f"{metric('stream_sqlserver_cdc_jni_commit_offset_lsn')}",
+                            "source_id {{source_id}} - JNI Commit Offset LSN",
+                        ),
+                        panels.target(
+                            f"{metric('sqlserver_cdc_upstream_min_lsn')}",
+                            "source_id {{source_id}} - Upstream Min LSN",
+                        ),
+                        panels.target(
+                            f"{metric('sqlserver_cdc_upstream_max_lsn')}",
+                            "source_id {{source_id}} - Upstream Max LSN",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "SQL Server CDC State Table LSN Lag",
+                    "Lag measured as SQL Server LSN distance: upstream_max_lsn - state_change_lsn (not bytes).",
+                    [
+                        panels.target(
+                            f"clamp_min({metric('sqlserver_cdc_upstream_max_lsn')} - on(source_id) {metric('stream_sqlserver_cdc_state_change_lsn')}, 0)",
+                            "source_id {{source_id}} - LSN Lag",
                         ),
                     ],
                 ),

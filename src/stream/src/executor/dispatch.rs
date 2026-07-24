@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
@@ -44,11 +43,14 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
+use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
+mod dispatch_sync_log_store;
 mod output_mapping;
+
+pub use dispatch_sync_log_store::SyncLogStoreDispatchExecutor;
 pub use output_mapping::DispatchOutputMapping;
 use risingwave_common::id::FragmentId;
 
@@ -110,7 +112,7 @@ impl DispatchExecutorMetrics {
     }
 }
 
-struct DispatchExecutorInner {
+pub struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
     actor_config: Arc<StreamingConfig>,
@@ -374,34 +376,22 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
-        match mutation {
-            Mutation::Stop(StopMutation { dropped_actors, .. }) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
+        if let Mutation::Update(UpdateMutation { dispatchers, .. }) = mutation
+            && let Some(updates) = dispatchers.get(&self.actor_id)
+        {
+            for update in updates {
+                self.post_update_dispatcher(update)?;
             }
-            Mutation::Update(UpdateMutation {
-                dispatchers,
-                dropped_actors,
-                ..
-            }) => {
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
-                    for update in updates {
-                        self.post_update_dispatcher(update)?;
-                    }
-                }
-
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
-            }
-            _ => {}
         };
+
+        if let Some(dropped_actors) = mutation.all_stop_actors()
+            // Remove outputs only if this actor itself is not to be stopped.
+            && !dropped_actors.contains(&self.actor_id)
+        {
+            for dispatcher in &mut self.dispatchers {
+                dispatcher.remove_outputs(dropped_actors);
+            }
+        }
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
@@ -514,6 +504,47 @@ impl DispatchExecutor {
     }
 }
 
+/// Dispatches a message batch downstream and returns the barriers that should be yielded by the
+/// barrier stream.
+async fn dispatch_message_batch(
+    inner: &mut DispatchExecutorInner,
+    batch: MessageBatch,
+) -> StreamResult<Option<Vec<Barrier>>> {
+    match batch {
+        MessageBatch::Chunk(chunk) => {
+            inner
+                .dispatch(MessageBatch::Chunk(chunk))
+                .instrument(tracing::info_span!("dispatch_chunk"))
+                .instrument_await("dispatch_chunk")
+                .await?;
+            Ok(None)
+        }
+        MessageBatch::BarrierBatch(barrier_batch) => {
+            assert!(!barrier_batch.is_empty());
+            let yielded_barriers = barrier_batch.clone();
+            inner
+                .dispatch(MessageBatch::BarrierBatch(barrier_batch))
+                .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                .instrument_await("dispatch_barrier_batch")
+                .await?;
+            inner
+                .metrics
+                .metrics
+                .barrier_batch_size
+                .observe(yielded_barriers.len() as f64);
+            Ok(Some(yielded_barriers))
+        }
+        MessageBatch::Watermark(watermark) => {
+            inner
+                .dispatch(MessageBatch::Watermark(watermark))
+                .instrument(tracing::info_span!("dispatch_watermark"))
+                .instrument_await("dispatch_watermark")
+                .await?;
+            Ok(None)
+        }
+    }
+}
+
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
@@ -529,36 +560,11 @@ impl StreamConsumer for DispatchExecutor {
                     // end_of_stream
                     break;
                 };
-                match message {
-                    chunk @ MessageBatch::Chunk(_) => {
-                        self.inner
-                            .dispatch(chunk)
-                            .instrument(tracing::info_span!("dispatch_chunk"))
-                            .instrument_await("dispatch_chunk")
-                            .await?;
-                    }
-                    MessageBatch::BarrierBatch(barrier_batch) => {
-                        assert!(!barrier_batch.is_empty());
-                        self.inner
-                            .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                            .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                            .instrument_await("dispatch_barrier_batch")
-                            .await?;
-                        self.inner
-                            .metrics
-                            .metrics
-                            .barrier_batch_size
-                            .observe(barrier_batch.len() as f64);
-                        for barrier in barrier_batch {
-                            yield barrier;
-                        }
-                    }
-                    watermark @ MessageBatch::Watermark(_) => {
-                        self.inner
-                            .dispatch(watermark)
-                            .instrument(tracing::info_span!("dispatch_watermark"))
-                            .instrument_await("dispatch_watermark")
-                            .await?;
+                if let Some(barrier_batch) =
+                    dispatch_message_batch(&mut self.inner, message).await?
+                {
+                    for barrier in barrier_batch {
+                        yield barrier;
                     }
                 }
             }
@@ -1004,12 +1010,35 @@ impl Dispatcher for HashDataDispatcher {
         }
         assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
-        let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
         // The output mapping may project columns and eliminate noop updates.
         let chunk = self.output_mapping.apply(chunk);
         // Get the visibility after noop update elimination to incorporate into the final visibility.
         let chunk_vis = chunk.visibility();
+
+        // The noop elimination in `output_mapping.apply()` may normalize partially-visible
+        // update pairs (e.g., U- → Delete, U+ → Insert). We must adopt these normalized ops,
+        // otherwise the downstream will see an orphan U+ and panic.
+        // Meanwhile, `new_ops` contains dist-key-changed rewrites (U-/U+ → Delete/Insert)
+        // that are not reflected in `chunk.ops()`. Merge both: prefer `new_ops` when it already
+        // did a rewrite, otherwise take the (possibly normalized) op from the chunk.
+        let chunk_ops = chunk.ops();
+        let ops: Vec<Op> = new_ops
+            .iter()
+            .zip_eq_fast(chunk_ops.iter())
+            .map(|(&new_op, &elim_op)| {
+                // If new_ops already rewrote U-/U+ to Delete/Insert (dist_key_changed), keep it.
+                // Otherwise, use the post-elimination op which may have been normalized.
+                match (new_op, elim_op) {
+                    // dist_key_changed rewrite: new_ops turned U- into Delete
+                    (Op::Delete, Op::UpdateDelete) => Op::Delete,
+                    // dist_key_changed rewrite: new_ops turned U+ into Insert
+                    (Op::Insert, Op::UpdateInsert) => Op::Insert,
+                    // For all other cases, use the post-elimination op (which includes normalize).
+                    _ => elim_op,
+                }
+            })
+            .collect();
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
@@ -1195,22 +1224,16 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         let chunk = self.output_mapping.apply(chunk);
         output.send(DispatcherMessageBatch::Chunk(chunk)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             output
@@ -1738,5 +1761,39 @@ mod tests {
         );
 
         hash_dispatcher.dispatch_data(projected).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_internal_projection_normalize_single_u_plus() {
+        let (output_tx, mut output_rx) = channel_for_test();
+        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            vec![0],
+            DispatchOutputMapping::Simple(vec![0]),
+            hash_mapping,
+            0.into(),
+        );
+
+        let input = StreamChunk::from_pretty(
+            "  I I
+            + 1 10
+            U- 1 10
+            U+ 1 30",
+        );
+
+        hash_dispatcher.dispatch_data(input).await.unwrap();
+
+        let output = output_rx.recv().await.unwrap();
+        assert_eq!(
+            *output.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I
+                + 1 D
+                U- 1 D
+                + 1",
+            )
+        );
     }
 }

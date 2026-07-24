@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
@@ -1098,7 +1097,7 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+            if ctx.backfill_type().is_snapshot_backfill() {
                 return Err(RwError::from(ErrorCode::NotSupported(
                     "Temporal join with snapshot backfill not supported".into(),
                     "Please use arrangement backfill".into(),
@@ -1229,7 +1228,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_backfill_type(new_scan, BackfillType::Replicated);
         Ok((
             new_stream_table_scan,
             new_predicate,
@@ -1420,7 +1419,9 @@ impl LogicalJoin {
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
-            *right.inputs().iter().exactly_one().unwrap().distribution(),
+            *Itertools::exactly_one(right.inputs().iter())
+                .unwrap()
+                .distribution(),
             Distribution::Single
         );
 
@@ -1448,7 +1449,7 @@ impl LogicalJoin {
         }
     }
 
-    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<BatchPlanRef> {
+    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<Option<BatchPlanRef>> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1460,10 +1461,7 @@ impl LogicalJoin {
             .core
             .clone_with_inputs(self.core.left.to_batch()?, self.core.right.to_batch()?);
 
-        Ok(self
-            .to_batch_lookup_join(predicate, join)?
-            .expect("Fail to convert to lookup join")
-            .into())
+        Ok(self.to_batch_lookup_join(predicate, join)?.map(Into::into))
     }
 
     fn to_stream_asof_join(
@@ -1619,7 +1617,7 @@ impl ToStream for LogicalJoin {
         {
             return Err(ErrorCode::NotSupported(
                 "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_owned(),
-                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_owned()).into());
+                 "please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information".to_owned()).into());
         }
 
         let predicate = EqJoinPredicate::create(
@@ -1654,7 +1652,7 @@ impl ToStream for LogicalJoin {
                 "streaming nested-loop join".to_owned(),
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
-                 See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),
+                 See also: https://docs.risingwave.com/processing/sql/dynamic-filters".to_owned(),
             )))
         }
     }
@@ -1769,21 +1767,28 @@ impl ToStream for LogicalJoin {
                 .core
                 .r2i_col_mapping()
                 .composite(&join_with_pk.core.i2o_col_mapping());
-            let left_right_stream_keys = join_with_pk
+            let mut left_right_keys = join_with_pk
                 .left()
                 .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
-                .chain(
-                    join_with_pk
-                        .right()
-                        .expect_stream_key()
-                        .iter()
-                        .map(|i| r2o.map(*i)),
-                )
                 .collect_vec();
+            left_right_keys.extend(
+                join_with_pk
+                    .right()
+                    .expect_stream_key()
+                    .iter()
+                    .map(|i| r2o.map(*i)),
+            );
+            left_right_keys.extend(
+                eq_predicate
+                    .eq_indexes()
+                    .iter()
+                    .flat_map(|(lk, rk)| [l2o.map(*lk), r2o.map(*rk)]),
+            );
+            let left_right_keys = left_right_keys.into_iter().unique().collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_keys)
         } else {
             join_with_pk.into()
         };
@@ -1845,7 +1850,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1909,7 +1914,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_semi_join() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -1989,7 +1994,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2064,7 +2069,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(DataType::Int32, format!("v{}", i)))
             .collect();
@@ -2235,7 +2240,7 @@ mod tests {
     #[tokio::test]
     async fn test_join_column_prune_with_order_required() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = (1..7)
             .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
@@ -2319,7 +2324,7 @@ mod tests {
         // Right Semi/Anti Join:
         //  Schema: [r0, r1, r2]
         //  FD: r0 --> {r1, r2}
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let left = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "l0"),

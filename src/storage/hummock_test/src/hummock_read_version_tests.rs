@@ -97,7 +97,7 @@ async fn test_read_version_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst_iter.count());
-        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
     }
 
     {
@@ -135,7 +135,7 @@ async fn test_read_version_basic() {
 
             assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
-            assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+            assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
         }
     }
 
@@ -157,7 +157,7 @@ async fn test_read_version_basic() {
             .uploading_imms
             .iter()
             .rev()
-            .map(|imm| imm.min_epoch())
+            .map(|imm| imm.epoch())
             .take(3)
             .rev()
             .collect::<Vec<_>>();
@@ -268,7 +268,7 @@ async fn test_read_version_basic() {
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
 
-        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
+        assert_eq!(test_epoch(4), staging_imm[0].epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -292,7 +292,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
+        assert_eq!(test_epoch(4), staging_imm[0].epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
@@ -354,7 +354,7 @@ async fn test_read_filter_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst.len());
-        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
 
         // test read_filter_for_version
         {

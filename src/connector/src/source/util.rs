@@ -17,36 +17,133 @@ use std::sync::Arc;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SplitImpl;
+use crate::source::google_pubsub::PubsubSplit;
 use crate::source::nats::split::NatsSplit;
 
 pub fn fill_adaptive_split(
     split_template: &SplitImpl,
     actor_count: usize,
 ) -> ConnectorResult<BTreeMap<Arc<str>, SplitImpl>> {
-    // Just Nats is adaptive for now
-    if let SplitImpl::Nats(split) = split_template {
-        let mut new_splits = BTreeMap::new();
-        for idx in 0..actor_count {
-            let split_id: Arc<str> = idx.to_string().into();
-            new_splits.insert(
-                split_id.clone(),
-                SplitImpl::Nats(NatsSplit::new(
-                    split.subject.clone(),
-                    split_id,
-                    split.start_sequence.clone(),
-                )),
+    match split_template {
+        SplitImpl::Nats(split) => {
+            let mut new_splits = BTreeMap::new();
+            for idx in 0..actor_count {
+                let split_id: Arc<str> = idx.to_string().into();
+                new_splits.insert(
+                    split_id.clone(),
+                    SplitImpl::Nats(NatsSplit::new(
+                        split.subject.clone(),
+                        split_id,
+                        split.start_sequence.clone(),
+                    )),
+                );
+            }
+            tracing::debug!(
+                "Filled adaptive splits for Nats source, {} splits in total",
+                new_splits.len()
             );
+            Ok(new_splits)
         }
-        tracing::debug!(
-            "Filled adaptive splits for Nats source, {} splits in total",
-            new_splits.len()
-        );
-        Ok(new_splits)
-    } else {
-        Err(ConnectorError::from(anyhow::anyhow!(
-            "Unsupported split type, expect Nats SplitImpl but get {:?}",
+        SplitImpl::GooglePubsub(split) => {
+            let mut new_splits = BTreeMap::new();
+            for idx in 0..actor_count {
+                let split_id: Arc<str> = format!("{}-{}", split.subscription, idx).into();
+                new_splits.insert(
+                    split_id,
+                    SplitImpl::GooglePubsub(PubsubSplit {
+                        index: idx as u32,
+                        subscription: split.subscription.clone(),
+                        __deprecated_start_offset: None,
+                        __deprecated_stop_offset: None,
+                    }),
+                );
+            }
+            tracing::debug!(
+                "Filled adaptive splits for GooglePubsub source, {} splits in total",
+                new_splits.len()
+            );
+            Ok(new_splits)
+        }
+        _ => Err(ConnectorError::from(anyhow::anyhow!(
+            "Unsupported split type for adaptive splits: {:?}",
             split_template
-        )))
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::SplitMetaData;
+    use crate::source::nats::split::NatsOffset;
+
+    #[test]
+    fn test_fill_adaptive_split_pubsub() {
+        let template = SplitImpl::GooglePubsub(PubsubSplit {
+            index: 0,
+            subscription: "projects/p/subscriptions/s".to_owned(),
+            __deprecated_start_offset: None,
+            __deprecated_stop_offset: None,
+        });
+
+        let splits = fill_adaptive_split(&template, 3).unwrap();
+        assert_eq!(splits.len(), 3);
+
+        for (idx, (split_id, split)) in splits.iter().enumerate() {
+            let expected_id = format!("projects/p/subscriptions/s-{}", idx);
+            assert_eq!(split_id.as_ref(), expected_id.as_str());
+            if let SplitImpl::GooglePubsub(ps) = split {
+                assert_eq!(ps.index, idx as u32);
+                assert_eq!(ps.subscription, "projects/p/subscriptions/s");
+                let expected_split_id: Arc<str> = expected_id.as_str().into();
+                assert_eq!(ps.id(), expected_split_id);
+            } else {
+                panic!("expected GooglePubsub split");
+            }
+        }
+    }
+
+    #[test]
+    fn test_fill_adaptive_split_pubsub_single_actor() {
+        let template = SplitImpl::GooglePubsub(PubsubSplit {
+            index: 0,
+            subscription: "sub".to_owned(),
+            __deprecated_start_offset: None,
+            __deprecated_stop_offset: None,
+        });
+
+        let splits = fill_adaptive_split(&template, 1).unwrap();
+        assert_eq!(splits.len(), 1);
+        assert!(splits.contains_key("sub-0"));
+    }
+
+    #[test]
+    fn test_fill_adaptive_split_nats() {
+        let template = SplitImpl::Nats(NatsSplit::new(
+            "test-subject".to_owned(),
+            "0".into(),
+            NatsOffset::None,
+        ));
+
+        let splits = fill_adaptive_split(&template, 4).unwrap();
+        assert_eq!(splits.len(), 4);
+
+        for idx in 0..4 {
+            assert!(splits.contains_key(idx.to_string().as_str()));
+        }
+    }
+
+    #[test]
+    fn test_fill_adaptive_split_unsupported() {
+        // Use a Kafka split (not adaptive) to test the error path
+        let template = SplitImpl::Kafka(crate::source::kafka::split::KafkaSplit::new(
+            0,
+            None,
+            None,
+            "topic".into(),
+        ));
+        let result = fill_adaptive_split(&template, 2);
+        assert!(result.is_err());
     }
 }
 

@@ -13,19 +13,23 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
+use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment};
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta_model::compaction_config::CompactionConfig;
 use risingwave_meta_model::compaction_status::LevelHandlers;
 use risingwave_meta_model::compaction_task::CompactionTask;
+use risingwave_meta_model::hummock_table_change_log::ActiveModel as MetaStoreTableChangeLog;
 use risingwave_meta_model::hummock_version_delta::FullVersionDelta;
 use risingwave_meta_model::hummock_version_stats::TableStats;
 use risingwave_meta_model::{
-    CompactionGroupId, CompactionTaskId, HummockVersionId, compaction_config, compaction_status,
-    compaction_task, hummock_pinned_snapshot, hummock_pinned_version, hummock_version_delta,
-    hummock_version_stats,
+    CompactionGroupId, CompactionTaskId, Epoch, HummockVersionId, compaction_config,
+    compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
+    hummock_version_delta, hummock_version_stats,
 };
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, PbSstableInfo,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
@@ -36,6 +40,15 @@ use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
 
 pub type Transaction = sea_orm::DatabaseTransaction;
+
+pub(crate) fn compaction_task_model_to_assignment(
+    model: compaction_task::Model,
+) -> CompactTaskAssignment {
+    CompactTaskAssignment {
+        compact_task: CompactTask::from(model.task.to_protobuf()),
+        context_id: model.context_id,
+    }
+}
 
 impl From<sea_orm::DbErr> for MetadataModelError {
     fn from(err: sea_orm::DbErr) -> Self {
@@ -107,9 +120,9 @@ impl Transactional<Transaction> for CompactStatus {
 #[async_trait::async_trait]
 impl Transactional<Transaction> for CompactTaskAssignment {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        let task = self.compact_task.clone().unwrap();
+        let task: risingwave_pb::hummock::CompactTask = (&self.compact_task).into();
         let m = compaction_task::ActiveModel {
-            id: Set(task.task_id.try_into().unwrap()),
+            id: Set(self.compact_task.task_id.try_into().unwrap()),
             context_id: Set(self.context_id),
             task: Set(CompactionTask::from(&task)),
         };
@@ -129,7 +142,7 @@ impl Transactional<Transaction> for CompactTaskAssignment {
 
     async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         compaction_task::Entity::delete_by_id(
-            CompactionTaskId::try_from(self.compact_task.as_ref().unwrap().task_id).unwrap(),
+            CompactionTaskId::try_from(self.compact_task.task_id).unwrap(),
         )
         .exec(trx)
         .await?;
@@ -265,5 +278,59 @@ impl From<compaction_status::Model> for CompactStatus {
             compaction_group_id: value.compaction_group_id,
             level_handlers: value.status.to_protobuf().iter().map_into().collect(),
         }
+    }
+}
+
+pub fn to_table_change_log_meta_store_model(
+    table_id: TableId,
+    change_log: &EpochNewChangeLog,
+) -> MetaStoreTableChangeLog {
+    MetaStoreTableChangeLog {
+        table_id: Set(table_id),
+        checkpoint_epoch: Set(change_log.checkpoint_epoch as _),
+        non_checkpoint_epochs: Set(change_log
+            .non_checkpoint_epochs
+            .iter()
+            .map(|e| *e as Epoch)
+            .collect::<Vec<_>>()
+            .into()),
+        new_value_sst: Set(change_log
+            .new_value
+            .iter()
+            .map(Into::into)
+            .collect::<Vec<PbSstableInfo>>()
+            .into()),
+        old_value_sst: Set(change_log
+            .old_value
+            .iter()
+            .map(Into::into)
+            .collect::<Vec<PbSstableInfo>>()
+            .into()),
+    }
+}
+
+pub fn to_table_change_log(
+    change_log: risingwave_meta_model::hummock_table_change_log::Model,
+) -> EpochNewChangeLog {
+    EpochNewChangeLog {
+        new_value: change_log
+            .new_value_sst
+            .to_protobuf()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        old_value: change_log
+            .old_value_sst
+            .to_protobuf()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        non_checkpoint_epochs: change_log
+            .non_checkpoint_epochs
+            .0
+            .iter()
+            .map(|e| *e as _)
+            .collect(),
+        checkpoint_epoch: change_log.checkpoint_epoch as _,
     }
 }

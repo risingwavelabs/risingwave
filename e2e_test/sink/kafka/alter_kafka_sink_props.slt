@@ -1,0 +1,68 @@
+statement ok
+set sink_decouple = true;
+
+# Kafka: verify supported alter-on-fly props.
+statement ok
+CREATE TABLE table_kafka (
+    id INT PRIMARY KEY,
+    v1 VARCHAR
+);
+
+statement ok
+CREATE SINK sink_kafka FROM table_kafka WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test-rw-sink-alter-connector-props',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+
+statement ok
+ALTER SINK sink_kafka CONNECTOR WITH (
+    properties.allow.auto.create.topics = 'true',
+    properties.batch.num.messages = '200000',
+    properties.batch.size = '1000000',
+    properties.enable.idempotence = 'true',
+    properties.max.in.flight.requests.per.connection = '1',
+    properties.message.max.bytes = '10485760',
+    properties.message.send.max.retries = '10',
+    properties.message.timeout.ms = '60000',
+    properties.queue.buffering.max.kbytes = '20480',
+    properties.queue.buffering.max.messages = '200000',
+    properties.queue.buffering.max.ms = '1000',
+    properties.request.required.acks = '-1',
+    properties.retry.backoff.ms = '200',
+    properties.receive.message.max.bytes = '104857600'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 'sink_kafka'
+  and definition ilike '%properties.allow."auto"."create".topics = ''true''%'
+  and definition ilike '%properties.batch.size = ''1000000''%'
+  and definition ilike '%properties.enable.idempotence = ''true''%'
+  and definition ilike '%properties."max"."in".flight.requests.per."connection" = ''1''%'
+  and definition ilike '%properties."message"."max".bytes = ''10485760''%'
+  and definition ilike '%properties."message".send."max".retries = ''10''%'
+  and definition ilike '%properties."message".timeout.ms = ''60000''%'
+  and definition ilike '%properties.queue.buffering."max".kbytes = ''20480''%'
+  and definition ilike '%properties.queue.buffering."max".messages = ''200000''%'
+  and definition ilike '%properties.queue.buffering."max".ms = ''1000''%'
+  and definition ilike '%properties.receive."message"."max".bytes = ''104857600''%'
+  and definition ilike '%properties.request.required.acks = ''-1''%'
+  and definition ilike '%properties.retry.backoff.ms = ''200''%';
+----
+1
+
+statement error Field 'topic' is not allowed to be altered on the fly for sink: kafka
+ALTER SINK sink_kafka CONNECTOR WITH (
+    topic = 'test-rw-sink-alter-connector-props-2'
+);
+
+statement ok
+DROP SINK sink_kafka;
+
+statement ok
+DROP TABLE table_kafka;

@@ -46,6 +46,7 @@ use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -130,7 +131,6 @@ pub async fn compute_node_serve(
             parallelism: opts.parallelism as u32,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
-            is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
             is_iceberg_compactor: false,
@@ -146,6 +146,8 @@ pub async fn compute_node_serve(
     ));
 
     let state_store_url = system_params.state_store();
+    let state_store_url = state_store_url.expose();
+
     let data_directory = system_params.data_directory();
 
     let embedded_compactor_enabled =
@@ -232,6 +234,7 @@ pub async fn compute_node_serve(
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
+        opts.role,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -418,19 +421,22 @@ pub async fn compute_node_serve(
     let stream_exchange_srv =
         StreamExchangeServiceImpl::new(stream_mgr.clone(), stream_exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
+    let (meta_cache, block_cache, hummock_storage) = if let Some(hummock) = state_store.as_hummock()
+    {
         (
             Some(hummock.sstable_store().meta_cache().clone()),
             Some(hummock.sstable_store().block_cache().clone()),
+            Some(hummock.clone()),
         )
     } else {
-        (None, None)
+        (None, None, None)
     };
     let monitor_srv = MonitorServiceImpl::new(
         stream_mgr.clone(),
         config.server.clone(),
         meta_cache.clone(),
         block_cache.clone(),
+        hummock_storage,
     );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone(), meta_cache, block_cache);
     let health_srv = HealthServiceImpl::new();
@@ -481,7 +487,9 @@ pub async fn compute_node_serve(
                 AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
             }
         })
-        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ))
         .add_service(ConfigServiceServer::new(config_srv))
         .add_service(HealthServer::new(health_srv))
         .monitored_serve_with_shutdown(

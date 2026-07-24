@@ -35,11 +35,13 @@ pub struct Model {
     pub adaptive_parallelism_strategy: Option<String>,
     pub parallelism: StreamingParallelism,
     pub backfill_parallelism: Option<StreamingParallelism>,
+    pub backfill_adaptive_parallelism_strategy: Option<String>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub backfill_orders: Option<BackfillOrders>,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
     pub is_serverless_backfill: bool,
+    pub refresh_interval_sec: Option<i64>,
 }
 
 // This data structure contains an adjacency list of backfill nodes.

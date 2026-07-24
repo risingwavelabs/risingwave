@@ -44,6 +44,7 @@ pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
 pub mod hummock_sequence;
 pub mod hummock_sstable_info;
+pub mod hummock_table_change_log;
 pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
@@ -71,6 +72,61 @@ pub mod user_privilege;
 pub mod view;
 pub mod worker;
 pub mod worker_property;
+
+#[macro_export]
+macro_rules! for_all_meta_model_entities {
+    ($macro:ident) => {
+        $macro! {
+            catalog_version,
+            cdc_table_snapshot_split,
+            cluster,
+            compaction_config,
+            compaction_status,
+            compaction_task,
+            connection,
+            database,
+            exactly_once_iceberg_sink,
+            fragment,
+            fragment_relation,
+            fragment_splits,
+            function,
+            hummock_epoch_to_version,
+            hummock_gc_history,
+            hummock_pinned_snapshot,
+            hummock_pinned_version,
+            hummock_sequence,
+            hummock_sstable_info,
+            hummock_table_change_log,
+            hummock_time_travel_delta,
+            hummock_time_travel_version,
+            hummock_version_delta,
+            hummock_version_stats,
+            iceberg_namespace_properties,
+            iceberg_tables,
+            index,
+            object,
+            object_dependency,
+            pending_sink_state,
+            refresh_job,
+            schema,
+            secret,
+            serde_seaql_migration,
+            session_parameter,
+            sink,
+            source,
+            streaming_job,
+            subscription,
+            system_parameter,
+            table,
+            user,
+            user_default_privilege,
+            user_privilege,
+            view,
+            worker,
+            worker_property
+        }
+    };
+}
 
 pub type TransactionId = i32;
 
@@ -318,9 +374,12 @@ macro_rules! derive_btreemap_from_blob {
     };
 }
 
-pub(crate) use {derive_array_from_blob, derive_from_blob};
+pub(crate) use derive_array_from_blob;
+pub(crate) use derive_from_blob;
 
 derive_from_json_struct!(TableIdArray, Vec<TableId>);
+
+derive_from_json_struct!(EpochArray, Vec<Epoch>);
 
 derive_from_json_struct!(I32Array, Vec<i32>);
 
@@ -417,6 +476,12 @@ derive_array_from_blob!(
     HummockVersionDeltaArray,
     risingwave_pb::hummock::PbHummockVersionDelta,
     PbHummockVersionDeltaArray
+);
+
+derive_array_from_blob!(
+    SstableInfoArray,
+    risingwave_pb::hummock::PbSstableInfo,
+    PbSstableInfoArray
 );
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]

@@ -65,7 +65,7 @@ feature_gated_function!(
 );
 
 /// Resolves the schema of the source from external schema file.
-/// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+/// See <https://docs.risingwave.com/sql/commands/sql-create-source> for more information.
 ///
 /// Note: the returned schema strictly corresponds to the schema.
 /// Other special columns like additional columns (`INCLUDE`), and `row_id` column are not included.
@@ -292,8 +292,12 @@ async fn bind_columns_from_source_for_non_cdc(
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
                 // TODO: rely on SpecificParserConfig::new to validate, like Avro
-                TimestamptzHandling::from_options(&format_encode_options_to_consume)
-                    .map_err(|err| InvalidInputSyntax(err.message))?;
+                if let Some(value) =
+                    format_encode_options_to_consume.get(TimestamptzHandling::OPTION_KEY)
+                {
+                    TimestamptzHandling::from_options(value)
+                        .map_err(|err| InvalidInputSyntax(err.message))?;
+                }
                 try_consume_string_from_options(
                     &mut format_encode_options_to_consume,
                     TimestamptzHandling::OPTION_KEY,

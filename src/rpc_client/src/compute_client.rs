@@ -35,7 +35,7 @@ use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
     FastInsertResponse, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
-    PbPermits, TaskInfoResponse, permits,
+    IngestDmlRequest, IngestDmlResponse, PbPermits, TaskInfoResponse, permits,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -61,7 +61,7 @@ pub struct ComputeClient {
 
 impl ComputeClient {
     pub async fn new(addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
@@ -208,6 +208,19 @@ impl ComputeClient {
             .task_client
             .clone()
             .fast_insert(req)
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn ingest_dml(
+        &self,
+        req: impl tonic::IntoStreamingRequest<Message = IngestDmlRequest>,
+    ) -> Result<Streaming<IngestDmlResponse>> {
+        Ok(self
+            .task_client
+            .clone()
+            .ingest_dml(req)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

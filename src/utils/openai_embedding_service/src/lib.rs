@@ -46,7 +46,7 @@ struct EmbeddingData {
 
 async fn embedding_handler<F: Future<Output = (Vec<Vec<f32>>, usize, usize)> + Send>(
     Json(payload): Json<EmbeddingRequest>,
-    gen_embedding: impl Fn(Vec<String>) -> F + Send,
+    gen_embedding: impl Fn(Vec<String>) -> F + Send + Sync,
 ) -> Json<EmbeddingResponse> {
     let inputs: Vec<_> = match payload.input {
         serde_json::Value::Array(array) => array
@@ -84,7 +84,7 @@ async fn embedding_handler<F: Future<Output = (Vec<Vec<f32>>, usize, usize)> + S
 }
 
 pub async fn serve_embedding_service<F: Future<Output = (Vec<Vec<f32>>, usize, usize)> + Send>(
-    gen_embedding: impl Fn(Vec<String>) -> F + Send + Clone + 'static,
+    gen_embedding: impl Fn(Vec<String>) -> F + Send + Sync + Clone + 'static,
     bind_addr: impl ToSocketAddrs,
 ) {
     let app = Router::new().route(

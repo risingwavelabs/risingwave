@@ -27,6 +27,7 @@ use tracing::{info, warn};
 use super::{
     LogSinker, SinkCoordinationRpcClientEnum, SinkLogReader, SinkWriterMetrics, SinkWriterParam,
 };
+use crate::sink::decouple_checkpoint_log_sink::should_force_commit_on_checkpoint_barrier;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogStoreReadItem, Result, SinkError, SinkParam, TruncateOffset};
 
@@ -202,9 +203,11 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     if is_checkpoint {
                         current_checkpoint += 1;
                         if current_checkpoint >= commit_checkpoint_interval.get()
-                            || new_vnode_bitmap.is_some()
-                            || is_stop
-                            || schema_change.is_some()
+                            || should_force_commit_on_checkpoint_barrier(
+                                new_vnode_bitmap.is_some(),
+                                is_stop,
+                                schema_change.is_some(),
+                            )
                         {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;

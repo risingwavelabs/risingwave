@@ -243,6 +243,7 @@ pub(crate) trait LogWriterTestExt: LogWriter {
                     new_vnode_bitmap: None,
                     is_stop: false,
                     schema_change: None,
+                    wait_log_store_flush: false,
                 },
             )
             .await?;

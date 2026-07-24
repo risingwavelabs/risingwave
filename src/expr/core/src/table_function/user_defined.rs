@@ -30,7 +30,7 @@ pub struct UserDefinedTableFunction {
     return_type: DataType,
     runtime: Box<dyn UdfImpl>,
     arrow_convert: UdfArrowConvert,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     chunk_size: usize,
 }
 

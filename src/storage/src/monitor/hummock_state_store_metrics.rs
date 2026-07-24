@@ -44,6 +44,7 @@ pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
+    pub vnode_pruning_counts: RelabeledGuardedIntCounterVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
@@ -95,6 +96,9 @@ pub struct HummockStateStoreMetrics {
 
     pub safe_version_hit: GenericCounter<AtomicU64>,
     pub safe_version_miss: GenericCounter<AtomicU64>,
+    pub table_change_log_fetch_latency: Histogram,
+    pub table_change_log_cache_hit: GenericCounter<AtomicU64>,
+    pub table_change_log_cache_miss: GenericCounter<AtomicU64>,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -115,7 +119,7 @@ impl HummockStateStoreMetrics {
 
         let bloom_filter_true_negative_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
-            "Total number of sstables that have been considered true negative by bloom filters",
+            "Total number of sstables that have been considered true negative by SST filters",
             &["table_id", "type"],
             registry
         )
@@ -128,7 +132,7 @@ impl HummockStateStoreMetrics {
 
         let bloom_filter_check_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_check_counts",
-            "Total number of read request to check bloom filters",
+            "Total number of read request to check SST filters",
             &["table_id", "type"],
             registry
         )
@@ -150,6 +154,20 @@ impl HummockStateStoreMetrics {
         let iter_merge_sstable_counts = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             iter_merge_sstable_counts,
+            metric_level,
+        );
+
+        let vnode_pruning_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_vnode_pruning_counts",
+            "Total number of SST pruning operations by vnode key range hints",
+            &["table_id", "operation", "result"],
+            registry
+        )
+        .unwrap();
+
+        let vnode_pruning_counts = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            vnode_pruning_counts,
             metric_level,
         );
 
@@ -209,7 +227,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
             "Histogram of iterator fetch SST meta time that have been issued to state store",
-            state_store_read_time_buckets,
+            state_store_read_time_buckets.clone(),
         );
         let iter_fetch_meta_duration =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -232,6 +250,25 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_table_change_log_fetch_latency",
+            "Latency of fetching table change logs",
+            state_store_read_time_buckets,
+        );
+        let table_change_log_fetch_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let table_change_log_cache_counts = register_int_counter_vec_with_registry!(
+            "state_store_table_change_log_cache_counts",
+            "Total number of table change log cache lookups",
+            &["result"],
+            registry
+        )
+        .unwrap();
+        let table_change_log_cache_hit = table_change_log_cache_counts.with_label_values(&["hit"]);
+        let table_change_log_cache_miss =
+            table_change_log_cache_counts.with_label_values(&["miss"]);
 
         // ----- vector -----
         let vector_object_request_counts = register_guarded_int_counter_vec_with_registry!(
@@ -466,13 +503,14 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
-        let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
-            "state_store_read_req_bloom_filter_positive_counts",
-            "Total number of read request with at least one SST bloom filter check returns positive",
-            &["table_id", "type"],
-            registry
-        )
-        .unwrap();
+        let read_req_bloom_filter_positive_counts =
+            register_guarded_int_counter_vec_with_registry!(
+                "state_store_read_req_bloom_filter_positive_counts",
+                "Total number of read request with at least one SST filter check returns positive",
+                &["table_id", "type"],
+                registry
+            )
+            .unwrap();
         let read_req_bloom_filter_positive_counts =
             RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
                 MetricLevel::Info,
@@ -483,7 +521,7 @@ impl HummockStateStoreMetrics {
 
         let read_req_positive_but_non_exist_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_positive_but_non_exist_counts",
-            "Total number of read request on non-existent key/prefix with at least one SST bloom filter check returns positive",
+            "Total number of read request on non-existent key/prefix with at least one SST filter check returns positive",
             &["table_id", "type"],
             registry
         )
@@ -497,7 +535,7 @@ impl HummockStateStoreMetrics {
 
         let read_req_check_bloom_filter_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_check_bloom_filter_counts",
-            "Total number of read request that checks bloom filter with a prefix hint",
+            "Total number of read request that checks an SST filter with a prefix hint",
             &["table_id", "type"],
             registry
         )
@@ -583,6 +621,7 @@ impl HummockStateStoreMetrics {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
             iter_merge_sstable_counts,
+            vnode_pruning_counts,
             sst_store_block_request_counts,
             iter_scan_key_counts,
             get_shared_buffer_hit_counts,
@@ -621,6 +660,9 @@ impl HummockStateStoreMetrics {
             event_handler_latency,
             safe_version_hit,
             safe_version_miss,
+            table_change_log_fetch_latency,
+            table_change_log_cache_hit,
+            table_change_log_cache_miss,
         }
     }
 

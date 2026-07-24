@@ -219,6 +219,25 @@ impl CatalogController {
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
+        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // names, so unlike the iceberg-table cleanup above, identify them by
+        // inspecting properties rather than by name prefix.
+        let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
+        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
+        for sink in Sink::find()
+            .filter(sink::Column::SinkId.is_in(removed_object_ids.clone()))
+            .all(&txn)
+            .await?
+        {
+            let properties = sink.properties.inner_ref();
+            if crate::manager::iceberg_compaction::is_iceberg_sink(properties) {
+                removed_iceberg_sink_ids.push(sink.sink_id);
+            }
+            if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(properties) {
+                removed_iceberg_pk_index_sink_ids.push(sink.sink_id);
+            }
+        }
+
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -322,13 +341,8 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(
-                &txn,
-                self.env.shared_actor_infos(),
-                removed_streaming_job_ids.clone(),
-            )
-            .await?;
+        let (removed_source_fragments, removed_sink_fragments, removed_fragments) =
+            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
         let sink_target_fragments = fetch_target_fragments(&txn, removed_sink_fragments).await?;
         let mut removed_sink_fragment_by_targets = HashMap::new();
@@ -407,9 +421,7 @@ impl CatalogController {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
                     .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
-                let schema_obj = schema_obj
-                    .into_iter()
-                    .exactly_one()
+                let schema_obj = Itertools::exactly_one(schema_obj.into_iter())
                     .expect("schema object not found");
                 to_notify_objs.push(schema_obj);
 
@@ -435,10 +447,11 @@ impl CatalogController {
                 removed_source_ids: removed_source_ids.into_iter().collect(),
                 removed_secret_ids,
                 removed_source_fragments,
-                removed_actors,
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
+                removed_iceberg_sink_ids,
+                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))
@@ -469,6 +482,7 @@ impl CatalogController {
         }
 
         subscription.delete(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 }

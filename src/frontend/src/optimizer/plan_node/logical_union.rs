@@ -347,11 +347,11 @@ mod tests {
     #[tokio::test]
     async fn test_prune_union() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
-            Field::with_name(ty.clone(), "v3"),
+            Field::with_name(ty, "v3"),
         ];
         let values1 = LogicalValues::new(vec![], Schema { fields }, ctx);
 
@@ -374,11 +374,11 @@ mod tests {
     #[tokio::test]
     async fn test_union_to_batch() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
-            Field::with_name(ty.clone(), "v3"),
+            Field::with_name(ty, "v3"),
         ];
         let values1 = LogicalValues::new(vec![], Schema { fields }, ctx);
 

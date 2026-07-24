@@ -32,6 +32,11 @@ SELECT to_jsonb(15.87::real);
 15.869999885559082
 
 query T
+SELECT to_jsonb('2e16'::float8);
+----
+2e16
+
+query T
 SELECT to_jsonb(99.99::numeric);
 ----
 99.99

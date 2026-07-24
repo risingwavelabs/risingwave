@@ -1,22 +1,22 @@
 import json
-import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import docker_compose_exec, report_failures
 
 relations = ['test', 'test_types']
+versions = ['7', '8']
 
 failed_cases = []
-versions = ['7', '8']
 for rel in relations:
     query = f'curl -XGET -u elastic:risingwave "http://localhost:9200/{rel}/_count"  -H "Content-Type: application/json"'
     for v in versions:
-        es = 'elasticsearch{}'.format(v)
+        es = f'elasticsearch{v}'
         print(f"Running Query: {query} on {es}")
-        counts = subprocess.check_output(["docker", "compose", "exec", es, "bash", "-c", query])
-        counts = json.loads(counts)['count']
-        print("{} counts in {}_{}".format(counts, es, rel))
+        output = docker_compose_exec(es, query)
+        counts = json.loads(output)['count']
+        print(f"{counts} counts in {es}_{rel}")
         if counts < 1:
-            failed_cases.append(es + '_' + rel)
+            failed_cases.append(f"{es}_{rel}")
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+report_failures(failed_cases)

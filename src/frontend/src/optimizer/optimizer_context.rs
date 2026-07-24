@@ -70,6 +70,11 @@ pub struct OptimizerContext {
     /// Last assigned watermark group ID.
     last_watermark_group_id: Cell<u32>,
 
+    // TODO: remove this when locality backfill is enabled by default
+    /// Count of places where locality backfill could have been applied but was not,
+    /// because `enable_locality_backfill` is off.
+    missed_locality_providers: Cell<usize>,
+
     _phantom: PhantomUnsend,
 }
 
@@ -120,14 +125,15 @@ impl OptimizerContext {
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
             last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
 
+            // TODO: remove this when locality backfill is enabled by default
+            missed_locality_providers: Cell::new(0),
+
             _phantom: Default::default(),
         }
     }
 
-    // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    #[expect(clippy::unused_async)]
-    pub async fn mock() -> OptimizerContextRef {
+    pub fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             sql: Arc::from(""),
@@ -146,6 +152,8 @@ impl OptimizerContext {
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
             last_watermark_group_id: Cell::new(0),
+
+            missed_locality_providers: Cell::new(0),
 
             _phantom: Default::default(),
         }
@@ -233,6 +241,20 @@ impl OptimizerContext {
         self.session_ctx().notice_to_user(str);
     }
 
+    // TODO: remove this when locality backfill is enabled by default
+    /// Increment the counter for missed locality providers.
+    /// Called when locality backfill could have been applied but `enable_locality_backfill` is off.
+    pub fn inc_missed_locality_providers(&self) {
+        self.missed_locality_providers
+            .set(self.missed_locality_providers.get() + 1);
+    }
+
+    // TODO: remove this when locality backfill is enabled by default
+    /// Get the number of missed locality providers.
+    pub fn missed_locality_providers(&self) -> usize {
+        self.missed_locality_providers.get()
+    }
+
     fn explain_plan_impl(&self, plan: &impl Explain) -> String {
         match self.explain_options.explain_format {
             ExplainFormat::Text => plan.explain_to_string(),
@@ -278,6 +300,11 @@ impl OptimizerContext {
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {
         &self.session_ctx
+    }
+
+    pub fn batch_plan_dml_wait_persistence(&self) -> bool {
+        let session_config = self.session_ctx.config();
+        !session_config.implicit_flush() && session_config.dml_wait_persistence()
     }
 
     /// Return the original SQL.

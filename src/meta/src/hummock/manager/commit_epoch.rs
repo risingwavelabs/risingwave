@@ -47,9 +47,7 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
-use crate::hummock::{
-    HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
-};
+use crate::hummock::{HummockManager, commit_multi_var_with_provided_txn};
 
 pub struct NewTableFragmentInfo {
     pub table_ids: HashSet<TableId>,
@@ -83,8 +81,10 @@ impl HummockManager {
             tables_to_commit,
             truncate_tables,
         } = commit_info;
-        let mut versioning_guard = self.versioning.write().await;
-        let _timer = start_measure_real_process_timer!(self, "commit_epoch");
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("commit_epoch")
+            .await;
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
             return Ok(());
@@ -110,12 +110,21 @@ impl HummockManager {
             );
         }
 
+        let table_change_log_object_ids_before_commit = versioning
+            .table_change_log
+            .values()
+            .flat_map(|l| l.get_object_ids())
+            .collect::<HashSet<_>>();
+
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             Some(&self.table_committed_epoch_notifiers),
             &self.metrics,
+            &self.env.opts,
+            &self.version_stat_tx,
         );
 
         let state_table_info = &version.latest_version().state_table_info;
@@ -324,8 +333,16 @@ impl HummockManager {
             );
         }
         trigger_epoch_stat(&self.metrics, &versioning.current_version);
-
+        let table_change_log_object_ids_after_commit = versioning
+            .table_change_log
+            .values()
+            .flat_map(|l| l.get_object_ids())
+            .collect::<HashSet<_>>();
         drop(versioning_guard);
+        let may_delete_object_ids =
+            &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;
+        self.gc_manager
+            .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {

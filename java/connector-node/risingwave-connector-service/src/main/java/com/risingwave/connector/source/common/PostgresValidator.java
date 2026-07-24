@@ -55,11 +55,13 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         String dataType;
         Long charMaxLength;
         String udtName;
+        Integer atttypmod;
 
-        ColumnInfo(String dataType, Long charMaxLength, String udtName) {
+        ColumnInfo(String dataType, Long charMaxLength, String udtName, Integer atttypmod) {
             this.dataType = dataType;
             this.charMaxLength = charMaxLength;
             this.udtName = udtName;
+            this.atttypmod = atttypmod;
         }
     }
 
@@ -239,25 +241,66 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
                 var udtName = res.getString(4);
-                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName));
+                Integer atttypmod =
+                        res.getObject(5) == null ? null : ((Number) res.getObject(5)).intValue();
+                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, atttypmod));
             }
 
-            for (var e : tableSchema.getColumnTypes().entrySet()) {
+            for (var colDesc : tableSchema.getColumnDescs()) {
+                var colName = colDesc.getName();
                 // skip validate internal columns
-                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                if (colName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var colInfo = schema.get(e.getKey());
+                var colInfo = schema.get(colName);
                 if (colInfo == null) {
                     throw ValidatorUtils.invalidArgument(
-                            "Column '" + e.getKey() + "' not found in the upstream database");
+                            "Column '" + colName + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(colInfo, e.getValue())) {
+                var expectedType = colDesc.getDataType();
+                if (!isDataTypeCompatible(colInfo, expectedType.getTypeName())) {
                     throw ValidatorUtils.invalidArgument(
-                            "Incompatible data type of column " + e.getKey());
+                            "Incompatible data type of column " + colName);
+                }
+                var vectorDimError = validateVectorDimension(colInfo, expectedType, colName);
+                if (vectorDimError != null) {
+                    throw ValidatorUtils.invalidArgument(vectorDimError);
                 }
             }
         }
+    }
+
+    private static String validateVectorDimension(
+            ColumnInfo colInfo, Data.DataType expectedType, String colName) {
+        if (expectedType.getTypeName().getNumber() != Data.DataType.TypeName.VECTOR_VALUE) {
+            return null;
+        }
+        if (colInfo.udtName == null || !colInfo.udtName.equalsIgnoreCase("vector")) {
+            return null;
+        }
+
+        int expectedDim = expectedType.getPrecision();
+        // For pgvector, PostgreSQL stores dimension in pg_attribute.atttypmod.
+        // `vector(n)` -> atttypmod = n, and dimension-less `vector` -> atttypmod = -1.
+        Integer upstreamDim =
+                (colInfo.atttypmod != null && colInfo.atttypmod > 0) ? colInfo.atttypmod : null;
+        if (upstreamDim == null) {
+            return "Incompatible vector dimension of column "
+                    + colName
+                    + ": upstream vector has no dimension, but expected vector("
+                    + expectedDim
+                    + ")";
+        }
+        if (upstreamDim != expectedDim) {
+            return "Incompatible vector dimension of column "
+                    + colName
+                    + ": upstream vector("
+                    + upstreamDim
+                    + "), but expected vector("
+                    + expectedDim
+                    + ")";
+        }
+        return null;
     }
 
     private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
@@ -811,6 +854,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         case "geometry":
                             // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
                             return val == Data.DataType.TypeName.BYTEA_VALUE;
+                        case "vector":
+                            // pgvector VECTOR -> VECTOR
+                            return val == Data.DataType.TypeName.VECTOR_VALUE;
                         case "ltree":
                             return false;
                         case "hstore":

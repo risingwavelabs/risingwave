@@ -150,10 +150,14 @@ pub enum ErrorCode {
     TaskNotFound,
     #[error("Session not found")]
     SessionNotFound,
+    #[error("Invalid reference: {0}")]
+    InvalidReference(String),
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Duplicate Relation Name: {0}")]
     DuplicateRelationName(String),
+    #[error("Invalid insert operation: {0}")]
+    InsertViolation(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]

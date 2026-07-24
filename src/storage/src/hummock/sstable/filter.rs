@@ -16,19 +16,42 @@
 
 use std::sync::Arc;
 
+use risingwave_pb::hummock::PbSstableFilterType;
+
 use crate::hummock::MemoryLimiter;
+
+pub const DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP: usize = 256 * 1024;
+
+#[derive(Clone, Copy, Debug)]
+pub struct FilterBuilderOptions {
+    /// Estimated key count for one output SST.
+    pub estimated_key_count: usize,
+    /// Estimated data block count for one output SST.
+    pub estimated_block_count: usize,
+    /// Maximum initial allocation for the key-hash buffer.
+    ///
+    /// Plain filters use this as the upper bound for `Vec<u64>::with_capacity`. Blocked filters use
+    /// their own smaller per-block bound for the current block-local filter.
+    pub hash_prealloc_key_count_cap: usize,
+}
 
 pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds Bloom filter from key hashes
-    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8>;
-    /// approximate memory of filter builder
+    /// Builds serialized filter bytes from key hashes.
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>>;
+    /// Approximate serialized filter bytes counted toward SST builder capacity.
+    ///
+    /// `SstableBuilder::reach_capacity` uses this value to decide when to seal the current
+    /// SST. It should track the filter bytes that would be appended to the SST if the builder
+    /// were finished now, including any pending block-local filter bytes. It is not a heap memory
+    /// estimate for the builder or the decoded filter reader. Use `approximate_building_memory`
+    /// for build-time temporary memory.
     fn approximate_len(&self) -> usize;
 
-    fn create(fpr: f64, capacity: usize) -> Self;
+    fn create(options: FilterBuilderOptions) -> Self;
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) {}
-    /// approximate memory when finish filter
+    /// Approximate temporary memory needed when finishing the filter.
     fn approximate_building_memory(&self) -> usize;
 
     /// Add raw data which build by keys directly. Please make sure that you have finished the last
@@ -37,5 +60,33 @@ pub trait FilterBuilder: Send {
 
     fn support_blocked_raw_data(&self) -> bool {
         false
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType;
+}
+
+pub struct NoneFilterBuilder;
+
+impl FilterBuilder for NoneFilterBuilder {
+    fn add_key(&mut self, _dist_key: &[u8], _table_id: u32) {}
+
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn approximate_len(&self) -> usize {
+        0
+    }
+
+    fn create(_options: FilterBuilderOptions) -> Self {
+        Self
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        0
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterNone
     }
 }

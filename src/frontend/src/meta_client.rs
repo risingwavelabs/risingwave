@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
 use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
-use risingwave_pb::backup_service::MetaSnapshotMetadata;
+use risingwave_pb::backup_service::{BackupJobStatus, MetaSnapshotMetadata};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -34,6 +36,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
@@ -59,6 +62,10 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn try_unregister(&self);
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
+
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64>;
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)>;
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()>;
 
     async fn recover(&self) -> Result<()>;
 
@@ -111,6 +118,15 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs>;
+
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion>;
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>>;
@@ -155,6 +171,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
@@ -211,6 +229,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 
+    async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()>;
+
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
@@ -218,6 +238,12 @@ pub trait FrontendMetaClient: Send + Sync {
     fn cluster_id(&self) -> &str;
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>>;
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -230,6 +256,18 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
         self.0.flush(database_id).await
+    }
+
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64> {
+        self.0.backup_meta(remarks).await
+    }
+
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)> {
+        self.0.get_backup_job_status(job_id).await
+    }
+
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        self.0.delete_meta_snapshot(snapshot_ids).await
     }
 
     async fn recover(&self) -> Result<()> {
@@ -331,6 +369,26 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.0
+            .get_table_change_logs(
+                true,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await
     }
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion> {
@@ -524,6 +582,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.compact_iceberg_table(sink_id).await
     }
 
+    async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()> {
+        self.0.rewrite_iceberg_table_manifests(sink_id).await
+    }
+
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
         self.0.expire_iceberg_table_snapshots(sink_id).await
     }
@@ -542,5 +604,19 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
         self.0.list_refresh_table_states().await
+    }
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>> {
+        self.0.list_iceberg_compaction_status().await
+    }
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()> {
+        self.0
+            .risectl_update_compaction_config(&compaction_group_ids, &configs)
+            .await
     }
 }

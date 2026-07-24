@@ -266,7 +266,12 @@ impl Binder {
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_owned(), alias)?;
+        self.bind_table_to_context(
+            columns,
+            table_name.to_owned(),
+            schema_name.map(|s| s.to_owned()),
+            alias,
+        )?;
         Ok(ret)
     }
 
@@ -410,9 +415,7 @@ impl Binder {
 
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        let Statement::Query(query) = ast
-            .into_iter()
-            .exactly_one()
+        let Statement::Query(query) = Itertools::exactly_one(ast.into_iter())
             .expect("a view should contain only one statement")
         else {
             unreachable!("a view should contain a query statement");
@@ -494,6 +497,7 @@ impl Binder {
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
             table_name.to_owned(),
+            Some(schema_name.to_owned()),
             None,
         )?;
 

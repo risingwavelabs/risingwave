@@ -34,7 +34,7 @@ use crate::source::filesystem::opendal_source::{
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
-    BoxSourceChunkStream, BoxTryStream, Column, ConnectorProperties, ConnectorState,
+    BoxSourceReaderEventStream, BoxTryStream, Column, ConnectorProperties, ConnectorState,
     CreateSplitReaderOpt, CreateSplitReaderResult, SourceColumnDesc, SourceContext,
     WaitCheckpointTask,
 };
@@ -145,7 +145,7 @@ impl SourceReader {
         })
     }
 
-    /// Build `SplitReader`s and then `BoxSourceChunkStream` from the given `ConnectorState` (`SplitImpl`s).
+    /// Build `SplitReader`s and then `BoxSourceReaderEventStream` from the given `ConnectorState` (`SplitImpl`s).
     ///
     /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream(
@@ -154,7 +154,7 @@ impl SourceReader {
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
         seek_to_latest: bool,
-    ) -> ConnectorResult<(BoxSourceChunkStream, CreateSplitReaderResult)> {
+    ) -> ConnectorResult<(BoxSourceReaderEventStream, CreateSplitReaderResult)> {
         let Some(splits) = state else {
             return Ok((pending().boxed(), Default::default()));
         };

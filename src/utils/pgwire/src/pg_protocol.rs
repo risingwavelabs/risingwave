@@ -84,10 +84,12 @@ where
     session: Option<Arc<SM::Session>>,
 
     result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
-    unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
-    prepare_statement_store: HashMap<String, <SM::Session as Session>::PreparedStatement>,
-    unnamed_portal: Option<<SM::Session as Session>::Portal>,
-    portal_store: HashMap<String, <SM::Session as Session>::Portal>,
+    unnamed_prepare_statement:
+        Option<PreparedStatementData<<SM::Session as Session>::PreparedStatement>>,
+    prepare_statement_store:
+        HashMap<String, PreparedStatementData<<SM::Session as Session>::PreparedStatement>>,
+    unnamed_portal: Option<PortalData<<SM::Session as Session>::Portal>>,
+    portal_store: HashMap<String, PortalData<<SM::Session as Session>::Portal>>,
     // Used to store the dependency of portal and prepare statement.
     // When we close a prepare statement, we need to close all the portals that depend on it.
     statement_portal_dependency: HashMap<String, Vec<String>>,
@@ -122,21 +124,38 @@ pub struct TlsConfig {
 }
 
 impl TlsConfig {
-    pub fn new_default() -> Option<Self> {
-        let cert = std::env::var("RW_SSL_CERT").ok()?;
-        let key = std::env::var("RW_SSL_KEY").ok()?;
+    pub fn new_default() -> anyhow::Result<Option<Self>> {
+        let cert = std::env::var("RW_SSL_CERT").ok();
+        let key = std::env::var("RW_SSL_KEY").ok();
         let enforce_ssl = env_var_is_true("RW_SSL_ENFORCE");
+
+        if cert.is_some() ^ key.is_some() {
+            return Err(anyhow::anyhow!(
+                "RW_SSL_CERT and RW_SSL_KEY must be set together"
+            ));
+        }
+
+        if enforce_ssl && cert.is_none() {
+            return Err(anyhow::anyhow!(
+                "RW_SSL_ENFORCE requires RW_SSL_CERT and RW_SSL_KEY to be set"
+            ));
+        }
+
+        let (Some(cert), Some(key)) = (cert, key) else {
+            return Ok(None);
+        };
+
         tracing::info!(
             "RW_SSL_CERT={}, RW_SSL_KEY={}, RW_SSL_ENFORCE={}",
             cert,
             key,
             enforce_ssl
         );
-        Some(Self {
+        Ok(Some(Self {
             cert,
             key,
             enforce_ssl,
-        })
+        }))
     }
 }
 
@@ -158,6 +177,18 @@ enum PgProtocolState {
     Regular,
 }
 
+#[derive(Clone)]
+struct PreparedStatementData<S> {
+    statement: S,
+    sql: Arc<str>,
+}
+
+#[derive(Clone)]
+struct PortalData<P> {
+    portal: P,
+    sql: Arc<str>,
+}
+
 /// Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations).
 ///
 /// PG protocol strings are always C strings.
@@ -170,19 +201,9 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-fn record_sql_in_current_span(
+fn get_redacted_and_truncated_sql(
     sql: &str,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
-) -> String {
-    let mut span = tracing::Span::current();
-    record_sql_in_span(sql, redact_sql_option_keywords, &mut span)
-}
-
-/// Record `sql` in the current tracing span.
-fn record_sql_in_span(
-    sql: &str,
-    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
-    span: &mut tracing::Span,
 ) -> String {
     let redacted_sql = if let Some(keywords) = redact_sql_option_keywords
         && !keywords.is_empty()
@@ -192,11 +213,25 @@ fn record_sql_in_span(
         sql.to_owned()
     };
     let truncated = truncated_fmt::TruncatedFmt(&redacted_sql, *RW_QUERY_LOG_TRUNCATE_LEN);
-    span.record("sql", tracing::field::display(&truncated));
     truncated.to_string()
 }
 
-/// Redacts SQL options. Data in DML is not redacted.
+/// Record `sql` in the current tracing span.
+fn record_sql_in_span(
+    sql: &str,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    span: &mut tracing::Span,
+) {
+    let redacted_and_truncated_sql =
+        get_redacted_and_truncated_sql(sql, redact_sql_option_keywords);
+    span.record("sql", tracing::field::display(&redacted_and_truncated_sql));
+}
+
+fn record_user_in_span(user: &str, span: &mut tracing::Span) {
+    span.record("user", tracing::field::display(user));
+}
+
+/// Redacts sensitive SQL fields. Data in DML is not redacted.
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
@@ -331,11 +366,26 @@ where
             mode,
             session_id,
             sql = tracing::field::Empty,
+            user = tracing::field::Empty,
         );
-        if let Ok(sql) = msg.get_sql()
-            && let Some(sql) = sql
-        {
-            record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+        match msg {
+            FeMessage::Execute(execute_msg) => {
+                if let Ok(portal_name) = cstr_to_str(&execute_msg.portal_name)
+                    && let Ok(sql) = self.get_portal_sql(portal_name)
+                {
+                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+                }
+            }
+            _ => {
+                if let Ok(sql) = msg.get_sql()
+                    && let Some(sql) = sql
+                {
+                    record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+                }
+            }
+        }
+        if let Some(current_session) = self.session.as_ref() {
+            record_user_in_span(&current_session.user(), &mut span);
         }
         span
     }
@@ -772,7 +822,7 @@ where
 
     async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
         let truncated_sql =
-            record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
+            get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -933,7 +983,6 @@ where
 
     async fn process_parse_msg(&mut self, mut msg: FeParseMessage) -> PsqlResult<()> {
         let sql = Arc::from(cstr_to_str(&msg.sql_bytes).unwrap());
-        record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
         let type_ids = std::mem::take(&mut msg.type_ids);
@@ -964,7 +1013,6 @@ where
         let stmt = {
             let stmts = Parser::parse_sql(&sql)
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
-            drop(sql);
             if stmts.len() > 1 {
                 return Err(PsqlError::ExtendedPrepareError(
                     "Only one statement is allowed in extended query mode".into(),
@@ -993,6 +1041,10 @@ where
             .parse(stmt, param_types)
             .await
             .map_err(|e| PsqlError::ExtendedPrepareError(e.into()))?;
+        let prepare_statement = PreparedStatementData {
+            statement: prepare_statement,
+            sql,
+        };
 
         if statement_name.is_empty() {
             self.unnamed_prepare_statement.replace(prepare_statement);
@@ -1019,7 +1071,7 @@ where
             return Err(PsqlError::Uncategorized("Duplicated portal name".into()));
         }
 
-        let prepare_statement = self.get_statement(&statement_name)?;
+        let prepare_statement = self.get_statement_data(&statement_name)?.clone();
 
         let result_formats = msg
             .result_format_codes
@@ -1033,8 +1085,17 @@ where
             .try_collect()?;
 
         let portal = session
-            .bind(prepare_statement, msg.params, param_formats, result_formats)
+            .bind(
+                prepare_statement.statement,
+                msg.params,
+                param_formats,
+                result_formats,
+            )
             .map_err(|e| PsqlError::Uncategorized(e.into()))?;
+        let portal = PortalData {
+            portal,
+            sql: prepare_statement.sql,
+        };
 
         if portal_name.is_empty() {
             self.result_cache.remove(&portal_name);
@@ -1074,16 +1135,16 @@ where
                 }
             }
             _ => {
-                let portal = self.get_portal(&portal_name)?;
-                let sql = format!("{}", portal);
+                let portal = self.get_portal_data(&portal_name)?.clone();
+                let sql = format!("{}", portal.portal);
                 let truncated_sql =
-                    record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
+                    get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
                 drop(sql);
 
                 session.check_idle_in_transaction_timeout()?;
                 // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
                 let _exec_context_guard = session.init_exec_context(truncated_sql.into());
-                let result = session.clone().execute(portal).await;
+                let result = session.clone().execute(portal.portal).await;
 
                 let pg_response = result.map_err(|e| PsqlError::ExtendedExecuteError(e.into()))?;
                 let mut result_cache = ResultCache::new(pg_response);
@@ -1178,20 +1239,21 @@ where
     }
 
     fn get_portal(&self, portal_name: &str) -> PsqlResult<<SM::Session as Session>::Portal> {
+        Ok(self.get_portal_data(portal_name)?.portal.clone())
+    }
+
+    fn get_portal_data(
+        &self,
+        portal_name: &str,
+    ) -> PsqlResult<&PortalData<<SM::Session as Session>::Portal>> {
         if portal_name.is_empty() {
-            Ok(self
-                .unnamed_portal
+            self.unnamed_portal
                 .as_ref()
-                .ok_or_else(|| PsqlError::Uncategorized("unnamed portal not found".into()))?
-                .clone())
+                .ok_or_else(|| PsqlError::Uncategorized("unnamed portal not found".into()))
         } else {
-            Ok(self
-                .portal_store
-                .get(portal_name)
-                .ok_or_else(|| {
-                    PsqlError::Uncategorized(format!("Portal {} not found", portal_name).into())
-                })?
-                .clone())
+            self.portal_store.get(portal_name).ok_or_else(|| {
+                PsqlError::Uncategorized(format!("Portal {} not found", portal_name).into())
+            })
         }
     }
 
@@ -1199,25 +1261,30 @@ where
         &self,
         statement_name: &str,
     ) -> PsqlResult<<SM::Session as Session>::PreparedStatement> {
+        Ok(self.get_statement_data(statement_name)?.statement.clone())
+    }
+
+    fn get_statement_data(
+        &self,
+        statement_name: &str,
+    ) -> PsqlResult<&PreparedStatementData<<SM::Session as Session>::PreparedStatement>> {
         if statement_name.is_empty() {
-            Ok(self
-                .unnamed_prepare_statement
-                .as_ref()
-                .ok_or_else(|| {
-                    PsqlError::Uncategorized("unnamed prepare statement not found".into())
-                })?
-                .clone())
+            self.unnamed_prepare_statement.as_ref().ok_or_else(|| {
+                PsqlError::Uncategorized("unnamed prepare statement not found".into())
+            })
         } else {
-            Ok(self
-                .prepare_statement_store
+            self.prepare_statement_store
                 .get(statement_name)
                 .ok_or_else(|| {
                     PsqlError::Uncategorized(
                         format!("Prepare statement {} not found", statement_name).into(),
                     )
-                })?
-                .clone())
+                })
         }
+    }
+
+    fn get_portal_sql(&self, portal_name: &str) -> PsqlResult<Arc<str>> {
+        Ok(self.get_portal_data(portal_name)?.sql.clone())
     }
 }
 
@@ -1611,6 +1678,27 @@ mod tests {
         assert_eq!(
             redact_sql(sql, keywords),
             "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
+        );
+    }
+
+    #[test]
+    fn test_redact_user_password_sql() {
+        let keywords = Arc::new(HashSet::from(["password".into()]));
+
+        assert_eq!(
+            redact_sql("ALTER USER WITH PASSWORD 'rw_password_2'", keywords.clone()),
+            "ALTER USER WITH PASSWORD [REDACTED]"
+        );
+        assert_eq!(
+            redact_sql(
+                "ALTER USER foo WITH ENCRYPTED PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+                keywords.clone(),
+            ),
+            "ALTER USER foo WITH ENCRYPTED PASSWORD [REDACTED]"
+        );
+        assert_eq!(
+            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", keywords),
+            "CREATE USER foo WITH PASSWORD [REDACTED]"
         );
     }
 

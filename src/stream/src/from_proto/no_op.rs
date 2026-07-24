@@ -22,6 +22,8 @@ use crate::task::ExecutorParams;
 
 pub struct NoOpExecutorBuilder;
 
+impl_stream_node_body!(NoOp(NoOpNode) => NoOpExecutorBuilder);
+
 impl ExecutorBuilder for NoOpExecutorBuilder {
     type Node = NoOpNode;
 

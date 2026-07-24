@@ -48,9 +48,11 @@ pub struct DeleteExecutor {
     txn_id: TxnId,
     session_id: u32,
     upsert: bool,
+    wait_for_persistence: bool,
 }
 
 impl DeleteExecutor {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,
@@ -62,6 +64,7 @@ impl DeleteExecutor {
         returning: bool,
         session_id: u32,
         upsert: bool,
+        wait_for_persistence: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -84,6 +87,7 @@ impl DeleteExecutor {
             txn_id,
             session_id,
             upsert,
+            wait_for_persistence,
         }
     }
 }
@@ -172,7 +176,11 @@ impl DeleteExecutor {
             rows_deleted += write_txn_data(chunk).await?;
         }
 
-        write_handle.end().await?;
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
 
         // create ret value
         if !self.returning {
@@ -215,6 +223,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             delete_node.returning,
             delete_node.session_id,
             delete_node.upsert,
+            delete_node.wait_for_persistence,
         )))
     }
 }
@@ -223,11 +232,13 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::catalog::{
         ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
@@ -281,6 +292,7 @@ mod tests {
             false,
             0,
             false,
+            false,
         ));
 
         let handle = tokio::spawn(async move {
@@ -313,7 +325,7 @@ mod tests {
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
-        reader.next().await.unwrap()?.into_end().unwrap();
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, None));
 
         handle.await.unwrap();
 

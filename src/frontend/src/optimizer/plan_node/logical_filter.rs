@@ -55,6 +55,17 @@ impl LogicalFilter {
         LogicalFilter { base, core }
     }
 
+    pub fn check_stream_predicate(predicate: &Condition) -> Result<()> {
+        if predicate.conjunctions.iter().any(|cond| cond.has_now()) {
+            bail!(
+                "Conditions containing now must be in the form of `input_expr cmp now_expr` or \
+                `now_expr cmp input_expr`, where `input_expr` references a column and contains \
+                no `now()`, and `now_expr` is a non-decreasing expression contains `now()`."
+            );
+        }
+        Ok(())
+    }
+
     /// Create a `LogicalFilter` unless the predicate is always true
     pub fn create(input: PlanRef, predicate: Condition) -> PlanRef {
         if predicate.always_true() {
@@ -198,13 +209,7 @@ impl ToStream for LogicalFilter {
         let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
-        if predicate.conjunctions.iter().any(|cond| cond.has_now()) {
-            bail!(
-                "Conditions containing now must be in the form of `input_expr cmp now_expr` or \
-                `now_expr cmp input_expr`, where `input_expr` references a column and contains \
-                no `now()`, and `now_expr` is a non-decreasing expression contains `now()`."
-            );
-        }
+        Self::check_stream_predicate(predicate)?;
         let core = self.core.clone_with_input(new_input);
         Ok(StreamFilter::new(core).into())
     }
@@ -252,7 +257,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -319,7 +324,7 @@ mod tests {
     ///     TableScan(v1, v2)
     /// ```
     async fn test_prune_filter_with_order_required() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -386,7 +391,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter_no_project() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
@@ -444,7 +449,7 @@ mod tests {
         // Condition: v1 = 0 AND v2 = v3
         // output: [v1, v2, v3, v4],
         // FD: v4 --> { v2, v3 }, {} --> v1, v2 --> v3, v3 --> v2
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

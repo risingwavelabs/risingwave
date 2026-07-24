@@ -24,7 +24,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::epoch::{EpochPair, test_epoch};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -33,7 +33,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::SINGLETON_VNODE;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
-use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
+use crate::common::table::test_utils::{
+    gen_pbtable, gen_pbtable_with_dist_key, gen_pbtable_with_value_indices,
+};
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -359,6 +361,67 @@ async fn test_state_table_iter_with_prefix() {
     // pk without the prefix the range will not be scan
     let res = iter.next().await;
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_state_table_rev_iter_with_range() {
+    const TEST_TABLE_ID: TableId = TableId::new(7777);
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+    ];
+    let order_types = vec![OrderType::ascending()];
+    let pk_index = vec![0_usize];
+    let table = gen_pbtable(TEST_TABLE_ID, column_descs, order_types, pk_index, 0);
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let base_epoch = test_env
+        .manager
+        .on_current_version(|version| version.table_committed_epoch(table.id).unwrap())
+        .await;
+    let mut epoch = EpochPair::new(base_epoch.next_epoch(), base_epoch);
+
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.init_epoch(epoch).await.unwrap();
+
+    state_table.insert(OwnedRow::new(vec![Some("A".into()), Some(1_i32.into())]));
+    state_table.insert(OwnedRow::new(vec![Some("B".into()), Some(2_i32.into())]));
+    state_table.insert(OwnedRow::new(vec![Some("C".into()), Some(3_i32.into())]));
+
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+
+    let scan_range = (
+        Bound::Included(OwnedRow::new(vec![Some("A".into())])),
+        Bound::Included(OwnedRow::new(vec![Some("C".into())])),
+    );
+    let iter = state_table
+        .rev_iter_with_prefix(row::empty(), &scan_range, PrefetchOptions::default())
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    let expect_rows = [
+        OwnedRow::new(vec![Some("C".into()), Some(3_i32.into())]),
+        OwnedRow::new(vec![Some("B".into()), Some(2_i32.into())]),
+        OwnedRow::new(vec![Some("A".into()), Some(1_i32.into())]),
+    ];
+    for expected in expect_rows {
+        let row = iter.next().await.unwrap().unwrap();
+        assert_eq!(row.as_ref(), &expected);
+    }
+    assert!(iter.next().await.is_none());
 }
 
 #[tokio::test]
@@ -1578,7 +1641,7 @@ async fn test_replicated_state_table_replication() {
             .await
             .unwrap();
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -1646,7 +1709,7 @@ async fn test_replicated_state_table_replication() {
             std::ops::Bound::Unbounded,
         );
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -1677,7 +1740,7 @@ async fn test_replicated_state_table_replication() {
         let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
             (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
         let replicated_iter = replicated_state_table
-            .iter_with_vnode_and_output_indices(SINGLETON_VNODE, &range_bounds, Default::default())
+            .iter_with_vnode(SINGLETON_VNODE, &range_bounds, Default::default())
             .await
             .unwrap();
         pin_mut!(replicated_iter);
@@ -1826,6 +1889,77 @@ async fn test_non_pk_prefix_watermark_read() {
             .unwrap();
         assert_eq!(r3, item_3);
     }
+}
+
+#[tokio::test]
+async fn test_committed_watermark_descending_direction() {
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let mut table = gen_pbtable_with_dist_key(
+        TEST_TABLE_ID,
+        vec![
+            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ],
+        vec![OrderType::descending()],
+        vec![0],
+        1,
+        vec![0],
+    );
+    table.watermark_indices = vec![0];
+    table.clean_watermark_indices = vec![0];
+
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table(table.clone()).await;
+
+    let vnode_count = VirtualNode::COUNT_FOR_TEST;
+    let half = vnode_count / 2;
+    let bitmap_of = |range: std::ops::Range<usize>| {
+        let mut b = BitmapBuilder::zeroed(vnode_count);
+        range.for_each(|i| b.set(i, true));
+        Arc::new(b.finish())
+    };
+
+    let mut state_table_low = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(0..half)),
+    )
+    .await;
+    let mut state_table_high = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(half..vnode_count)),
+    )
+    .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table_low.init_epoch(epoch).await.unwrap();
+    state_table_high.init_epoch(epoch).await.unwrap();
+
+    state_table_low.update_watermark(ScalarImpl::Int32(100));
+    state_table_high.update_watermark(ScalarImpl::Int32(200));
+
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table_low.commit_for_test(epoch).await.unwrap();
+    state_table_high.commit_for_test(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    let state_table = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(0..vnode_count)),
+    )
+    .await;
+    assert_eq!(
+        state_table.get_committed_watermark(),
+        Some(&ScalarImpl::Int32(200)),
+    );
 }
 
 #[tokio::test]

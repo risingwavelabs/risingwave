@@ -97,10 +97,7 @@ fn test_single_phase_properties() {
     .unwrap();
 
     let func: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = SinglePhaseAgg::new(
         "sum".to_owned(),
@@ -142,10 +139,7 @@ fn test_two_phase_properties() {
 
     let phase1: BoxedAggregateFunction = Box::new(MockSumAgg);
     let phase2: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = TwoPhaseAgg::new("sum".to_owned(), cast, phase1, phase2, signature).unwrap();
 
@@ -184,10 +178,7 @@ async fn test_single_phase_accumulator() {
     .unwrap();
 
     let func: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = SinglePhaseAgg::new(
         "sum".to_owned(),
@@ -204,6 +195,7 @@ async fn test_single_phase_accumulator() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,
@@ -243,10 +235,7 @@ async fn test_single_phase_accumulator_state_and_merge() {
     .unwrap();
 
     let func: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = SinglePhaseAgg::new(
         "sum".to_owned(),
@@ -263,6 +252,7 @@ async fn test_single_phase_accumulator_state_and_merge() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,
@@ -303,10 +293,7 @@ async fn test_single_phase_accumulator_empty_batch() {
     .unwrap();
 
     let func: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = SinglePhaseAgg::new(
         "sum".to_owned(),
@@ -323,6 +310,7 @@ async fn test_single_phase_accumulator_empty_batch() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,
@@ -352,10 +340,7 @@ async fn test_two_phase_accumulator() {
 
     let phase1: BoxedAggregateFunction = Box::new(MockSumAgg);
     let phase2: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = TwoPhaseAgg::new("sum".to_owned(), cast, phase1, phase2, signature).unwrap();
 
@@ -366,6 +351,7 @@ async fn test_two_phase_accumulator() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,
@@ -406,10 +392,7 @@ async fn test_two_phase_accumulator_state_and_merge() {
 
     let phase1: BoxedAggregateFunction = Box::new(MockSumAgg);
     let phase2: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
 
     let agg = TwoPhaseAgg::new("sum".to_owned(), cast, phase1, phase2, signature).unwrap();
 
@@ -420,6 +403,7 @@ async fn test_two_phase_accumulator_state_and_merge() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,
@@ -457,10 +441,7 @@ async fn test_two_phase_accumulator_empty_batch() {
     .unwrap();
     let phase1: BoxedAggregateFunction = Box::new(MockSumAgg);
     let phase2: BoxedAggregateFunction = Box::new(MockSumAgg);
-    let signature = Signature {
-        type_signature: TypeSignature::Any(1),
-        volatility: Volatility::Volatile,
-    };
+    let signature = Signature::new(TypeSignature::Any(1), Volatility::Volatile);
     let agg = TwoPhaseAgg::new("sum".to_owned(), cast, phase1, phase2, signature).unwrap();
     let schema = Arc::new(datafusion::arrow::datatypes::Schema::new(vec![
         DFField::new("value", DFDataType::Int64, true),
@@ -469,6 +450,7 @@ async fn test_two_phase_accumulator_empty_batch() {
     let args = AccumulatorArgs {
         schema: &schema,
         exprs: &[],
+        expr_fields: &[],
         is_distinct: false,
         name: "sum",
         ignore_nulls: false,

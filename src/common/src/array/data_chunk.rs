@@ -758,7 +758,7 @@ impl DataChunkTestExt for DataChunk {
         for line in lines {
             let mut token = line.trim().split_ascii_whitespace();
             // allow `zip` since `token` may longer than `array_builders`
-            #[allow(clippy::disallowed_methods)]
+            #[expect(clippy::disallowed_methods)]
             for ((builder, ty), val_str) in
                 array_builders.iter_mut().zip(&datatypes).zip(&mut token)
             {

@@ -163,6 +163,57 @@ select count(_row_id) from t_without_pk;
 statement ok
 DROP TABLE t_without_pk
 
+# test materialized view on append only iceberg table with jsonb column
+statement ok
+CREATE TABLE events (
+  session_time timestamp,
+  session_id text,
+  data jsonb
+)
+APPEND ONLY
+with(commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+CREATE MATERIALIZED VIEW avg_dframes AS
+WITH sessions_frames AS (
+  SELECT
+    session_time,
+    session_id,
+    max((data->'nbFrames')::int) - min((data->'nbFrames')::int) AS dframes
+  FROM events
+  GROUP BY 1, 2
+)
+SELECT
+  window_start,
+  count(distinct session_id) AS nb_sessions,
+  round(avg(dframes), 1) AS avg_dframes
+FROM TUMBLE(sessions_frames, session_time, INTERVAL '1' HOUR)
+GROUP BY 1;
+
+statement ok
+INSERT INTO events VALUES
+('2025-04-10 10:10:00', 's1', '{"nbFrames": 10}'),
+('2025-04-10 10:10:00', 's1', '{"nbFrames": 16}'),
+('2025-04-10 10:20:00', 's2', '{"nbFrames": 7}'),
+('2025-04-10 10:20:00', 's2', '{"nbFrames": 10}'),
+('2025-04-10 11:05:00', 's3', '{"nbFrames": 1}'),
+('2025-04-10 11:05:00', 's3', '{"nbFrames": 5}');
+
+statement ok
+FLUSH;
+
+query TIR rowsort retry 6 backoff 5s
+SELECT * FROM avg_dframes;
+----
+2025-04-10 10:00:00 2 4.5
+2025-04-10 11:00:00 1 4
+
+statement ok
+DROP MATERIALIZED VIEW avg_dframes;
+
+statement ok
+DROP TABLE events;
+
 # test predicate pushdown, fix https://github.com/risingwavelabs/risingwave/issues/20462
 statement ok
 CREATE TABLE price (
@@ -196,6 +247,26 @@ SELECT id, price, date FROM price WHERE price < 180.20
 
 statement ok
 DROP TABLE price;
+
+statement ok
+CREATE TABLE t_order_key_append_only (
+  id BIGINT PRIMARY KEY,
+  v1 INT
+)
+APPEND ONLY
+WITH (
+  commit_checkpoint_interval = 1,
+  order_key = 'v1 desc nulls last, id asc'
+) ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_order_key_append_only VALUES (1, 10), (2, 20);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP TABLE t_order_key_append_only;
 
 statement ok
 DROP CONNECTION my_conn;

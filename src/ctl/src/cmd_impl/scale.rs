@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod resize;
-
-pub use resize::*;
 use risingwave_pb::meta::table_parallelism::FixedParallelism;
 use risingwave_pb::meta::{TableParallelism, table_parallelism};
 

@@ -17,20 +17,13 @@ itertools = { workspace = true }
 paste = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
+risingwave_license = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_with = "3"
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 walkdir = "2"
 
 [target.'cfg(not(madsim))'.dependencies]

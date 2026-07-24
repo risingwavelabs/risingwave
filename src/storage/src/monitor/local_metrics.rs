@@ -29,6 +29,15 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
+#[cfg(test)]
+pub(crate) fn flush_local_metrics_for_test() {
+    LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+        for metrics in local_metrics.values_mut() {
+            metrics.flush();
+        }
+    });
+}
+
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -58,6 +67,9 @@ pub struct StoreLocalStatistic {
     pub staging_sst_get_count: u64,
     pub overlapping_get_count: u64,
     pub non_overlapping_get_count: u64,
+
+    pub vnode_checked_get_count: u64,
+    pub vnode_pruned_get_count: u64,
 
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     reported: AtomicBool,
@@ -152,11 +164,11 @@ impl StoreLocalStatistic {
         }
     }
 
-    fn report_bloom_filter_metrics(&self, metrics: &BloomFilterLocalMetrics) {
+    fn report_sst_filter_metrics(&self, metrics: &SstFilterLocalMetrics) {
         if self.bloom_filter_check_counts == 0 {
             return;
         }
-        // checks SST bloom filters
+        // Checks SST filters.
         metrics
             .bloom_filter_true_negative_counts
             .inc_by(self.bloom_filter_true_negative_counts);
@@ -168,12 +180,12 @@ impl StoreLocalStatistic {
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
             if !self.found_key {
                 // false positive
-                // checks SST bloom filters (at least one bloom filter return true) but returns
+                // Checks SST filters, at least one filter returns true, but returns
                 // nothing
                 metrics.read_req_positive_but_non_exist_counts.inc();
             }
             // positive
-            // checks SST bloom filters and at least one bloom filter returns positive
+            // Checks SST filters and at least one filter returns positive.
             metrics.read_req_bloom_filter_positive_counts.inc();
         }
     }
@@ -207,6 +219,8 @@ impl StoreLocalStatistic {
             || self.bloom_filter_true_negative_counts != 0
             || self.remote_io_time.load(Ordering::Relaxed) != 0
             || self.bloom_filter_check_counts != 0
+            || self.vnode_checked_get_count != 0
+            || self.vnode_pruned_get_count != 0
     }
 }
 
@@ -240,14 +254,17 @@ struct LocalStoreMetrics {
     overlapping_iter_count: LocalHistogram,
     non_overlapping_iter_count: LocalHistogram,
     sub_iter_count: LocalHistogram,
-    iter_filter_metrics: BloomFilterLocalMetrics,
-    get_filter_metrics: BloomFilterLocalMetrics,
+    iter_filter_metrics: SstFilterLocalMetrics,
+    get_filter_metrics: SstFilterLocalMetrics,
     collect_count: usize,
 
     staging_imm_get_count: LocalHistogram,
     staging_sst_get_count: LocalHistogram,
     overlapping_get_count: LocalHistogram,
     non_overlapping_get_count: LocalHistogram,
+
+    vnode_checked_get_count: LabelGuardedLocalIntCounter,
+    vnode_pruned_get_count: LabelGuardedLocalIntCounter,
 }
 
 const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
@@ -332,8 +349,8 @@ impl LocalStoreMetrics {
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "sub-iter"])
             .local();
-        let get_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "get");
-        let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
+        let get_filter_metrics = SstFilterLocalMetrics::new(metrics, table_id_label, "get");
+        let iter_filter_metrics = SstFilterLocalMetrics::new(metrics, table_id_label, "iter");
 
         let staging_imm_get_count = metrics
             .iter_merge_sstable_counts
@@ -350,6 +367,15 @@ impl LocalStoreMetrics {
         let non_overlapping_get_count = metrics
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "committed-non-overlapping-get"])
+            .local();
+
+        let vnode_checked_get_count = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[table_id_label, "get", "checked"])
+            .local();
+        let vnode_pruned_get_count = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[table_id_label, "get", "pruned"])
             .local();
 
         Self {
@@ -377,6 +403,8 @@ impl LocalStoreMetrics {
             staging_sst_get_count,
             overlapping_get_count,
             non_overlapping_get_count,
+            vnode_checked_get_count,
+            vnode_pruned_get_count,
         }
     }
 
@@ -464,18 +492,20 @@ add_local_metrics_count!(
     skip_delete_key_count,
     get_shared_buffer_hit_counts,
     total_key_count,
-    processed_key_count
+    processed_key_count,
+    vnode_checked_get_count,
+    vnode_pruned_get_count
 );
 
-macro_rules! define_bloom_filter_metrics {
+macro_rules! define_sst_filter_metrics {
     ($($x:ident),*) => (
-        struct BloomFilterLocalMetrics {
+        struct SstFilterLocalMetrics {
             $($x: LabelGuardedLocalIntCounter,)*
         }
 
-        impl BloomFilterLocalMetrics {
+        impl SstFilterLocalMetrics {
             pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str, oper_type: &str) -> Self {
-                // checks SST bloom filters
+                // Checks SST filters.
                 Self {
                     $($x: metrics.$x.with_guarded_label_values(&[table_id_label, oper_type]).local(),)*
                 }
@@ -490,7 +520,7 @@ macro_rules! define_bloom_filter_metrics {
     )
 }
 
-define_bloom_filter_metrics!(
+define_sst_filter_metrics!(
     read_req_check_bloom_filter_counts,
     bloom_filter_check_counts,
     bloom_filter_true_negative_counts,
@@ -527,7 +557,7 @@ impl Drop for GetLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&table_metrics.get_filter_metrics);
+                .report_sst_filter_metrics(&table_metrics.get_filter_metrics);
         });
     }
 }
@@ -565,7 +595,7 @@ impl Drop for IterLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&table_metrics.iter_filter_metrics);
+                .report_sst_filter_metrics(&table_metrics.iter_filter_metrics);
         });
     }
 }

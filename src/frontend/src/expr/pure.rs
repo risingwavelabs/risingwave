@@ -93,10 +93,15 @@ impl ExprVisitor for ImpureAnalyzer {
         self.impure = Some("NOW or PROCTIME".into());
     }
 
+    fn visit_secret_ref(&mut self, secret_ref: &super::SecretRef) {
+        self.impure = Some(format!("secret reference `{}`", secret_ref.secret_name).into());
+    }
+
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
         let func_type = func_call.func_type();
         match func_type {
             Type::Unspecified => unreachable!(),
+            #[expect(deprecated)]
             Type::Add
             | Type::Subtract
             | Type::Multiply
@@ -250,6 +255,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayOverlaps
             | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat
@@ -308,6 +314,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Sha256
             | Type::Sha384
             | Type::Sha512
+            | Type::Crc32
+            | Type::Crc32c
             | Type::Hmac
             | Type::SecureCompare
             | Type::Decrypt
@@ -394,7 +402,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::HasDatabasePrivilege
-            | Type::Random => self.impure = Some(func_type.as_str_name().into()),
+            | Type::Random
+            | Type::ClockTimestamp
+            | Type::GenRandomUuid => self.impure = Some(func_type.as_str_name().into()),
         }
     }
 }

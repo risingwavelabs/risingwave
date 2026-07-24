@@ -39,7 +39,7 @@ use risingwave_storage::store::timeout_auto_rebuild::{
 };
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreRead};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
@@ -123,7 +123,12 @@ impl RewindDelay {
 
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// consuming historical log data
-    ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
+    ReadStateStoreStream(
+        Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>,
+        /// Held permit limiting concurrent historical reads. Automatically released
+        /// when this variant is replaced (i.e. stream fully consumed or reset).
+        Option<OwnedSemaphorePermit>,
+    ),
     ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
     Reset,
     Empty,
@@ -189,9 +194,14 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
+
+    /// Shared semaphore to limit concurrent historical reads across the compute node.
+    /// `None` means unlimited.
+    historical_read_semaphore: Option<Arc<Semaphore>>,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
@@ -200,6 +210,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
+        historical_read_semaphore: Option<Arc<Semaphore>>,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -215,6 +226,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
+            historical_read_semaphore,
         }
     }
 }
@@ -272,8 +284,33 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             {
                 KvLogStoreReaderFutureState::Empty
             } else {
+                // Acquire a permit before starting to read historical data.
+                // This limits the number of concurrent historical reads across
+                // the compute node, preventing excessive state store I/O during
+                // recovery or restart.
+                //
+                // Deadlock safety: The writer side of this log store runs as a
+                // separate future in a `select` with this consumer. Even if this
+                // consumer is blocked waiting for a permit, the writer can still
+                // make progress processing barriers. The log store buffer is also
+                // unbounded on the writer side, so the writer won't be blocked by
+                // the reader not consuming. Therefore, blocking here does not
+                // prevent barrier flow.
+                let permit = if let Some(semaphore) = &self.historical_read_semaphore {
+                    Some(
+                        semaphore
+                            .clone()
+                            .acquire_owned()
+                            .instrument_await("Wait for Historical Read Permit")
+                            .await
+                            .map_err(|_| anyhow!("historical read semaphore closed"))?,
+                    )
+                } else {
+                    None
+                };
                 KvLogStoreReaderFutureState::ReadStateStoreStream(
                     self.read_persisted_log_store(range_start).await?,
+                    permit,
                 )
             };
         self.rx.rewind(start_offset);
@@ -320,7 +357,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
         match &mut self.future_state {
-            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream) => {
+            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream, _permit) => {
                 match state_store_stream
                     .try_next()
                     .instrument_await("Try Next for Historical Stream")
@@ -354,6 +391,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         return Ok((epoch, item));
                     }
                     None => {
+                        // Historical stream fully consumed. Permit is dropped with the variant.
                         self.future_state = KvLogStoreReaderFutureState::Empty;
                     }
                 }
@@ -644,5 +682,246 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
                 read_metrics,
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use futures::FutureExt;
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
+    use risingwave_connector::sink::log_store::{LogReader, LogStoreReadItem};
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+    use risingwave_storage::error::StorageResult;
+    use risingwave_storage::store::{
+        KeyValueFn, ReadOptions, StateStoreGet, StateStoreIter, StateStoreKeyedRowRef,
+        StateStoreRead, StorageFuture,
+    };
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::{Semaphore, oneshot, watch};
+    use tokio::time::timeout;
+
+    use super::KvLogStoreReader;
+    use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
+    use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+    use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
+    use crate::common::log_store_impl::kv_log_store::test_utils::{
+        TEST_TABLE_ID, check_stream_chunk_eq, gen_stream_chunk_with_info, gen_test_log_store_table,
+    };
+    use crate::common::log_store_impl::kv_log_store::{
+        KV_LOG_STORE_V2_INFO, KvLogStoreMetrics, SeqId,
+    };
+
+    struct ControlledIterPlan {
+        release_rx: watch::Receiver<bool>,
+    }
+
+    struct ControlledIterHandle {
+        release_tx: watch::Sender<bool>,
+    }
+
+    impl ControlledIterHandle {
+        fn release(&self) {
+            self.release_tx.send_replace(true);
+        }
+    }
+
+    struct ControlledIter {
+        release_rx: watch::Receiver<bool>,
+        finished: bool,
+    }
+
+    impl StateStoreIter for ControlledIter {
+        async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
+            if self.finished {
+                return Ok(None);
+            }
+            if !*self.release_rx.borrow() {
+                self.release_rx
+                    .changed()
+                    .await
+                    .expect("release sender should stay alive during the test");
+            }
+            self.finished = true;
+            Ok(None)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MockStateStore {
+        iter_plans: Arc<Mutex<VecDeque<ControlledIterPlan>>>,
+    }
+
+    impl MockStateStore {
+        fn push_blocking_iter(&self) -> ControlledIterHandle {
+            let (release_tx, release_rx) = watch::channel(false);
+            self.iter_plans
+                .lock()
+                .expect("poisoned iter plans")
+                .push_back(ControlledIterPlan { release_rx });
+            ControlledIterHandle { release_tx }
+        }
+    }
+
+    impl StateStoreGet for MockStateStore {
+        fn on_key_value<'a, O: Send + 'a>(
+            &'a self,
+            _key: TableKey<Bytes>,
+            _read_options: ReadOptions,
+            _on_key_value_fn: impl KeyValueFn<'a, O>,
+        ) -> impl StorageFuture<'a, Option<O>> {
+            async { Ok(None) }
+        }
+    }
+
+    impl StateStoreRead for MockStateStore {
+        type Iter = ControlledIter;
+        type RevIter = ControlledIter;
+
+        fn iter(
+            &self,
+            _key_range: TableKeyRange,
+            _read_options: ReadOptions,
+        ) -> impl StorageFuture<'_, Self::Iter> {
+            let plan = self
+                .iter_plans
+                .lock()
+                .expect("poisoned iter plans")
+                .pop_front()
+                .expect("missing iter plan for test");
+            async move {
+                Ok(ControlledIter {
+                    release_rx: plan.release_rx,
+                    finished: false,
+                })
+            }
+        }
+
+        fn rev_iter(
+            &self,
+            _key_range: TableKeyRange,
+            _read_options: ReadOptions,
+        ) -> impl StorageFuture<'_, Self::RevIter> {
+            async { unreachable!("rev_iter should not be called in this test") }
+        }
+    }
+
+    fn single_vnode_bitmap() -> Arc<Bitmap> {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        builder.set(0, true);
+        Arc::new(builder.finish())
+    }
+
+    fn new_reader(
+        state_store: MockStateStore,
+        semaphore: Arc<Semaphore>,
+        identity: &str,
+    ) -> (
+        KvLogStoreReader<MockStateStore>,
+        crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender,
+    ) {
+        let epoch = test_epoch(1);
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let table = gen_test_log_store_table(pk_info);
+        let vnodes = single_vnode_bitmap();
+        let serde = LogStoreRowSerde::new(&table, Some(vnodes), pk_info);
+        let read_state = LogStoreReadState {
+            table_id: TEST_TABLE_ID,
+            state_store: Arc::new(state_store),
+            serde,
+            chunk_size: 1024,
+        };
+        let (tx, rx) = new_log_store_buffer(1024, 1024, KvLogStoreMetrics::for_test());
+        let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
+        let (_update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        init_epoch_tx
+            .send(EpochPair::new_test_epoch(epoch))
+            .expect("init epoch send should succeed");
+        (
+            KvLogStoreReader::new(
+                read_state,
+                rx,
+                init_epoch_rx,
+                update_vnode_bitmap_rx,
+                KvLogStoreMetrics::for_test(),
+                pause_rx,
+                identity.to_owned(),
+                Some(semaphore),
+            ),
+            tx,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_historical_read_init_concurrency_limit_does_not_block_writer_buffer() {
+        let mock_store = MockStateStore::default();
+        let iter1 = mock_store.push_blocking_iter();
+        let iter2 = mock_store.push_blocking_iter();
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        let (mut reader1, tx1) = new_reader(mock_store.clone(), semaphore.clone(), "reader1");
+        let (mut reader2, tx2) = new_reader(mock_store, semaphore, "reader2");
+
+        reader1.init().await.unwrap();
+        reader2.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
+
+        let mut start_reader2 = Box::pin(reader2.start_from(None));
+        assert!(
+            start_reader2.as_mut().now_or_never().is_none(),
+            "second reader should wait for the historical read permit"
+        );
+
+        let epoch = test_epoch(1);
+        let next_epoch = test_epoch(2);
+        let expected_chunk = gen_stream_chunk_with_info(0, &KV_LOG_STORE_V2_INFO);
+        let chunk_end_seq_id = expected_chunk.cardinality() as SeqId - 1;
+        assert!(
+            tx2.try_add_stream_chunk(epoch, expected_chunk.clone(), 0, chunk_end_seq_id)
+                .is_none()
+        );
+        tx2.barrier(epoch, true, next_epoch, None, false);
+
+        tx1.barrier(epoch, true, next_epoch, None, false);
+        iter1.release();
+
+        let (_, item) = reader1.next_item().await.unwrap();
+        assert!(matches!(
+            item,
+            LogStoreReadItem::Barrier {
+                is_checkpoint: true,
+                ..
+            }
+        ));
+
+        timeout(Duration::from_secs(1), start_reader2)
+            .await
+            .expect("second reader should start once the permit is released")
+            .unwrap();
+
+        iter2.release();
+
+        let (_, item) = reader2.next_item().await.unwrap();
+        let LogStoreReadItem::StreamChunk { chunk, chunk_id } = item else {
+            panic!("expected stream chunk");
+        };
+        assert_eq!(chunk_id, 0);
+        assert!(check_stream_chunk_eq(&expected_chunk, &chunk));
+
+        let (_, item) = reader2.next_item().await.unwrap();
+        assert!(matches!(
+            item,
+            LogStoreReadItem::Barrier {
+                is_checkpoint: true,
+                ..
+            }
+        ));
     }
 }

@@ -33,7 +33,6 @@ pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerAppendOnlyTopNExecutor<S, WITH_TIES>>;
 
 impl<S: StateStore, const WITH_TIES: bool> AppendOnlyTopNExecutor<S, WITH_TIES> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Executor,
         ctx: ActorContextRef,
@@ -75,7 +74,6 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_TIES> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
         storage_key: Vec<ColumnOrder>,

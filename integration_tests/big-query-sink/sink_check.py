@@ -1,6 +1,9 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import report_failures
 
 relations = ['rwctest.bqtest.bq_sink', 'rwctest.bqtest.bq_sink_data_types']
 
@@ -20,6 +23,4 @@ for rel in relations:
     subprocess.run(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", drop_sql],
                    check=True)
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+report_failures(failed_cases)

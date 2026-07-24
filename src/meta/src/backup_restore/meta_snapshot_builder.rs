@@ -90,7 +90,7 @@ impl MetaSnapshotV2Builder {
             .map_err(map_db_err)?
             .into_iter()
             .map_into::<PbHummockVersionDelta>()
-            .map(|pb_delta| HummockVersionDelta::from_persisted_protobuf(&pb_delta));
+            .map(HummockVersionDelta::from_persisted_protobuf_owned);
         let hummock_version = {
             let mut redo_state = hummock_version;
             let mut max_log_id = None;

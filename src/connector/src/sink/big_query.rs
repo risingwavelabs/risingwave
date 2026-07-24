@@ -27,6 +27,7 @@ use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
+use gcp_bigquery_client::model::query_response::ResultSet;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -42,14 +43,11 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
-use prost::Message;
-use prost_014::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
-use prost_types_014::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -94,7 +92,7 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(default)] // default false
+    #[serde(default, alias = "create_table_if_not_exists")] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
@@ -262,7 +260,12 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub aws_auth_props: AwsAuthProps,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(BigQueryConfig);
 
 impl EnforceSecret for BigQueryConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -325,6 +328,28 @@ impl BigQuerySink {
 }
 
 impl BigQuerySink {
+    fn is_decimal_type_compatible(bigquery_type: &str) -> bool {
+        // BigQuery INFORMATION_SCHEMA reports parameterized decimal columns as
+        // `NUMERIC(p, s)` or `BIGNUMERIC(p, s)`. RisingWave `Decimal` does not
+        // carry typmod, so schema validation accepts the BigQuery decimal type
+        // family instead of requiring exact string equality.
+        let normalized = bigquery_type.trim().to_ascii_uppercase();
+        matches!(
+            normalized
+                .split_once('(')
+                .map_or(normalized.as_str(), |(prefix, _)| prefix),
+            "NUMERIC" | "BIGNUMERIC"
+        )
+    }
+
+    fn is_data_type_compatible(rw_data_type: &DataType, bigquery_type: &str) -> Result<bool> {
+        if matches!(rw_data_type, DataType::Decimal) {
+            return Ok(Self::is_decimal_type_compatible(bigquery_type));
+        }
+
+        Ok(Self::get_string_and_check_support_from_datatype(rw_data_type)? == bigquery_type)
+    }
+
     fn check_column_name_and_type(
         &self,
         big_query_columns_desc: HashMap<String, String>,
@@ -351,7 +376,7 @@ impl BigQuerySink {
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
-            if data_type_string.ne(value) {
+            if !Self::is_data_type_compatible(&i.data_type, value)? {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ",
                     i.name,
@@ -499,6 +524,8 @@ impl Sink for BigQuerySink {
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
@@ -541,7 +568,7 @@ impl Sink for BigQuerySink {
                 .get(project_id, dataset_id, table_id, None)
                 .await
             {
-                Err(BQError::RequestError(_)) => {
+                Err(BQError::ResponseError { error }) if error.error.code == 404 => {
                     // early return: no need to query schema to check column and type
                     return self
                         .create_table(
@@ -559,7 +586,7 @@ impl Sink for BigQuerySink {
             }
         }
 
-        let mut rs = client
+        let rs = client
             .job()
             .query(
                 &self.config.common.project,
@@ -568,6 +595,7 @@ impl Sink for BigQuerySink {
                     project_id, dataset_id, table_id,
                 )),
             ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut rs = ResultSet::new_from_query_response(rs);
 
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
@@ -652,7 +680,7 @@ impl BigQuerySinkWriter {
             .ok_or_else(|| {
                 SinkError::BigQuery(anyhow::anyhow!(
                     "Can't find message proto {}",
-                    &config.common.table
+                    config.common.table
                 ))
             })?;
         let proto_field = if !is_append_only {
@@ -686,7 +714,7 @@ impl BigQuerySinkWriter {
                 message_descriptor,
                 proto_field,
                 writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(to_gcloud_descriptor(&descriptor_proto)?),
+                    proto_descriptor: Some(descriptor_proto.clone()),
                 },
             },
             resp_stream,
@@ -840,6 +868,7 @@ impl StorageWriterClient {
         let conn_options = ConnectionOptions {
             connect_timeout: CONNECT_TIMEOUT,
             timeout: CONNECTION_TIMEOUT,
+            ..Default::default()
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
         let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)
@@ -899,13 +928,6 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     })
     .context("failed to build descriptor pool")
     .map_err(SinkError::BigQuery)
-}
-
-fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
-    let bytes = Message::encode_to_vec(desc);
-    Message014::decode(bytes.as_slice())
-        .context("failed to convert descriptor proto")
-        .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(
@@ -988,13 +1010,16 @@ fn build_protobuf_field(
 #[cfg(test)]
 mod test {
 
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
+    use std::collections::HashMap;
 
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};
 
+    use crate::connector_common::AwsAuthProps;
     use crate::sink::big_query::{
-        BigQuerySink, build_protobuf_descriptor_pool, build_protobuf_schema,
+        BigQueryCommon, BigQueryConfig, BigQuerySink, build_protobuf_descriptor_pool,
+        build_protobuf_schema,
     };
 
     #[tokio::test]
@@ -1073,5 +1098,63 @@ mod test {
             v3_v3_message.get_field_by_name("v2").unwrap().kind(),
             prost_reflect::Kind::Int64
         );
+    }
+
+    #[test]
+    fn test_decimal_type_family_compatibility() {
+        assert!(BigQuerySink::is_decimal_type_compatible("NUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible("numeric(31, 2)"));
+        assert!(BigQuerySink::is_decimal_type_compatible("BIGNUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible(
+            "bignumeric(35, 12)"
+        ));
+        assert!(!BigQuerySink::is_decimal_type_compatible("STRING"));
+    }
+
+    #[test]
+    fn test_decimal_schema_check_accepts_parameterized_numeric_types() {
+        let sink = BigQuerySink {
+            config: BigQueryConfig {
+                common: BigQueryCommon {
+                    local_path: None,
+                    s3_path: None,
+                    project: "project".to_owned(),
+                    dataset: "dataset".to_owned(),
+                    table: "table".to_owned(),
+                    auto_create: false,
+                    credentials: None,
+                },
+                aws_auth_props: AwsAuthProps {
+                    region: None,
+                    endpoint: None,
+                    access_key: None,
+                    secret_key: None,
+                    session_token: None,
+                    arn: None,
+                    external_id: None,
+                    profile: None,
+                    msk_signer_timeout_sec: None,
+                },
+                r#type: "append-only".to_owned(),
+                unknown_fields: Default::default(),
+            },
+            schema: Schema {
+                fields: vec![Field::with_name(DataType::Decimal, "capitalizedcost")],
+            },
+            pk_indices: vec![],
+            is_append_only: true,
+        };
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "NUMERIC(31, 2)".to_owned(),
+        )]))
+        .unwrap();
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "BIGNUMERIC(35, 12)".to_owned(),
+        )]))
+        .unwrap();
     }
 }

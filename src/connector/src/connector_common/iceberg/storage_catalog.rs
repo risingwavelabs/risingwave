@@ -341,7 +341,7 @@ impl Catalog for StorageCatalog {
         let table = self.load_table(table).await?;
         table
             .file_io()
-            .remove_dir_all(table.metadata().location())
+            .delete_prefix(table.metadata().location())
             .await
     }
 

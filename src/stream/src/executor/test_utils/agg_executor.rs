@@ -178,7 +178,7 @@ pub async fn create_intermediate_state_table<S: StateStore>(
 }
 
 /// NOTE(kwannoel): This should only be used by `test` or `bench`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     store: S,
     input: Executor,
@@ -251,7 +251,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     (info, exec).into()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn new_boxed_simple_agg_executor<S: StateStore>(
     actor_ctx: ActorContextRef,
     store: S,

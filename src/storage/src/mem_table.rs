@@ -411,16 +411,16 @@ impl KeyOp {
         match self {
             Self::Insert(after) => {
                 let after = row_deserializer.deserialize(after.as_ref());
-                format!("Insert({:?})", &after)
+                format!("Insert({:?})", after)
             }
             Self::Delete(before) => {
                 let before = row_deserializer.deserialize(before.as_ref());
-                format!("Delete({:?})", &before)
+                format!("Delete({:?})", before)
             }
             Self::Update((before, after)) => {
                 let after = row_deserializer.deserialize(after.as_ref());
                 let before = row_deserializer.deserialize(before.as_ref());
-                format!("Update({:?}, {:?})", &before, &after)
+                format!("Update({:?}, {:?})", before, after)
             }
         }
     }

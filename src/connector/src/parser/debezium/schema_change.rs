@@ -32,7 +32,7 @@ pub(crate) enum TableChangeType {
 }
 
 impl TableChangeType {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn from_proto(value: PbTableChangeType) -> Self {
         match value {
             PbTableChangeType::Alter => TableChangeType::Alter,

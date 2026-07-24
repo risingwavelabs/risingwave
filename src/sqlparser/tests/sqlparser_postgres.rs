@@ -419,6 +419,26 @@ fn parse_set() {
         }
     );
 
+    let stmt = verified_stmt("SET a = bounded(4)");
+    assert_eq!(
+        stmt,
+        Statement::SetVariable {
+            local: false,
+            variable: "a".into(),
+            value: SetVariableValueSingle::Raw("bounded(4)".into()).into(),
+        }
+    );
+
+    let stmt = verified_stmt("SET a = ratio(0.5)");
+    assert_eq!(
+        stmt,
+        Statement::SetVariable {
+            local: false,
+            variable: "a".into(),
+            value: SetVariableValueSingle::Raw("ratio(0.5)".into()).into(),
+        }
+    );
+
     let stmt = verified_stmt("SET a = DEFAULT");
     assert_eq!(
         stmt,
@@ -614,7 +634,7 @@ fn parse_pg_bitwise_binary_ops() {
     ];
 
     for (str_op, op) in bitwise_ops {
-        let select = verified_only_select(&format!("SELECT a {} b", &str_op));
+        let select = verified_only_select(&format!("SELECT a {} b", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
@@ -636,7 +656,7 @@ fn parse_pg_unary_ops() {
     ];
 
     for (str_op, op) in pg_unary_ops {
-        let select = verified_only_select(&format!("SELECT {} a", &str_op));
+        let select = verified_only_select(&format!("SELECT {} a", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
@@ -657,7 +677,7 @@ fn parse_pg_regex_match_ops() {
     ];
 
     for (str_op, op) in pg_regex_match_ops {
-        let select = verified_only_select(&format!("SELECT 'abc' {} '^a'", &str_op));
+        let select = verified_only_select(&format!("SELECT 'abc' {} '^a'", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
                 left: Box::new(Expr::Value(Value::SingleQuotedString("abc".into()))),
@@ -720,6 +740,19 @@ fn parse_comments() {
         } => {
             assert_eq!("comment", comment);
             assert_eq!("public.tab", object_name.to_string());
+            assert_eq!(CommentObject::Table, object_type);
+        }
+        _ => unreachable!(),
+    }
+
+    match one_statement_parses_to("COMMENT ON TABLE t IS $$hello$$", "") {
+        Statement::Comment {
+            object_type,
+            object_name,
+            comment: Some(comment),
+        } => {
+            assert_eq!("hello", comment);
+            assert_eq!("t", object_name.to_string());
             assert_eq!(CommentObject::Table, object_type);
         }
         _ => unreachable!(),
@@ -1316,4 +1349,88 @@ fn parse_variadic_argument() {
             .to_string()
             .contains("VARIADIC argument must be the last"),
     );
+}
+
+#[test]
+fn parse_dollar_quoted_string_with_inner_different_tag() {
+    {
+        let sql = "SELECT $foo$the content with $bar$nested$bar$ usage$foo$";
+
+        let projection = verified_only_select(sql).projection;
+
+        assert_eq!(
+            expr_from_projection(&projection[0]),
+            &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                tag: Some("foo".into()),
+                value: "the content with $bar$nested$bar$ usage".into(),
+            }))
+        );
+    }
+
+    {
+        let sql = "SELECT $$the cont$ent with$$";
+
+        let projection = verified_only_select(sql).projection;
+
+        assert_eq!(
+            expr_from_projection(&projection[0]),
+            &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                tag: None,
+                value: "the cont$ent with".into(),
+            }))
+        );
+    }
+}
+
+#[test]
+fn parse_dollar_quoted_string_followed_by_alias_with_dollar() {
+    {
+        let sql = "SELECT $go$o$not nesting just $ sign$go$o$";
+
+        let stmt = parse_sql_statements(sql).unwrap();
+
+        let projection = match stmt.first().unwrap() {
+            Statement::Query(query) => match &query.body {
+                SetExpr::Select(select) => &select.projection,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+
+        assert_eq!(
+            projection[0],
+            SelectItem::ExprWithAlias {
+                expr: Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                    tag: Some("go".into()),
+                    value: "o$not nesting just $ sign".into(),
+                })),
+                alias: Ident::new_unchecked("o$"),
+            }
+        );
+    }
+
+    {
+        let sql = "SELECT $$_123$$abc$$";
+
+        let stmt = parse_sql_statements(sql).unwrap();
+
+        let projection = match stmt.first().unwrap() {
+            Statement::Query(query) => match &query.body {
+                SetExpr::Select(select) => &select.projection,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+
+        assert_eq!(
+            projection[0],
+            SelectItem::ExprWithAlias {
+                expr: Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                    tag: None,
+                    value: "_123".into(),
+                })),
+                alias: Ident::new_unchecked("abc$$"),
+            }
+        );
+    }
 }

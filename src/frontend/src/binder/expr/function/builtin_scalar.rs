@@ -302,6 +302,8 @@ impl Binder {
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("hmac", raw_call(ExprType::Hmac)),
+                ("crc32", raw_call(ExprType::Crc32)),
+                ("crc32c", raw_call(ExprType::Crc32c)),
                 ("secure_compare", raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
@@ -342,6 +344,9 @@ impl Binder {
                 ("arraycontains", raw_call(ExprType::ArrayContains)),
                 ("array_contained", raw_call(ExprType::ArrayContained)),
                 ("arraycontained", raw_call(ExprType::ArrayContained)),
+                ("array_overlaps", raw_call(ExprType::ArrayOverlaps)),
+                ("array_is_overlap", raw_call(ExprType::ArrayOverlaps)),
+                ("array_is_intersect", raw_call(ExprType::ArrayOverlaps)),
                 ("array_flatten", guard_by_len(|_binder, [input]| {
                     input.ensure_array_type().map_err(|_| ErrorCode::BindError("array_flatten expects `any[][]` input".into()))?;
                     let return_type = input.return_type().into_list_elem();
@@ -776,6 +781,8 @@ impl Binder {
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 ("random", raw_call(ExprType::Random)),
+                ("clock_timestamp", raw_call(ExprType::ClockTimestamp)),
+                ("gen_random_uuid", raw_call(ExprType::GenRandomUuid)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 
@@ -866,7 +873,7 @@ impl Binder {
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: {:?}. \
-                Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
+                Please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information",
                 self.context.clause
             ))
                 .into());

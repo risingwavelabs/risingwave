@@ -50,7 +50,7 @@ impl Planner {
             mut select_items,
             group_by,
             mut having,
-            distinct,
+            mut distinct,
             ..
         }: BoundSelect,
         extra_order_exprs: Vec<ExprImpl>,
@@ -104,8 +104,25 @@ impl Planner {
         // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());
         if !group_by.is_empty() || having.is_some() || has_agg_call {
+            // The `DISTINCT ON` expressions must also be rewritten to reference the
+            // aggregated results, just like the SELECT and ORDER BY expressions. By
+            // appending them to `select_items` they go through the same agg rewriting,
+            // which maps group-key references and rejects any column that neither
+            // appears in GROUP BY nor inside an aggregate (matching PostgreSQL).
+            let n_distinct_on = if let BoundDistinct::DistinctOn(exprs) = &distinct {
+                select_items.extend(exprs.iter().cloned());
+                exprs.len()
+            } else {
+                0
+            };
+
             (root, select_items, having) =
                 LogicalAgg::create(select_items, group_by, having, root)?;
+
+            if n_distinct_on > 0 {
+                let rewritten = select_items.split_off(select_items.len() - n_distinct_on);
+                distinct = BoundDistinct::DistinctOn(rewritten);
+            }
         }
 
         if let Some(having) = having {

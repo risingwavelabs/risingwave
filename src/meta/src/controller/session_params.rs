@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::config::SessionInitConfig;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
@@ -45,11 +47,44 @@ impl SessionParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
         notification_manager: NotificationManagerRef,
-        mut init_params: SessionConfig,
+        session_init: SessionInitConfig,
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
+
+        // Precedence (high to low):
+        // 1. Persisted value in Meta store (`session_parameter`)
+        // 2. Explicit value in `[session_init]`
+        // 3. Built-in `SessionConfig::default()`
+        let mut init_params = SessionConfig::default();
+
+        // Apply the explicitly-configured `[session_init]` values onto the built-in defaults.
+        // Record the normalized value of each so we can later detect when a persisted value
+        // takes precedence and warn the operator.
+        let mut session_init_values: HashMap<String, String> = HashMap::new();
+        for (name, value) in session_init.entries() {
+            let normalized = init_params.set(name, value.to_owned(), &mut ())?;
+            session_init_values.insert(name.to_owned(), normalized);
+        }
+        if !session_init_values.is_empty() {
+            info!(
+                "[session_init] seeds session parameters during cluster bootstrap only; \
+                 persisted values in the meta store take precedence on existing clusters"
+            );
+        }
+
+        // Persisted values take precedence over `[session_init]`.
         let params = SessionParameter::find().all(&db).await?;
         for param in params {
+            if let Some(configured) = session_init_values.get(&param.name)
+                && *configured != param.value
+            {
+                tracing::warn!(
+                    parameter = %param.name,
+                    session_init_value = %configured,
+                    persisted_value = %param.value,
+                    "session_init value differs from persisted session parameter, using persisted value"
+                );
+            }
             if let Err(e) = init_params.set(&param.name, param.value, &mut ()) {
                 match e {
                     SessionConfigError::InvalidValue { .. } => {
@@ -162,7 +197,7 @@ mod tests {
         let session_param_ctl = SessionParamsController::new(
             meta_store.clone(),
             env.notification_manager_ref(),
-            init_params.clone(),
+            SessionInitConfig::default(),
         )
         .await
         .unwrap();
@@ -190,7 +225,7 @@ mod tests {
         let session_param_ctl = SessionParamsController::new(
             meta_store.clone(),
             env.notification_manager_ref(),
-            init_params.clone(),
+            SessionInitConfig::default(),
         )
         .await
         .unwrap();
@@ -224,5 +259,157 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
+    }
+
+    /// Scenario 1: on a new cluster, `[session_init]` seeds values into the meta store, including
+    /// the `default` placeholder which must be persisted verbatim.
+    #[tokio::test]
+    async fn test_session_init_bootstrap() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+        // Simulate an empty store: drop the rows seeded while constructing the test env.
+        SessionParameter::delete_many()
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism: Some("bounded(8)".to_owned()),
+            streaming_parallelism_for_table: Some("default".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+
+        let params = ctl.get_params().await;
+        assert_eq!(params.get("streaming_parallelism").unwrap(), "bounded(8)");
+        // `default` must be persisted as-is, not materialized into a concrete value.
+        assert_eq!(
+            params.get("streaming_parallelism_for_table").unwrap(),
+            "default"
+        );
+
+        // Values are persisted to the meta store.
+        let persisted = SessionParameter::find_by_id("streaming_parallelism".to_owned())
+            .one(&meta_store.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.value, "bounded(8)");
+    }
+
+    /// Scenario 2: on an existing cluster, a persisted value takes precedence over `[session_init]`.
+    #[tokio::test]
+    async fn test_session_init_persisted_takes_precedence() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+
+        // First launch: seed the store and then mimic an `ALTER SYSTEM SET`.
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        ctl.set_param("streaming_parallelism", Some("ratio(0.5)".to_owned()))
+            .await
+            .unwrap();
+
+        // Restart with a conflicting `[session_init]`: the persisted value must win.
+        let session_init = SessionInitConfig {
+            streaming_parallelism: Some("bounded(8)".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+        let params = ctl.get_params().await;
+        assert_eq!(params.get("streaming_parallelism").unwrap(), "ratio(0.5)");
+    }
+
+    /// Scenario 3: a newly supported field missing from the persisted `session_parameter` table is
+    /// seeded from `[session_init]` on restart.
+    #[tokio::test]
+    async fn test_session_init_seeds_missing_field() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+
+        // First launch seeds and persists defaults for all fields.
+        SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        // Simulate an older cluster that has no row for this field.
+        SessionParameter::delete_by_id("streaming_parallelism_for_materialized_view".to_owned())
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism_for_materialized_view: Some("bounded(4)".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+        let params = ctl.get_params().await;
+        assert_eq!(
+            params
+                .get("streaming_parallelism_for_materialized_view")
+                .unwrap(),
+            "bounded(4)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_session_init_invalid_value_fails_without_persisting() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+        // Simulate an empty store: drop the rows seeded while constructing the test env.
+        SessionParameter::delete_many()
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism_for_backfill: Some("bounded(2)".to_owned()),
+            ..Default::default()
+        };
+        let err = match SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        {
+            Ok(_) => panic!("invalid [session_init] should fail"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("SessionParams error: Invalid value `bounded(2)` for `streaming_parallelism_for_backfill`"));
+
+        let persisted = SessionParameter::find()
+            .all(&meta_store.conn)
+            .await
+            .unwrap();
+        assert!(persisted.is_empty());
     }
 }

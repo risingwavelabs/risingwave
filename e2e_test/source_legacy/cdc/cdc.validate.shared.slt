@@ -1,0 +1,272 @@
+# CDC frontend validation tests using shared sources.
+#
+# These tests verify that the frontend correctly rejects bad CDC source
+# definitions (at `CREATE SOURCE`) and bad CDC table definitions (at
+# `CREATE TABLE ... FROM <source> TABLE '<db>.<table>'`) before any
+# streaming pipeline is created.
+
+control substitution on
+
+
+############################################################
+# MySQL: connection-level errors fire at `CREATE SOURCE`.
+############################################################
+
+# invalid username
+statement error
+create source mysql_invalid_user with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'rot',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5801'
+);
+
+# invalid password
+statement error
+create source mysql_invalid_pwd with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '1456',
+ database.name = 'my@db',
+ server.id = '5801'
+);
+
+# invalid database name
+statement error
+create source mysql_invalid_db with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mdb',
+ server.id = '5801'
+);
+
+
+############################################################
+# MySQL: schema-level errors fire at `CREATE TABLE FROM SOURCE`.
+############################################################
+
+statement ok
+create source mysql_validate_src with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5801'
+);
+
+# upstream table does not exist
+statement error
+create table products (
+ id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_validate_src table 'my@db.prdcts';
+
+# primary key column does not match upstream
+statement error
+create table orders (
+ order_id int,
+ order_date timestamp,
+ customer_name string,
+ price decimal,
+ product_id int,
+ order_status smallint,
+ PRIMARY KEY (product_id)
+) from mysql_validate_src table 'my@db.orders';
+
+# column data type mismatch (decimal vs double)
+statement error
+create table orders (
+ order_id int,
+ order_date timestamp,
+ customer_name string,
+ price double,
+ product_id int,
+ order_status smallint,
+ PRIMARY KEY (order_id)
+) from mysql_validate_src table 'my@db.orders';
+
+# column name mismatch
+statement error
+create table orders (
+ order_id int,
+ order_date timestamp,
+ cust_name string,
+ price decimal,
+ product_id int,
+ order_status smallint,
+ PRIMARY KEY (order_id)
+) from mysql_validate_src table 'my@db.orders';
+
+statement ok
+drop source mysql_validate_src;
+
+
+############################################################
+# Postgres: connection-level errors fire at `CREATE SOURCE`.
+############################################################
+
+# invalid username
+statement error
+create source pg_invalid_user with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'posres',
+ password = 'postgres',
+ database.name = 'cdc_test'
+);
+
+# invalid password
+statement error
+create source pg_invalid_pwd with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'otgres',
+ database.name = 'cdc_test'
+);
+
+
+############################################################
+# Postgres: schema-level errors fire at `CREATE TABLE FROM SOURCE`.
+############################################################
+
+statement ok
+create source pg_validate_src with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'validate_slot'
+);
+
+# NOT NULL constraint not supported on CDC tables
+statement error CDC table with NOT NULL constraint is not supported
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING NOT NULL,
+  is_arrived boolean NOT NULL,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipments';
+
+# upstream table does not exist
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipment';
+
+# primary key column does not match upstream
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (order_id)
+) from pg_validate_src table 'public.shipments';
+
+# column name mismatch
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  orderid INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipments';
+
+# column data type mismatch (real vs integer)
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id real,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipments';
+
+# non-generated column after a generated column is rejected
+statement error Not supported: Non-generated column found after a generated column.
+create table shipments (
+  next_shipment_id INTEGER as shipment_id + 1,
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipments';
+
+# generated column placed at the end is valid
+statement ok
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+  generated_c INTEGER AS shipment_id + order_id,
+ PRIMARY KEY (shipment_id)
+) from pg_validate_src table 'public.shipments';
+
+statement ok
+drop table shipments;
+
+statement ok
+drop source pg_validate_src;
+
+
+############################################################
+# Postgres: partition table publication validation.
+# Publication `rw_publication_pubviaroot_false` is created upstream
+# without `publish_via_partition_root = true`, so CDC ingestion of the
+# partitioned root table must be rejected.
+############################################################
+
+statement ok
+create source pg_partition_pubviaroot_false with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ publication.name = 'rw_publication_pubviaroot_false',
+ slot.name = 'validate_partition_slot'
+);
+
+statement error Table 'partitioned_timestamp_table' has partitions, which requires publication 'rw_publication_pubviaroot_false' to be created with `publish_via_partition_root = true`.
+create table partitioned_timestamp_table(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) from pg_partition_pubviaroot_false table 'public.partitioned_timestamp_table';
+
+statement ok
+drop source pg_partition_pubviaroot_false;

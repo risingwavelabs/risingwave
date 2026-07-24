@@ -35,6 +35,11 @@ pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 #[repr(transparent)]
 pub struct TypedId<const N: usize, P>(pub(crate) P);
 
+// SAFETY: `TypedId` is `#[repr(transparent)]` over `P`, so it is layout-compatible with `P`.
+unsafe impl<const N: usize, P> ::prost::TransparentOver for TypedId<N, P> {
+    type Inner = P;
+}
+
 impl<const N: usize, P: std::fmt::Debug> std::fmt::Debug for TypedId<N, P> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         <P as std::fmt::Debug>::fmt(&self.0, f)
@@ -65,11 +70,6 @@ impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(<P as FromStr>::from_str(s)?))
     }
-}
-
-// # safety: transparent repr
-unsafe impl<const N: usize, P> prost::TransparentOver for TypedId<N, P> {
-    type Inner = P;
 }
 
 impl<const N: usize, P> Borrow<P> for TypedId<N, P> {

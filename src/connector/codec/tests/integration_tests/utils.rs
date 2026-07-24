@@ -29,7 +29,7 @@ impl std::fmt::Debug for DataTypeTestDisplay<'_> {
                 if s.len() == 1 {
                     // avoid multiline display for single field struct
                     let (name, ty) = s.iter().next().unwrap();
-                    return write!(f, "Struct {{ {}: {:?} }}", name, &DataTypeTestDisplay(ty));
+                    return write!(f, "Struct {{ {}: {:?} }}", name, DataTypeTestDisplay(ty));
                 }
 
                 let mut f = f.debug_struct("Struct");
@@ -46,15 +46,15 @@ impl std::fmt::Debug for DataTypeTestDisplay<'_> {
                         .field(&DataTypeTestDisplay(t))
                         .finish()
                 } else {
-                    write!(f, "List({:?})", &DataTypeTestDisplay(t))
+                    write!(f, "List({:?})", DataTypeTestDisplay(t))
                 }
             }
             DataType::Map(m) => {
                 write!(
                     f,
                     "Map({:?},{:?})",
-                    &DataTypeTestDisplay(m.key()),
-                    &DataTypeTestDisplay(m.value())
+                    DataTypeTestDisplay(m.key()),
+                    DataTypeTestDisplay(m.value())
                 )
             }
             _ => {
@@ -75,7 +75,7 @@ impl std::fmt::Debug for ScalarRefImplTestDisplay<'_> {
                 if s.iter_fields_ref().len() == 1 {
                     // avoid multiline display for single field struct
                     let field = s.iter_fields_ref().next().unwrap();
-                    return write!(f, "StructValue({:#?})", &DatumRefTestDisplay(field));
+                    return write!(f, "StructValue({:#?})", DatumRefTestDisplay(field));
                 }
 
                 let mut f = f.debug_tuple("StructValue");

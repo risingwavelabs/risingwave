@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(coroutines)]
-#![feature(stmt_expr_attributes)]
 #![feature(proc_macro_hygiene)]
 #![feature(register_tool)]
 #![register_tool(rw)]
@@ -31,7 +30,7 @@ use clap::Parser;
 use foyer::{CacheBuilder, HybridCacheBuilder};
 use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
-    NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
+    NoOverride, ObjectStoreConfig, Role, extract_storage_memory_config, load_config,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -72,7 +71,7 @@ async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
     unsafe { std::env::set_var(USE_TRACE, "false") };
-    run_replay(args).await.unwrap();
+    Box::pin(run_replay(args)).await.unwrap();
 }
 
 async fn run_replay(args: Args) -> Result<()> {
@@ -81,7 +80,7 @@ async fn run_replay(args: Args) -> Result<()> {
     let mut reader = TraceReaderImpl::new_bincode(f)?;
     // first record is the snapshot
     let r: Record = reader.read().unwrap();
-    let replay_interface = create_replay_hummock(r, &args).await.unwrap();
+    let replay_interface = Box::pin(create_replay_hummock(r, &args)).await.unwrap();
     let mut replayer = HummockReplay::new(reader, replay_interface);
     replayer.run().await.unwrap();
 
@@ -171,6 +170,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     };
 
     let storage = HummockStorage::new(
+        Role::None,
         storage_opts,
         sstable_store,
         hummock_meta_client.clone(),

@@ -115,6 +115,17 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
+    // Validate debezium.heartbeat.interval.ms if present: must be a valid integer and not 0
+    if let Some(interval_value) = changed_props.get("debezium.heartbeat.interval.ms")
+        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
+            config_value: interval_value.to_owned(),
+        }
+        .into());
+    }
+
     meta_client
         .alter_source_connector_props(
             source_id,

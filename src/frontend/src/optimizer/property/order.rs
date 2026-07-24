@@ -41,7 +41,7 @@ impl Order {
             .collect_vec()
     }
 
-    #[allow(clippy::len_without_is_empty)]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.column_orders.len()
     }

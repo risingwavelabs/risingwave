@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
+use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SOURCE_PREFIX, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
@@ -111,9 +111,16 @@ impl SourceCatalog {
     pub fn is_iceberg_connector(&self) -> bool {
         self.with_properties.is_iceberg_connector()
     }
-}
 
-impl SourceCatalog {
+    /// If this source is an iceberg source, returns the corresponding iceberg table name.
+    pub fn iceberg_table_name(&self) -> Option<String> {
+        if self.name.starts_with(ICEBERG_SOURCE_PREFIX) {
+            Some(self.name[ICEBERG_SOURCE_PREFIX.len()..].to_string())
+        } else {
+            None
+        }
+    }
+
     /// Returns the SQL definition when the source was created, purified with best effort.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()

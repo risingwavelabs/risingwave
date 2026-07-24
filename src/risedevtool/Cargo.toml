@@ -14,7 +14,7 @@ chrono = { workspace = true, features = [
     "std",
 ] }
 console = "0.16"
-fs-err = "3.2.2"
+fs-err = "3.3.0"
 glob = "0.3"
 google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 indicatif = "0.18"
@@ -31,15 +31,7 @@ serde_yaml = "0.9"
 sqlx = { workspace = true, features = ["any"] }
 tempfile = "3"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"

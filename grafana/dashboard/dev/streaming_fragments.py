@@ -35,6 +35,9 @@ def _kv_log_store_buffer_usage_by_fragment_expr() -> str:
 def _sync_kv_log_store_buffer_usage_by_fragment_expr() -> str:
     return f"sum({metric('sync_kv_log_store_buffer_memory_bytes')}) by (fragment_id)"
 
+def _channel_buffer_usage_by_fragment_expr() -> str:
+    return f"sum({metric('stream_fragment_channel_buffered_bytes')}) by (fragment_id)"
+
 @section
 def _(outer_panels: Panels):
     # The actor_id can be masked due to metrics level settings.
@@ -82,6 +85,7 @@ def _(outer_panels: Panels):
     sync_kv_log_store_buffer_by_fragment_usage_expr = (
         _sync_kv_log_store_buffer_usage_by_fragment_expr()
     )
+    channel_buffer_usage_expr = _channel_buffer_usage_by_fragment_expr()
     total_memory_usage_expr = " + ".join(
         map(
             _coalesce_fragment,
@@ -90,8 +94,13 @@ def _(outer_panels: Panels):
                 shared_buffer_usage_expr,
                 kv_log_store_buffer_by_fragment_usage_expr,
                 sync_kv_log_store_buffer_by_fragment_usage_expr,
+                channel_buffer_usage_expr,
             ],
         )
+    )
+    total_memory_usage_ratio_expr = (
+        f"({total_memory_usage_expr}) "
+        f"/ on() group_left clamp_min(sum(({total_memory_usage_expr})), 1)"
     )
     return [
         outer_panels.row_collapsed(
@@ -323,6 +332,16 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.subheader("Memory Usage by Fragment"),
+                panels.timeseries_percentage(
+                    "Total Memory Usage Ratio(%)",
+                    "Fragment memory usage / sum of all fragment memory usages",
+                    [
+                        panels.target(
+                            total_memory_usage_ratio_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Total Memory Usage",
                     "Sum of executor cache memory, shared buffer imm size, and log store buffer memory",
@@ -349,6 +368,16 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             shared_buffer_usage_expr,
+                            "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Inter-Actor Channel Buffer Memory Usage",
+                    "Estimated buffered bytes for actor channels per fragment.",
+                    [
+                        panels.target(
+                            f"{channel_buffer_usage_expr}",
                             "fragment {{fragment_id}}",
                         ),
                     ],

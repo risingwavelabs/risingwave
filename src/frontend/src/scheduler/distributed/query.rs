@@ -532,7 +532,7 @@ pub(crate) mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let table_id = 0.into();
         let vnode_count = VirtualNode::COUNT_FOR_TEST;
 
@@ -672,7 +672,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()
@@ -690,7 +689,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()
@@ -708,7 +706,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()

@@ -165,7 +165,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_count(self, title, description, targets, legendCols=["mean"]):
+    def timeseries_count(self, title, description, targets, legendCols=["mean"], unit=''):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
@@ -173,6 +173,7 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
+            unit=unit,
             legendCalcs=legendCols,
             **self.common_options,
         )

@@ -42,6 +42,87 @@ drop table t1;
 statement ok
 drop table t2;
 
+# ============================================================
+# Regression: ASOF join must pick the CLOSEST matching row,
+# not an arbitrary one. Tests Ge (>=) and Le (<=) with
+# multiple right-side candidates per equality key.
+# Bug: find_asof_matched_rows compared probe vs result instead
+# of build vs result when updating the best candidate.
+# ============================================================
+
+statement ok
+create table events (id int primary key, asset_id int, ts int);
+
+statement ok
+create table rates (asset_id int, ts int, rate int, pk int primary key);
+
+statement ok
+insert into events values (1, 1, 100), (2, 1, 50), (3, 2, 80);
+
+statement ok
+insert into rates values (1, 30, 300, 1), (1, 60, 600, 2), (1, 90, 900, 3), (1, 110, 1100, 4), (2, 85, 850, 5);
+
+# Ge: event.ts >= rate.ts → pick rate with MAX ts that is still <= event.ts
+# event(1,1,100): rates with asset=1 and ts<=100 are ts=30,60,90. Closest=90 (rate=900)
+# event(2,1,50):  rates with asset=1 and ts<=50 are ts=30. Closest=30 (rate=300)
+# event(3,2,80):  rates with asset=2 and ts<=80: none. LEFT JOIN → NULL
+query IIIII
+SELECT e.id, e.asset_id, e.ts, r.ts as rate_ts, r.rate
+FROM events e ASOF LEFT JOIN rates r
+  ON e.asset_id = r.asset_id AND e.ts >= r.ts
+ORDER BY e.id;
+----
+1 1 100 90 900
+2 1 50 30 300
+3 2 80 NULL NULL
+
+# Le: event.ts <= rate.ts → pick rate with MIN ts that is still >= event.ts
+# event(1,1,100): rates with asset=1 and ts>=100 are ts=110. Closest=110 (rate=1100)
+# event(2,1,50):  rates with asset=1 and ts>=50 are ts=60,90,110. Closest=60 (rate=600)
+# event(3,2,80):  rates with asset=2 and ts>=80 are ts=85. Closest=85 (rate=850)
+query IIIII
+SELECT e.id, e.asset_id, e.ts, r.ts as rate_ts, r.rate
+FROM events e ASOF LEFT JOIN rates r
+  ON e.asset_id = r.asset_id AND e.ts <= r.ts
+ORDER BY e.id;
+----
+1 1 100 110 1100
+2 1 50 60 600
+3 2 80 85 850
+
+# Gt: event.ts > rate.ts → pick rate with MAX ts that is strictly < event.ts
+# event(1,1,100): rates with asset=1 and ts<100 are ts=30,60,90. Closest=90 (rate=900)
+# event(2,1,50):  rates with asset=1 and ts<50 are ts=30. Closest=30 (rate=300)
+query IIIII
+SELECT e.id, e.asset_id, e.ts, r.ts as rate_ts, r.rate
+FROM events e ASOF LEFT JOIN rates r
+  ON e.asset_id = r.asset_id AND e.ts > r.ts
+ORDER BY e.id;
+----
+1 1 100 90 900
+2 1 50 30 300
+3 2 80 NULL NULL
+
+# Lt: event.ts < rate.ts → pick rate with MIN ts that is strictly > event.ts
+# event(1,1,100): rates with asset=1 and ts>100 are ts=110. Closest=110 (rate=1100)
+# event(2,1,50):  rates with asset=1 and ts>50 are ts=60,90,110. Closest=60 (rate=600)
+# event(3,2,80):  rates with asset=2 and ts>80 are ts=85. Closest=85 (rate=850)
+query IIIII
+SELECT e.id, e.asset_id, e.ts, r.ts as rate_ts, r.rate
+FROM events e ASOF LEFT JOIN rates r
+  ON e.asset_id = r.asset_id AND e.ts < r.ts
+ORDER BY e.id;
+----
+1 1 100 110 1100
+2 1 50 60 600
+3 2 80 85 850
+
+statement ok
+drop table events;
+
+statement ok
+drop table rates;
+
 # AsOf lookup join. Query results should be the same as the above asof join queries.
 
 statement ok

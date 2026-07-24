@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::needless_question_mark)]
-
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
@@ -54,7 +52,7 @@ enum Commands {
     Default,
 }
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]
@@ -151,7 +149,7 @@ from source. This implies `ENABLE_BUILD_RUST` to be false.
                 "
 Required if you want to build dashboard from source.
 This is generally not the option you want to use to develop the
-dashboard. Instead, directly run `npm run dev` in the dashboard
+dashboard. Instead, directly run `pnpm run dev` in the dashboard
 directory to start the development server, set the API endpoint
 to a running RisingWave cluster in the settings page.
 "

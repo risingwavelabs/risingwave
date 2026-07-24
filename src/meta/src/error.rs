@@ -169,6 +169,10 @@ impl MetaError {
         matches!(self.inner(), MetaErrorInner::InvalidWorker(..))
     }
 
+    pub fn is_catalog_id_not_found(&self, relation: &'static str) -> bool {
+        matches!(self.inner(), MetaErrorInner::CatalogIdNotFound(found_relation, _) if *found_relation == relation)
+    }
+
     pub fn catalog_id_not_found<T: ToString>(relation: &'static str, id: T) -> Self {
         MetaErrorInner::CatalogIdNotFound(relation, id.to_string()).into()
     }

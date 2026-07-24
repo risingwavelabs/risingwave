@@ -70,7 +70,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, DatabaseId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
@@ -133,6 +133,9 @@ pub struct Binder {
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
 
+    /// The included secrets while binding a query (e.g., secret refs in UDF arguments).
+    included_secrets: HashSet<SecretId>,
+
     param_types: ParameterTypes,
 
     /// The temporary sources that will be used during binding phase
@@ -146,11 +149,15 @@ pub struct Binder {
     secure_compare_context: Option<SecureCompareContext>,
 }
 
-// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
+pub const WEBHOOK_PAYLOAD_FIELD_NAME: &str = "payload";
+
+// There are hidden names reserved for webhook validation expressions:
+// - `headers`, whose type is `JSONB`
+// - `payload`, whose type is `BYTEA`
 #[derive(Default, Clone, Debug)]
 pub struct SecureCompareContext {
-    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
-    pub column_name: String,
+    /// The identifier used to reference the raw webhook payload during validation.
+    pub payload_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
     pub secret_name: Option<String>,
 }
@@ -256,6 +263,7 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
+            included_secrets: HashSet::new(),
             param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
             staging_catalog_manager: session.staging_catalog_manager(),
@@ -295,7 +303,7 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }
@@ -325,6 +333,11 @@ impl Binder {
     /// Get included user-defined functions in the query after binding.
     pub fn included_udfs(&self) -> &HashSet<FunctionId> {
         &self.included_udfs
+    }
+
+    /// Get included secrets in the query after binding (e.g., secret refs in UDF arguments).
+    pub fn included_secrets(&self) -> &HashSet<SecretId> {
+        &self.included_secrets
     }
 
     fn push_context(&mut self) {
@@ -371,17 +384,25 @@ impl Binder {
         Ok(())
     }
 
-    fn try_mark_lateral_as_visible(&mut self) {
-        if let Some(mut ctx) = self.lateral_contexts.pop() {
-            ctx.is_visible = true;
-            self.lateral_contexts.push(ctx);
-        }
+    /// Make every enclosing left-hand `FROM` context visible while binding a lateral table
+    /// factor. A lateral factor nested in a join tree may refer not only to its immediate left
+    /// sibling, but also to left inputs of enclosing joins.
+    fn mark_lateral_contexts_visible(&mut self) -> Vec<bool> {
+        self.lateral_contexts
+            .iter_mut()
+            .map(|ctx| std::mem::replace(&mut ctx.is_visible, true))
+            .collect()
     }
 
-    fn try_mark_lateral_as_invisible(&mut self) {
-        if let Some(mut ctx) = self.lateral_contexts.pop() {
-            ctx.is_visible = false;
-            self.lateral_contexts.push(ctx);
+    fn restore_lateral_contexts_visibility(&mut self, visibility: Vec<bool>) {
+        // Some table-factor binders return early on an error without unwinding their temporary
+        // query context. The whole binder is discarded in that case, so there is no visibility
+        // state to restore on the active stack.
+        if self.lateral_contexts.len() != visibility.len() {
+            return;
+        }
+        for (ctx, is_visible) in self.lateral_contexts.iter_mut().zip_eq_debug(visibility) {
+            ctx.is_visible = is_visible;
         }
     }
 

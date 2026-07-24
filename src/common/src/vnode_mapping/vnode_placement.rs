@@ -229,7 +229,6 @@ mod tests {
         assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
 
         let serving_property = Property {
-            is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
             ..Default::default()

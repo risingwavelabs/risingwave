@@ -41,6 +41,11 @@ select * from mv1;
 ----
 [true, false, null, true]  [0, 1, 2, 8]  {"bbb": 999, "ccc": null, "ddd": {"foo": "bar"}} [{"key": 1, "val": [1, 3]}, null, {"key": 3, "val": [1, 2, 3]}, {"key": 9, "val": [10]}]  {"bbb": [{"key": 31, "val": "v31"}], "ccc": [{"key": 21, "val": "v21"}, {"key": 22, "val": "v22"}], "ddd": null}
 
+query T
+select jsonb_agg((row(v2, v3)).* order by v2) from t;
+----
+[{"f1": 0, "f2": "bbb"}, {"f1": 1, "f2": "ccc"}, {"f1": 2, "f2": "bbb"}, {"f1": 8, "f2": "ddd"}]
+
 statement ok
 drop materialized view mv1;
 

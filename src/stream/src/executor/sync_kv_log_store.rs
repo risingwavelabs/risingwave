@@ -56,7 +56,6 @@
 //! TODO(kwannoel):
 //! - [] Add dedicated metrics for sync log store, namespace according to the upstream.
 //! - [] Add tests
-//! - [] Handle watermark r/w
 //! - [] Handle paused stream
 
 use std::collections::VecDeque;
@@ -73,8 +72,10 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
+use risingwave_pb::id::FragmentId;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use risingwave_storage::store::{
@@ -99,7 +100,7 @@ use crate::common::log_store_impl::kv_log_store::{
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 use crate::executor::{
-    Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
+    Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
 pub mod metrics {
@@ -334,28 +335,27 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+pub(crate) type ReadFlushedChunkFuture =
+    BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+
+pub struct SyncKvLogStoreContext<S: StateStore> {
+    pub table_id: TableId,
+    pub fragment_id: FragmentId,
+    pub metrics: SyncedKvLogStoreMetrics,
+    pub serde: LogStoreRowSerde,
+    pub state_store: S,
+    pub max_buffer_size: usize,
+    pub chunk_size: usize,
+    pub pause_duration_ms: Duration,
+    pub aligned: bool,
+}
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
-    table_id: TableId,
-    metrics: SyncedKvLogStoreMetrics,
-    serde: LogStoreRowSerde,
-
-    // Upstream
     upstream: Executor,
-
-    // Log store state
-    state_store: S,
-    max_buffer_size: usize,
-
-    // Max chunk size when reading from logstore / buffer
-    chunk_size: usize,
-
-    pause_duration_ms: Duration,
-
-    aligned: bool,
+    logstore_context: SyncKvLogStoreContext<S>,
 }
+
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[expect(clippy::too_many_arguments)]
@@ -371,22 +371,26 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         pause_duration_ms: Duration,
         aligned: bool,
     ) -> Self {
-        Self {
-            actor_context,
+        let logstore_context = SyncKvLogStoreContext {
             table_id,
+            fragment_id: actor_context.fragment_id,
             metrics,
             serde,
             state_store,
-            upstream,
             max_buffer_size: buffer_size,
             chunk_size,
             pause_duration_ms,
             aligned,
+        };
+        Self {
+            actor_context,
+            upstream,
+            logstore_context,
         }
     }
 }
 
-struct FlushedChunkInfo {
+pub(crate) struct FlushedChunkInfo {
     epoch: u64,
     start_seq_id: SeqId,
     end_seq_id: SeqId,
@@ -394,7 +398,7 @@ struct FlushedChunkInfo {
     vnode_bitmap: Bitmap,
 }
 
-enum WriteFuture<S: LocalStateStore> {
+pub(crate) enum WriteFuture<S: LocalStateStore> {
     /// We trigger a brief pause to let the `ReadFuture` be polled in the following scenarios:
     /// - When seeing an upstream data chunk, when the buffer becomes full, and the state is clean.
     /// - When seeing a checkpoint barrier, when the buffer is not empty, and the state is clean.
@@ -425,7 +429,7 @@ enum WriteFuture<S: LocalStateStore> {
     Empty,
 }
 
-enum WriteFutureEvent {
+pub(crate) enum WriteFutureEvent {
     UpstreamMessageReceived(Message),
     ChunkFlushed(FlushedChunkInfo),
 }
@@ -460,7 +464,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
-    fn receive_from_upstream(
+    pub(crate) fn receive_from_upstream(
         stream: BoxedMessageStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
@@ -470,7 +474,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
-    fn paused(
+    pub(crate) fn paused(
         duration: Duration,
         barrier: Barrier,
         stream: BoxedMessageStream,
@@ -487,7 +491,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
-    async fn next_event(
+    pub(crate) async fn next_event(
         &mut self,
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
@@ -540,11 +544,193 @@ impl<S: LocalStateStore> WriteFuture<S> {
     }
 }
 
+pub(crate) type LocalLogStoreReadState<S> =
+    LogStoreReadState<<<S as StateStore>::Local as LocalStateStore>::FlushedSnapshotReader>;
+pub(crate) type LocalLogStoreWriteState<S> = LogStoreWriteState<<S as StateStore>::Local>;
+
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
+    pub(crate) async fn init_local_log_store_state(
+        context: &SyncKvLogStoreContext<S>,
+        first_write_epoch: EpochPair,
+    ) -> StreamExecutorResult<(LocalLogStoreReadState<S>, LocalLogStoreWriteState<S>)> {
+        let local_state_store = context
+            .state_store
+            .new_local(NewLocalOptions {
+                table_id: context.table_id,
+                fragment_id: context.fragment_id,
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: TableOption {
+                    retention_seconds: None,
+                },
+                is_replicated: false,
+                vnodes: context.serde.vnodes().clone(),
+                upload_on_flush: false,
+            })
+            .await;
+
+        let (read_state, mut initial_write_state) = new_log_store_state(
+            context.table_id,
+            local_state_store,
+            context.serde.clone(),
+            context.chunk_size,
+        );
+        initial_write_state.init(first_write_epoch).await?;
+        Ok((read_state, initial_write_state))
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    pub(crate) async fn aligned_message_stream(
+        actor_id: ActorId,
+        input: BoxedMessageStream,
+        read_state: LocalLogStoreReadState<S>,
+        mut initial_write_state: LocalLogStoreWriteState<S>,
+        metrics: SyncedKvLogStoreMetrics,
+        initial_write_epoch: EpochPair,
+    ) {
+        tracing::info!("aligned mode");
+        // We want to realign the buffer and the stream.
+        // We just block the upstream input stream,
+        // and wait until the persisted logstore is empty.
+        // Then after that we can consume the input stream.
+        let log_store_stream = read_state
+            .read_persisted_log_store(
+                metrics.persistent_log_read_metrics.clone(),
+                initial_write_epoch.curr,
+                LogStoreReadStateStreamRangeStart::Unbounded,
+            )
+            .await?;
+
+        #[for_await]
+        for message in log_store_stream {
+            let (_epoch, message) = message?;
+            match message {
+                KvLogStoreItem::Barrier { .. } => {
+                    continue;
+                }
+                KvLogStoreItem::StreamChunk { chunk, .. } => {
+                    yield Message::Chunk(chunk);
+                }
+            }
+        }
+
+        let mut realigned_logstore = false;
+
+        #[for_await]
+        for message in input {
+            match message? {
+                Message::Barrier(barrier) => {
+                    let is_checkpoint = barrier.is_checkpoint();
+                    let mut progress = LogStoreVnodeProgress::None;
+                    progress.apply_aligned(read_state.vnodes().clone(), barrier.epoch.prev, None);
+                    // Truncate the logstore.
+                    let post_seal =
+                        initial_write_state.seal_current_epoch(barrier.epoch.curr, progress.take());
+                    barrier.assume_no_update_vnode_bitmap(actor_id)?;
+                    yield Message::Barrier(barrier);
+                    post_seal.post_yield_barrier(None).await?;
+                    if !realigned_logstore && is_checkpoint {
+                        realigned_logstore = true;
+                        tracing::info!("realigned logstore");
+                    }
+                }
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(chunk);
+                }
+                Message::Watermark(watermark) => {
+                    yield Message::Watermark(watermark);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn apply_pause_resume_mutation(barrier: &Barrier, pause_stream: &mut bool) {
+        if let Some(mutation) = barrier.mutation.as_deref() {
+            match mutation {
+                Mutation::Pause => {
+                    *pause_stream = true;
+                }
+                Mutation::Resume => {
+                    *pause_stream = false;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(crate) fn process_upstream_chunk(
+        seq_id: SeqId,
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S::Local>,
+        chunk: StreamChunk,
+        buffer: &mut SyncedLogStoreBuffer,
+    ) -> (SeqId, WriteFuture<S::Local>) {
+        let cardinality = chunk.cardinality();
+        if cardinality == 0 {
+            tracing::warn!(
+                epoch = write_state.epoch().curr,
+                "received empty chunk (cardinality=0), skipping"
+            );
+            return (
+                seq_id,
+                WriteFuture::receive_from_upstream(stream, write_state),
+            );
+        }
+
+        let start_seq_id = seq_id;
+        let new_seq_id = seq_id + cardinality as SeqId;
+        let end_seq_id = new_seq_id - 1;
+        let epoch = write_state.epoch().curr;
+        tracing::trace!(
+            start_seq_id,
+            end_seq_id,
+            new_seq_id,
+            epoch,
+            cardinality,
+            "received chunk"
+        );
+        let next_write_future = if let Some(chunk_to_flush) =
+            buffer.add_or_flush_chunk(start_seq_id, end_seq_id, chunk, epoch)
+        {
+            WriteFuture::flush_chunk(
+                stream,
+                write_state,
+                chunk_to_flush,
+                epoch,
+                start_seq_id,
+                end_seq_id,
+            )
+        } else {
+            WriteFuture::receive_from_upstream(stream, write_state)
+        };
+        (new_seq_id, next_write_future)
+    }
+
+    pub(crate) fn process_flushed_chunk(
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S::Local>,
+        info: FlushedChunkInfo,
+        buffer: &mut SyncedLogStoreBuffer,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> WriteFuture<S::Local> {
+        buffer.add_flushed_item_to_buffer(
+            info.start_seq_id,
+            info.end_seq_id,
+            info.vnode_bitmap,
+            info.epoch,
+        );
+        metrics
+            .storage_write_count
+            .inc_by(info.flush_info.flush_count as _);
+        metrics
+            .storage_write_size
+            .inc_by(info.flush_info.flush_size as _);
+        WriteFuture::receive_from_upstream(stream, write_state)
+    }
+
     #[try_stream(ok= Message, error = StreamExecutorError)]
     pub async fn execute_monitored(self) {
-        let wait_next_poll_ns = self.metrics.wait_next_poll_ns.clone();
+        let wait_next_poll_ns = self.logstore_context.metrics.wait_next_poll_ns.clone();
         #[for_await]
         for message in self.execute_inner() {
             let current_time = Instant::now();
@@ -562,322 +748,182 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         let first_write_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier.clone());
 
-        let local_state_store = self
-            .state_store
-            .new_local(NewLocalOptions {
-                table_id: self.table_id,
-                fragment_id: self.actor_context.fragment_id,
-                op_consistency_level: OpConsistencyLevel::Inconsistent,
-                table_option: TableOption {
-                    retention_seconds: None,
-                },
-                is_replicated: false,
-                vnodes: self.serde.vnodes().clone(),
-                upload_on_flush: false,
-            })
-            .await;
-
-        let (mut read_state, mut initial_write_state) = new_log_store_state(
-            self.table_id,
-            local_state_store,
-            self.serde,
-            self.chunk_size,
-        );
-        initial_write_state.init(first_write_epoch).await?;
+        let (read_state, initial_write_state) =
+            Self::init_local_log_store_state(&self.logstore_context, first_write_epoch).await?;
 
         let mut pause_stream = first_barrier.is_pause_on_startup();
-        let mut initial_write_epoch = first_write_epoch;
+        let initial_write_epoch = first_write_epoch;
 
-        if self.aligned {
-            tracing::info!("aligned mode");
-            // We want to realign the buffer and the stream.
-            // We just block the upstream input stream,
-            // and wait until the persisted logstore is empty.
-            // Then after that we can consume the input stream.
-            let log_store_stream = read_state
-                .read_persisted_log_store(
-                    self.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.curr,
-                    LogStoreReadStateStreamRangeStart::Unbounded,
-                )
-                .await?;
-
+        if self.logstore_context.aligned {
+            let aligned_stream = Self::aligned_message_stream(
+                self.actor_context.id,
+                input,
+                read_state,
+                initial_write_state,
+                self.logstore_context.metrics.clone(),
+                initial_write_epoch,
+            );
             #[for_await]
-            for message in log_store_stream {
-                let (_epoch, message) = message?;
-                match message {
-                    KvLogStoreItem::Barrier { .. } => {
-                        continue;
-                    }
-                    KvLogStoreItem::StreamChunk { chunk, .. } => {
-                        yield Message::Chunk(chunk);
-                    }
-                }
+            for message in aligned_stream {
+                yield message?;
             }
-
-            let mut realigned_logstore = false;
-
-            #[for_await]
-            for message in input {
-                match message? {
-                    Message::Barrier(barrier) => {
-                        let is_checkpoint = barrier.is_checkpoint();
-                        let mut progress = LogStoreVnodeProgress::None;
-                        progress.apply_aligned(
-                            read_state.vnodes().clone(),
-                            barrier.epoch.prev,
-                            None,
-                        );
-                        // Truncate the logstore
-                        let post_seal = initial_write_state
-                            .seal_current_epoch(barrier.epoch.curr, progress.take());
-                        let update_vnode_bitmap =
-                            barrier.as_update_vnode_bitmap(self.actor_context.id);
-                        yield Message::Barrier(barrier);
-                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
-                        if !realigned_logstore && is_checkpoint {
-                            realigned_logstore = true;
-                            tracing::info!("realigned logstore");
-                        }
-                    }
-                    Message::Chunk(chunk) => {
-                        yield Message::Chunk(chunk);
-                    }
-                    Message::Watermark(watermark) => {
-                        yield Message::Watermark(watermark);
-                    }
-                }
-            }
-
             return Ok(());
         }
 
-        // We only recreate the consume stream when:
-        // 1. On bootstrap
-        // 2. On vnode update
-        'recreate_consume_stream: loop {
-            let mut seq_id = FIRST_SEQ_ID;
-            let mut buffer = SyncedLogStoreBuffer {
-                buffer: VecDeque::new(),
-                current_size: 0,
-                max_size: self.max_buffer_size,
-                max_chunk_size: self.chunk_size,
-                next_chunk_id: 0,
-                metrics: self.metrics.clone(),
-                flushed_count: 0,
-            };
+        let mut seq_id = FIRST_SEQ_ID;
+        let mut buffer = SyncedLogStoreBuffer::new(
+            self.logstore_context.max_buffer_size,
+            self.logstore_context.chunk_size,
+            &self.logstore_context.metrics,
+        );
 
-            let log_store_stream = read_state
-                .read_persisted_log_store(
-                    self.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.curr,
-                    LogStoreReadStateStreamRangeStart::Unbounded,
-                )
-                .await?;
+        let log_store_stream = read_state
+            .read_persisted_log_store(
+                self.logstore_context
+                    .metrics
+                    .persistent_log_read_metrics
+                    .clone(),
+                initial_write_epoch.curr,
+                LogStoreReadStateStreamRangeStart::Unbounded,
+            )
+            .await?;
 
-            let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
-            let mut clean_state = log_store_stream.peek().await.is_none();
-            tracing::trace!(?clean_state);
+        let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
+        let mut clean_state = log_store_stream.peek().await.is_none();
+        tracing::trace!(?clean_state);
 
-            let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
+        let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
 
-            let mut write_future_state =
-                WriteFuture::receive_from_upstream(input, initial_write_state);
+        let mut write_future_state = WriteFuture::receive_from_upstream(input, initial_write_state);
 
-            let mut progress = LogStoreVnodeProgress::None;
+        let mut progress = LogStoreVnodeProgress::None;
 
-            loop {
-                let select_result = {
-                    let read_future = async {
-                        if pause_stream {
-                            pending().await
-                        } else {
-                            read_future_state
-                                .next_chunk(&mut progress, &read_state, &mut buffer, &self.metrics)
-                                .await
-                        }
-                    };
-                    pin_mut!(read_future);
-                    let write_future = write_future_state.next_event(&self.metrics);
-                    pin_mut!(write_future);
-                    let output = select(write_future, read_future).await;
-                    drop_either_future(output)
+        loop {
+            let select_result = {
+                let read_future = async {
+                    if pause_stream {
+                        pending().await
+                    } else {
+                        read_future_state
+                            .next_message(
+                                &mut progress,
+                                &read_state,
+                                &mut buffer,
+                                &self.logstore_context.metrics,
+                            )
+                            .await
+                    }
                 };
-                match select_result {
-                    Either::Left(result) => {
-                        // drop the future to ensure that the future must be reset later
-                        drop(write_future_state);
-                        let (stream, mut write_state, either) = result?;
-                        match either {
-                            WriteFutureEvent::UpstreamMessageReceived(msg) => {
-                                match msg {
-                                    Message::Barrier(barrier) => {
-                                        if clean_state
-                                            && barrier.kind.is_checkpoint()
-                                            && !buffer.is_empty()
-                                        {
-                                            write_future_state = WriteFuture::paused(
-                                                self.pause_duration_ms,
-                                                barrier,
-                                                stream,
-                                                write_state,
-                                            );
-                                            clean_state = false;
-                                            self.metrics.unclean_state.inc();
-                                        } else {
-                                            if let Some(mutation) = barrier.mutation.as_deref() {
-                                                match mutation {
-                                                    Mutation::Pause => {
-                                                        pause_stream = true;
-                                                    }
-                                                    Mutation::Resume => {
-                                                        pause_stream = false;
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                            let write_state_post_write_barrier =
-                                                Self::write_barrier(
-                                                    self.actor_context.id,
-                                                    &mut write_state,
-                                                    barrier.clone(),
-                                                    &self.metrics,
-                                                    progress.take(),
-                                                    &mut buffer,
-                                                )
-                                                .await?;
-                                            seq_id = FIRST_SEQ_ID;
-                                            let update_vnode_bitmap = barrier
-                                                .as_update_vnode_bitmap(self.actor_context.id);
-                                            let barrier_epoch = barrier.epoch;
-                                            tracing::trace!(
-                                                ?update_vnode_bitmap,
-                                                actor_id = %self.actor_context.id,
-                                                "update vnode bitmap"
-                                            );
+                pin_mut!(read_future);
+                let write_future = write_future_state.next_event(&self.logstore_context.metrics);
+                pin_mut!(write_future);
+                let output = select(write_future, read_future).await;
+                drop_either_future(output)
+            };
+            match select_result {
+                Either::Left(result) => {
+                    // drop the future to ensure that the future must be reset later
+                    drop(write_future_state);
+                    let (stream, mut write_state, either) = result?;
+                    match either {
+                        WriteFutureEvent::UpstreamMessageReceived(msg) => match msg {
+                            Message::Barrier(barrier) => {
+                                if clean_state && barrier.kind.is_checkpoint() && !buffer.is_empty()
+                                {
+                                    write_future_state = WriteFuture::paused(
+                                        self.logstore_context.pause_duration_ms,
+                                        barrier,
+                                        stream,
+                                        write_state,
+                                    );
+                                    clean_state = false;
+                                    self.logstore_context.metrics.unclean_state.inc();
+                                } else {
+                                    Self::apply_pause_resume_mutation(&barrier, &mut pause_stream);
+                                    let write_state_post_write_barrier = Self::write_barrier(
+                                        self.actor_context.id,
+                                        &mut write_state,
+                                        barrier.clone(),
+                                        &self.logstore_context.metrics,
+                                        progress.take(),
+                                        &mut buffer,
+                                    )
+                                    .await?;
+                                    seq_id = FIRST_SEQ_ID;
+                                    barrier.assume_no_update_vnode_bitmap(self.actor_context.id)?;
 
-                                            yield Message::Barrier(barrier);
+                                    yield Message::Barrier(barrier);
 
-                                            write_state_post_write_barrier
-                                                .post_yield_barrier(update_vnode_bitmap.clone())
-                                                .await?;
-                                            if let Some(vnode_bitmap) = update_vnode_bitmap {
-                                                // Apply Vnode Update
-                                                read_state.update_vnode_bitmap(vnode_bitmap);
-                                                initial_write_epoch = barrier_epoch;
-                                                input = stream;
-                                                initial_write_state = write_state;
-                                                continue 'recreate_consume_stream;
-                                            } else {
-                                                write_future_state =
-                                                    WriteFuture::receive_from_upstream(
-                                                        stream,
-                                                        write_state,
-                                                    );
-                                            }
-                                        }
-                                    }
-                                    Message::Chunk(chunk) => {
-                                        let start_seq_id = seq_id;
-                                        let new_seq_id = seq_id + chunk.cardinality() as SeqId;
-                                        let end_seq_id = new_seq_id - 1;
-                                        let epoch = write_state.epoch().curr;
-                                        tracing::trace!(
-                                            start_seq_id,
-                                            end_seq_id,
-                                            new_seq_id,
-                                            epoch,
-                                            cardinality = chunk.cardinality(),
-                                            "received chunk"
-                                        );
-                                        if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(
-                                            start_seq_id,
-                                            end_seq_id,
-                                            chunk,
-                                            epoch,
-                                        ) {
-                                            seq_id = new_seq_id;
-                                            write_future_state = WriteFuture::flush_chunk(
-                                                stream,
-                                                write_state,
-                                                chunk_to_flush,
-                                                epoch,
-                                                start_seq_id,
-                                                end_seq_id,
-                                            );
-                                        } else {
-                                            seq_id = new_seq_id;
-                                            write_future_state = WriteFuture::receive_from_upstream(
-                                                stream,
-                                                write_state,
-                                            );
-                                        }
-                                    }
-                                    // FIXME(kwannoel): This should truncate the logstore,
-                                    // it will not bypass like barrier.
-                                    Message::Watermark(_watermark) => {
-                                        write_future_state =
-                                            WriteFuture::receive_from_upstream(stream, write_state);
-                                    }
+                                    write_state_post_write_barrier
+                                        .post_yield_barrier(None)
+                                        .await?;
+
+                                    write_future_state =
+                                        WriteFuture::receive_from_upstream(stream, write_state);
                                 }
                             }
-                            WriteFutureEvent::ChunkFlushed(FlushedChunkInfo {
-                                start_seq_id,
-                                end_seq_id,
-                                epoch,
-                                flush_info,
-                                vnode_bitmap,
-                            }) => {
-                                buffer.add_flushed_item_to_buffer(
-                                    start_seq_id,
-                                    end_seq_id,
-                                    vnode_bitmap,
-                                    epoch,
+                            Message::Chunk(chunk) => {
+                                let (new_seq_id, next_write_future) = Self::process_upstream_chunk(
+                                    seq_id,
+                                    stream,
+                                    write_state,
+                                    chunk,
+                                    &mut buffer,
                                 );
-                                self.metrics
-                                    .storage_write_count
-                                    .inc_by(flush_info.flush_count as _);
-                                self.metrics
-                                    .storage_write_size
-                                    .inc_by(flush_info.flush_size as _);
+                                seq_id = new_seq_id;
+                                write_future_state = next_write_future;
+                            }
+                            Message::Watermark(watermark) => {
+                                buffer.add_watermark(write_state.epoch().curr, watermark);
                                 write_future_state =
                                     WriteFuture::receive_from_upstream(stream, write_state);
                             }
+                        },
+                        WriteFutureEvent::ChunkFlushed(info) => {
+                            write_future_state = Self::process_flushed_chunk(
+                                stream,
+                                write_state,
+                                info,
+                                &mut buffer,
+                                &self.logstore_context.metrics,
+                            );
                         }
                     }
-                    Either::Right(result) => {
-                        if !clean_state
-                            && matches!(read_future_state, ReadFuture::Idle)
-                            && buffer.is_empty()
-                        {
-                            clean_state = true;
-                            self.metrics.clean_state.inc();
+                }
+                Either::Right(result) => {
+                    let clean_state_reached = read_future_state.mark_clean_state(
+                        &mut clean_state,
+                        &buffer,
+                        &self.logstore_context.metrics,
+                    );
 
-                            // Let write future resume immediately
-                            if let WriteFuture::Paused { sleep_future, .. } =
-                                &mut write_future_state
-                            {
-                                tracing::trace!("resuming paused future");
-                                assert!(buffer.current_size < self.max_buffer_size);
-                                *sleep_future = None;
-                            }
+                    if clean_state_reached {
+                        // Let write future resume immediately
+                        if let WriteFuture::Paused { sleep_future, .. } = &mut write_future_state {
+                            tracing::trace!("resuming paused future");
+                            assert!(buffer.has_available_capacity());
+                            *sleep_future = None;
                         }
-                        let chunk = result?;
-                        self.metrics
+                    }
+                    let message = result?;
+                    if let Message::Chunk(chunk) = &message {
+                        self.logstore_context
+                            .metrics
                             .total_read_count
                             .inc_by(chunk.cardinality() as _);
-
-                        yield Message::Chunk(chunk);
                     }
+
+                    yield message;
                 }
             }
         }
     }
 }
 
-type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
+pub(crate) type PersistedStream<S> =
+    Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
 
-enum ReadFuture<S: StateStoreRead> {
+pub(crate) enum ReadFuture<S: StateStoreRead> {
     ReadingPersistedStream(PersistedStream<S>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
@@ -888,13 +934,28 @@ enum ReadFuture<S: StateStoreRead> {
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
-    async fn next_chunk(
+    pub(crate) fn mark_clean_state(
+        &self,
+        clean_state: &mut bool,
+        buffer: &SyncedLogStoreBuffer,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> bool {
+        if !*clean_state && matches!(self, ReadFuture::Idle) && buffer.is_empty() {
+            *clean_state = true;
+            metrics.clean_state.inc();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) async fn next_message(
         &mut self,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
-    ) -> StreamExecutorResult<StreamChunk> {
+    ) -> StreamExecutorResult<Message> {
         match self {
             ReadFuture::ReadingPersistedStream(stream) => {
                 while let Some((epoch, item)) = stream.try_next().await? {
@@ -911,7 +972,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         } => {
                             tracing::trace!("read logstore chunk of size: {}", chunk.cardinality());
                             progress.apply_per_vnode(epoch, chunk_progress);
-                            return Ok(chunk);
+                            return Ok(Message::Chunk(chunk));
                         }
                     }
                 }
@@ -929,13 +990,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
                     return pending().await;
                 };
                 match item {
-                    LogStoreBufferItem::StreamChunk {
+                    SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::StreamChunk {
                         chunk,
                         start_seq_id,
                         end_seq_id,
                         flushed,
                         ..
-                    } => {
+                    }) => {
                         metrics.buffer_read_count.inc_by(chunk.cardinality() as _);
                         tracing::trace!(
                             start_seq_id,
@@ -949,14 +1010,14 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             item_epoch,
                             Some(end_seq_id),
                         );
-                        return Ok(chunk);
+                        return Ok(Message::Chunk(chunk));
                     }
-                    LogStoreBufferItem::Flushed {
+                    SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Flushed {
                         vnode_bitmap,
                         start_seq_id,
                         end_seq_id,
                         chunk_id,
-                    } => {
+                    }) => {
                         tracing::trace!(start_seq_id, end_seq_id, chunk_id, "read flushed chunk");
                         let read_metrics = metrics.flushed_buffer_read_metrics.clone();
                         let future = read_state
@@ -972,10 +1033,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         *self = ReadFuture::ReadingFlushedChunk { future, end_seq_id };
                         break;
                     }
-                    LogStoreBufferItem::Barrier { .. } => {
+                    SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Barrier { .. }) => {
                         tracing::trace!(item_epoch, "read buffer barrier");
                         progress.apply_aligned(read_state.vnodes().clone(), item_epoch, None);
                         continue;
+                    }
+                    SyncedLogStoreBufferItem::Watermark(watermark) => {
+                        return Ok(Message::Watermark(watermark));
                     }
                 }
             },
@@ -996,13 +1060,13 @@ impl<S: StateStoreRead> ReadFuture<S> {
             chunk.cardinality()
         );
         *self = ReadFuture::Idle;
-        Ok(chunk)
+        Ok(Message::Chunk(chunk))
     }
 }
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier<'a>(
+    pub(crate) async fn write_barrier<'a>(
         actor_id: ActorId,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
@@ -1021,13 +1085,13 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         if barrier.is_checkpoint() {
             for (epoch, item) in buffer.buffer.iter_mut().rev() {
                 match item {
-                    LogStoreBufferItem::StreamChunk {
+                    SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::StreamChunk {
                         chunk,
                         start_seq_id,
                         end_seq_id,
                         flushed,
                         ..
-                    } => {
+                    }) => {
                         if !*flushed {
                             writer.write_chunk(chunk, *epoch, *start_seq_id, *end_seq_id)?;
                             *flushed = true;
@@ -1035,7 +1099,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             break;
                         }
                     }
-                    LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. } => {}
+                    SyncedLogStoreBufferItem::LogStore(
+                        LogStoreBufferItem::Flushed { .. } | LogStoreBufferItem::Barrier { .. },
+                    )
+                    | SyncedLogStoreBufferItem::Watermark(_) => {}
                 }
             }
         }
@@ -1053,12 +1120,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         // Add to buffer
         buffer.buffer.push_back((
             epoch,
-            LogStoreBufferItem::Barrier {
+            SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Barrier {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
                 schema_change: None,
                 is_stop: false,
-            },
+            }),
         ));
         buffer.next_chunk_id = 0;
         buffer.update_buffer_metrics();
@@ -1067,8 +1134,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct SyncedLogStoreBuffer {
-    buffer: VecDeque<(u64, LogStoreBufferItem)>,
+#[derive(EstimateSize)]
+enum SyncedLogStoreBufferItem {
+    LogStore(LogStoreBufferItem),
+    Watermark(Watermark),
+}
+
+pub(crate) struct SyncedLogStoreBuffer {
+    buffer: VecDeque<(u64, SyncedLogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
     max_chunk_size: usize,
@@ -1078,8 +1151,28 @@ struct SyncedLogStoreBuffer {
 }
 
 impl SyncedLogStoreBuffer {
-    fn is_empty(&self) -> bool {
+    pub fn new(
+        max_buffer_size: usize,
+        chunk_size: usize,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> Self {
+        SyncedLogStoreBuffer {
+            buffer: VecDeque::new(),
+            current_size: 0,
+            max_size: max_buffer_size,
+            max_chunk_size: chunk_size,
+            next_chunk_id: 0,
+            metrics: metrics.clone(),
+            flushed_count: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
         self.current_size == 0
+    }
+
+    pub fn has_available_capacity(&self) -> bool {
+        self.current_size < self.max_size
     }
 
     fn add_or_flush_chunk(
@@ -1122,12 +1215,12 @@ impl SyncedLogStoreBuffer {
 
         if let Some((
             item_epoch,
-            LogStoreBufferItem::Flushed {
+            SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Flushed {
                 start_seq_id: prev_start_seq_id,
                 end_seq_id: prev_end_seq_id,
                 vnode_bitmap,
                 ..
-            },
+            }),
         )) = self.buffer.back_mut()
             && let flushed_chunk_size = (*prev_end_seq_id - *prev_start_seq_id + 1) as usize
             && let projected_flushed_chunk_size = flushed_chunk_size + new_chunk_size
@@ -1150,12 +1243,12 @@ impl SyncedLogStoreBuffer {
             self.next_chunk_id += 1;
             self.buffer.push_back((
                 epoch,
-                LogStoreBufferItem::Flushed {
+                SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Flushed {
                     start_seq_id,
                     end_seq_id,
                     vnode_bitmap: new_vnode_bitmap,
                     chunk_id,
-                },
+                }),
             ));
             self.flushed_count += 1;
             tracing::trace!(
@@ -1178,24 +1271,35 @@ impl SyncedLogStoreBuffer {
         self.current_size += chunk.cardinality();
         self.buffer.push_back((
             epoch,
-            LogStoreBufferItem::StreamChunk {
+            SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::StreamChunk {
                 chunk,
                 start_seq_id,
                 end_seq_id,
                 flushed: false,
                 chunk_id,
-            },
+            }),
         ));
         self.update_buffer_metrics();
     }
 
-    fn pop_front(&mut self) -> Option<(u64, LogStoreBufferItem)> {
+    pub(crate) fn add_watermark(&mut self, epoch: u64, watermark: Watermark) {
+        self.buffer
+            .push_back((epoch, SyncedLogStoreBufferItem::Watermark(watermark)));
+        self.update_buffer_metrics();
+    }
+
+    fn pop_front(&mut self) -> Option<(u64, SyncedLogStoreBufferItem)> {
         let item = self.buffer.pop_front();
         match &item {
-            Some((_, LogStoreBufferItem::Flushed { .. })) => {
+            Some((_, SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Flushed { .. }))) => {
                 self.flushed_count -= 1;
             }
-            Some((_, LogStoreBufferItem::StreamChunk { chunk, .. })) => {
+            Some((
+                _,
+                SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::StreamChunk {
+                    chunk, ..
+                }),
+            )) => {
                 self.current_size -= chunk.cardinality();
             }
             _ => {}
@@ -1210,19 +1314,23 @@ impl SyncedLogStoreBuffer {
         let mut memory_bytes = 0;
         for (_, item) in &self.buffer {
             match item {
-                LogStoreBufferItem::StreamChunk { chunk, .. } => {
+                SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::StreamChunk {
+                    chunk,
+                    ..
+                }) => {
                     row_count += chunk.cardinality();
                 }
-                LogStoreBufferItem::Flushed {
+                SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Flushed {
                     start_seq_id,
                     end_seq_id,
                     ..
-                } => {
+                }) => {
                     row_count += (end_seq_id - start_seq_id) as usize;
                 }
-                LogStoreBufferItem::Barrier { .. } => {
+                SyncedLogStoreBufferItem::LogStore(LogStoreBufferItem::Barrier { .. }) => {
                     epoch_count += 1;
                 }
+                SyncedLogStoreBufferItem::Watermark(_) => {}
             }
             memory_bytes += item.estimated_size();
         }
@@ -1332,6 +1440,7 @@ mod tests {
         );
 
         tx.push_chunk(chunk_1.clone());
+        tx.push_int64_watermark(0, 7);
         tx.push_chunk(chunk_2.clone());
 
         let mut stream = log_store_executor.execute();
@@ -1348,6 +1457,13 @@ mod tests {
                 assert_stream_chunk_eq!(chunk, chunk_1);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Watermark(watermark))) => {
+                assert_eq!(watermark, Watermark::new(0, DataType::Int64, 7_i64.into()));
+            }
+            other => panic!("Expected a watermark message, got {:?}", other),
         }
 
         match stream.next().await {
@@ -1370,7 +1486,7 @@ mod tests {
     // test barrier persisted read
     //
     // sequence of events (earliest -> latest):
-    // barrier(1) -> chunk(1) -> chunk(2) -> poll(3) items -> barrier(2) -> poll(1) item
+    // barrier(1) -> chunk(1) -> watermark -> chunk(2) -> poll(4) items -> barrier(2)
     // * poll just means we read from the executor stream.
     #[tokio::test]
     async fn test_barrier_persisted_read() {
@@ -1427,6 +1543,7 @@ mod tests {
         );
 
         tx.push_chunk(chunk_1.clone());
+        tx.push_int64_watermark(0, 7);
         tx.push_chunk(chunk_2.clone());
 
         tx.push_barrier(test_epoch(2), false);
@@ -1445,6 +1562,13 @@ mod tests {
                 assert_stream_chunk_eq!(chunk, chunk_1);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Watermark(watermark))) => {
+                assert_eq!(watermark, Watermark::new(0, DataType::Int64, 7_i64.into()));
+            }
+            other => panic!("Expected a watermark message, got {:?}", other),
         }
 
         match stream.next().await {
@@ -1518,8 +1642,15 @@ mod tests {
             U+ 10  10",
         );
 
+        let chunk_3 = StreamChunk::from_pretty(
+            "   I   T
+            +  11  12",
+        );
+
         tx.push_chunk(chunk_1.clone());
         tx.push_chunk(chunk_2.clone());
+        tx.push_int64_watermark(0, 7);
+        tx.push_chunk(chunk_3.clone());
 
         tx.push_barrier(test_epoch(2), false);
 
@@ -1550,6 +1681,20 @@ mod tests {
                     U+ 10  10",
                 );
                 assert_stream_chunk_eq!(actual, expected);
+            }
+            other => panic!("Expected a chunk message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Watermark(watermark))) => {
+                assert_eq!(watermark, Watermark::new(0, DataType::Int64, 7_i64.into()));
+            }
+            other => panic!("Expected a watermark message, got {:?}", other),
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(actual))) => {
+                assert_stream_chunk_eq!(actual, chunk_3);
             }
             other => panic!("Expected a chunk message, got {:?}", other),
         }

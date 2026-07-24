@@ -1500,7 +1500,7 @@ mod tests {
         (stream, tx1, tx2, ops, rows)
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn gen_multi_test_stream(
         serde: LogStoreRowSerde,
         size: usize,

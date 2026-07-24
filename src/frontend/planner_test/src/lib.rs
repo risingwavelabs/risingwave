@@ -39,6 +39,7 @@ use risingwave_frontend::{
     Binder, Explain, FrontendOpts, OptimizerContext, OptimizerContextRef, PlanRef, Planner,
     WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
+use risingwave_license::{LicenseKey, LicenseManager};
 use risingwave_sqlparser::ast::{
     AstOption, BackfillOrderStrategy, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
@@ -283,8 +284,8 @@ impl TestCase {
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
-        self.do_create_source(session.clone()).await?;
-        self.do_create_table_with_connector(session.clone()).await?;
+        Box::pin(self.do_create_source(session.clone())).await?;
+        Box::pin(self.do_create_table_with_connector(session.clone())).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -294,14 +295,13 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(self.sql()))
         {
-            result = self
-                .run_sql(
-                    Arc::from(sql.to_owned()),
-                    session.clone(),
-                    do_check_result,
-                    result,
-                )
-                .await?;
+            result = Box::pin(self.run_sql(
+                Arc::from(sql.to_owned()),
+                session.clone(),
+                do_check_result,
+                result,
+            ))
+            .await?;
         }
 
         let mut result = result.unwrap_or_default();
@@ -345,12 +345,12 @@ impl TestCase {
                         connector.encode,
                     );
                     let temp_file = create_proto_file(content.as_str());
-                    self.run_sql(
+                    Box::pin(self.run_sql(
                         Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
-                    )
+                    ))
                     .await
                 } else {
                     panic!(
@@ -376,12 +376,12 @@ impl TestCase {
                         source.encode,
                     );
                     let temp_file = create_proto_file(content.as_str());
-                    self.run_sql(
+                    Box::pin(self.run_sql(
                         Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
-                    )
+                    ))
                     .await
                 } else {
                     panic!(
@@ -447,7 +447,7 @@ impl TestCase {
                 } => {
                     let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
 
-                    create_table::handle_create_table(
+                    Box::pin(create_table::handle_create_table(
                         handler_args,
                         name,
                         columns,
@@ -466,7 +466,7 @@ impl TestCase {
                         include_column_options,
                         webhook_info,
                         engine,
-                    )
+                    ))
                     .await?;
                 }
                 Statement::CreateSource { stmt } => {
@@ -567,13 +567,22 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp =
-                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
-
-                    let explain_output = get_explain_output(rsp).await;
-                    let ret = TestCaseResult {
-                        explain_output: Some(explain_output),
-                        ..Default::default()
+                    let ret = match Box::pin(explain::handle_explain(
+                        handler_args,
+                        *statement,
+                        options,
+                        analyze,
+                    ))
+                    .await
+                    {
+                        Ok(rsp) => TestCaseResult {
+                            explain_output: Some(get_explain_output(rsp).await),
+                            ..Default::default()
+                        },
+                        Err(error) => TestCaseResult {
+                            planner_error: Some(error.to_report_string()),
+                            ..Default::default()
+                        },
                     };
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -816,7 +825,7 @@ impl TestCase {
                     return Err(anyhow!("expect a query"));
                 };
 
-                let (stream_plan, table) = match create_mv::gen_create_mv_plan(
+                let (stream_plan, table) = match create_mv::explain_create_mv_plan(
                     &session,
                     context.clone(),
                     q,
@@ -879,11 +888,12 @@ impl TestCase {
                     "test_table".into(),
                     format_desc,
                     false,
+                    false,
+                    false,
                     None,
                     None,
                     false,
                     None,
-                    true,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -959,6 +969,8 @@ pub fn test_data_dir() -> PathBuf {
 }
 
 pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    LicenseManager::get().refresh(LicenseKey::default().as_ref());
+
     let file_name = file_path.file_name().unwrap().to_str().unwrap();
     println!("-- running {file_name} --");
 
@@ -985,7 +997,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
             c.id().clone().unwrap_or_else(|| "<none>".to_owned()),
             c.sql()
         );
-        match c.run(true).await {
+        match Box::pin(c.run(true)).await {
             Ok(case) => {
                 outputs.push(case);
             }

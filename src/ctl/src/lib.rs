@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
@@ -22,9 +23,10 @@ use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
-use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
+    CompressionAlgorithm, SstableFilterLayout, SstableFilterType,
+};
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
@@ -67,9 +69,6 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
-    /// Commands for Scaling
-    #[clap(subcommand)]
-    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -93,7 +92,7 @@ enum ComputeCommands {
     ShowConfig { host: String },
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
@@ -138,11 +137,20 @@ enum HummockCommands {
         #[clap(short, long = "table-id", default_value_t = 0)]
         table_id: u32,
 
-        #[clap(short, long = "level", default_value_t = 1)]
-        level: u32,
+        #[clap(short, long = "level", value_delimiter = ',', default_values_t = vec![1u32])]
+        levels: Vec<u32>,
+
+        #[clap(long = "target-level")]
+        target_level: Option<u32>,
 
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
+
+        #[clap(long = "exclusive", default_value_t = false)]
+        exclusive: bool,
+
+        #[clap(long = "retry-interval-ms", default_value_t = 1000)]
+        retry_interval_ms: u64,
     },
     /// Trigger a full GC for SSTs that is not pinned, with timestamp <= now -
     /// `sst_retention_time_sec`, and with `prefix` in path.
@@ -194,6 +202,23 @@ enum HummockCommands {
         compression_level: Option<u32>,
         #[clap(long)]
         compression_algorithm: Option<String>,
+        /// LSM level index to update, e.g. 0 for L0, 6 for L6.
+        #[clap(long, requires = "sstable_filter_type")]
+        sstable_filter_type_level: Option<u32>,
+        /// SST filter type to use for this level. Supported values: "none", "xor16", "xor8".
+        #[clap(long, requires = "sstable_filter_type_level")]
+        sstable_filter_type: Option<String>,
+        /// LSM level index to update, e.g. 0 for L0, 6 for L6.
+        #[clap(long, requires = "sstable_filter_layout")]
+        sstable_filter_layout_level: Option<u32>,
+        /// Filter layout for this level.
+        ///
+        /// Supported values:
+        /// - "auto": decide by heuristics (currently by kv-count threshold)
+        /// - "plain": always use a single non-blocked filter, ignoring kv-count threshold
+        /// - "blocked": always use block-based filters, ignoring kv-count threshold
+        #[clap(long, requires = "sstable_filter_layout_level")]
+        sstable_filter_layout: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
         #[clap(long)]
@@ -214,10 +239,14 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        /// KV-count threshold for using blocked xor filters when output layout is "auto".
+        ///
+        /// Note: shared-buffer flush does not read compaction group config, so this setting only
+        /// applies to compaction tasks.
         #[clap(long)]
-        vnode_aligned_level_size_threshold: Option<u64>,
+        blocked_xor_filter_kv_count_threshold: Option<u64>,
         #[clap(long)]
-        max_kv_count_for_xor16: Option<u64>,
+        max_vnode_key_range_bytes: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -310,6 +339,15 @@ enum HummockCommands {
         #[clap(long)]
         data_cache_capacity_mb: Option<u64>,
     },
+    /// Table cache refill tools.
+    #[clap(subcommand)]
+    Refill(RefillCommands),
+}
+
+#[derive(Subcommand)]
+enum RefillCommands {
+    /// Collect table cache refill stats from compute nodes.
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -337,35 +375,8 @@ enum TableCommands {
     List,
 }
 
-#[derive(Subcommand, Debug)]
-enum ScaleCommands {
-    /// Mark a compute node as unschedulable
-    #[clap(verbatim_doc_comment)]
-    Cordon {
-        /// Workers that need to be cordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
-    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
-    Uncordon {
-        /// Workers that need to be uncordoned, both id and host are supported.
-        #[clap(
-            long,
-            required = true,
-            value_delimiter = ',',
-            value_name = "id or host,..."
-        )]
-        workers: Vec<String>,
-    },
-}
-
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -520,6 +531,13 @@ enum MetaCommands {
         #[clap(long)]
         offsets: String,
     },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -634,11 +652,6 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
-#[expect(
-    clippy::large_stack_frames,
-    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
-              post-layout generator stores only one arm at a time (~13–16 KiB)."
-)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -680,15 +693,21 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
-            level,
+            levels,
+            target_level,
             sst_ids,
+            exclusive,
+            retry_interval_ms,
         }) => {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
                 table_id.into(),
-                level,
+                levels,
+                target_level,
                 sst_ids,
+                exclusive,
+                retry_interval_ms,
             )
             .await?
         }
@@ -721,6 +740,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             tombstone_reclaim_ratio,
             compression_level,
             compression_algorithm,
+            sstable_filter_type_level,
+            sstable_filter_type,
+            sstable_filter_layout_level,
+            sstable_filter_layout,
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
             disable_auto_group_scheduling,
@@ -731,8 +754,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            vnode_aligned_level_size_threshold,
-            max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold,
+            max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -762,6 +785,20 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     } else {
                         None
                     },
+                    if let (Some(level), Some(filter_type)) =
+                        (sstable_filter_type_level, sstable_filter_type)
+                    {
+                        Some(SstableFilterType { level, filter_type })
+                    } else {
+                        None
+                    },
+                    if let (Some(level), Some(layout)) =
+                        (sstable_filter_layout_level, sstable_filter_layout)
+                    {
+                        Some(SstableFilterLayout { level, layout })
+                    } else {
+                        None
+                    },
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
                     disable_auto_group_scheduling,
@@ -772,8 +809,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    vnode_aligned_level_size_threshold,
-                    max_kv_count_for_xor16,
+                    blocked_xor_filter_kv_count_threshold,
+                    max_vnode_key_range_bytes,
                 ),
             )
             .await?
@@ -894,6 +931,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             )
             .await?
         }
+        Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
+            cmd_impl::hummock::refill_stats(context).await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -981,14 +1021,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
             cmd_impl::profile::heap_profile(context, dir, worker_types).await?
         }
-        Commands::Scale(ScaleCommands::Cordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
-                .await?
-        }
-        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
-                .await?
-        }
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }
@@ -1017,6 +1049,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::InjectSourceOffsets { source_id, offsets }) => {
             cmd_impl::meta::inject_source_offsets(context, source_id, offsets).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }

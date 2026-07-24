@@ -20,6 +20,8 @@ use crate::from_proto::*;
 
 pub struct GlobalApproxPercentileExecutorBuilder;
 
+impl_stream_node_body!(GlobalApproxPercentile(GlobalApproxPercentileNode) => GlobalApproxPercentileExecutorBuilder);
+
 impl ExecutorBuilder for GlobalApproxPercentileExecutorBuilder {
     type Node = GlobalApproxPercentileNode;
 

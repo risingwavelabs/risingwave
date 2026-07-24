@@ -1,0 +1,79 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE hjw_left (
+    id INT,
+    ts TIMESTAMPTZ,
+    v INT,
+    WATERMARK FOR ts AS ts - INTERVAL '1' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE hjw_right (
+    id INT,
+    ts TIMESTAMPTZ,
+    v INT,
+    WATERMARK FOR ts AS ts - INTERVAL '1' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW hjw_join_mv AS
+SELECT l.id, l.ts, r.v AS rv
+FROM hjw_left l
+JOIN hjw_right r
+ON l.id = r.id AND l.ts = r.ts;
+
+statement ok
+CREATE MATERIALIZED VIEW hjw_eowc_mv AS
+SELECT * FROM hjw_join_mv
+EMIT ON WINDOW CLOSE;
+
+statement ok
+INSERT INTO hjw_right VALUES (1, '2024-01-01 00:00:01+00', 11);
+
+statement ok
+INSERT INTO hjw_left VALUES (1, '2024-01-01 00:00:01+00', 101);
+
+statement ok
+INSERT INTO hjw_right VALUES (1, '2024-01-01 00:00:05+00', 22);
+
+statement ok
+INSERT INTO hjw_left VALUES (1, '2024-01-01 00:00:05+00', 202);
+
+statement ok
+CREATE TABLE bj_left (
+    id INT,
+    ts TIMESTAMPTZ,
+    v INT,
+    WATERMARK FOR ts AS ts - INTERVAL '1' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE bj_right (
+    id INT,
+    ts TIMESTAMPTZ,
+    v INT,
+    WATERMARK FOR ts AS ts - INTERVAL '1' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW bj_mv AS
+SELECT l.id, l.ts, r.ts AS rts, l.v, r.v AS rv
+FROM bj_left l
+JOIN bj_right r
+ON l.id = r.id
+AND l.ts >= r.ts
+AND l.ts <= r.ts + INTERVAL '2' SECOND;
+
+statement ok
+INSERT INTO bj_right VALUES (1, '2024-01-01 00:00:01+00', 10);
+
+statement ok
+INSERT INTO bj_left VALUES (1, '2024-01-01 00:00:02+00', 100);
+
+statement ok
+INSERT INTO bj_left VALUES (1, '2024-01-01 00:00:05+00', 200);
+
+statement ok
+INSERT INTO bj_right VALUES (1, '2024-01-01 00:00:04+00', 20);

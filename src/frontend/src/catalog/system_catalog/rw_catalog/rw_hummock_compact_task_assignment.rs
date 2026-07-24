@@ -14,6 +14,7 @@
 
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_pb::id::CompactionGroupId;
 use serde_json::json;
 
@@ -35,6 +36,7 @@ struct RwHummockCompactTaskAssignment {
     target_sub_level_id: i64,
     compression_algorithm: i32,
     table_ids: JsonbVal,
+    existing_table_ids: JsonbVal,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_compact_task_assignment")]
@@ -44,9 +46,18 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskA
 
     let mut rows = vec![];
     for compact_task_assignment in compact_task_assignments {
-        let compact_task = compact_task_assignment.compact_task.unwrap();
+        let compact_task = CompactTask::from(compact_task_assignment.compact_task.unwrap());
 
         let select_level = compact_task.input_ssts[0].level_idx;
+        let table_ids = compact_task
+            .get_table_ids_from_input_ssts()
+            .map(|table_id| table_id.as_raw_id())
+            .collect::<Vec<_>>();
+        let existing_table_ids = compact_task
+            .existing_table_ids
+            .iter()
+            .map(|table_id| table_id.as_raw_id())
+            .collect::<Vec<_>>();
 
         rows.push(RwHummockCompactTaskAssignment {
             compaction_group_id: compact_task.compaction_group_id,
@@ -60,7 +71,8 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskA
             target_file_size: compact_task.target_file_size as _,
             target_sub_level_id: compact_task.target_sub_level_id as _,
             compression_algorithm: compact_task.compression_algorithm as _,
-            table_ids: json!(compact_task.existing_table_ids).into(),
+            table_ids: json!(table_ids).into(),
+            existing_table_ids: json!(existing_table_ids).into(),
         });
     }
 

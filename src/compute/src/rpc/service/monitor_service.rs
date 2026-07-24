@@ -18,6 +18,7 @@ use std::time::Duration;
 use foyer::{HybridCache, TracingOptions};
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -27,11 +28,16 @@ use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
+    ProfilingResponse, RelationStats, StackTraceRequest, StackTraceResponse,
+    TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::event_handler::refiller::{
+    TableCacheRefillContext, TableCacheRefillMonitorSnapshot,
+};
+use risingwave_storage::hummock::store::HummockStorage;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -48,6 +54,7 @@ pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
+    hummock_storage: Option<HummockStorage>,
 }
 
 impl MonitorServiceImpl {
@@ -56,12 +63,14 @@ impl MonitorServiceImpl {
         server_config: ServerConfig,
         meta_cache: Option<MetaCache>,
         block_cache: Option<BlockCache>,
+        hummock_storage: Option<HummockStorage>,
     ) -> Self {
         Self {
             stream_mgr,
             profile_service: ProfileServiceImpl::new(server_config),
             meta_cache,
             block_cache,
+            hummock_storage,
         }
     }
 }
@@ -161,14 +170,14 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        self.profile_service.heap_profiling(request).await
+        self.profile_service.heap_profiling(request)
     }
 
     async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        self.profile_service.list_heap_profiling(_request).await
+        self.profile_service.list_heap_profiling(_request)
     }
 
     async fn analyze_heap(
@@ -435,6 +444,145 @@ impl MonitorService for MonitorServiceImpl {
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
     }
+
+    async fn get_table_cache_refill_stats(
+        &self,
+        _request: Request<GetTableCacheRefillStatsRequest>,
+    ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
+        let Some(hummock_storage) = &self.hummock_storage else {
+            return Ok(Response::new(GetTableCacheRefillStatsResponse {
+                stats: "{}".to_owned(),
+            }));
+        };
+
+        let monitor_snapshot = hummock_storage
+            .table_cache_refill_monitor_snapshot()
+            .await
+            .map_err(|err| {
+                Status::internal(format!(
+                    "failed to get table cache refill monitor snapshot: {e}",
+                    e = err.as_report()
+                ))
+            })?;
+        let stats = TableCacheRefillStats::from(&monitor_snapshot);
+        let json_value = serde_json::to_value(stats).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
+        let json_string_pretty = serde_json::to_string_pretty(&json_value).map_err(|err| {
+            Status::internal(format!(
+                "failed to serialize stats: {e}",
+                e = err.as_report()
+            ))
+        })?;
+        Ok(Response::new(GetTableCacheRefillStatsResponse {
+            stats: json_string_pretty,
+        }))
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillStats {
+    contexts: HashMap<u32, TableCacheRefillTableStats>,
+    streaming: HashMap<u32, Vec<u16>>,
+    serving: HashMap<u32, Vec<u16>>,
+    policies: HashMap<u32, String>,
+    default_policy: String,
+    internal: TableCacheRefillInternalStats,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillTableStats {
+    streaming: Option<Vec<u16>>,
+    serving: Option<Vec<u16>>,
+    policy: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillInternalStats {
+    streaming: HashMap<u32, Vec<Vec<u16>>>,
+    serving: HashMap<u32, Vec<u16>>,
+}
+
+impl From<&TableCacheRefillMonitorSnapshot> for TableCacheRefillStats {
+    fn from(snapshot: &TableCacheRefillMonitorSnapshot) -> Self {
+        let contexts = snapshot
+            .contexts
+            .iter()
+            .map(|(table_id, context)| {
+                (
+                    table_id.as_raw_id(),
+                    TableCacheRefillTableStats::from(context.clone()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let streaming = contexts
+            .iter()
+            .filter_map(|(table_id, context)| {
+                context
+                    .streaming
+                    .as_ref()
+                    .map(|vnodes| (*table_id, vnodes.clone()))
+            })
+            .collect();
+        let serving = contexts
+            .iter()
+            .filter_map(|(table_id, context)| {
+                context
+                    .serving
+                    .as_ref()
+                    .map(|vnodes| (*table_id, vnodes.clone()))
+            })
+            .collect();
+        let policies = snapshot
+            .policies
+            .iter()
+            .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
+            .collect();
+        let internal_streaming = snapshot
+            .streaming_table_vnode_mapping
+            .iter()
+            // Keep the historical list-of-lists JSON shape. The refiller stores one
+            // table-level union bitmap per table.
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), vec![bitmap_to_vnodes(bitmap)]))
+            .collect();
+        let internal_serving = snapshot
+            .serving_table_vnode_mapping
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        Self {
+            contexts,
+            streaming,
+            serving,
+            policies,
+            default_policy: snapshot.default_policy.to_string(),
+            internal: TableCacheRefillInternalStats {
+                streaming: internal_streaming,
+                serving: internal_serving,
+            },
+        }
+    }
+}
+
+impl From<TableCacheRefillContext> for TableCacheRefillTableStats {
+    fn from(context: TableCacheRefillContext) -> Self {
+        Self {
+            streaming: context
+                .streaming_vnode_bitmap
+                .as_ref()
+                .map(bitmap_to_vnodes),
+            serving: context.serving_vnode_bitmap.as_ref().map(bitmap_to_vnodes),
+            policy: context.policy.to_string(),
+        }
+    }
+}
+
+fn bitmap_to_vnodes(bitmap: &Bitmap) -> Vec<u16> {
+    bitmap.iter_ones().map(|idx| idx as u16).collect()
 }
 
 pub use grpc_middleware::*;
@@ -442,102 +590,7 @@ use risingwave_common::metrics::get_label_infallible;
 use risingwave_pb::id::FragmentId;
 
 pub mod grpc_middleware {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::task::{Context, Poll};
-
-    use either::Either;
-    use futures::Future;
-    use tonic::body::BoxBody;
-    use tower::{Layer, Service};
-
-    /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = await_tree::Registry;
-
-    /// Await-tree key type for gRPC calls.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub struct GrpcCall {
-        pub desc: String,
-    }
-
-    #[derive(Clone)]
-    pub struct AwaitTreeMiddlewareLayer {
-        registry: Option<AwaitTreeRegistryRef>,
-    }
-
-    impl AwaitTreeMiddlewareLayer {
-        pub fn new(registry: AwaitTreeRegistryRef) -> Self {
-            Self {
-                registry: Some(registry),
-            }
-        }
-
-        pub fn new_optional(registry: Option<AwaitTreeRegistryRef>) -> Self {
-            Self { registry }
-        }
-    }
-
-    impl<S> Layer<S> for AwaitTreeMiddlewareLayer {
-        type Service = AwaitTreeMiddleware<S>;
-
-        fn layer(&self, service: S) -> Self::Service {
-            AwaitTreeMiddleware {
-                inner: service,
-                registry: self.registry.clone(),
-                next_id: Default::default(),
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct AwaitTreeMiddleware<S> {
-        inner: S,
-        registry: Option<AwaitTreeRegistryRef>,
-        next_id: Arc<AtomicU64>,
-    }
-
-    impl<S> Service<http::Request<BoxBody>> for AwaitTreeMiddleware<S>
-    where
-        S: Service<http::Request<BoxBody>> + Clone,
-    {
-        type Error = S::Error;
-        type Response = S::Response;
-
-        type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
-
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            self.inner.poll_ready(cx)
-        }
-
-        fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
-            let Some(registry) = self.registry.clone() else {
-                return Either::Left(self.inner.call(req));
-            };
-
-            // This is necessary because tonic internally uses `tower::buffer::Buffer`.
-            // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
-            // for details on why this is necessary
-            let clone = self.inner.clone();
-            let mut inner = std::mem::replace(&mut self.inner, clone);
-
-            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let desc = if let Some(authority) = req.uri().authority() {
-                format!("{authority} - {id}")
-            } else {
-                format!("?? - {id}")
-            };
-            let key = GrpcCall { desc };
-
-            Either::Right(async move {
-                let root = registry.register(key, req.uri().path());
-
-                root.instrument(inner.call(req)).await
-            })
-        }
-    }
-
-    #[cfg(not(madsim))]
-    impl<S: tonic::server::NamedService> tonic::server::NamedService for AwaitTreeMiddleware<S> {
-        const NAME: &'static str = S::NAME;
-    }
+    pub use risingwave_common_service::{
+        AwaitTreeMiddleware, AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, GrpcCall,
+    };
 }

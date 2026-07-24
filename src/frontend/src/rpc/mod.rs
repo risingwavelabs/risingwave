@@ -54,8 +54,12 @@ impl FrontendService for FrontendServiceImpl {
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
 
-        let replace_plan =
-            get_new_table_plan(req.table_id, req.database_id, req.cdc_table_change).await?;
+        let replace_plan = Box::pin(get_new_table_plan(
+            req.table_id,
+            req.database_id,
+            req.cdc_table_change,
+        ))
+        .await?;
 
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
@@ -197,13 +201,13 @@ async fn get_new_table_plan(
         table_catalog.create_sql_ast_purified()?
     };
 
-    let (mut source, mut table, graph, job_type) = get_replace_table_plan(
+    let (mut source, mut table, graph, job_type) = Box::pin(get_replace_table_plan(
         &session,
         table_name,
         definition,
         &table_catalog,
         SqlColumnStrategy::FollowUnchecked,
-    )
+    ))
     .await?;
 
     // The dummy session may be created with a fixed super user, which can cause the generated

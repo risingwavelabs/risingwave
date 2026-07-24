@@ -38,7 +38,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -46,6 +46,28 @@ import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
+
+    /**
+     * Per-sourceId shared state. All OpendalSchemaHistory instances for the same sourceId share one
+     * {@link SharedState} object, which serves two purposes:
+     *
+     * <ol>
+     *   <li>As the lock object for {@code synchronized} to prevent concurrent writes.
+     *   <li>Holds a monotonically increasing {@code activeVersion} so that stale (superseded)
+     *       instances can detect they are no longer the active writer and skip writes.
+     * </ol>
+     */
+    private static final ConcurrentHashMap<String, SharedState> SHARED_STATES =
+            new ConcurrentHashMap<>();
+
+    static final class SharedState {
+        /** Which instance is the active writer. */
+        long activeVersion = 0;
+
+        /** Global sequence number so that no two instances ever write the same file name. */
+        long sequenceNumber = 0;
+    }
+
     private String sourceId = "";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
     public static final String MAX_RECORDS_PER_FILE_CONFIG =
@@ -61,8 +83,10 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     // Cache the actual records from the latest file to avoid redundant getObject() calls
     private List<HistoryRecord> cachedLatestFileRecords = null;
 
-    // Atomic sequence number for thread-safe increment
-    private AtomicLong sequenceNumber = new AtomicLong(0);
+    private SharedState sharedState;
+
+    /** Version assigned to this instance in {@link #doStart()}. */
+    private long myVersion;
 
     // Override ALL_FIELDS to include our custom configuration fields
     // This ensures that our custom fields are properly validated by Debezium
@@ -110,6 +134,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                         maxRecordsPerFile);
             }
         }
+        sharedState = SHARED_STATES.computeIfAbsent(sourceId, ignored -> new SharedState());
         LOGGER.info(
                 "Schema history for source id {} will be stored under directory {} (maxRecordsPerFile={})",
                 sourceId,
@@ -124,25 +149,32 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStart() {
-        try {
-            // 1. List and sort history files by sequence number
-            List<String> historyFiles = listAndSortHistoryFiles();
+        synchronized (sharedState) {
+            try {
+                // Claim active status — all older instances are now stale.
+                myVersion = ++sharedState.activeVersion;
 
-            // 2. Initialize sequence number from existing files
-            initializeSequenceNumber(historyFiles);
+                // 1. List and sort history files by sequence number
+                List<String> historyFiles = listAndSortHistoryFiles();
 
-            // 3. Load all records and initialize cache
-            // loadAllHistoryRecords will also initialize the cache for the latest file
-            this.records = loadAllHistoryRecords(historyFiles);
+                // 2. Initialize sequence number from existing files
+                initializeSequenceNumber(historyFiles);
 
-            LOGGER.info(
-                    "Loaded schema history with {} total records from {} files. Current sequence number: {}",
-                    this.records.size(),
-                    historyFiles.size(),
-                    sequenceNumber.get());
+                // 3. Load all records and initialize cache
+                // loadAllHistoryRecords will also initialize the cache for the latest file
+                this.records = loadAllHistoryRecords(historyFiles);
 
-        } catch (Exception e) {
-            throw new SchemaHistoryException("Failed to initialize schema history", e);
+                LOGGER.info(
+                        "Loaded schema history with {} total records from {} files. "
+                                + "Current sequence number: {}, version: {}",
+                        this.records.size(),
+                        historyFiles.size(),
+                        sharedState.sequenceNumber,
+                        myVersion);
+
+            } catch (Exception e) {
+                throw new SchemaHistoryException("Failed to initialize schema history", e);
+            }
         }
     }
 
@@ -155,37 +187,50 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("Storing new schema history record.");
-        try {
-            // Use cached information to avoid expensive list operations and getObject() calls
-            if (cachedLatestFile != null && cachedLatestFileRecords.size() < maxRecordsPerFile) {
-                // 1. Append to existing file using cached records (no getObject() needed!)
-                cachedLatestFileRecords.add(record);
-                putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
-
-                LOGGER.info(
-                        "Appended record to existing file: {} (now {} records)",
-                        cachedLatestFile,
-                        cachedLatestFileRecords.size());
-            } else {
-                // 2. Create new file with next sequence number when current file is full or doesn't
-                // exist
-                long nextSequence = sequenceNumber.incrementAndGet();
-                String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
-                List<HistoryRecord> newRecords = new ArrayList<>();
-                newRecords.add(record);
-                putObject(newFile, fromHistoryRecords(newRecords));
-
-                // Update cache to point to new file
-                cachedLatestFile = newFile;
-                cachedLatestFileRecords = newRecords;
-
-                LOGGER.info(
-                        "Created new schema history file: {} (sequence: {})",
-                        newFile,
-                        nextSequence);
+        synchronized (sharedState) {
+            if (myVersion != sharedState.activeVersion) {
+                LOGGER.warn(
+                        "Stale schema history instance for source {} (version {} vs active {}), "
+                                + "skipping write",
+                        sourceId,
+                        myVersion,
+                        sharedState.activeVersion);
+                return;
             }
-        } catch (Exception e) {
-            throw new SchemaHistoryException("Failed to store schema history record", e);
+            try {
+                // Use cached information to avoid expensive list operations and getObject() calls
+                if (cachedLatestFile != null
+                        && cachedLatestFileRecords.size() < maxRecordsPerFile) {
+                    // 1. Append to existing file using cached records (no getObject() needed!)
+                    cachedLatestFileRecords.add(record);
+                    putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
+
+                    LOGGER.info(
+                            "Appended record to existing file: {} (now {} records)",
+                            cachedLatestFile,
+                            cachedLatestFileRecords.size());
+                } else {
+                    // 2. Create new file with next sequence number when current file is full or
+                    // doesn't exist
+                    long nextSequence = ++sharedState.sequenceNumber;
+                    String newFile =
+                            String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
+                    List<HistoryRecord> newRecords = new ArrayList<>();
+                    newRecords.add(record);
+                    putObject(newFile, fromHistoryRecords(newRecords));
+
+                    // Update cache to point to new file
+                    cachedLatestFile = newFile;
+                    cachedLatestFileRecords = newRecords;
+
+                    LOGGER.info(
+                            "Created new schema history file: {} (sequence: {})",
+                            newFile,
+                            nextSequence);
+                }
+            } catch (Exception e) {
+                throw new SchemaHistoryException("Failed to store schema history record", e);
+            }
         }
     }
 
@@ -275,19 +320,27 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     /**
      * Initialize sequence number from existing files. This ensures we don't reuse sequence numbers
-     * that have already been used.
+     * that have already been used. Caller must hold {@code synchronized(sharedState)}.
      */
     private void initializeSequenceNumber(List<String> historyFiles) {
         if (historyFiles.isEmpty()) {
-            sequenceNumber.set(0);
-            LOGGER.info("No existing files, initialized sequence number to 0");
+            // Don't reset to 0 — a previous instance may have incremented sequenceNumber
+            // beyond what is visible on disk (e.g., putObject timed out client-side but
+            // succeeded server-side).
+            LOGGER.info(
+                    "No existing files, keeping current sequence number: {}",
+                    sharedState.sequenceNumber);
         } else {
             // historyFiles is already sorted by sequence number in listAndSortHistoryFiles(),
-            // so the last file has the maximum sequence number
+            // so the last file has the maximum sequence number.
+            // Use Math.max to avoid regressing the sequence number: a previous instance may
+            // have incremented it past what is visible on disk.
             long maxSequence =
                     extractSequenceFromFileName(historyFiles.get(historyFiles.size() - 1));
-            sequenceNumber.set(maxSequence);
-            LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
+            sharedState.sequenceNumber = Math.max(sharedState.sequenceNumber, maxSequence);
+            LOGGER.info(
+                    "Initialized sequence number to {} from existing files",
+                    sharedState.sequenceNumber);
         }
     }
 
@@ -297,6 +350,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
      * so there's no benefit to complex on-demand loading.
      *
      * <p>This method also initializes the cache for the latest file to avoid re-reading it later.
+     * Caller must hold {@code synchronized(sharedState)}.
      */
     private List<HistoryRecord> loadAllHistoryRecords(List<String> historyFiles) {
         List<HistoryRecord> allRecords = new ArrayList<>();
@@ -315,7 +369,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 // Initialize cache when processing the last file to avoid re-reading it later
                 if (i == historyFiles.size() - 1) {
                     cachedLatestFile = filePath;
-                    // Cache the records list to avoid getObject() on subsequent writes
                     cachedLatestFileRecords = new ArrayList<>(records);
                     LOGGER.debug(
                             "Initialized cache: latest file {} with {} records",

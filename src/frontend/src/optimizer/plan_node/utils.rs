@@ -38,6 +38,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
@@ -46,7 +47,6 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
-use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
@@ -62,6 +62,8 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    clean_watermark_indices: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -127,6 +129,12 @@ impl TableCatalogBuilder {
         self.dist_key_in_pk = Some(dist_key_in_pk);
     }
 
+    /// Set the indices of watermark columns used for state cleaning.
+    /// These are column indices in the table schema.
+    pub fn set_clean_watermark_indices(&mut self, clean_watermark_indices: Vec<usize>) {
+        self.clean_watermark_indices = clean_watermark_indices;
+    }
+
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
@@ -147,7 +155,7 @@ impl TableCatalogBuilder {
 
     /// Consume builder and create `TableCatalog` (for proto). The `read_prefix_len_hint` is the
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
-    /// implementing the table's bloom filter or other storage optimization techniques.
+    /// implementing the table's SST filter or other storage optimization techniques.
     pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
         assert!(read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
@@ -214,9 +222,9 @@ impl TableCatalogBuilder {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
-            clean_watermark_index_in_pk: None, // TODO: fill this field
-            clean_watermark_indices: vec![],   // TODO: fill this field
-            refreshable: false,                // Internal tables are not refreshable
+            clean_watermark_index_in_pk: None,
+            clean_watermark_indices: self.clean_watermark_indices,
+            refreshable: false, // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,
         }
@@ -348,7 +356,7 @@ pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
 macro_rules! plan_node_name {
     ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
-            #[allow(unused_mut)]
+
             let mut properties: Vec<&str> = vec![];
             $( if $cond { properties.push($prop); } )*
             let mut name = $name.to_string();
@@ -384,7 +392,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     if columns.len() != input.schema().fields().len()
         || columns
@@ -435,7 +443,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     let payload_indices = {
         let mut payload_indices = Vec::with_capacity(columns.len());
@@ -460,10 +468,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
-/// Check that all leaf nodes must be stream table scan,
-/// since that plan node maps to `backfill` executor, which supports recovery.
-/// Some other leaf nodes like `StreamValues` do not support recovery, and they
-/// cannot use background ddl.
+/// Check that all leaf nodes support recoverable background DDL.
 pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
         if plan.as_stream_source_scan().is_some()
@@ -472,11 +477,19 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
-            scan.stream_scan_type() == StreamScanType::Backfill
-                || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
-                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
-                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
+            #[expect(deprecated)]
+            match scan.stream_scan_type() {
+                StreamScanType::Backfill
+                | StreamScanType::ArrangementBackfill
+                | StreamScanType::CrossDbSnapshotBackfill
+                | StreamScanType::SnapshotBackfill
+                | StreamScanType::UpstreamOnly => true,
+                StreamScanType::Unspecified => unreachable!(),
+                // These legacy scan types do not persist snapshot progress.
+                StreamScanType::Chain | StreamScanType::Rearrange => false,
+            }
         } else {
+            // Other leaf nodes, such as `StreamValues`, do not support recovery.
             false
         }
     } else {

@@ -15,6 +15,40 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+enum SstableFilterType {
+  SSTABLE_FILTER_UNSPECIFIED = 0;
+  SSTABLE_FILTER_NONE = 1;
+  SSTABLE_FILTER_XOR8 = 2;
+  SSTABLE_FILTER_XOR16 = 3;
+}
+
+// Layout strategy of the xor filter stored in SST.
+//
+// Note: the actual on-disk encoding is still determined by the filter bytes footer.
+// This enum is used for task planning and configuration.
+enum SstableFilterLayout {
+  SSTABLE_FILTER_LAYOUT_UNSPECIFIED = 0;
+  // Let the system decide whether to use a block-based filter (currently by kv-count threshold).
+  SSTABLE_FILTER_LAYOUT_AUTO = 1;
+  // Always use a single non-blocked filter. Ignore kv-count threshold.
+  SSTABLE_FILTER_LAYOUT_PLAIN = 2;
+  // Always use per-block filters. Ignore kv-count threshold.
+  SSTABLE_FILTER_LAYOUT_BLOCKED = 3;
+}
+
+// Key range for a single vnode within an SST.
+// Keys are always represented as closed intervals: [min_key, max_key].
+message VnodeUserKeyRange {
+  bytes min_key = 1;
+  bytes max_key = 2;
+}
+
+// Optional per-vnode statistics for SSTs with few vnodes.
+// Enables more precise query pruning by providing vnode-level key ranges.
+message VnodeStatistics {
+  map<uint32, VnodeUserKeyRange> vnode_user_key_ranges = 1;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -29,11 +63,23 @@ message SstableInfo {
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
-  BloomFilterType bloom_filter_kind = 13;
+  // Legacy SST filter metadata for SSTs written before `filter_type` and `filter_layout` existed.
+  // New writers must leave this field as BLOOM_FILTER_UNSPECIFIED and set `filter_type` instead.
+  BloomFilterType bloom_filter_kind = 13 [deprecated = true];
 
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
   // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
   uint64 sst_size = 14;
+
+  // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
+  // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
+  VnodeStatistics vnode_statistics = 15;
+  // Canonical SST filter type for newly written SSTs. If this field is present,
+  // `bloom_filter_kind` must be BLOOM_FILTER_UNSPECIFIED.
+  optional SstableFilterType filter_type = 16;
+  // Canonical SST filter physical layout for newly written SSTs. This is set only when
+  // `filter_type` is not SSTABLE_FILTER_NONE.
+  optional SstableFilterLayout filter_layout = 17;
 }
 
 enum LevelType {
@@ -352,6 +398,45 @@ message HummockVersionCheckpoint {
   map<uint64, StaleObjects> stale_objects = 2;
 }
 
+// Compression algorithm used for checkpoint data serialization.
+enum CheckpointCompressionAlgorithm {
+  // No compression (uncompressed).
+  CHECKPOINT_COMPRESSION_UNSPECIFIED = 0;
+  // Zstd compression (default, good balance between ratio and speed).
+  CHECKPOINT_COMPRESSION_ZSTD = 1;
+  // Lz4 compression (faster but lower compression ratio).
+  CHECKPOINT_COMPRESSION_LZ4 = 2;
+}
+
+// Envelope message wrapping a compressed or uncompressed HummockVersionCheckpoint.
+// When compression_algorithm is NONE (or UNSPECIFIED), payload contains raw PbHummockVersionCheckpoint bytes.
+// Otherwise, payload contains the compressed PbHummockVersionCheckpoint bytes.
+//
+// Backward compatibility:
+// - Old code (unaware of this message) writes raw PbHummockVersionCheckpoint directly.
+// - New code tries to decode as HummockVersionCheckpointEnvelope first.
+//   If it fails (old format), it falls back to decoding as PbHummockVersionCheckpoint.
+// - Legacy bytes may occasionally decode as an envelope due to protobuf's unknown-field
+//   skipping, so readers treat `checksum` as the discriminator: all new envelopes set it,
+//   while old raw checkpoints do not have field 3.
+//
+// Format detection logic:
+// 1. Try to decode bytes as HummockVersionCheckpointEnvelope
+// 2. If checksum.is_some(), treat as new envelope format:
+//    a. Verify checksum against payload
+//    b. Decompress payload according to compression_algorithm
+//    c. Decode decompressed bytes as PbHummockVersionCheckpoint
+// 3. If checksum.is_none() or decode fails, treat as legacy format:
+//    - Decode bytes directly as PbHummockVersionCheckpoint
+message HummockVersionCheckpointEnvelope {
+  CheckpointCompressionAlgorithm compression_algorithm = 1;
+  // Compressed (or uncompressed if algorithm is NONE) PbHummockVersionCheckpoint bytes.
+  bytes payload = 2;
+  // xxhash64 checksum of the payload bytes (compressed data) for integrity verification.
+  // Presence of this field distinguishes new envelope format from legacy raw checkpoints.
+  optional uint64 checksum = 3;
+}
+
 message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
@@ -379,6 +464,26 @@ message GetCurrentVersionRequest {}
 message GetCurrentVersionResponse {
   common.Status status = 1;
   HummockVersion current_version = 2;
+}
+
+message GetTableChangeLogsRequest {
+  message TableFilter {
+    repeated uint32 table_ids = 1;
+  }
+  // If true, returns only the epoch without the full log bodies.
+  bool epoch_only = 1;
+  bool exclude_empty = 2;
+  // Defines the epoch range to fetch.
+  optional uint64 start_epoch_inclusive = 3;
+  optional uint64 end_epoch_inclusive = 4;
+  // Defines the tables to fetch.
+  optional TableFilter table_ids = 5;
+  // Limit the number of `EpochNewChangeLog` returned for each table.
+  optional uint32 limit = 6;
+}
+
+message GetTableChangeLogsResponse {
+  map<uint32, TableChangeLog> table_change_logs = 1;
 }
 
 message UnpinVersionRequest {
@@ -493,9 +598,24 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
-  // The maximum key-value count threshold for using Xor16 filter.
-  // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
+  // KV-count threshold for using blocked xor filter when `sstable_filter_layout` is AUTO.
+  //
+  // If the estimated key count of one output SST exceeds this threshold, compaction will build
+  // blocked xor filters. Otherwise it will build a single non-blocked xor filter.
+  //
+  // This is an output-SST-level heuristic. Older versions compared the threshold with the total
+  // key count of the whole compaction task, which could classify many small output SSTs as blocked.
+  //
+  // Keep the historical protobuf field name for wire and JSON compatibility.
   optional uint64 max_kv_count_for_xor16 = 28;
+  // Max bytes for vnode-level key range hints to embed into output SSTs.
+  optional uint64 max_vnode_key_range_bytes = 29;
+  // The SST filter type that output SSTs in this task should use.
+  // Supported values: NONE, XOR16, XOR8.
+  SstableFilterType sstable_filter_type = 30;
+  // The xor filter layout to use for output SSTs in this task.
+  // Ignored when `sstable_filter_type` is NONE.
+  SstableFilterLayout sstable_filter_layout = 31;
 }
 
 message LevelHandler {
@@ -683,10 +803,13 @@ message TriggerManualCompactionRequest {
   uint32 table_id = 3;
   uint32 level = 4;
   repeated uint64 sst_ids = 5;
+  optional bool exclusive = 6;
+  optional uint32 target_level = 7;
 }
 
 message TriggerManualCompactionResponse {
   common.Status status = 1;
+  optional bool should_retry = 2;
 }
 
 message TriggerFullGCRequest {
@@ -761,6 +884,18 @@ message RiseCtlUpdateCompactionConfigRequest {
     string compression_algorithm = 2;
   }
 
+  message SstableFilterType {
+    // LSM level index to update, e.g. 0 for L0 and 6 for L6.
+    uint32 level = 1;
+    string filter_type = 2;
+  }
+
+  message SstableFilterLayout {
+    // LSM level index to update. See `SstableFilterType.level`.
+    uint32 level = 1;
+    string layout = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -796,9 +931,17 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 sst_allowed_trivial_move_max_count = 29;
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
-      uint64 vnode_aligned_level_size_threshold = 31;
-      // The maximum key-value count threshold for using Xor16 filter
+      // Deprecated. Kept for backward compatibility and ignored by meta.
+      uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
+      // KV-count threshold for using blocked xor filter when layout is "auto".
+      // Keep the historical protobuf field name for wire and JSON compatibility.
       uint64 max_kv_count_for_xor16 = 32;
+      // Max bytes for vnode key-range hints recorded into each SST.
+      uint64 max_vnode_key_range_bytes = 33;
+      // Reset compression algorithm for all levels to defaults according to group max_level.
+      bool reset_compression_algorithm = 34;
+      SstableFilterType sstable_filter_type = 35;
+      SstableFilterLayout sstable_filter_layout = 36;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -957,6 +1100,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
+  rpc GetTableChangeLogs(GetTableChangeLogsRequest) returns (GetTableChangeLogsResponse);
 
   // iceberg
   rpc SubscribeIcebergCompactionEvent(stream iceberg_compaction.SubscribeIcebergCompactionEventRequest) returns (stream iceberg_compaction.SubscribeIcebergCompactionEventResponse);
@@ -1023,23 +1167,48 @@ message CompactionConfig {
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
 
-  // Enable strict one-vnode-per-SST for levels that meet the size threshold.
-  // Only effective when both conditions are met:
-  //   1. target_level > base_level (deeper levels only)
-  //   2. level.total_file_size >= this threshold
-  //
-  // This prevents generating too many small SSTs when level size is small.
-  // Each SST will contain exactly one vnode, enabling precise query pruning.
-  //
-  // Typical value: 50GB.
-  optional uint64 vnode_aligned_level_size_threshold = 31;
+  // Deprecated. Kept for backward compatibility and ignored by meta.
+  optional uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
 
-  // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
-  // When the number of keys in a compaction task or SST exceeds this threshold,
-  // a BlockedXor16 filter will be used instead of a single Xor16 filter.
+  // KV-count threshold for using blocked xor filter when `sstable_filter_layout[level]` is AUTO.
+  //
+  // When the estimated key count of one output SST exceeds this threshold, compaction will build
+  // blocked xor filters. Otherwise it will build a single non-blocked xor filter.
+  //
+  // This is an output-SST-level heuristic. Older versions compared the threshold with the total
+  // key count of the whole compaction task, which could classify many small output SSTs as blocked.
   //
   // Typical value: 256 * 1024 (256K keys).
+  //
+  // Keep the historical protobuf field name for wire and JSON compatibility.
   optional uint64 max_kv_count_for_xor16 = 32;
+
+  // Max bytes for vnode key-range hints recorded into each SST.
+  optional uint64 max_vnode_key_range_bytes = 33;
+
+  // The SST filter type to use for each output level (for compaction tasks).
+  //
+  // Supported values: "none", "xor16", "xor8".
+  //
+  // Index by LSM level.
+  //
+  // `sstable_filter_type[0]` is reserved for L0 and currently ignored by shared-buffer flush, which
+  // always uses xor16. `sstable_filter_type[1]` applies to L1 output, `sstable_filter_type[6]`
+  // applies to L6 output, etc.
+  repeated string sstable_filter_type = 34;
+
+  // The xor filter layout to use for each output level (for compaction tasks).
+  //
+  // Supported values:
+  // - "auto": decide by heuristics (currently by kv-count threshold)
+  // - "plain": always use a single non-blocked filter, ignoring kv-count threshold
+  // - "blocked": always use block-based filters, ignoring kv-count threshold
+  //
+  // Ignored when the corresponding `sstable_filter_type` is "none".
+  //
+  // Note: `sstable_filter_layout[0]` is reserved for L0 and currently ignored by shared-buffer
+  // flush, which always uses "auto".
+  repeated string sstable_filter_layout = 35;
 }
 
 message TableStats {

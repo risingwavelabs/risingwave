@@ -10,12 +10,12 @@
   <version>0.1.0-SNAPSHOT</version>
 
   <name>udf-example</name>
-  <url>https://docs.risingwave.com/docs/current/udf-java</url>
+  <url>https://docs.risingwave.com/sql/udfs/use-udfs-in-java</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.source>11</maven.compiler.source>
-    <maven.compiler.target>11</maven.compiler.target>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
     <maven.javadoc.skip>true</maven.javadoc.skip>
   </properties>
 

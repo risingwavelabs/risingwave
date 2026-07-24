@@ -10,13 +10,6 @@ rpk topic create nexmark-person -p 4
 
 include ./create_tables.slt.part
 
-include ./insert_auction.slt.part
-include ./insert_bid.slt.part
-include ./insert_person.slt.part
-
-statement ok
-flush;
-
 statement ok
 create sink nexmark_auction FROM auction
 WITH (
@@ -43,6 +36,13 @@ WITH (
 ) FORMAT PLAIN ENCODE JSON (
     force_append_only='true'
 );
+
+include ./insert_auction.slt.part
+include ./insert_bid.slt.part
+include ./insert_person.slt.part
+
+statement ok
+flush;
 
 sleep 5s
 

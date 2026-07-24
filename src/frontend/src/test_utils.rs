@@ -30,12 +30,15 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -50,6 +53,7 @@ use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -59,6 +63,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
@@ -136,12 +141,19 @@ impl LocalFrontend {
         Self { opts, env }
     }
 
+    #[expect(clippy::unused_async)]
+    pub async fn with_frontend_config(opts: FrontendOpts, frontend_config: FrontendConfig) -> Self {
+        let mut env = FrontendEnv::mock();
+        env.set_frontend_config_for_test(frontend_config);
+        Self { opts, env }
+    }
+
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_ref().run_statement(sql, vec![]).await
+        Box::pin(self.session_ref().run_statement(sql, vec![])).await
     }
 
     pub async fn run_sql_with_session(
@@ -150,7 +162,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        session_ref.run_statement(sql, vec![]).await
+        Box::pin(session_ref.run_statement(sql, vec![])).await
     }
 
     pub async fn run_user_sql(
@@ -161,9 +173,11 @@ impl LocalFrontend {
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql, vec![])
-            .await
+        Box::pin(
+            self.session_user_ref(database, user_name, user_id)
+                .run_statement(sql, vec![]),
+        )
+        .await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
@@ -302,6 +316,7 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -351,6 +366,7 @@ impl CatalogWriter for MockCatalogWriter {
             dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
+            None,
         )
         .await?;
         Ok(())
@@ -388,10 +404,28 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(old_sink_id.as_raw_id());
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, old_sink_id);
+        self.create_sink_inner(sink, graph)?;
         Ok(())
     }
 
@@ -404,6 +438,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
@@ -668,6 +703,30 @@ impl CatalogWriter for MockCatalogWriter {
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(subscription) = schema.get_subscription_by_id(subscription_id) {
+                    let mut pb_subscription = subscription.to_proto();
+                    pb_subscription.retention_seconds = retention_seconds;
+                    pb_subscription.definition = definition;
+                    self.catalog.write().update_subscription(&pb_subscription);
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(
+            ErrorCode::ItemNotFound(format!("subscription not found: {:?}", subscription_id))
+                .into(),
+        )
+    }
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -695,6 +754,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: PbTableParallelism,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -704,6 +764,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: Option<PbTableParallelism>,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -736,11 +797,28 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: TableId,
+        _job_id: JobId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
+            database.to_prost()
+        };
+        pb_database.resource_group =
+            resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
     }
 
     async fn alter_database_param(
@@ -775,7 +853,7 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self, _job_id: Option<JobId>) -> Result<()> {
         Ok(())
     }
 }
@@ -1257,6 +1335,21 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn backup_meta(&self, _remarks: Option<String>) -> RpcResult<u64> {
+        unimplemented!()
+    }
+
+    async fn get_backup_job_status(
+        &self,
+        _job_id: u64,
+    ) -> RpcResult<(risingwave_pb::backup_service::BackupJobStatus, String)> {
+        unimplemented!()
+    }
+
+    async fn delete_meta_snapshot(&self, _snapshot_ids: &[u64]) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn apply_throttle(
         &self,
         _throttle_target: PbThrottleTarget,
@@ -1340,6 +1433,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
+        Ok(vec![])
+    }
+
     async fn get_fragment_by_id(
         &self,
         _fragment_id: FragmentId,
@@ -1370,6 +1467,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(1)
     }
 
+    async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
         Ok(())
     }
@@ -1384,6 +1485,25 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> RpcResult<TableChangeLogs> {
+        Ok(HashMap::default())
+    }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<risingwave_hummock_sdk::CompactionGroupId>,
+        _configs: Vec<PbMutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 }
 

@@ -96,7 +96,7 @@ impl Binder {
                     // Currently, the generated columns are not supported yet. So the ident here should only be one of the following
                     // - `headers`
                     // - secret name
-                    // - the name of the payload column
+                    // - the identifier bound to the raw webhook payload
                     // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
                     if ident.real_value() == *"headers" {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
@@ -104,7 +104,7 @@ impl Binder {
                         && ident.real_value() == *ctx.secret_name.as_ref().unwrap()
                     {
                         Ok(InputRef::new(1, DataType::Varchar).into())
-                    } else if ident.real_value() == ctx.column_name {
+                    } else if ident.real_value() == ctx.payload_name {
                         Ok(InputRef::new(2, DataType::Bytea).into())
                     } else {
                         Err(
@@ -269,22 +269,23 @@ impl Binder {
         negated: bool,
     ) -> Result<ExprImpl> {
         let left = self.bind_expr_inner(expr)?;
-        let mut bound_expr_list = vec![left.clone()];
+        let mut in_list_exprs = vec![left.clone()];
         let mut non_const_exprs = vec![];
         for elem in list {
             let expr = self.bind_expr_inner(elem)?;
-            match expr.is_const() {
-                true => bound_expr_list.push(expr),
+            match expr.is_const() || matches!(&expr, ExprImpl::Parameter(_)) {
+                true => in_list_exprs.push(expr),
                 false => non_const_exprs.push(expr),
             }
         }
 
-        let mut ret = if bound_expr_list.len() == 1 {
+        let mut ret = if in_list_exprs.len() == 1 {
             None
         } else {
-            Some(FunctionCall::new(ExprType::In, bound_expr_list)?.into())
+            Some(FunctionCall::new(ExprType::In, in_list_exprs)?.into())
         };
-        // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
+        // Row-dependent list items are not part of IN-expr in backend and rewritten into
+        // OR-Equal-exprs.
         for expr in non_const_exprs {
             if let Some(inner_ret) = ret {
                 ret = Some(

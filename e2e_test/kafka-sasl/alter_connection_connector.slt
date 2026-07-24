@@ -10,7 +10,7 @@ cat << EOF | rpk topic produce test_alter_conn_1 -X brokers=message_queue_sasl_1
 {"x": 3}
 EOF
 
-system ok
+system ok retry 20 backoff 1s
 rpk topic create test_alter_conn_1 -p 2 -X brokers=message_queue_sasl_2:19093 -X sasl.mechanism=PLAIN -X user=dev1 -X pass=rw
 
 system ok

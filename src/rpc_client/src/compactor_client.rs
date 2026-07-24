@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
     GetNewObjectIdsRequest, GetNewObjectIdsResponse, ReportCompactionTaskRequest,
@@ -45,12 +46,12 @@ pub struct CompactorClient {
 
 impl CompactorClient {
     pub async fn new(host_addr: HostAddr) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .connect_timeout(Duration::from_secs(5))
             .monitored_connect("grpc-compactor-client", Default::default())
             .await?;
         Ok(Self {
-            monitor_client: MonitorServiceClient::new(channel),
+            monitor_client: configured_monitor_service_client(MonitorServiceClient::new(channel)),
         })
     }
 

@@ -1,0 +1,24 @@
+control substitution on
+
+statement ok
+create table internal_view_t (v1 int);
+
+statement ok
+create materialized view internal_view_source as select * from internal_view_t;
+
+let internal_streamscan_table
+SELECT name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'internal_view_source'
+  AND name LIKE '%streamscan%'
+ORDER BY id
+LIMIT 1
+
+statement error CREATE VIEW does not support internal table
+create view internal_view_target as select * from ${internal_streamscan_table};
+
+statement ok
+drop materialized view internal_view_source;
+
+statement ok
+drop table internal_view_t;

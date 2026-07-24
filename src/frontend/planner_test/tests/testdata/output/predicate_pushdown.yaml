@@ -282,7 +282,7 @@
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: |-
     Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
-    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    HINT: please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -295,7 +295,7 @@
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: |-
     Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
-    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    HINT: please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information
 - name: now() does not get pushed to scan, but others do
   sql: |
     create table t1(v1 timestamp with time zone, v2 int);

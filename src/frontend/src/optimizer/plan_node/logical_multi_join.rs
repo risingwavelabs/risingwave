@@ -395,7 +395,7 @@ impl LogicalMultiJoin {
         output
     }
 
-    #[allow(clippy::doc_overindented_list_items)]
+    #[expect(clippy::doc_overindented_list_items)]
     /// Our heuristic join reordering algorithm will try to perform a left-deep join.
     /// It will try to do the following:
     ///
@@ -501,7 +501,6 @@ impl LogicalMultiJoin {
         Ok(join_ordering)
     }
 
-    #[allow(clippy::doc_overindented_list_items)]
     /// transform multijoin into bushy tree join.
     ///
     /// 1. First, use equivalent condition derivation to get derive join relation.
@@ -900,7 +899,7 @@ mod test {
         //
         // Output: [v0, v1, v4, v5]
         // FD: v0 --> v1, {} --> v0, {} --> v5, v4 --> v5, v5 --> v4
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let t1 = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "v0"),

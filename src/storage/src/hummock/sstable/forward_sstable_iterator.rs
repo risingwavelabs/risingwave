@@ -68,6 +68,12 @@ impl SstableIterator {
     ) -> Self {
         let mut block_start_idx_inclusive = 0;
         let mut block_end_idx_inclusive = sstable.meta.block_metas.len() - 1;
+        assert!(
+            !sstable_info_ref.table_ids.is_empty(),
+            "SstableIterator: SST {} (object {}) has empty table_ids",
+            sstable_info_ref.sst_id,
+            sstable_info_ref.object_id,
+        );
         let read_table_id_range = (
             *sstable_info_ref.table_ids.first().unwrap(),
             *sstable_info_ref.table_ids.last().unwrap(),

@@ -1,0 +1,9 @@
+query II
+SELECT count(*), sum(v) FROM hummock_stale_live;
+----
+1000 5005000
+
+query I
+SELECT count(*) FROM rw_catalog.rw_tables WHERE name = 'hummock_stale_dropped';
+----
+0

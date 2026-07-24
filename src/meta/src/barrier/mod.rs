@@ -38,6 +38,7 @@ mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
+mod partial_graph;
 mod progress;
 mod rpc;
 mod schedule;
@@ -52,8 +53,9 @@ use risingwave_common::id::JobId;
 use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SnapshotBackfillInfo,
+    BarrierKind, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SinceEpochInfo,
+    SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
@@ -132,7 +134,6 @@ pub(crate) enum BarrierManagerRequest {
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
-    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]

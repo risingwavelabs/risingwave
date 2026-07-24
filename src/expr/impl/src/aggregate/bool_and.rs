@@ -106,7 +106,7 @@ impl BoolAndUpdatable {
         if input { state } else { state - 1 }
     }
 
-    #[allow(dead_code)] // TODO: support merge
+    #[expect(dead_code)] // TODO: support merge
     fn merge(&self, state1: i64, state2: i64) -> i64 {
         state1 + state2
     }

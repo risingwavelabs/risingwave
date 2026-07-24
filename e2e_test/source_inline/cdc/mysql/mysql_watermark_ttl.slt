@@ -1,0 +1,94 @@
+control substitution on
+
+statement ok
+SET streaming_parallelism TO 1;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_cdc_watermark_ttl_test;
+    CREATE TABLE mysql_cdc_watermark_ttl_test (
+        id INT NOT NULL PRIMARY KEY,
+        ts INT NOT NULL,
+        v VARCHAR(50) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+    INSERT INTO mysql_cdc_watermark_ttl_test (id, ts, v) VALUES
+        (1, 30, 'backfill_keep_high'),
+        (2, 5, 'backfill_drop_low'),
+        (3, 25, 'backfill_keep_mid');
+"
+
+statement ok
+create source s_mysql_cdc_watermark_ttl with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev'
+);
+
+sleep 2s
+
+statement error non-TTL watermark defined on the table created from a CDC source
+create table rw_mysql_cdc_watermark_non_ttl (
+  id INT,
+  ts INT,
+  v VARCHAR,
+  PRIMARY KEY (id),
+  WATERMARK FOR ts AS ts - 10
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 1,
+  backfill.parallelism = 1
+) from s_mysql_cdc_watermark_ttl table 'risedev.mysql_cdc_watermark_ttl_test';
+
+statement ok
+create table rw_mysql_cdc_watermark_ttl (
+  id INT,
+  ts INT,
+  v VARCHAR,
+  PRIMARY KEY (id),
+  WATERMARK FOR ts AS ts - 10 WITH TTL
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 1,
+  backfill.parallelism = 1
+) from s_mysql_cdc_watermark_ttl table 'risedev.mysql_cdc_watermark_ttl_test';
+
+# Backfill order is deterministic with parallelism 1. The row with ts = 5 is read after ts = 30,
+# so it is filtered by the TTL watermark during bootstrap.
+query IIT retry 10 backoff 1s
+select id, ts, v from rw_mysql_cdc_watermark_ttl order by id;
+----
+1 30 backfill_keep_high
+3 25 backfill_keep_mid
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_cdc_watermark_ttl_test (id, ts, v) VALUES
+        (4, 35, 'stream_keep_high'),
+        (5, 8, 'stream_drop_low');
+"
+
+query IIT retry 10 backoff 1s
+select id, ts, v from rw_mysql_cdc_watermark_ttl order by id;
+----
+1 30 backfill_keep_high
+3 25 backfill_keep_mid
+4 35 stream_keep_high
+
+statement ok
+drop table rw_mysql_cdc_watermark_ttl;
+
+statement ok
+drop source s_mysql_cdc_watermark_ttl cascade;
+
+statement ok
+SET streaming_parallelism TO DEFAULT;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_cdc_watermark_ttl_test;
+"

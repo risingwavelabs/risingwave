@@ -41,3 +41,39 @@ github hmac_sha1
 github hmac_sha1
 github hmac_sha1
 github hmac_sha1
+
+query ITT
+select id, customer_name, amount::varchar from multi_column_validate order by id;
+----
+1234 Alice 99.99
+
+query ITT
+select id, customer_name, amount::varchar from multi_column_no_pk order by id, customer_name, amount;
+----
+1234 Alice 99.99
+
+query IT
+select id, event_time::varchar from multi_column_with_options order by id;
+----
+1 2024-04-11 02:00:00.123+00:00
+
+query ITT
+select id, customer_name, amount::varchar from multi_column_batched order by id;
+----
+2001 Bob 10.5
+2002 Carol 20.5
+
+query IT
+select id, event_time::varchar from multi_column_timestamp_option order by id;
+----
+1 2024-04-11 02:00:00.123
+
+query IT
+select id, event_time::varchar from multi_column_time_option order by id;
+----
+1 01:02:03.123
+
+query IT
+select id, amount::varchar from multi_column_bigint_precise_option order by id;
+----
+1 123456

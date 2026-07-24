@@ -1,20 +1,14 @@
-import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import docker_compose_exec, check_row_counts, report_failures
 
-relations = ['target_count', 'data_types', 'cock_all_data_types']
 
-failed_cases = []
-for rel in relations:
+def cockroach_count(rel):
     sql = f'SELECT COUNT(*) FROM {rel};'
-    print(f"Running SQL: {sql} ON cockroach")
-    command = f'psql -U root -h cockroachdb -p 26257 -d defaultdb --tuples-only -c "{sql}"'
-    rows = subprocess.check_output(
-        ["docker", "compose", "exec", "postgres", "bash", "-c", command])
-    rows = int(rows.decode('utf-8').strip())
-    print(f"{rows} rows in {rel}")
-    if rows < 1:
-        failed_cases.append(rel)
+    output = docker_compose_exec("postgres", f'psql -U root -h cockroachdb -p 26257 -d defaultdb --tuples-only -c "{sql}"')
+    return int(output.strip())
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+
+failed = check_row_counts(['target_count', 'data_types', 'cock_all_data_types'], cockroach_count, "cockroach")
+report_failures(failed)

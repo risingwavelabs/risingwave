@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package window_function;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// State for the row_number window function.
+message RowNumberState {
+  int64 prev_rank = 1;
+}
+
+// State for the rank window function.
+message RankState {
+  // The memcmp-encoded order key of the previous output row.
+  // Absent when no row has been output yet.
+  optional bytes prev_order_key = 1;
+  int64 prev_rank = 2;
+  int64 prev_pos_in_peer_group = 3;
+}
+
+// State for the dense_rank window function.
+message DenseRankState {
+  // The memcmp-encoded order key of the previous output row.
+  // Absent when no row has been output yet.
+  optional bytes prev_order_key = 1;
+  int64 prev_rank = 2;
+}
+
+// Serialized form of a StateKey stored in a WindowStateSnapshot.
+// Both fields are opaque binary blobs; the order_key is MemcmpEncoded and
+// the pk is serialized by OrderedRowSerde in the executor.
+message StateKey {
+  bytes order_key = 1;
+  bytes pk = 2;
+}
+
+// Persisted snapshot of a window function state, stored per partition per
+// window call in the intermediate_state_table.
+message WindowStateSnapshot {
+  // The key of the last row that was output before this snapshot was taken.
+  // Absent when no row has been output yet.
+  optional StateKey last_output_key = 1;
+
+  // Function-specific state. The variant must match the window function type
+  // of the corresponding call; a mismatch is treated as a decode error.
+  oneof function_state {
+    RowNumberState row_number_state = 2;
+    RankState rank_state = 3;
+    DenseRankState dense_rank_state = 4;
+  }
+}

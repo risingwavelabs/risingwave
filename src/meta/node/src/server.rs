@@ -17,14 +17,14 @@ use std::time::Duration;
 
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::config::SessionInitConfig;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_common_service::{AwaitTreeMiddlewareLayer, MetricsManager, TracingExtractLayer};
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -60,6 +60,7 @@ use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -89,6 +90,7 @@ use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
 use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
@@ -128,7 +130,7 @@ pub async fn rpc_serve(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
@@ -159,7 +161,7 @@ pub async fn rpc_serve(
         }
     };
 
-    rpc_serve_with_store(
+    Box::pin(rpc_serve_with_store(
         meta_store_impl,
         election_client,
         address_info,
@@ -168,9 +170,9 @@ pub async fn rpc_serve(
         server_config,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         shutdown,
-    )
+    ))
     .await
 }
 
@@ -187,7 +189,7 @@ pub async fn rpc_serve_with_store(
     server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     // TODO(shutdown): directly use cancellation token
@@ -251,7 +253,7 @@ pub async fn rpc_serve_with_store(
         max_cluster_heartbeat_interval,
         opts,
         init_system_params,
-        init_session_config,
+        session_init,
         server_config,
         election_client,
         shutdown,
@@ -314,7 +316,7 @@ pub async fn start_service_as_election_leader(
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
-    init_session_config: SessionConfig,
+    session_init: SessionInitConfig,
     server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
@@ -324,7 +326,7 @@ pub async fn start_service_as_election_leader(
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
-        init_session_config,
+        session_init,
         meta_store_impl,
     )
     .await?;
@@ -400,47 +402,12 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-        metadata_manager.clone(),
-        env.await_tree_reg().clone(),
-        hummock_manager.clone(),
-        env.event_log_manager_ref(),
-        prometheus_client.clone(),
-        prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
-        env.system_params_manager_impl_ref(),
-    ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,
         max_memory_usage: opts.cached_traces_memory_limit_bytes,
     });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
-
-    #[cfg(not(madsim))]
-    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-        use risingwave_common::config::RpcClientConfig;
-        use risingwave_rpc_client::MonitorClientPool;
-
-        let dashboard_service = crate::dashboard::DashboardService {
-            await_tree_reg: env.await_tree_reg().clone(),
-            dashboard_addr: *dashboard_addr,
-            prometheus_client,
-            prometheus_selector,
-            metadata_manager: metadata_manager.clone(),
-            hummock_manager: hummock_manager.clone(),
-            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
-            diagnose_command,
-            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
-                server_config.clone(),
-            ),
-            trace_state,
-        };
-        let task = tokio::spawn(dashboard_service.serve());
-        Some(task)
-    } else {
-        None
-    };
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
@@ -498,6 +465,19 @@ pub async fn start_service_as_election_leader(
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
+    // Register before the barrier manager starts recovery. Dirty creating-job cleanup emits local
+    // serving mapping deletes, which must not be dropped during bootstrap.
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping.clone(),
+        env.session_params_manager_impl_ref(),
+    ));
+
+    let iceberg_pk_index_sink_manager =
+        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+    tracing::info!("IcebergPkIndexSinkManager started");
+
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
@@ -539,8 +519,11 @@ pub async fn start_service_as_election_leader(
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
+        serving_vnode_mapping.clone(),
         source_manager.clone(),
         sink_manager.clone(),
+        iceberg_pk_index_sink_manager.clone(),
+        iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
         refresh_manager.clone(),
@@ -561,7 +544,10 @@ pub async fn start_service_as_election_leader(
             env.clone(),
             metadata_manager.clone(),
             barrier_scheduler.clone(),
+            hummock_manager.clone(),
             source_manager.clone(),
+            refresh_manager.clone(),
+            iceberg_compaction_mgr.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -582,6 +568,7 @@ pub async fn start_service_as_election_leader(
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
         barrier_scheduler.clone(),
+        iceberg_pk_index_sink_manager.clone(),
     )
     .await;
 
@@ -606,6 +593,7 @@ pub async fn start_service_as_election_leader(
         stream_manager.clone(),
         metadata_manager.clone(),
         refresh_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -632,8 +620,44 @@ pub async fn start_service_as_election_leader(
     let monitor_srv = MonitorServiceImpl::new(
         metadata_manager.clone(),
         env.await_tree_reg().clone(),
-        server_config,
+        server_config.clone(),
     );
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        hummock_manager.clone(),
+        iceberg_compaction_mgr.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref(),
+    ));
+
+    #[cfg(not(madsim))]
+    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        use risingwave_common::config::RpcClientConfig;
+        use risingwave_rpc_client::MonitorClientPool;
+
+        let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
+            dashboard_addr: *dashboard_addr,
+            prometheus_client,
+            prometheus_selector,
+            metadata_manager: metadata_manager.clone(),
+            hummock_manager: hummock_manager.clone(),
+            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
+            diagnose_command,
+            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
+                server_config.clone(),
+            ),
+            trace_state,
+        };
+        let task = tokio::spawn(dashboard_service.serve());
+        Some(task)
+    } else {
+        None
+    };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -645,17 +669,21 @@ pub async fn start_service_as_election_leader(
         backup_manager.clone(),
         &env.opts,
         {
-            let barrier_manager = barrier_manager.clone();
+            let catalog_controller = metadata_manager.catalog_controller.clone();
             Box::new(move || {
-                let barrier_manager = barrier_manager.clone();
+                let catalog_controller = catalog_controller.clone();
                 Box::pin(async move {
-                    barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
-                        true
-                    })
+                    catalog_controller
+                        .get_pinned_snapshot_epochs()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect pinned snapshot epochs. pause vacuum time travel");
+                            None
+                        })
                 })
             })
-        }
+        },
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),
@@ -685,13 +713,6 @@ pub async fn start_service_as_election_leader(
     sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
         iceberg_compaction_mgr.clone(),
         iceberg_compactor_event_rx,
-    ));
-
-    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
-        env.notification_manager_ref(),
-        metadata_manager.clone(),
-        serving_vnode_mapping,
-        env.session_params_manager_impl_ref(),
     ));
 
     {
@@ -759,6 +780,7 @@ pub async fn start_service_as_election_leader(
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
+        .layer(AwaitTreeMiddlewareLayer::new(env.await_tree_reg().clone()))
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
@@ -788,7 +810,9 @@ pub async fn start_service_as_election_leader(
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
         ))
-        .add_service(MonitorServiceServer::new(monitor_srv));
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));

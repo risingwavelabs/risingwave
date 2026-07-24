@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
@@ -137,7 +137,10 @@ pub fn infer_left_internal_table_catalog(
 
     // The pk of dynamic filter internal table should be left_key + input_pk.
     let mut pk_indices = vec![left_key_index];
-    let read_prefix_len_hint = pk_indices.len();
+    // The executor replays changes by scanning left-key ranges with `iter_with_vnode`
+    // when the dynamic predicate changes, so there is no fixed prefix lookup for
+    // prefix SST filters to prune.
+    let read_prefix_len_hint = 0;
 
     for i in me.stream_key().unwrap() {
         if *i != left_key_index {

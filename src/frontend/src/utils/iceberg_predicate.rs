@@ -21,61 +21,60 @@ use risingwave_common::types::ScalarImpl;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::utils::Condition;
 
+pub struct ExtractIcebergPredicateResult {
+    pub iceberg_predicate: IcebergPredicate,
+    pub extracted_condition: Condition,
+    pub remaining_condition: Condition,
+}
+
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
 /// zone-map is used to evaluate predicates on iceberg tables.
 /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
-pub fn to_iceberg_predicate(
+pub fn extract_iceberg_predicate(
     predicate: Condition,
     fields: &[Field],
-) -> (IcebergPredicate, Condition) {
+) -> ExtractIcebergPredicateResult {
     if predicate.always_true() {
-        return (IcebergPredicate::AlwaysTrue, predicate);
+        return ExtractIcebergPredicateResult {
+            iceberg_predicate: IcebergPredicate::AlwaysTrue,
+            extracted_condition: Condition {
+                conjunctions: vec![],
+            },
+            remaining_condition: Condition {
+                conjunctions: vec![],
+            },
+        };
     }
 
-    let mut conjunctions = predicate.conjunctions;
-    let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
+    let mut iceberg_predicates = Vec::new();
+    let mut extracted_conjunctions = Vec::new();
+    let mut remaining_conjunctions = Vec::new();
 
-    let mut iceberg_condition_root = None;
-    while let Some(conjunction) = conjunctions.pop() {
+    for conjunction in predicate.conjunctions {
         match rw_expr_to_iceberg_predicate(&conjunction, fields) {
-            iceberg_predicate @ Some(_) => {
-                iceberg_condition_root = iceberg_predicate;
-                break;
-            }
-            None => {
-                ignored_conjunctions.push(conjunction);
-                continue;
-            }
-        }
-    }
-
-    let mut iceberg_condition_root = match iceberg_condition_root {
-        Some(p) => p,
-        None => {
-            return (
-                IcebergPredicate::AlwaysTrue,
-                Condition {
-                    conjunctions: ignored_conjunctions,
-                },
-            );
-        }
-    };
-
-    for rw_condition in conjunctions {
-        match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
             Some(iceberg_predicate) => {
-                iceberg_condition_root = iceberg_condition_root.and(iceberg_predicate)
+                iceberg_predicates.push(iceberg_predicate);
+                extracted_conjunctions.push(conjunction);
             }
-            None => ignored_conjunctions.push(rw_condition),
+            None => remaining_conjunctions.push(conjunction),
         }
     }
-    (
-        iceberg_condition_root,
-        Condition {
-            conjunctions: ignored_conjunctions,
+
+    let iceberg_predicate = iceberg_predicates
+        .into_iter()
+        .reduce(IcebergPredicate::and)
+        .unwrap_or(IcebergPredicate::AlwaysTrue);
+
+    ExtractIcebergPredicateResult {
+        iceberg_predicate,
+        extracted_condition: Condition {
+            conjunctions: extracted_conjunctions,
         },
-    )
+        remaining_condition: Condition {
+            conjunctions: remaining_conjunctions,
+        },
+    }
 }
 
 fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
@@ -173,7 +172,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
+                            Some(reference.less_than(datum))
                         }
                         _ => None,
                     }
@@ -190,7 +189,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
+                            Some(reference.less_than_or_equal_to(datum))
                         }
                         _ => None,
                     }
@@ -207,7 +206,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
+                            Some(reference.greater_than(datum))
                         }
                         _ => None,
                     }
@@ -224,7 +223,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
+                            Some(reference.greater_than_or_equal_to(datum))
                         }
                         _ => None,
                     }
@@ -255,11 +254,8 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                                 return None;
                             }
                             if let ExprImpl::Literal(l) = arg {
-                                if let Some(datum) = rw_literal_to_iceberg_datum(l) {
-                                    datums.push(datum);
-                                } else {
-                                    return None;
-                                }
+                                let datum = rw_literal_to_iceberg_datum(l)?;
+                                datums.push(datum);
                             } else {
                                 return None;
                             }
@@ -272,5 +268,41 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{FunctionCall, InputRef};
+
+    #[test]
+    fn comparison_pushdown_mirrors_flipped_operators() {
+        let fields = vec![Field::new("x", DataType::Int64)];
+        let col = || InputRef::new(0, DataType::Int64).into();
+        let lit = || Literal::new(Some(ScalarImpl::Int64(5)), DataType::Int64).into();
+
+        let cases: [(ExprType, ExprImpl, ExprImpl, &str); 12] = [
+            (ExprType::Equal, col(), lit(), "x = 5"),
+            (ExprType::Equal, lit(), col(), "x = 5"),
+            (ExprType::NotEqual, col(), lit(), "x != 5"),
+            (ExprType::NotEqual, lit(), col(), "x != 5"),
+            (ExprType::GreaterThan, col(), lit(), "x > 5"),
+            (ExprType::GreaterThan, lit(), col(), "x < 5"),
+            (ExprType::GreaterThanOrEqual, col(), lit(), "x >= 5"),
+            (ExprType::GreaterThanOrEqual, lit(), col(), "x <= 5"),
+            (ExprType::LessThan, col(), lit(), "x < 5"),
+            (ExprType::LessThan, lit(), col(), "x > 5"),
+            (ExprType::LessThanOrEqual, col(), lit(), "x <= 5"),
+            (ExprType::LessThanOrEqual, lit(), col(), "x >= 5"),
+        ];
+        for (op, arg0, arg1, expected) in cases {
+            let expr = FunctionCall::new(op, vec![arg0, arg1]).unwrap().into();
+            let predicate = rw_expr_to_iceberg_predicate(&expr, &fields)
+                .unwrap_or_else(|| panic!("{op:?} should be pushable"));
+            assert_eq!(predicate.to_string(), expected);
+        }
     }
 }

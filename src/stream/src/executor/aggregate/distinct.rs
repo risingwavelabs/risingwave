@@ -184,7 +184,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 }
             });
 
-        for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
+        for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv) {
             // update visibility
             **vis &= !vis_mask_inv.finish();
         }

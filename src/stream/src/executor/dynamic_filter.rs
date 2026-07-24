@@ -55,7 +55,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> DynamicFilterExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         eval_error_report: ActorEvalErrorReport,
@@ -282,8 +282,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         cmp,
                         DataType::Boolean,
                         vec![
-                            Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                            Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                            InputRefExpression::new(l_data_type.clone(), self.key_l).into(),
+                            LiteralExpression::new(r_data_type.clone(), Some(scalar)).into(),
                         ],
                         eval_error_report.clone(),
                     )

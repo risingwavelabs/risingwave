@@ -93,11 +93,26 @@ impl Relation {
     pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated_by_depth(depth),
-            Relation::Join(join) | Relation::Apply(join) => {
+            Relation::Join(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
                     || join.left.is_correlated_by_depth(depth)
                     || join.right.is_correlated_by_depth(depth)
             }
+            // The right side of an `Apply` is bound in a scope extended by its left input. When
+            // looking for a reference owned by an enclosing `Apply`, cross that scope boundary.
+            Relation::Apply(join) => {
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated_by_depth(depth)
+                    || join.right.is_correlated_by_depth(depth + 1)
+            }
+            Relation::TableFunction {
+                expr: table_function,
+                with_ordinality: _,
+            } => table_function.has_correlated_input_ref_by_depth(depth + 1),
+            Relation::Share(share) => match &share.input {
+                BoundShareInput::Query(query) => query.is_correlated_by_depth(depth),
+                BoundShareInput::ChangeLog(change_log) => change_log.is_correlated_by_depth(depth),
+            },
             _ => false,
         }
     }
@@ -113,6 +128,18 @@ impl Relation {
                     || join.left.is_correlated_by_correlated_id(correlated_id)
                     || join.right.is_correlated_by_correlated_id(correlated_id)
             }
+            Relation::TableFunction {
+                expr: table_function,
+                with_ordinality: _,
+            } => table_function.has_correlated_input_ref_by_correlated_id(correlated_id),
+            Relation::Share(share) => match &share.input {
+                BoundShareInput::Query(query) => {
+                    query.is_correlated_by_correlated_id(correlated_id)
+                }
+                BoundShareInput::ChangeLog(change_log) => {
+                    change_log.is_correlated_by_correlated_id(correlated_id)
+                }
+            },
             _ => false,
         }
     }
@@ -126,7 +153,7 @@ impl Relation {
             Relation::Subquery(subquery) => subquery
                 .query
                 .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-            Relation::Join(join) | Relation::Apply(join) => {
+            Relation::Join(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
@@ -139,6 +166,25 @@ impl Relation {
                 correlated_indices.extend(
                     join.right
                         .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+                correlated_indices
+            }
+            Relation::Apply(join) => {
+                let mut correlated_indices = vec![];
+                correlated_indices.extend(
+                    join.cond
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+                correlated_indices.extend(
+                    join.left
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+                correlated_indices.extend(
+                    join.right
+                        .collect_correlated_indices_by_depth_and_assign_id(
+                            depth + 1,
+                            correlated_id,
+                        ),
                 );
                 correlated_indices
             }
@@ -340,12 +386,18 @@ impl Binder {
         &mut self,
         columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
+        schema_name: Option<String>,
         alias: Option<&TableAlias>,
     ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
-        let (table_name, column_aliases) = match alias {
-            None => (table_name, &EMPTY[..]),
-            Some(TableAlias { name, columns }) => (name.real_value(), columns.as_slice()),
+        let (resolved_schema_name, table_name, column_aliases, table_alias) = match alias {
+            None => (schema_name.clone(), table_name, &EMPTY[..], None),
+            Some(TableAlias { name, columns }) => (
+                None,
+                name.real_value(),
+                columns.as_slice(),
+                Some(table_name),
+            ),
         };
 
         let num_col_aliases = column_aliases.len();
@@ -366,6 +418,8 @@ impl Binder {
             field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
+                schema_name.clone(),
+                table_alias.clone(),
                 begin + index,
                 is_hidden,
                 field,
@@ -386,7 +440,11 @@ impl Binder {
             .into());
         }
 
-        match self.context.range_of.entry(table_name.clone()) {
+        match self
+            .context
+            .range_of
+            .entry((resolved_schema_name, table_name.clone()))
+        {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name while binding table to context: {}",
                 table_name
@@ -452,21 +510,41 @@ impl Binder {
                     .collect();
             }
 
+            let exposed_table_name = original_alias.name.real_value();
+            self.context
+                .check_relation_name_conflict(&exposed_table_name)?;
+
             match cte_state {
                 BindingCteState::Bound { query } => {
                     let input = BoundShareInput::Query(query);
-                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name,
+                        None,
+                        Some(&original_alias),
+                    )?;
+                    self.context.add_cte_name(exposed_table_name);
                     // we could always share the cte,
                     // no matter it's recursive or not.
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
                 BindingCteState::ChangeLog { table } => {
                     let input = BoundShareInput::ChangeLog(table);
-                    self.bind_table_to_context(input.fields()?, table_name, Some(&original_alias))?;
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name,
+                        None,
+                        Some(&original_alias),
+                    )?;
+                    self.context.add_cte_name(exposed_table_name);
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
             }
         } else {
+            let exposed_table_name = alias
+                .map(|alias| alias.name.real_value())
+                .unwrap_or_else(|| table_name.clone());
+            self.context.check_catalog_name(&exposed_table_name)?;
             self.bind_catalog_relation_by_name(
                 db_name.as_deref(),
                 schema_name.as_deref(),
@@ -555,9 +633,9 @@ impl Binder {
                 args,
                 with_ordinality,
             } => {
-                self.try_mark_lateral_as_visible();
+                let visibility = self.mark_lateral_contexts_visible();
                 let result = self.bind_table_function(name, alias.as_ref(), args, *with_ordinality);
-                self.try_mark_lateral_as_invisible();
+                self.restore_lateral_contexts_visibility(visibility);
                 result
             }
             TableFactor::Derived {
@@ -566,16 +644,13 @@ impl Binder {
                 alias,
             } => {
                 if *lateral {
-                    // If we detect a lateral, we mark the lateral context as visible.
-                    self.try_mark_lateral_as_visible();
+                    let visibility = self.mark_lateral_contexts_visible();
 
                     // Bind lateral subquery here.
-                    let bound_subquery =
-                        self.bind_subquery_relation(subquery, alias.as_ref(), true)?;
+                    let result = self.bind_subquery_relation(subquery, alias.as_ref(), true);
 
-                    // Mark the lateral context as invisible once again.
-                    self.try_mark_lateral_as_invisible();
-                    Ok(Relation::Subquery(Box::new(bound_subquery)))
+                    self.restore_lateral_contexts_visibility(visibility);
+                    result.map(|subquery| Relation::Subquery(Box::new(subquery)))
                 } else {
                     // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();

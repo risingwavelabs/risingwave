@@ -245,7 +245,8 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Returns the item if it's the only item in this mapping, otherwise returns `None`.
     pub fn to_single(&self) -> Option<T::Item> {
-        self.data.iter().copied().dedup().exactly_one().ok()
+        // UFCS pins this to `itertools::Itertools::exactly_one` (see rust#48919).
+        Itertools::exactly_one(self.data.iter().copied().dedup()).ok()
     }
 
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents

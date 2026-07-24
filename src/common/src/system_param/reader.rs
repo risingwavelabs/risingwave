@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::str::FromStr;
 
 use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{AdaptiveParallelismStrategy, ParamValue, default};
+use super::{ParamValue, StateStoreUrlRef, default};
 use crate::for_all_params;
 
 /// Information about a system parameter.
@@ -162,12 +161,13 @@ where
         self.inner().block_size_kb.unwrap()
     }
 
+    #[expect(deprecated)]
     fn bloom_false_positive(&self) -> f64 {
         self.inner().bloom_false_positive.unwrap()
     }
 
-    fn state_store(&self) -> &str {
-        self.inner().state_store.as_ref().unwrap()
+    fn state_store(&self) -> StateStoreUrlRef<'_> {
+        self.inner().state_store.as_deref().unwrap().into()
     }
 
     fn data_directory(&self) -> &str {
@@ -218,14 +218,6 @@ where
         self.inner()
             .time_travel_retention_ms
             .unwrap_or_else(default::time_travel_retention_ms)
-    }
-
-    fn adaptive_parallelism_strategy(&self) -> AdaptiveParallelismStrategy {
-        self.inner()
-            .adaptive_parallelism_strategy
-            .as_deref()
-            .and_then(|s| AdaptiveParallelismStrategy::from_str(s).ok())
-            .unwrap_or(AdaptiveParallelismStrategy::Auto)
     }
 
     fn per_database_isolation(&self) -> <bool as ParamValue>::Borrowed<'_> {

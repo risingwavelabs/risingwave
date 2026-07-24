@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::num::NonZeroU32;
 
 use fixedbitset::FixedBitSet;
@@ -178,7 +178,7 @@ impl StreamMaterialize {
     /// Different from `create`, the `columns` are passed in directly, instead of being derived from
     /// the input. So the column IDs are preserved from the SQL columns binding step and will be
     /// consistent with the source node and DML node.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_for_table(
         input: PlanRef,
         name: String,
@@ -438,7 +438,7 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            read_prefix_len_hint: _,
             version,
             watermark_columns: _,
             dist_key_in_pk,
@@ -470,17 +470,14 @@ impl StreamMaterialize {
         assert!(retention_seconds.is_none());
         assert!(refreshable);
 
-        // only keep pk columns
-        let mut pk_col_indices = vec![];
-        let mut pk_cols = vec![];
-        for (i, col) in columns.iter().enumerate() {
-            if pk.iter().any(|pk| pk.column_index == i) {
-                pk_col_indices.push(i);
-                pk_cols.push(col.clone());
-            }
-        }
+        // Keep pk columns in pk order, so the staging chunk projected by pk indices can be
+        // written directly without reordering.
+        let pk_col_indices = pk.iter().map(|pk| pk.column_index).collect_vec();
+        let pk_cols = pk_col_indices
+            .iter()
+            .map(|&col_idx| columns[col_idx].clone())
+            .collect_vec();
         let mapping = ColIndexMapping::with_remaining_columns(&pk_col_indices, columns.len());
-
         TableCatalog {
             id,
             schema_id,
@@ -495,7 +492,8 @@ impl StreamMaterialize {
                 .collect(),
             stream_key: mapping.try_map_all(stream_key).unwrap(),
             vnode_col_index: vnode_col_index.map(|i| mapping.map(i)),
-            dist_key_in_pk: mapping.try_map_all(dist_key_in_pk).unwrap(),
+            // `dist_key_in_pk` is already based on pk positions, so it should keep unchanged.
+            dist_key_in_pk,
             distribution_key: mapping.try_map_all(distribution_key).unwrap(),
             table_type: TableType::Internal,
             watermark_columns: FixedBitSet::new(),
@@ -509,7 +507,10 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            // Refresh staging tables are consumed by the refresh merge path with
+            // `iter_keyed_row_with_vnode` range scans. They are not read by
+            // fixed-prefix lookups, so prefix SST filters would only add write cost.
+            read_prefix_len_hint: 0,
             version,
             created_at_epoch,
             initialized_at_epoch,

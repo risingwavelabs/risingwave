@@ -104,15 +104,38 @@ public abstract class JdbcUtils {
             props.setProperty(
                     "reWriteBatchedInsertsSize", String.valueOf(config.getBatchInsertRows()));
         }
+        // Configure TCP keep-alive with custom SocketFactory if enabled
+        boolean keepaliveConfigured = false;
+        try {
+            if (config.isKeepaliveEnabled()) {
+                LOG.info(
+                        "Enabling TCP keep-alive: idle={}s, interval={}s, count={}",
+                        config.getKeepaliveIdleSeconds(),
+                        config.getKeepaliveIntervalSeconds(),
+                        config.getKeepaliveCount());
+                // Configure the ThreadLocal factory parameters
+                JDBCKeepaliveSocketFactory.configure(
+                        config.getKeepaliveIdleSeconds(),
+                        config.getKeepaliveIntervalSeconds(),
+                        config.getKeepaliveCount());
+                keepaliveConfigured = true;
+                props.setProperty("socketFactory", JDBCKeepaliveSocketFactory.class.getName());
+            }
 
-        var conn = DriverManager.getConnection(jdbcUrl, props);
-        // disable auto commit can improve performance
-        conn.setAutoCommit(config.isAutoCommit());
-        // explicitly set isolation level to RC
-        // Fix: https://github.com/risingwavelabs/risingwave/issues/24215
-        if (!jdbcUrl.startsWith("jdbc:postgresql")) {
-            conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            var conn = DriverManager.getConnection(jdbcUrl, props);
+            // disable auto commit can improve performance
+            conn.setAutoCommit(config.isAutoCommit());
+            // explicitly set isolation level to RC
+            // Fix: https://github.com/risingwavelabs/risingwave/issues/24215
+            if (!jdbcUrl.startsWith("jdbc:postgresql")) {
+                conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            }
+            return conn;
+        } finally {
+            // Clean up ThreadLocal to prevent memory leak
+            if (keepaliveConfigured) {
+                JDBCKeepaliveSocketFactory.clearConfig();
+            }
         }
-        return conn;
     }
 }
