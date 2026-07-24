@@ -521,6 +521,15 @@ impl CatalogController {
             .iter()
             .map(|job_id| job_id.as_mv_table_id())
             .collect_vec();
+        // Object deletion cascades to the fragments of the dirty streaming jobs. Keep their IDs
+        // before the transaction deletes them so the serving mapping can be notified after commit.
+        let dirty_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(dirty_job_ids.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         // Filter out dummy objs for replacement.
         // todo: we'd better introduce a new dummy object type for replacement.
@@ -649,6 +658,10 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.into_iter().map(|t| (t.id, t)));
+
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(dirty_fragment_ids);
 
         let object_group = build_object_group_for_delete(
             to_notify_objs
