@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
-use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::parser::{
     BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
@@ -47,7 +47,8 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
-    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
+    cmp_pk_unsigned_aware, get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
+    mark_cdc_chunk,
 };
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
@@ -56,6 +57,12 @@ use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
+
+struct PkCompareInfo<'a> {
+    indices: &'a [usize],
+    order: &'a [OrderType],
+    needs_unsigned_i64_compare: &'a [bool],
+}
 
 // The TimestampHandling/TimestamptzHandling/TimeHandling parser's behavior depends on the debezium.time.precision.mode setting:
 // - If left unset, Debezium defaults to time.precision.mode=microseconds (per debezium.properties), and the parser uses Micro.
@@ -191,8 +198,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
         upstream_chunk_buffer: &mut Vec<StreamChunk>,
         current_pk_pos: Option<&OwnedRow>,
-        pk_indices: &[usize],
-        pk_order: &[OrderType],
+        pk_compare: PkCompareInfo<'_>,
         last_binlog_offset: &Option<CdcOffset>,
         output_indices: &[usize],
     ) -> StreamExecutorResult<(Vec<StreamChunk>, u64, Option<CdcOffset>)> {
@@ -227,10 +233,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .as_ref()
                     .is_none_or(|binlog_low| *binlog_low <= event_offset);
 
-                let row_pk = row.project(pk_indices);
-                let reached_current_pos =
-                    cmp_datum_iter(row_pk.iter(), current_pos.iter(), pk_order.iter().copied())
-                        .is_le();
+                let row_pk = row.project(pk_compare.indices);
+                let reached_current_pos = cmp_pk_unsigned_aware(
+                    row_pk.iter(),
+                    current_pos.iter(),
+                    pk_compare.order,
+                    pk_compare.needs_unsigned_i64_compare,
+                )
+                .is_le();
                 if !in_binlog_range {
                     continue;
                 }
@@ -418,6 +428,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
+
+        // Whether each pk column needs unsigned `i64` comparison. Frontend up-casts narrower
+        // unsigned integers, while unsigned float/double/decimal keep their native comparison
+        // semantics; only `BIGINT UNSIGNED` can overflow into a negative `i64` in RisingWave.
+        let pk_needs_unsigned_i64_compare = {
+            let schema = self.external_table.schema();
+            let pk_names: Vec<String> = pk_indices
+                .iter()
+                .map(|&i| schema.fields[i].name.clone())
+                .collect();
+            upstream_table_reader
+                .reader
+                .pk_column_unsigned_i64_compare_flags(&pk_names)?
+        };
 
         tracing::info!(
             %table_id,
@@ -621,8 +645,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             &offset_parse_func,
                                             &mut upstream_chunk_buffer,
                                             current_pk_pos.as_ref(),
-                                            &pk_indices,
-                                            &pk_order,
+                                            PkCompareInfo {
+                                                indices: &pk_indices,
+                                                order: &pk_order,
+                                                needs_unsigned_i64_compare:
+                                                    &pk_needs_unsigned_i64_compare,
+                                            },
                                             &last_binlog_offset,
                                             &self.output_indices,
                                         )?;
@@ -836,6 +864,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 current_pos,
                                 &pk_indices,
                                 &pk_order,
+                                &pk_needs_unsigned_i64_compare,
                                 last_binlog_offset.clone(),
                             )?,
                             &self.output_indices,
@@ -1099,6 +1128,7 @@ mod tests {
     };
     use risingwave_storage::memory::MemoryStateStore;
 
+    use super::PkCompareInfo;
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -1344,8 +1374,11 @@ mod tests {
                 &MockExternalTableReader::get_cdc_offset_parser(),
                 &mut upstream_chunk_buffer,
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
-                &[0],
-                &[OrderType::ascending()],
+                PkCompareInfo {
+                    indices: &[0],
+                    order: &[OrderType::ascending()],
+                    needs_unsigned_i64_compare: &[false],
+                },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1378,6 +1411,85 @@ mod tests {
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(6)),
                 Some(ScalarImpl::Int64(600)),
+                Some(ScalarImpl::Utf8(
+                    r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                        .into(),
+                )),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_consume_buffer_uses_unsigned_bigint_pk_order() {
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
+            &[
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(4)),
+                        Some(ScalarImpl::Int64(400)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        // `u64::MAX` represented in RisingWave's `i64` storage.
+                        Some(ScalarImpl::Int64(-1)),
+                        Some(ScalarImpl::Int64(900)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+            ],
+            &[DataType::Int64, DataType::Int64, DataType::Varchar],
+        )];
+
+        let (emitted_chunks, drained_row_count, drained_offset) =
+            CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                &MockExternalTableReader::get_cdc_offset_parser(),
+                &mut upstream_chunk_buffer,
+                Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+                PkCompareInfo {
+                    indices: &[0],
+                    order: &[OrderType::ascending()],
+                    needs_unsigned_i64_compare: &[true],
+                },
+                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &[0, 1],
+            )
+            .unwrap();
+
+        assert_eq!(drained_row_count, 1);
+        assert_eq!(
+            drained_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+        );
+        assert_eq!(emitted_chunks.len(), 1);
+        assert_eq!(
+            emitted_chunks[0].rows().next().unwrap().1.to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(4)),
+                Some(ScalarImpl::Int64(400))
+            ])
+        );
+
+        assert_eq!(upstream_chunk_buffer.len(), 1);
+        assert_eq!(
+            upstream_chunk_buffer[0]
+                .rows()
+                .next()
+                .unwrap()
+                .1
+                .to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(-1)),
+                Some(ScalarImpl::Int64(900)),
                 Some(ScalarImpl::Utf8(
                     r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
                         .into(),
@@ -1432,8 +1544,11 @@ mod tests {
                 &MockExternalTableReader::get_cdc_offset_parser(),
                 &mut upstream_chunk_buffer,
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
-                &[0],
-                &[OrderType::ascending()],
+                PkCompareInfo {
+                    indices: &[0],
+                    order: &[OrderType::ascending()],
+                    needs_unsigned_i64_compare: &[false],
+                },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1534,8 +1649,11 @@ mod tests {
                 &MockExternalTableReader::get_cdc_offset_parser(),
                 &mut upstream_chunk_buffer,
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
-                &[0],
-                &[OrderType::ascending()],
+                PkCompareInfo {
+                    indices: &[0],
+                    order: &[OrderType::ascending()],
+                    needs_unsigned_i64_compare: &[false],
+                },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 &[0, 1],
             )
@@ -1611,8 +1729,11 @@ mod tests {
                 &MockExternalTableReader::get_cdc_offset_parser(),
                 &mut upstream_chunk_buffer,
                 Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])),
-                &[0],
-                &[OrderType::ascending()],
+                PkCompareInfo {
+                    indices: &[0],
+                    order: &[OrderType::ascending()],
+                    needs_unsigned_i64_compare: &[false],
+                },
                 &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3))),
                 &[0, 1],
             )

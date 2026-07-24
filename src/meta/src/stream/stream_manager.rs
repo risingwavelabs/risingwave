@@ -391,9 +391,9 @@ impl GlobalStreamManager {
             let version = match create_type {
                 CreateType::Background => {
                     stream_manager
-                        .env
-                        .notification_manager_ref()
-                        .current_version()
+                        .metadata_manager
+                        .catalog_controller
+                        .notify_frontend_trivial()
                         .await
                 }
                 CreateType::Foreground => {

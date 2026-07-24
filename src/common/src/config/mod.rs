@@ -44,9 +44,9 @@ pub use storage::{
 pub mod merge;
 pub mod mutate;
 pub mod none_as_empty_string;
+pub mod role;
 pub mod system;
 pub mod utils;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -58,6 +58,7 @@ pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
+pub use role::*;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
@@ -166,6 +167,8 @@ impl RwConfig {
 pub mod default {
 
     pub mod developer {
+        use crate::config::streaming::CacheRefillPolicy;
+
         pub fn meta_cached_traces_num() -> u32 {
             256
         }
@@ -472,6 +475,10 @@ pub mod default {
 
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn cache_refill_policy() -> CacheRefillPolicy {
+            CacheRefillPolicy::Enabled
         }
 
         pub fn enable_vnode_key_stats_for_materialize() -> bool {

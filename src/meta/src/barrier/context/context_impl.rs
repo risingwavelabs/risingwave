@@ -26,6 +26,8 @@ use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
+use risingwave_pb::meta::PbTableRefillRuntimeConfig;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -49,6 +51,7 @@ use crate::barrier::{
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
+use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
@@ -235,6 +238,35 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 })
             })
             .await
+    }
+
+    async fn refresh_table_refill_runtime_state_after_recovery(&self) -> MetaResult<()> {
+        let policies = self
+            .metadata_manager
+            .catalog_controller
+            .table_cache_refill_policies_snapshot()
+            .await?;
+        let (serving_workers, fragment_serving_infos) =
+            fetch_serving_infos(&self.metadata_manager).await?;
+
+        self.env
+            .notification_manager()
+            .notify_hummock(
+                Operation::Update,
+                Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                    table_cache_refill_policies: Some(policies),
+                    ..Default::default()
+                }),
+            )
+            .await;
+        sync_serving_table_vnode_mappings_to_hummock(
+            &self.env.notification_manager_ref(),
+            &self.serving_vnode_mapping,
+            &serving_workers,
+            &fragment_serving_infos,
+        )
+        .await;
+        Ok(())
     }
 
     #[await_tree::instrument("post_collect_command({command})")]

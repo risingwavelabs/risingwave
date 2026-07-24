@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use iceberg::spec::{FormatVersion, MAIN_BRANCH};
 use iceberg::table::Table;
+use iceberg::transaction::{MANIFEST_MIN_MERGE_COUNT_DEFAULT, MANIFEST_TARGET_SIZE_BYTES_DEFAULT};
 use iceberg::{Catalog, TableIdent};
 use parquet::basic::Compression;
 use serde::de::{self, Deserializer, Visitor};
@@ -111,6 +112,9 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
+pub const ENABLE_MANIFEST_REWRITE: &str = "enable_manifest_rewrite";
+pub const MANIFEST_REWRITE_TARGET_SIZE_BYTES: &str = "manifest_rewrite_target_size_bytes";
+pub const MANIFEST_REWRITE_MIN_COUNT_TO_MERGE: &str = "manifest_rewrite_min_count_to_merge";
 pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
 
 pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
@@ -399,6 +403,27 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub snapshot_expiration_clear_expired_meta_data: bool,
 
+    /// Whether to periodically rewrite fragmented Iceberg data manifests.
+    #[serde(
+        rename = "enable_manifest_rewrite",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_manifest_rewrite: bool,
+
+    /// Target size in bytes for rewritten Iceberg data manifests.
+    #[serde(rename = "manifest_rewrite_target_size_bytes", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub manifest_rewrite_target_size_bytes: Option<u64>,
+
+    /// Minimum number of manifests required to rewrite an under-filled batch.
+    #[serde(rename = "manifest_rewrite_min_count_to_merge", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub manifest_rewrite_min_count_to_merge: Option<usize>,
+
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
     /// If unset, defaults to 1000 only when compaction is enabled
@@ -574,6 +599,7 @@ impl IcebergConfig {
         // Enforce merge-on-read for append-only sinks
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
         config.validate_enable_pk_index()?;
+        config.validate_manifest_rewrite_format(config.format_version)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(
@@ -600,6 +626,18 @@ impl IcebergConfig {
         if config.max_snapshots_num_before_compaction == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.max_snapshots_num` must be greater than 0"
+            )));
+        }
+
+        if config.manifest_rewrite_target_size_bytes == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`manifest_rewrite_target_size_bytes` must be greater than 0"
+            )));
+        }
+
+        if config.manifest_rewrite_min_count_to_merge == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`manifest_rewrite_min_count_to_merge` must be greater than 0"
             )));
         }
 
@@ -686,6 +724,15 @@ impl IcebergConfig {
         self.format_version
     }
 
+    pub fn validate_manifest_rewrite_format(&self, format_version: FormatVersion) -> Result<()> {
+        if self.enable_manifest_rewrite && format_version >= FormatVersion::V3 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_manifest_rewrite` is not supported for Iceberg format version 3 because rewrite manifests cannot preserve row lineage"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn compaction_interval_sec(&self) -> u64 {
         // default to 1 hour
         self.compaction_interval_sec.unwrap_or(3600)
@@ -696,6 +743,16 @@ impl IcebergConfig {
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
             .map(|max_age_millis| current_time_ms - max_age_millis)
+    }
+
+    pub fn manifest_rewrite_target_size_bytes(&self) -> u64 {
+        self.manifest_rewrite_target_size_bytes
+            .unwrap_or(MANIFEST_TARGET_SIZE_BYTES_DEFAULT as u64)
+    }
+
+    pub fn manifest_rewrite_min_count_to_merge(&self) -> usize {
+        self.manifest_rewrite_min_count_to_merge
+            .unwrap_or(MANIFEST_MIN_MERGE_COUNT_DEFAULT as usize)
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {

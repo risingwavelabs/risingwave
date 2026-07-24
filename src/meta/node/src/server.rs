@@ -519,6 +519,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
+        serving_vnode_mapping.clone(),
         source_manager.clone(),
         sink_manager.clone(),
         iceberg_pk_index_sink_manager.clone(),

@@ -12272,6 +12272,7 @@ dependencies = [
  "thiserror 2.0.17",
  "thiserror-ext",
  "tracing",
+ "uuid",
  "workspace-hack",
  "zstd",
 ]
@@ -12918,6 +12919,7 @@ dependencies = [
  "madsim",
  "madsim-rdkafka",
  "madsim-tokio",
+ "madsim-tonic",
  "maplit",
  "paste",
  "pin-project",
