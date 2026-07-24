@@ -8,7 +8,8 @@
   sql: create table t (id int, value string);
 - id: create_append_only_table
   sql: create table t (id int, value string) append only;
-- before:
+- name: materialize impure select-list expressions by default on upsert stream
+  before:
   - create_table
   sql: |
     select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
@@ -25,6 +26,17 @@
     └─StreamProject { exprs: [t.id, t.value, $expr1, t._row_id] }
       └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1] }
         └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: skip impure select-list materialization with unsafe session option
+  before:
+  - create_table
+  sql: |
+    set streaming_unsafe_allow_unmaterialized_impure_expr = true;
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, value, embedding, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.id, t.value, OpenaiEmbedding('{"api_key": "sk-test-key", "model": "text-embedding-3-small"}':Jsonb, t.value) as $expr1, t._row_id] }
+      └─StreamTableScan { table: t, columns: [t.id, t.value, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - before:
   - create_table
   sql: |
