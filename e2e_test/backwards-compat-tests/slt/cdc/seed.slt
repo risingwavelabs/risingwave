@@ -24,8 +24,7 @@ CREATE SOURCE cdc_source_mysql WITH (
     port=3306,
     database.name='rwcdc',
     username='root',
-    password='123456',
-    auto.schema.change='true'
+    password='123456'
 );
 
 statement ok
