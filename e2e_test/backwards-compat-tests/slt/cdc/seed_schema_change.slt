@@ -10,6 +10,20 @@ DESCRIBE mysql_table_in_rw;
 ----
 id integer false NULL
 name character varying false NULL
+legacy_serial numeric false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description mysql_table_in_rw NULL NULL
+
+statement ok
+ALTER TABLE mysql_table_in_rw ALTER COLUMN legacy_serial SET DATA TYPE INT;
+
+query TTTT retry 10 backoff 3s
+DESCRIBE mysql_table_in_rw;
+----
+id integer false NULL
+name character varying false NULL
 legacy_serial integer false NULL
 _rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
