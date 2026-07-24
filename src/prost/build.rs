@@ -344,6 +344,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        WaitIcebergPkIndexSinkEpochRequest {
+            sink_id: SinkId,
+        }
         WaitRequest {
             job_id: JobId,
         }

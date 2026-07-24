@@ -94,7 +94,7 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
-pub(super) fn to_partial_graph_id(
+pub(crate) fn to_partial_graph_id(
     database_id: DatabaseId,
     creating_job_id: Option<JobId>,
 ) -> PartialGraphId {

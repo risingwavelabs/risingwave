@@ -841,6 +841,18 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Block until the pk-index sink `sink_id`'s database has committed through `epoch`, returning
+    /// the coordinator's committed iceberg snapshot id (`None` if no snapshot committed yet).
+    pub async fn wait_iceberg_pk_index_sink_epoch(
+        &self,
+        sink_id: SinkId,
+        epoch: u64,
+    ) -> Result<Option<i64>> {
+        let request = WaitIcebergPkIndexSinkEpochRequest { sink_id, epoch };
+        let resp = self.inner.wait_iceberg_pk_index_sink_epoch(request).await?;
+        Ok(resp.snapshot_id)
+    }
+
     pub async fn create_view(
         &self,
         view: PbView,
@@ -2761,6 +2773,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
+            ,{ ddl_client, wait_iceberg_pk_index_sink_epoch, WaitIcebergPkIndexSinkEpochRequest, WaitIcebergPkIndexSinkEpochResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

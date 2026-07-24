@@ -27,6 +27,7 @@
 
 mod position_delete_handler_impl;
 mod position_delete_merger;
+mod position_delete_staging;
 mod writer;
 mod writer_impl;
 
