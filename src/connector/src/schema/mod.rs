@@ -17,6 +17,7 @@ use crate::error::ConnectorError;
 pub mod avro;
 mod loader;
 pub mod protobuf;
+pub mod pulsar_schema_registry;
 pub mod schema_registry;
 
 pub use loader::{ConfluentSchemaLoader, SchemaLoader, SchemaVersion};
@@ -26,6 +27,7 @@ const KEY_MESSAGE_NAME_KEY: &str = "key.message";
 const SCHEMA_LOCATION_KEY: &str = "schema.location";
 const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
 const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
+pub const SCHEMA_REGISTRY_TYPE_KEY: &str = "schema.registry.type";
 pub const AWS_GLUE_SCHEMA_ARN_KEY: &str = "aws.glue.schema_arn";
 
 #[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
