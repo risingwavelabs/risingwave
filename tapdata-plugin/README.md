@@ -17,10 +17,11 @@ The final release decision must use CI and one exact, checksummed artifact.
 
 ## What it does
 
-- A recorded `1.0.0` source-matrix qualification artifact passed PostgreSQL, MySQL 8.4 with
-  `binlog_row_image=FULL`, MongoDB 7 with `enableFillingModifiedData=true`, and Kafka 3.9.1
-  through JSONB append-only mode. SQL Server has not yet been qualified; the final canonical JAR
-  must be identified by its release checksum rather than inferred from the version alone
+- The `1.0.0` source matrix passed PostgreSQL, MySQL 8.4 with `binlog_row_image=FULL`,
+  MongoDB 7 with `enableFillingModifiedData=true`, SQL Server 2022 Change Tracking,
+  Oracle 26ai LogMiner, and Kafka 3.9.1 through JSONB append-only mode. SQL Server and
+  Oracle were exercised through both WebSocket streaming and JDBC fallback. The final
+  canonical JAR must be identified by its release checksum rather than its version alone
 - Supports batch snapshot sync and CDC (change-data-capture) streaming
 - In streaming mode, auto-creates webhook-backed tables (`WITH (connector = 'webhook')`)
 - Handles RisingWave SQL dialect differences from PostgreSQL automatically
@@ -252,8 +253,9 @@ docs/risingwave_zh_CN.md    - Chinese documentation
   this is a Kafka source/runtime requirement, not a RisingWave target requirement
 - That legacy Kafka source inferred arrays as `STRING`. JSONB mode preserved the source-emitted
   value; native array typing still requires qualification with TapData's current Kafka connector
-- SQL Server remains unqualified and requires a supported TapData connector on an x86-64 test
-  environment; this is a source-matrix gap, not a reproduced RisingWave target failure
+- SQL Server and Oracle tasks must use their real primary key as the target update condition;
+  TapFlow-generated tasks can otherwise retain the generic `_id` default
+- Oracle 19c+ must use manual LogMiner (`autoLog=false`); Continuous Miner is no longer supported
 - PostgreSQL updates with unavailable TOAST values fail if `before` and `after` cannot reconstruct
   the column; the connector never guesses the missing value
 - Unknown relational fields fail explicitly because DDL/schema changes are not propagated

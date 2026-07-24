@@ -77,7 +77,13 @@ Source requirements:
 - MongoDB must keep TapData Update Field Completion enabled
   (`enableFillingModifiedData=true`, the TapData default).
 - Kafka was qualified through JSONB append-only mode.
-- SQL Server and Oracle are not part of the qualified 1.0.0 source matrix.
+- SQL Server 2022 was qualified with database/table Change Tracking enabled.
+- Oracle 26ai was qualified with ARCHIVELOG, primary-key supplemental logging, manual LogMiner,
+  and `SET CONTAINER` for the common mining user.
+- SQL Server and Oracle passed snapshot, insert/update/delete, primary-key change, and type
+  mapping through both WebSocket streaming and JDBC fallback. WebSocket tasks also passed
+  stop/start checkpoint recovery. The target update condition must be the real primary key,
+  not TapFlow's generic `_id` default.
 
 ## WebSocket protocol
 
