@@ -1930,6 +1930,9 @@ TurbopufferConfig:
   - name: disable_backpressure
     field_type: bool
     required: false
+  - name: num_shards
+    field_type: usize
+    required: false
   - name: full_text_search_columns
     field_type: String
     required: false
