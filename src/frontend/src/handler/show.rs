@@ -865,7 +865,8 @@ pub fn handle_show_create_object(
         .get_user_by_name(user_name)
         .expect("user not found");
 
-    let (sql, schema_name) = match show_create_type {
+    let mut rows = vec![];
+    match show_create_type {
         ShowCreateType::MaterializedView => {
             let (mv, schema) = schema_path
                 .try_find(|schema_name| {
@@ -879,7 +880,10 @@ pub fn handle_show_create_object(
                     )
                 })?
                 .ok_or_else(|| CatalogError::not_found("materialized view", name.to_string()))?;
-            (mv.create_sql(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: mv.create_sql(),
+            });
         }
         ShowCreateType::View => {
             let (view, schema) =
@@ -887,7 +891,10 @@ pub fn handle_show_create_object(
             if !view.is_system_view() && !has_access_to_object(current_user, view.id, view.owner) {
                 return Err(CatalogError::not_found("view", name.to_string()).into());
             }
-            (view.create_sql(schema.to_owned()), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: view.create_sql(schema.to_owned()),
+            });
         }
         ShowCreateType::Table => {
             let (table, schema) = schema_path
@@ -904,7 +911,10 @@ pub fn handle_show_create_object(
                 })?
                 .ok_or_else(|| CatalogError::not_found("table", name.to_string()))?;
 
-            (table.create_sql_purified(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: table.create_sql_purified(),
+            });
         }
         ShowCreateType::Sink => {
             let (sink, schema) =
@@ -912,7 +922,10 @@ pub fn handle_show_create_object(
             if !has_access_to_object(current_user, sink.id, sink.owner) {
                 return Err(CatalogError::not_found("sink", name.to_string()).into());
             }
-            (sink.create_sql(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: sink.create_sql(),
+            });
         }
         ShowCreateType::Source => {
             let (source, schema) = schema_path
@@ -928,7 +941,10 @@ pub fn handle_show_create_object(
                     )
                 })?
                 .ok_or_else(|| CatalogError::not_found("source", name.to_string()))?;
-            (source.create_sql_purified(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: source.create_sql_purified(),
+            });
         }
         ShowCreateType::Index => {
             let (index, schema) = schema_path
@@ -943,10 +959,44 @@ pub fn handle_show_create_object(
                     )
                 })?
                 .ok_or_else(|| CatalogError::not_found("index", name.to_string()))?;
-            (index.create_sql(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: index.create_sql(),
+            });
         }
         ShowCreateType::Function => {
-            bail_not_implemented!("show create on: {}", show_create_type);
+            let (functions, schema) = schema_path
+                .try_find(|schema_name| {
+                    let schema_catalog =
+                        catalog_reader.get_schema_by_name(&database, schema_name)?;
+                    let mut funcs: Vec<_> = schema_catalog
+                        .get_functions_by_name(&object_name)
+                        .into_iter()
+                        .flatten()
+                        .filter(|f| has_access_to_object(current_user, f.id, f.owner))
+                        .cloned()
+                        .collect();
+                    funcs.sort_by_key(|f| {
+                        let arg_types = f
+                            .arg_types
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<_>>();
+                        (arg_types, f.id)
+                    });
+                    if funcs.is_empty() {
+                        Ok::<_, RwError>(None)
+                    } else {
+                        Ok(Some(funcs))
+                    }
+                })?
+                .ok_or_else(|| CatalogError::not_found("function", name.to_string()))?;
+            for f in functions {
+                rows.push(ShowCreateObjectRow {
+                    name: format!("{}.{}", schema, object_name),
+                    create_sql: f.create_sql(),
+                });
+            }
         }
         ShowCreateType::Subscription => {
             let (subscription, schema) =
@@ -954,16 +1004,15 @@ pub fn handle_show_create_object(
             if !has_access_to_object(current_user, subscription.id, subscription.owner) {
                 return Err(CatalogError::not_found("subscription", name.to_string()).into());
             }
-            (subscription.create_sql(), schema)
+            rows.push(ShowCreateObjectRow {
+                name: format!("{}.{}", schema, object_name),
+                create_sql: subscription.create_sql(),
+            });
         }
-    };
-    let name = format!("{}.{}", schema_name, object_name);
+    }
 
     Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-        .rows([ShowCreateObjectRow {
-            name,
-            create_sql: sql,
-        }])
+        .rows(rows)
         .into())
 }
 
