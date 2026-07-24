@@ -834,7 +834,7 @@ impl iter::Iterator for BitmapOnesIter<'_> {
                     };
                 }
                 cur_bits.map(|bits| {
-                    let low_bit = bits & bits.wrapping_neg();
+                    let low_bit = bits.isolate_lowest_one();
                     let low_bit_idx = bits.trailing_zeros();
                     *cur_bits = Some(bits ^ low_bit);
                     *cur_idx * BITS + low_bit_idx as usize
