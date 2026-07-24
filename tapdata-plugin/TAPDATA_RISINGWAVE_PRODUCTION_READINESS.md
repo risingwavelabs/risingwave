@@ -26,7 +26,8 @@ JAR checksum. No existing local JAR or historical checksum is a current release 
 | MySQL source | Qualified with `binlog_row_image=FULL` |
 | MongoDB source | Qualified with TapData Update Field Completion enabled |
 | Kafka source | Qualified through JSONB append-only mode |
-| SQL Server / Oracle | Not qualified for 1.0.0 |
+| SQL Server source | Qualified with SQL Server 2022 Change Tracking through WebSocket and JDBC |
+| Oracle source | Qualified with Oracle 26ai LogMiner through WebSocket and JDBC |
 | RisingWave Cloud | JDBC TLS and WSS were exercised on a development cluster |
 
 ## Qualification evidence
@@ -43,6 +44,9 @@ feature confidence but do not replace the final exact-artifact run after reposit
 | MySQL replication | FULL row-image update preserved unchanged fields |
 | MongoDB replication | Filled update preserved fields; `$unset` mapped to SQL `NULL` |
 | Kafka replication | Continuous keyless inserts through JSONB append-only mode |
+| SQL Server replication | Change Tracking snapshot, CDC, types, primary-key change, and restart through WebSocket and JDBC |
+| Oracle replication | LogMiner snapshot, CDC, types, primary-key change, and restart through WebSocket and JDBC |
+| Three-mode soak | One hour; 13/13 samples Running with monotonically increasing row counts and no task errors |
 | CDC semantics | Replace, removed fields, primary-key changes, missing identity, and unknown fields |
 | Scalar values | Numeric, decimal, temporal, JSONB, and binary round trips |
 | JDBC JSONB | Uses PostgreSQL `PGobject(type=jsonb)` and writes successfully |
@@ -70,7 +74,9 @@ feature confidence but do not replace the final exact-artifact run after reposit
 - Keep MySQL `binlog_row_image=FULL`.
 - Keep MongoDB `enableFillingModifiedData=true`; the target cannot distinguish an unsafe partial
   patch from a valid sparse full document when both arrive as after-only `_id` events.
-- Treat SQL Server and Oracle as unqualified until tested with supported TapData connectors.
+- Use SQL Server Change Tracking and the real source primary key as the target update condition.
+- Use Oracle 19c+ manual LogMiner (`autoLog=false`), PK supplemental logging, and the real source
+  primary key as the target update condition.
 - Do not claim exactly-once delivery for keyless JSONB.
 - Use an explicitly approved TapData runtime version and pin production container images by digest.
 - Use WSS and an appropriate JDBC SSL mode for remote deployments.
@@ -78,7 +84,8 @@ feature confidence but do not replace the final exact-artifact run after reposit
 ## Remaining release gates
 
 1. **Repository ownership:** choose one canonical source repository and publication owner.
-2. **Integration:** rebase or migrate onto the destination repository's current main branch.
+2. **Integration:** the branch is rebased onto the destination repository's current main; publish
+   the rewritten branch and open the PR.
 3. **CI:** ensure connector changes trigger at least Maven unit tests and packaging.
 4. **Clean build:** build from a committed worktree with `Git-Dirty: false`.
 5. **Exact-artifact tests:** install the generated JAR in a clean TapData environment and run:

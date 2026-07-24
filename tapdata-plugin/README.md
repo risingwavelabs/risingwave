@@ -13,6 +13,8 @@ RisingWave. Supports three write modes:
 Maintainer architecture and release requirements are summarized in
 [`TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md`](TAPDATA_RISINGWAVE_PLUGIN_HANDOFF.md) and
 [`TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md`](TAPDATA_RISINGWAVE_PRODUCTION_READINESS.md).
+The complete manual and automated acceptance workflow is in
+[`TAPDATA_RISINGWAVE_ACCEPTANCE_TEST.md`](TAPDATA_RISINGWAVE_ACCEPTANCE_TEST.md).
 The final release decision must use CI and one exact, checksummed artifact.
 
 ## What it does
