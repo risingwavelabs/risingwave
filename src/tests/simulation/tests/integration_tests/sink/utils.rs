@@ -18,7 +18,7 @@ use std::iter::once;
 use std::mem::take;
 use std::num::NonZero;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicU32, AtomicUsize};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -196,6 +196,7 @@ pub struct TestWriter {
     store: TestSinkStore,
     parallelism_counter: Arc<AtomicUsize>,
     err_rate: Arc<AtomicU32>,
+    barrier_delay_ms: Option<Arc<AtomicU64>>,
 }
 
 #[async_trait]
@@ -225,7 +226,12 @@ impl SinkWriter for TestWriter {
         &mut self,
         is_checkpoint: bool,
     ) -> risingwave_connector::sink::Result<Self::CommitMetadata> {
-        if is_checkpoint {
+        if let Some(barrier_delay_ms) = &self.barrier_delay_ms {
+            let barrier_delay_ms = barrier_delay_ms.load(Relaxed);
+            if barrier_delay_ms > 0 {
+                sleep(Duration::from_millis(barrier_delay_ms)).await;
+            }
+        } else if is_checkpoint {
             self.store.inc_checkpoint();
             sleep(Duration::from_millis(100)).await;
         }
@@ -504,10 +510,12 @@ pub struct SimulationTestSink {
     pub store: TestSinkStore,
     pub parallelism_counter: Arc<AtomicUsize>,
     pub err_rate: Arc<AtomicU32>,
+    barrier_delay_ms: Option<(Arc<AtomicU64>, u64)>,
 }
 
 pub enum TestSinkType {
     SinkWriter,
+    SlowBarrier(Duration),
     SinglePhaseCoordinatedSink,
     TwoPhaseCoordinatedSink,
     AsyncTruncate,
@@ -531,6 +539,13 @@ impl SimulationTestSink {
         let parallelism_counter = Arc::new(AtomicUsize::new(0));
         let err_rate = Arc::new(AtomicU32::new(0));
         let store = TestSinkStore::new();
+        let barrier_delay_ms = match &test_type {
+            TestSinkType::SlowBarrier(delay) => Some((
+                Arc::new(AtomicU64::new(0)),
+                delay.as_millis().try_into().unwrap(),
+            )),
+            _ => None,
+        };
 
         let _sink_guard = match test_type {
             TestSinkType::SinglePhaseCoordinatedSink => {
@@ -649,6 +664,29 @@ impl SimulationTestSink {
                             store: store.clone(),
                             parallelism_counter: parallelism_counter.clone(),
                             err_rate: err_rate.clone(),
+                            barrier_delay_ms: None,
+                        }
+                        .into_log_sinker(metrics),
+                    );
+                    async move { Ok(log_sinker) }.boxed()
+                }
+            }),
+            TestSinkType::SlowBarrier(_) => register_build_sink({
+                let parallelism_counter = parallelism_counter.clone();
+                let err_rate = err_rate.clone();
+                let store = store.clone();
+                let barrier_delay_ms = barrier_delay_ms.as_ref().unwrap().0.clone();
+                use risingwave_connector::sink::SinkWriterMetrics;
+                use risingwave_connector::sink::writer::SinkWriterExt;
+                move |_, writer_param| {
+                    parallelism_counter.fetch_add(1, Relaxed);
+                    let metrics = SinkWriterMetrics::new(&writer_param);
+                    let log_sinker = risingwave_connector::sink::boxed::boxed_log_sinker(
+                        TestWriter {
+                            store: store.clone(),
+                            parallelism_counter: parallelism_counter.clone(),
+                            err_rate: err_rate.clone(),
+                            barrier_delay_ms: Some(barrier_delay_ms.clone()),
                         }
                         .into_log_sinker(metrics),
                     );
@@ -740,7 +778,13 @@ impl SimulationTestSink {
             parallelism_counter,
             store,
             err_rate,
+            barrier_delay_ms,
         }
+    }
+
+    pub fn enable_barrier_delay(&self) {
+        let (barrier_delay_ms, delay) = self.barrier_delay_ms.as_ref().unwrap();
+        barrier_delay_ms.store(*delay, Relaxed);
     }
 
     pub fn set_err_rate(&self, err_rate: f64) {
