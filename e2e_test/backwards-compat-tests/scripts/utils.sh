@@ -100,6 +100,16 @@ run_risectl() (
   .risingwave/bin/risingwave/risectl "$@"
 )
 
+enable_mysql_cdc_auto_schema_change() {
+  local phase="$1"
+  echo "--- CDC TEST: Enabling auto schema change on ${phase} MySQL CDC source"
+  local mysql_cdc_source_id
+  mysql_cdc_source_id=$(run_sql_scalar "SELECT id FROM rw_catalog.rw_sources WHERE name = 'cdc_source_mysql';")
+  run_risectl meta alter-source-properties-safe \
+    --source-id "$mysql_cdc_source_id" \
+    --props '{"auto.schema.change":"true"}'
+}
+
 check_version() {
   local VERSION=$1
   local raw_version=$(run_sql "SELECT version();")
@@ -664,6 +674,8 @@ seed_old_cluster() {
 
   echo "--- CDC TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed.slt"
+  enable_mysql_cdc_auto_schema_change "old-cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed_schema_change.slt"
 
   echo "--- CDC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_original.slt"
@@ -742,12 +754,7 @@ validate_new_cluster() {
   echo "--- ASOF JOIN TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_restart.slt"
 
-  echo "--- CDC TEST: Enabling auto schema change on upgraded MySQL CDC source"
-  local mysql_cdc_source_id
-  mysql_cdc_source_id=$(run_sql_scalar "SELECT id FROM rw_catalog.rw_sources WHERE name = 'cdc_source_mysql';")
-  run_risectl meta alter-source-properties-safe \
-    --source-id "$mysql_cdc_source_id" \
-    --props '{"auto.schema.change":"true"}'
+  enable_mysql_cdc_auto_schema_change "upgraded"
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"

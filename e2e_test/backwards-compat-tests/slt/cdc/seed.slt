@@ -9,12 +9,6 @@ CREATE TABLE table_in_mysql (
     name VARCHAR(255)
 );
 INSERT INTO table_in_mysql VALUES (1,'11'),(2,'22');
-CREATE TABLE serial_table_in_mysql (
-    id SERIAL,
-    name VARCHAR(255),
-    PRIMARY KEY (id)
-);
-INSERT INTO serial_table_in_mysql (name) VALUES ('snapshot_1'),('snapshot_2');
 EOF
 
 statement ok
@@ -33,9 +27,6 @@ CREATE TABLE mysql_table_in_rw (
     name VARCHAR
 )
 FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
-
-statement ok
-CREATE TABLE mysql_serial_table_in_rw (*) FROM cdc_source_mysql TABLE 'rwcdc.serial_table_in_mysql';
 
 
 # postgres
