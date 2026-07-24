@@ -336,6 +336,7 @@ impl PulsarBrokerReader {
             pulsar_reader: self.consumer,
             ack_rx,
             topic: self.split.topic.to_string(),
+            termination_reported: false,
         }
     }
 }
@@ -346,9 +347,32 @@ struct PulsarConsumeStream {
     pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
     ack_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     topic: String,
+    termination_reported: bool,
 }
 
 impl PulsarConsumeStream {
+    fn unexpected_termination_error(&self) -> pulsar::error::Error {
+        // Current RisingWave Pulsar sources are unbounded, so SDK consumer
+        // termination is unexpected and should trigger source retry. Future
+        // bounded Pulsar source mode must revisit this assumption.
+        pulsar::error::Error::Custom(format!(
+            "unexpected Pulsar consumer termination: source_id={}, source_name={}, actor_id={}, fragment_id={}, split_id={}, topic={}",
+            self.source_ctx.source_id,
+            self.source_ctx.source_name,
+            self.source_ctx.actor_id,
+            self.source_ctx.fragment_id,
+            self.split_id,
+            self.topic,
+        ))
+    }
+
+    fn report_unexpected_termination(
+        &mut self,
+    ) -> Poll<Option<Result<Message<Vec<u8>>, pulsar::error::Error>>> {
+        self.termination_reported = true;
+        Poll::Ready(Some(Err(self.unexpected_termination_error())))
+    }
+
     fn inc_ack_failure_count(&self, failure_type: ConnectorAckFailureType) {
         self.source_ctx.metrics.inc_connector_ack_failure_count(
             self.source_ctx.source_name.as_str(),
@@ -425,6 +449,10 @@ impl futures::Stream for PulsarConsumeStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if self.termination_reported {
+            return Poll::Ready(None);
+        }
+
         match (
             self.ack_rx.poll_recv(cx),
             self.pulsar_reader.poll_next_unpin(cx),
@@ -442,7 +470,9 @@ impl futures::Stream for PulsarConsumeStream {
                 Some(Err(e)) => {
                     return Poll::Ready(Some(Err(e)));
                 }
-                None => {}
+                None => {
+                    return self.report_unexpected_termination();
+                }
             },
             (Poll::Ready(some_ack), Poll::Ready(maybe_message)) => {
                 if let Some(ack_message_id) = some_ack {
@@ -455,7 +485,9 @@ impl futures::Stream for PulsarConsumeStream {
                     Some(Err(e)) => {
                         return Poll::Ready(Some(Err(e)));
                     }
-                    None => {}
+                    None => {
+                        return self.report_unexpected_termination();
+                    }
                 }
             }
         }
