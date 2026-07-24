@@ -475,6 +475,10 @@ pub struct SessionConfig {
     #[parameter(default = 40_usize)] // default value borrowed from pg_vector
     batch_hnsw_ef_search: usize,
 
+    /// The column width used when pretty-printing the plan tree in `EXPLAIN` output.
+    #[parameter(default = 2048_usize)]
+    explain_column_width: usize,
+
     /// Enable index selection for queries
     #[parameter(default = true)]
     enable_index_selection: bool,

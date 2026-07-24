@@ -796,8 +796,9 @@ impl<C: ConventionMarker> Explain for PlanRef<C> {
     fn explain_to_string(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
 
+        let width = self.ctx().session_ctx().config().explain_column_width();
         let mut output = String::with_capacity(2048);
-        let mut config = pretty_config();
+        let mut config = pretty_config(width);
         config.unicode(&mut output, &plan.explain());
         output
     }
@@ -844,11 +845,11 @@ impl<C: ConventionMarker> PlanRef<C> {
     }
 }
 
-pub(crate) fn pretty_config() -> PrettyConfig {
+pub(crate) fn pretty_config(width: usize) -> PrettyConfig {
     PrettyConfig {
         indent: 3,
         need_boundaries: false,
-        width: 2048,
+        width,
         reduced_spaces: true,
     }
 }
