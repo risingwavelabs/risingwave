@@ -36,7 +36,7 @@ use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroup
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{CdcTableType, OptionalAssociatedSourceId};
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
@@ -75,6 +75,22 @@ pub struct DdlServiceImpl {
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     barrier_scheduler: BarrierScheduler,
+}
+
+fn keep_legacy_mysql_serial_int32_columns_for_schema_change(
+    original_columns: &HashSet<(String, DataType)>,
+    new_columns: &mut HashSet<(String, DataType)>,
+    is_mysql_cdc_table: bool,
+) {
+    if !is_mysql_cdc_table {
+        return;
+    }
+
+    for (name, data_type) in original_columns {
+        if data_type == &DataType::Int32 && new_columns.remove(&(name.clone(), DataType::Decimal)) {
+            new_columns.insert((name.clone(), DataType::Int32));
+        }
+    }
 }
 
 impl DdlServiceImpl {
@@ -1429,6 +1445,12 @@ impl DdlService for DdlServiceImpl {
                     }
                 }
 
+                keep_legacy_mysql_serial_int32_columns_for_schema_change(
+                    &original_columns,
+                    &mut new_columns,
+                    table.cdc_table_type == Some(CdcTableType::Mysql as i32),
+                );
+
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
                 {
@@ -1961,4 +1983,45 @@ fn add_auto_schema_change_fail_event_log(
         fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use risingwave_common::types::DataType;
+
+    use super::keep_legacy_mysql_serial_int32_columns_for_schema_change;
+
+    #[test]
+    fn test_keep_legacy_mysql_serial_int32_columns_for_schema_change() {
+        let original_columns = HashSet::from([
+            ("id".to_owned(), DataType::Int32),
+            ("name".to_owned(), DataType::Varchar),
+        ]);
+        let mut new_columns = HashSet::from([
+            ("id".to_owned(), DataType::Decimal),
+            ("name".to_owned(), DataType::Varchar),
+            ("note".to_owned(), DataType::Varchar),
+            ("new_serial".to_owned(), DataType::Decimal),
+        ]);
+
+        keep_legacy_mysql_serial_int32_columns_for_schema_change(
+            &original_columns,
+            &mut new_columns,
+            true,
+        );
+
+        assert!(new_columns.contains(&("id".to_owned(), DataType::Int32)));
+        assert!(!new_columns.contains(&("id".to_owned(), DataType::Decimal)));
+        assert!(new_columns.contains(&("new_serial".to_owned(), DataType::Decimal)));
+
+        let mut non_mysql_columns = HashSet::from([("id".to_owned(), DataType::Decimal)]);
+        keep_legacy_mysql_serial_int32_columns_for_schema_change(
+            &original_columns,
+            &mut non_mysql_columns,
+            false,
+        );
+        assert!(non_mysql_columns.contains(&("id".to_owned(), DataType::Decimal)));
+    }
 }

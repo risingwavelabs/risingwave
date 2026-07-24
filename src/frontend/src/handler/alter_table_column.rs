@@ -18,7 +18,9 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::DataType;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
@@ -66,9 +68,18 @@ pub async fn get_new_table_definition_for_cdc_table(
         constraints.clear();
     }
 
+    let new_columns = keep_legacy_serial_int32_columns(
+        original_catalog.columns(),
+        new_columns,
+        matches!(
+            original_catalog.cdc_table_type,
+            Some(ExternalCdcTableType::MySql)
+        ),
+    );
+
     let new_definition = try_purify_table_source_create_sql_ast(
         definition,
-        new_columns,
+        &new_columns,
         None,
         // The IDs of `new_columns` may not be consistently maintained at this point.
         // So we use the column names to identify the primary key columns.
@@ -76,6 +87,39 @@ pub async fn get_new_table_definition_for_cdc_table(
     )?;
 
     Ok(new_definition)
+}
+
+fn keep_legacy_serial_int32_columns(
+    original_columns: &[ColumnCatalog],
+    new_columns: &[ColumnCatalog],
+    is_mysql_cdc_table: bool,
+) -> Vec<ColumnCatalog> {
+    if !is_mysql_cdc_table {
+        return new_columns.to_vec();
+    }
+
+    let original_columns = original_columns
+        .iter()
+        .map(|column| (column.name(), column))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    new_columns
+        .iter()
+        .cloned()
+        .map(|mut column| {
+            if let Some(original_column) = original_columns.get(column.name())
+                // MySQL `SERIAL` used to be inferred as `Int32`. After fixing it to
+                // `Decimal`, Debezium's full-column schema-change payload may re-report
+                // an existing legacy column with the corrected type. Keep the persisted
+                // type for existing columns; newly added columns still use the new mapping.
+                && original_column.data_type() == &DataType::Int32
+                && column.data_type() == &DataType::Decimal
+            {
+                column.column_desc.data_type = DataType::Int32;
+            }
+            column
+        })
+        .collect()
 }
 
 pub async fn get_replace_table_plan(
@@ -350,12 +394,52 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
+        ColumnCatalog, ColumnDesc, ColumnId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+        ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
+    use super::keep_legacy_serial_int32_columns;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
+
+    #[test]
+    fn test_keep_legacy_serial_int32_columns() {
+        let original_columns = vec![
+            ColumnCatalog::visible(ColumnDesc::named("id", ColumnId::new(1), DataType::Int32)),
+            ColumnCatalog::visible(ColumnDesc::named("v1", ColumnId::new(2), DataType::Varchar)),
+        ];
+        let new_columns = vec![
+            ColumnCatalog::visible(ColumnDesc::named(
+                "id",
+                ColumnId::placeholder(),
+                DataType::Decimal,
+            )),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "v1",
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "new_serial",
+                ColumnId::placeholder(),
+                DataType::Decimal,
+            )),
+        ];
+
+        let columns = keep_legacy_serial_int32_columns(&original_columns, &new_columns, true);
+        let data_types: HashMap<_, _> = columns
+            .iter()
+            .map(|column| (column.name(), column.data_type().clone()))
+            .collect();
+
+        assert_eq!(data_types["id"], DataType::Int32);
+        assert_eq!(data_types["v1"], DataType::Varchar);
+        assert_eq!(data_types["new_serial"], DataType::Decimal);
+
+        let columns = keep_legacy_serial_int32_columns(&original_columns, &new_columns, false);
+        assert_eq!(columns[0].data_type(), &DataType::Decimal);
+    }
 
     #[tokio::test]
     async fn test_add_column_handler() {
