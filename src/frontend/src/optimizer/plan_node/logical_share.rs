@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::{Hash, Hasher};
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 
@@ -27,6 +29,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
     ToStreamContext,
 };
+use crate::optimizer::{OptimizerContextRef, ShareId};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalShare` operator is used to represent reusing of existing operators.
@@ -46,7 +49,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///        |
 ///   LogicalSource
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct LogicalShare {
     pub base: PlanBase<Logical>,
     core: generic::Share<PlanRef>,
@@ -54,11 +57,18 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        let _ctx = input.ctx();
-        let _functional_dependency = input.functional_dependency().clone();
-        let core = generic::Share::new(input);
-        let base = PlanBase::new_logical_with_core(&core);
+        let ctx = input.ctx();
+        let core = ctx.register_logical_share(input);
+        Self::with_core(core)
+    }
+
+    fn with_core(core: generic::Share<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_share(&core);
         LogicalShare { base, core }
+    }
+
+    pub(in crate::optimizer) fn from_share_id(ctx: OptimizerContextRef, share_id: ShareId) -> Self {
+        Self::with_core(ctx.logical_share(share_id))
     }
 
     pub fn create(input: PlanRef) -> PlanRef {
@@ -70,9 +80,23 @@ impl LogicalShare {
     }
 }
 
+impl PartialEq for LogicalShare {
+    fn eq(&self, other: &Self) -> bool {
+        self.share_id() == other.share_id()
+    }
+}
+
+impl Eq for LogicalShare {}
+
+impl Hash for LogicalShare {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.share_id().hash(state);
+    }
+}
+
 impl PlanTreeNodeUnary<Logical> for LogicalShare {
     fn input(&self) -> PlanRef {
-        self.core.input.borrow().clone()
+        self.core.input()
     }
 
     fn clone_with_input(&self, _input: PlanRef) -> Self {
@@ -91,13 +115,26 @@ impl PlanTreeNodeUnary<Logical> for LogicalShare {
 impl_plan_tree_node_for_unary! { Logical, LogicalShare}
 
 impl ShareNode<Logical> for LogicalShare {
-    fn new_share(core: Share<PlanRef>) -> PlanRef {
-        let base = PlanBase::new_logical_with_core(&core);
-        LogicalShare { base, core }.into()
+    fn share_id(&self) -> ShareId {
+        self.core.share_id()
     }
 
-    fn replace_input(&self, plan: PlanRef) {
-        *self.core.input.borrow_mut() = plan;
+    fn new_share(core: Share<PlanRef>) -> PlanRef {
+        Self::with_core(core).into()
+    }
+
+    fn replace_input(&self, plan: PlanRef) -> PlanRef {
+        debug_assert!(
+            self.schema().type_eq(plan.schema()),
+            "replacing a logical share input must preserve its schema"
+        );
+        self.ctx()
+            .update_logical_share(self.share_id(), plan.clone());
+        Self::with_core(self.core.with_input(plan)).into()
+    }
+
+    fn fork_with_input(&self, plan: PlanRef) -> PlanRef {
+        Self::new(plan).into()
     }
 }
 
@@ -140,12 +177,11 @@ impl ToStream for LogicalShare {
         &self,
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
-        match ctx.get_to_stream_result(self.id()) {
+        match ctx.get_to_stream_result(self.share_id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let core = generic::Share::new(new_input);
-                let stream_share_ref: StreamPlanRef = StreamShare::new(core).into();
-                ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
+                let stream_share_ref: StreamPlanRef = StreamShare::new_from_input(new_input).into();
+                ctx.add_to_stream_result(self.share_id(), stream_share_ref.clone());
                 Ok(stream_share_ref)
             }
             Some(cache) => Ok(cache.clone()),
@@ -156,11 +192,11 @@ impl ToStream for LogicalShare {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        match ctx.get_rewrite_result(self.id()) {
+        match ctx.get_rewrite_result(self.share_id()) {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = Self::new(new_input).into();
-                ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
+                ctx.add_rewrite_result(self.share_id(), new_share.clone(), col_change.clone());
                 Ok((new_share, col_change))
             }
             Some(cache) => Ok(cache.clone()),
