@@ -166,6 +166,13 @@ pub struct GetByIdResp {
     pub schema: String,
 }
 
+/// A subject and version pair associated with a schema ID.
+#[derive(Debug, Deserialize)]
+pub struct SchemaIdVersion {
+    pub subject: String,
+    pub version: i32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct GetBySubjectResp {
     pub id: i32,
