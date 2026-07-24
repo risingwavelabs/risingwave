@@ -1,0 +1,72 @@
+# v1 validation: MATCH_RECOGNIZE must reject inputs/clauses it cannot faithfully execute, at
+# CREATE time, rather than compiling to wrong behaviour or crashing the executor later.
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table src (id int, ts int, v int, watermark for ts as ts - 10) append only;
+
+# ORDER BY direction / null placement is dropped by the plan, so DESC or explicit NULLS would sort
+# the wrong way. Reject non-default ordering.
+statement error ascending
+create materialized view bad_desc as
+select * from src match_recognize (
+  partition by id
+  order by ts desc
+  measures a.v as m
+  one row per match
+  pattern (a)
+  define a as a.v > 0
+)
+emit on window close;
+
+statement error ascending
+create materialized view bad_nulls as
+select * from src match_recognize (
+  partition by id
+  order by ts nulls first
+  measures a.v as m
+  one row per match
+  pattern (a)
+  define a as a.v > 0
+)
+emit on window close;
+
+# PREV/NEXT offsets are physical row navigation; offset 0 would resolve to the current row, which is
+# not what the navigation means.
+statement error positive integer literal
+create materialized view bad_offset as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < prev(b.v, 0)
+)
+emit on window close;
+
+# The executor matches over an append-only sequence and emits insert-only results; a non-append-only
+# input (here, an aggregation that produces a retract stream) must be rejected during planning.
+statement ok
+create materialized view agg as
+select id, max(ts) as ts, count(*)::int as v from src group by id;
+
+statement error append-only
+create materialized view bad_input as
+select * from agg match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a)
+  define a as a.v > 0
+)
+emit on window close;
+
+statement ok
+drop materialized view agg;
+
+statement ok
+drop table src;

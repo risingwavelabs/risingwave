@@ -98,6 +98,10 @@ echo "--- e2e, $mode, streaming"
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}" --label "serial"
+# Streaming tests that drive cluster recovery (`recover;`) are named `*.slt.serial` so they are
+# excluded from the parallel run above (recovery restarts the whole cluster). Run them here, serially,
+# on the same cluster.
+risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt.serial' --junit "streaming-serial-${profile}" --label "serial" --label "can-use-recover"
 
 echo "--- Kill cluster"
 cluster_stop
