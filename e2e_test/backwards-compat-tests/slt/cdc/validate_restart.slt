@@ -6,6 +6,12 @@ SELECT * FROM mysql_table_in_rw;
 1 xxx
 2 22
 
+query IT rowsort retry 10 backoff 3s
+SELECT id, name FROM mysql_serial_table_in_rw;
+----
+1 snapshot_1
+2 snapshot_2
+
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
 INSERT INTO table_in_mysql VALUES (3,'33');
@@ -18,6 +24,44 @@ SELECT * FROM mysql_table_in_rw;
 ----
 1 nnn
 3 33
+
+system ok
+mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
+INSERT INTO serial_table_in_mysql (name) VALUES ('cdc_3');
+DELETE FROM serial_table_in_mysql WHERE id=2;
+UPDATE serial_table_in_mysql SET name='cdc_1' WHERE id=1;
+EOF
+
+query IT rowsort retry 10 backoff 3s
+SELECT id, name FROM mysql_serial_table_in_rw;
+----
+1 cdc_1
+3 cdc_3
+
+system ok
+mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
+ALTER TABLE serial_table_in_mysql ADD COLUMN note VARCHAR(255) DEFAULT 'legacy_ok';
+INSERT INTO serial_table_in_mysql (name, note) VALUES ('schema_4','schema_note');
+EOF
+
+# The legacy table keeps the old SERIAL -> INT mapping after auto schema change.
+query TTTT retry 10 backoff 3s
+DESCRIBE mysql_serial_table_in_rw;
+----
+id integer false NULL
+name character varying false NULL
+note character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description mysql_serial_table_in_rw NULL NULL
+
+query ITT rowsort retry 10 backoff 3s
+SELECT id, name, note FROM mysql_serial_table_in_rw;
+----
+1 cdc_1 legacy_ok
+3 cdc_3 legacy_ok
+4 schema_4 schema_note
 
 # postgres
 
