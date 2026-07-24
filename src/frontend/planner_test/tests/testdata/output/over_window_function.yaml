@@ -127,6 +127,50 @@
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─StreamExchange { dist: HashShard(t.y) }
         └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: lag with default argument
+  sql: |
+    create table t(x int, y int);
+    select x, y, lag(x, 0, 5) over(PARTITION BY y ORDER BY x) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1] }
+    └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING)] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, 0:Int32, 5:Int32] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1] }
+      └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING)] }
+        └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+          └─BatchSort { order: [t.y ASC, t.x ASC] }
+            └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, lag, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1, t._row_id] }
+      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING)] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: lead with default argument
+  sql: |
+    create table t(x int, y int);
+    select x, y, lead(x, 2, 5) over(PARTITION BY y ORDER BY x) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1] }
+    └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id, t._rw_timestamp, 2:Int32, 5:Int32] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1] }
+      └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
+        └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+          └─BatchSort { order: [t.y ASC, t.x ASC] }
+            └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, lead, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, Case((count = 0:Int64), 5:Int32, first_value) as $expr1, t._row_id] }
+      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: lag with over clause, ignoring frame definition
   sql: |
     create table t(x int, y int);
