@@ -457,6 +457,7 @@ impl CreatingStreamingJobControl {
         }
 
         let mut pending_upstream_barriers = pending_upstream_barriers.peekable();
+        pending_non_checkpoint_barriers.push(prev_epoch);
         if pending_upstream_barriers.peek().is_none() {
             assert!(
                 new_upstream_barrier_prev_epoch > prev_epoch,
@@ -1155,9 +1156,12 @@ mod tests {
         assert_eq!(
             barriers
                 .iter()
-                .map(|barrier| barrier.kind.is_checkpoint())
+                .map(|barrier| match &barrier.kind {
+                    BarrierKind::Checkpoint(epochs) => Some(epochs.clone()),
+                    _ => None,
+                })
                 .collect::<Vec<_>>(),
-            vec![false, false, true]
+            vec![None, None, Some(vec![45, 50, 55])]
         );
     }
 
@@ -1206,7 +1210,7 @@ mod tests {
                     _ => None,
                 })
                 .collect::<Vec<_>>(),
-            vec![None, None, Some(vec![45, 50]), None, Some(vec![60, 65])]
+            vec![None, None, Some(vec![45, 50, 55]), None, Some(vec![60, 65])]
         );
     }
 
@@ -1280,7 +1284,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(vec![61, 62, 63, 64]),
+                Some(vec![61, 62, 63, 64, 65]),
                 None,
                 None,
                 None,
@@ -1317,9 +1321,12 @@ mod tests {
         assert_eq!(
             barriers
                 .iter()
-                .map(|barrier| barrier.kind.is_checkpoint())
+                .map(|barrier| match &barrier.kind {
+                    BarrierKind::Checkpoint(epochs) => Some(epochs.clone()),
+                    _ => None,
+                })
                 .collect::<Vec<_>>(),
-            vec![false, false, false, false, true]
+            vec![None, None, None, None, Some(vec![61, 62, 63, 64, 65])]
         );
     }
 }
