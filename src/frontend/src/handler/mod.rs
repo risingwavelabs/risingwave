@@ -1175,14 +1175,14 @@ pub async fn handle(
                     .await
                 }
                 AlterViewOperation::AlterRateLimit(rate_limit) => {
-                    if !materialized {
-                        bail_not_implemented!("ALTER VIEW SET BACKFILL RATE LIMIT");
-                    }
                     ensure_rate_limit_type_supported(
                         &rate_limit,
                         &[AlterRateLimitType::Backfill],
                         "MATERIALIZED VIEW",
                     )?;
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET BACKFILL RATE LIMIT");
+                    }
                     alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                         handler_args,
                         PbThrottleTarget::Mv,

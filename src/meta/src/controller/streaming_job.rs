@@ -199,6 +199,19 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
     }
 }
 
+fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -> MetaResult<bool> {
+    let PbNodeBody::Sink(node) = node else {
+        return Ok(false);
+    };
+    if node.log_store_type != PbSinkLogStoreType::KvLogStore as i32 {
+        return Err(MetaError::invalid_parameter(
+            "sink rate limit is only supported for kv log store, please SET sink_decouple = TRUE before CREATE SINK",
+        ));
+    }
+    node.rate_limit = rate_limit;
+    Ok(true)
+}
+
 impl CatalogController {
     pub async fn get_pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
         // Hold the catalog read lock across both queries so a job cannot transition out of
@@ -2578,7 +2591,7 @@ impl CatalogController {
     async fn mutate_fragment_by_fragment_id(
         &self,
         fragment_id: FragmentId,
-        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
+        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         err_msg: &'static str,
     ) -> MetaResult<PbStreamNode> {
         let inner = self.inner.read().await;
@@ -2598,7 +2611,7 @@ impl CatalogController {
         let mut pb_stream_node = stream_node.to_protobuf();
         let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
 
-        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node) {
+        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node)? {
             return Err(MetaError::invalid_parameter(format!(
                 "fragment id {fragment_id}: {}",
                 err_msg
@@ -2693,15 +2706,13 @@ impl CatalogController {
                 let mut found = Ok(false);
                 if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
-                        if let PbNodeBody::Sink(node) = node {
-                            if node.log_store_type != PbSinkLogStoreType::KvLogStore as i32 {
-                                found = Err(MetaError::invalid_parameter(
-                                    "sink rate limit is only supported for kv log store, please SET sink_decouple = TRUE before CREATE SINK",
-                                ));
-                                return;
-                            }
-                            node.rate_limit = rate_limit;
-                            found = Ok(true);
+                        if found.is_err() {
+                            return;
+                        }
+                        match update_sink_node_rate_limit(node, rate_limit) {
+                            Ok(true) => found = Ok(true),
+                            Ok(false) => {}
+                            Err(err) => found = Err(err),
                         }
                     });
                 }
@@ -3662,20 +3673,20 @@ impl CatalogController {
     ) -> MetaResult<PbStreamNode> {
         let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
                                  stream_node: &mut PbStreamNode| {
-            let mut found = false;
+            let mut found = Ok(false);
             match throttle_type {
                 ThrottleType::Source => {
                     visit_stream_node_mut(stream_node, |node| match node {
                         PbNodeBody::Source(node) => {
                             if let Some(node_inner) = &mut node.source_inner {
                                 node_inner.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                         }
                         PbNodeBody::StreamFsFetch(node) => {
                             if let Some(node_inner) = &mut node.node_inner {
                                 node_inner.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                         }
                         _ => {}
@@ -3688,15 +3699,15 @@ impl CatalogController {
                         visit_stream_node_mut(stream_node, |node| match node {
                             PbNodeBody::StreamCdcScan(node) => {
                                 node.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                             PbNodeBody::StreamScan(node) => {
                                 node.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                             PbNodeBody::SourceBackfill(node) => {
                                 node.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                             _ => {}
                         });
@@ -3707,9 +3718,13 @@ impl CatalogController {
                         .contains_any(FragmentTypeFlag::sink_rate_limit_fragments())
                     {
                         visit_stream_node_mut(stream_node, |node| {
-                            if let PbNodeBody::Sink(node) = node {
-                                node.rate_limit = rate_limit;
-                                found = true;
+                            if found.is_err() {
+                                return;
+                            }
+                            match update_sink_node_rate_limit(node, rate_limit) {
+                                Ok(true) => found = Ok(true),
+                                Ok(false) => {}
+                                Err(err) => found = Err(err),
                             }
                         });
                     }
@@ -3720,7 +3735,7 @@ impl CatalogController {
                         visit_stream_node_mut(stream_node, |node| {
                             if let PbNodeBody::Dml(node) = node {
                                 node.rate_limit = rate_limit;
-                                found = true;
+                                found = Ok(true);
                             }
                         });
                     }
