@@ -342,6 +342,11 @@ impl Sink for IcebergSink {
     ) -> Result<SinkCommitCoordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
+        let catalog_name = self.config.common.catalog_name();
+        let table_name = table.identifier().to_string();
+        let iceberg_snapshot_num = GLOBAL_SINK_METRICS
+            .iceberg_snapshot_num
+            .with_guarded_label_values(&[&self.param.sink_name, &catalog_name, &table_name]);
         let coordinator = IcebergSinkCommitter {
             catalog,
             table,
@@ -351,6 +356,7 @@ impl Sink for IcebergSink {
             param: self.param.clone(),
             commit_retry_num: self.config.commit_retry_num,
             iceberg_compact_stat_sender,
+            iceberg_snapshot_num,
         };
         if self.config.is_exactly_once.unwrap_or_default() {
             Ok(SinkCommitCoordinator::TwoPhase(Box::new(coordinator)))

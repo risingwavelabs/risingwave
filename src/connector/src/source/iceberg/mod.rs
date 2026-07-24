@@ -42,7 +42,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
-pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
+pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergFileScanMetrics, IcebergScanMetrics};
 use crate::connector_common::{
     IcebergCommon, IcebergTableIdentifier, iceberg_java_catalog_props_from_options,
 };
@@ -458,20 +458,16 @@ pub async fn scan_task_to_chunk_with_deletes(
         need_file_path_and_pos,
         handle_delete_files,
     }: IcebergScanOpts,
-    metrics: Option<Arc<IcebergScanMetrics>>,
+    metrics: Option<IcebergFileScanMetrics>,
 ) {
-    let table_name = table.identifier().name().to_owned();
-
     let num_delete_files = data_file_scan_task.deletes.len();
     let expected_record_count = data_file_scan_task.record_count;
     let file_start = std::time::Instant::now();
 
-    let mut read_bytes = scopeguard::guard(0u64, |read_bytes| {
-        if let Some(metrics) = metrics.clone() {
-            metrics
-                .iceberg_read_bytes
-                .with_guarded_label_values(&[&table_name])
-                .inc_by(read_bytes as _);
+    let read_metrics = metrics.clone();
+    let mut read_bytes = scopeguard::guard(0u64, move |read_bytes| {
+        if let Some(metrics) = read_metrics {
+            metrics.record_read_bytes(read_bytes);
         }
     });
 
@@ -541,28 +537,14 @@ pub async fn scan_task_to_chunk_with_deletes(
     }
 
     // Record per-file metrics after reading all batches.
-    if let Some(ref metrics) = metrics {
-        let label_values = [table_name.as_str()];
+    if let Some(metrics) = metrics {
+        metrics.record_file_read_duration(file_start.elapsed().as_secs_f64());
 
-        // File read duration.
-        metrics
-            .iceberg_source_file_read_duration_seconds
-            .with_guarded_label_values(&label_values)
-            .observe(file_start.elapsed().as_secs_f64());
-
-        // Rows read.
         if total_rows_read > 0 {
-            metrics
-                .iceberg_source_rows_read_total
-                .with_guarded_label_values(&label_values)
-                .inc_by(total_rows_read);
+            metrics.record_rows_read(total_rows_read);
         }
 
-        // File read count.
-        metrics
-            .iceberg_source_files_read_total
-            .with_guarded_label_values(&[table_name.as_str(), "data"])
-            .inc();
+        metrics.record_file_read();
 
         // APPROXIMATE: Estimate delete rows applied. The delta between expected_record_count
         // and actual rows read may also include predicate pushdown / row-group pruning effects,
@@ -574,10 +556,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         {
             let deleted = expected.saturating_sub(total_rows_read);
             if deleted > 0 {
-                metrics
-                    .iceberg_source_delete_rows_applied_total
-                    .with_guarded_label_values(&[table_name.as_str(), "sdk_applied_approx"])
-                    .inc_by(deleted);
+                metrics.record_delete_rows_applied(deleted);
             }
         }
     }
