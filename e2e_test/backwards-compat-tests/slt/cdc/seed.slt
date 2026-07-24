@@ -10,7 +10,7 @@ CREATE TABLE table_in_mysql (
 );
 INSERT INTO table_in_mysql VALUES (1,'11'),(2,'22');
 CREATE TABLE serial_table_in_mysql (
-    id SERIAL,
+    id INT NOT NULL AUTO_INCREMENT,
     name VARCHAR(255),
     PRIMARY KEY (id)
 );

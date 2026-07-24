@@ -43,6 +43,7 @@ ALTER SOURCE cdc_source_mysql CONNECTOR WITH (auto.schema.change='true');
 
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
+ALTER TABLE serial_table_in_mysql MODIFY COLUMN id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;
 ALTER TABLE serial_table_in_mysql ADD COLUMN note VARCHAR(255) DEFAULT 'legacy_ok';
 INSERT INTO serial_table_in_mysql (name, note) VALUES ('schema_4','schema_note');
 EOF
