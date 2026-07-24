@@ -164,6 +164,42 @@ impl DmlManager {
         Ok(table_dml_handle)
     }
 
+    /// Similar to [`Self::table_dml_handle`], but retries on [`DmlError::NoReader`] with
+    /// exponential backoff.
+    ///
+    /// During recovery or immediately after a streaming job is created, there is a brief window
+    /// where the DML executor may not have registered its reader yet. This method handles that
+    /// transient condition by retrying instead of immediately failing.
+    pub async fn table_dml_handle_with_retry(
+        &self,
+        table_id: TableId,
+        table_version_id: TableVersionId,
+    ) -> Result<TableDmlHandleRef> {
+        const MAX_RETRIES: usize = 10;
+        const INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
+        const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
+
+        let mut backoff = INITIAL_BACKOFF;
+        for retry in 0..MAX_RETRIES {
+            match self.table_dml_handle(table_id, table_version_id) {
+                Ok(handle) => return Ok(handle),
+                Err(DmlError::NoReader) => {
+                    tracing::debug!(
+                        %table_id,
+                        retry = retry + 1,
+                        backoff_ms = %backoff.as_millis(),
+                        "DML reader not yet available, retrying",
+                    );
+                    tokio::time::sleep(backoff).await;
+                    backoff = std::cmp::min(backoff * 2, MAX_BACKOFF);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        // Final attempt without retry.
+        self.table_dml_handle(table_id, table_version_id)
+    }
+
     pub fn clear(&self) {
         self.table_readers.write().clear()
     }
@@ -313,5 +349,67 @@ mod tests {
         let _h = dml_manager
             .register_reader(table_id, table_version_id, &other_column_descs)
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_table_dml_handle_with_retry_immediate_success() {
+        let dml_manager = Arc::new(DmlManager::for_test());
+        let table_id = TableId::new(1);
+        let table_version_id = INITIAL_TABLE_VERSION_ID;
+        let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
+
+        // Register reader first — retry should succeed immediately.
+        let _h = dml_manager
+            .register_reader(table_id, table_version_id, &column_descs)
+            .unwrap();
+
+        let handle = dml_manager
+            .table_dml_handle_with_retry(table_id, table_version_id)
+            .await
+            .unwrap();
+        assert_eq!(handle.column_descs(), &column_descs);
+    }
+
+    #[tokio::test]
+    async fn test_table_dml_handle_with_retry_delayed_registration() {
+        let dml_manager = Arc::new(DmlManager::for_test());
+        let table_id = TableId::new(1);
+        let table_version_id = INITIAL_TABLE_VERSION_ID;
+        let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
+
+        // Register reader after a short delay — retry should eventually succeed.
+        let dml_manager_clone = dml_manager.clone();
+        let column_descs_clone = column_descs.clone();
+        let _register_task = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            dml_manager_clone
+                .register_reader(table_id, table_version_id, &column_descs_clone)
+                .unwrap()
+        });
+
+        let handle = dml_manager
+            .table_dml_handle_with_retry(table_id, table_version_id)
+            .await
+            .unwrap();
+        assert_eq!(handle.column_descs(), &column_descs);
+    }
+
+    #[tokio::test]
+    async fn test_table_dml_handle_with_retry_schema_changed_no_retry() {
+        let dml_manager = Arc::new(DmlManager::for_test());
+        let table_id = TableId::new(1);
+        let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
+
+        // Register with version 2.
+        let _h = dml_manager
+            .register_reader(table_id, 2, &column_descs)
+            .unwrap();
+
+        // Try to get handle with version 1 — should get SchemaChanged immediately, no retry.
+        let err = dml_manager
+            .table_dml_handle_with_retry(table_id, 1)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DmlError::SchemaChanged));
     }
 }
