@@ -22,6 +22,7 @@ import { NAVBAR_WIDTH } from "../components/Layout"
 import Title from "../components/Title"
 
 export default function Home() {
+  // home
   return (
     <Fragment>
       <Head>
