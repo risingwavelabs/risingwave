@@ -8656,15 +8656,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e0826a989adedc2a244799e823aece04662b66609d96af8dff7ac6df9a8925d"
 
 [[package]]
-name = "npm_rs"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1454347ca3c562570eff8af4a09445783dc4b7ccd00853390a7f88f76037b55"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12635,7 +12626,6 @@ dependencies = [
  "cargo-emit",
  "dircpy",
  "mime_guess",
- "npm_rs",
  "reqwest 0.12.25",
  "rust-embed",
  "thiserror-ext",
