@@ -440,10 +440,49 @@ impl CacheRefiller {
 
     pub(crate) fn start_cache_refill(
         &mut self,
-        deltas: Vec<SstDeltaInfo>,
+        mut deltas: Vec<SstDeltaInfo>,
         pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
+        for delta in &mut deltas {
+            let for_serving = self.role.for_serving();
+            // Writer-appended L0 SSTs are already warm on the streaming side. Their data refill
+            // may therefore only be needed by serving workers.
+            let for_streaming =
+                self.role.for_streaming() && !delta.delete_sst_object_ids.is_empty();
+
+            if !for_serving && !for_streaming {
+                delta.insert_sst_infos.clear();
+                continue;
+            }
+
+            // This is deliberately a whole-SST admission check before Meta load. The serving
+            // mapping key set identifies result tables, but bitmap contents remain for the exact
+            // block/vnode decision in DataCacheRefillTaskGenerator after Meta load. An SST stays
+            // when any contained table matches either the serving or streaming refill lane.
+            delta.insert_sst_infos.retain(|sst| {
+                sst.table_ids.iter().any(|table_id| {
+                    // A missing entry means there is no table override, not that the table is
+                    // absent. Preserve the configured legacy/default policy in that case.
+                    let policy = self
+                        .table_cache_refill_policies
+                        .get(table_id)
+                        .copied()
+                        .unwrap_or(self.default_policy);
+
+                    if policy == CacheRefillPolicy::Disabled {
+                        return false;
+                    }
+
+                    let serving_matches = for_serving
+                        && self.serving_table_vnode_mapping.contains_key(table_id)
+                        && (policy.is_unscoped_enabled() || policy.is_serving_scoped());
+                    let streaming_matches = for_streaming
+                        && (policy.is_unscoped_enabled() || policy.is_streaming_scoped());
+                    serving_matches || streaming_matches
+                })
+            });
+        }
         let context = self.new_cache_refill_context(&deltas);
         let handle = (self.spawn_refill_task)(
             deltas,
@@ -1418,6 +1457,206 @@ mod tests {
             .unwrap();
         assert_eq!(context.policy, CacheRefillPolicy::Serving);
         assert_eq!(context.serving_vnode_bitmap.as_ref(), Some(&old_vnodes));
+    }
+
+    #[tokio::test]
+    async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
+        let streaming_table = TableId::from(1);
+        let serving_table = TableId::from(2);
+        let disabled_table = TableId::from(3);
+        let internal_table = TableId::from(4);
+        let fallback_table = TableId::from(5);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let sstable_store = mock_sstable_store().await;
+        let sst_info = |table_ids: Vec<TableId>| {
+            SstableInfo::from(SstableInfoInner {
+                table_ids,
+                ..Default::default()
+            })
+        };
+        let capture_pruned_table_ids = |role,
+                                        default_policy,
+                                        policies: HashMap<TableId, CacheRefillPolicy>,
+                                        serving_table_vnodes: HashMap<TableId, Bitmap>,
+                                        delta| {
+            let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
+            let captured_deltas_clone = captured_deltas.clone();
+            let spawn_refill_task: SpawnRefillTask = Arc::new(move |deltas, _, _, _| {
+                *captured_deltas_clone.lock() = Some(deltas);
+                tokio::spawn(async {})
+            });
+            let mut refiller = CacheRefiller::new(
+                role,
+                test_refill_config(default_policy),
+                sstable_store.clone(),
+                spawn_refill_task,
+            );
+            refiller.replace_table_cache_refill_policies(policies);
+            refiller.replace_serving_table_vnode_mapping(serving_table_vnodes);
+            refiller.start_cache_refill(
+                vec![delta],
+                pinned_version_for_test(),
+                pinned_version_for_test(),
+            );
+            captured_deltas
+                .lock()
+                .take()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .insert_sst_infos
+                .into_iter()
+                .map(|sst| sst.table_ids.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let normal_delta = |insert_sst_infos| SstDeltaInfo {
+            insert_sst_infos,
+            delete_sst_object_ids: vec![1.into()],
+            insert_sst_level: 1,
+        };
+        let insert_only_delta = |insert_sst_infos| SstDeltaInfo {
+            insert_sst_infos,
+            delete_sst_object_ids: vec![],
+            insert_sst_level: 0,
+        };
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (disabled_table, CacheRefillPolicy::Disabled),
+                    (streaming_table, CacheRefillPolicy::Enabled),
+                ]),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![disabled_table]),
+                    sst_info(vec![streaming_table]),
+                ]),
+            ),
+            vec![vec![streaming_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (internal_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![internal_table]),
+                ]),
+            ),
+            vec![vec![streaming_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                    (internal_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::from([(serving_table, serving_vnodes.clone())]),
+                insert_only_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                    sst_info(vec![internal_table]),
+                ]),
+            ),
+            vec![vec![serving_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Serving,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::from([(serving_table, serving_vnodes.clone())]),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            vec![vec![serving_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Serving,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Enabled),
+                    (serving_table, CacheRefillPolicy::Enabled),
+                ]),
+                HashMap::from([(serving_table, serving_vnodes.clone())]),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                    sst_info(vec![streaming_table, serving_table]),
+                ]),
+            ),
+            vec![vec![serving_table], vec![streaming_table, serving_table],],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            vec![vec![streaming_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::new(),
+                insert_only_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            Vec::<Vec<TableId>>::new(),
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Enabled,
+                HashMap::from([(disabled_table, CacheRefillPolicy::Disabled)]),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![disabled_table]),
+                    sst_info(vec![fallback_table]),
+                    sst_info(vec![disabled_table, fallback_table]),
+                ]),
+            ),
+            vec![vec![fallback_table], vec![disabled_table, fallback_table]],
+        );
     }
 
     #[tokio::test]
