@@ -10425,6 +10425,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "proto-src-confluent"
+version = "0.1.0+gc1e412b.v8.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4f58442516149764e913a2ba92fa50a1db1a50fd539e5c1874c3ce25911bdcc"
+
+[[package]]
+name = "proto-src-google-type"
+version = "0.1.0+g208f198.v2.71.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9380399e02f6d18b5aad0c5d47054a82c7aa346919a98f835fe7f590c7b4c123"
+
+[[package]]
 name = "protobuf"
 version = "3.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12075,6 +12087,8 @@ dependencies = [
  "prost-build 0.14.3",
  "prost-reflect",
  "prost-types 0.14.3",
+ "proto-src-confluent",
+ "proto-src-google-type",
  "protox",
  "reqwest 0.12.25",
  "risingwave_common",
