@@ -290,6 +290,7 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
         "mediumint" => Some(ColumnType::MediumInt(make_numeric_attr())),
         "int" => Some(ColumnType::Int(make_numeric_attr())),
         "bigint" => Some(ColumnType::BigInt(make_numeric_attr())),
+        "serial" => Some(ColumnType::Serial),
         "decimal" => Some(ColumnType::Decimal(make_numeric_attr())),
         "float" => Some(ColumnType::Float(make_numeric_attr())),
         "double" => Some(ColumnType::Double(make_numeric_attr())),
@@ -329,7 +330,9 @@ pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
 
 pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
-        ColumnType::Serial => DataType::Int32,
+        // MySQL `SERIAL` is an alias for `BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE`.
+        // Keep it consistent with explicit `BIGINT UNSIGNED`.
+        ColumnType::Serial => DataType::Decimal,
         ColumnType::Bit(attr) => {
             if let Some(1) = attr.maximum {
                 DataType::Boolean
@@ -800,7 +803,9 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::source::cdc::external::mysql::MySqlExternalTable;
+    use crate::source::cdc::external::mysql::{
+        MySqlExternalTable, mysql_type_to_rw_type, type_name_to_mysql_type,
+    };
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
         SchemaTableName,
@@ -839,6 +844,22 @@ mod tests {
         assert_eq!(
             expr,
             "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+        );
+    }
+
+    #[test]
+    fn test_mysql_serial_type_mapping() {
+        let serial_type = type_name_to_mysql_type("SERIAL").unwrap();
+        let unsigned_bigint_type = type_name_to_mysql_type("BIGINT UNSIGNED").unwrap();
+
+        assert_eq!(serial_type, sea_schema::mysql::def::ColumnType::Serial);
+        assert_eq!(
+            mysql_type_to_rw_type(&serial_type).unwrap(),
+            DataType::Decimal
+        );
+        assert_eq!(
+            mysql_type_to_rw_type(&serial_type).unwrap(),
+            mysql_type_to_rw_type(&unsigned_bigint_type).unwrap()
         );
     }
 
