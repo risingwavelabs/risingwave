@@ -563,8 +563,8 @@ impl stream_plan::PbStreamScanType {
             PbStreamScanType::Unspecified => {
                 unreachable!()
             }
-            // todo: should this be true?
-            PbStreamScanType::UpstreamOnly => false,
+            // `UpstreamOnly` has no snapshot or backfill state to restore.
+            PbStreamScanType::UpstreamOnly => true,
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
             PbStreamScanType::SnapshotBackfill => !is_online,

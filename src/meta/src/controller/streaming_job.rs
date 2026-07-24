@@ -26,7 +26,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_body, visit_stream_node_mut,
+    visit_stream_node_body, visit_stream_node_mut, visit_stream_node_stream_scan,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
@@ -61,7 +61,7 @@ use risingwave_pb::plan_common::source_refresh_mode::{
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
+use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode, StreamScanType};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -119,7 +119,65 @@ struct DependentSourceFragmentUpdate {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    pub async fn get_pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
+        // Hold the catalog read lock across both queries so a job cannot transition out of
+        // `Creating` while its fragments are being inspected.
+        let inner = self.inner.read().await;
+        let creating_job_ids = StreamingJobModel::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+            .into_tuple::<JobId>()
+            .all(&inner.db)
+            .await?;
+        if creating_job_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let fragments = Fragment::find()
+            .filter(fragment::Column::JobId.is_in(creating_job_ids))
+            .all(&inner.db)
+            .await?;
+        let mut pinned_snapshot_epochs: HashMap<TableId, HashSet<u64>> = HashMap::new();
+        for fragment in fragments {
+            visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                    Ok(scan_type) => scan_type,
+                    Err(err) => {
+                        tracing::warn!(
+                            job_id = %fragment.job_id,
+                            fragment_id = %fragment.fragment_id,
+                            stream_scan_type = stream_scan.stream_scan_type,
+                            error = %err.as_report(),
+                            "invalid persisted stream scan type, skip collecting snapshot pin"
+                        );
+                        return;
+                    }
+                };
+                if !matches!(
+                    scan_type,
+                    StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill
+                ) {
+                    return;
+                }
+                let Some(epoch) = stream_scan.snapshot_backfill_epoch else {
+                    tracing::warn!(
+                        job_id = %fragment.job_id,
+                        fragment_id = %fragment.fragment_id,
+                        table_id = %stream_scan.table_id,
+                        "persisted snapshot backfill epoch is not set, skip collecting snapshot pin"
+                    );
+                    return;
+                };
+                pinned_snapshot_epochs
+                    .entry(stream_scan.table_id)
+                    .or_default()
+                    .insert(epoch);
+            });
+        }
+        Ok(pinned_snapshot_epochs)
+    }
+
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,

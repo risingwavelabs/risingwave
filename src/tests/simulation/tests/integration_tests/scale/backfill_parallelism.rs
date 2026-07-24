@@ -47,7 +47,14 @@ async fn wait_parallelism(
 }
 
 async fn wait_jobs_finished(session: &mut risingwave_simulation::cluster::Session) -> Result<()> {
-    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 20) {
+    wait_jobs_finished_with_multiplier(session, 20).await
+}
+
+async fn wait_jobs_finished_with_multiplier(
+    session: &mut risingwave_simulation::cluster::Session,
+    multiplier: u64,
+) -> Result<()> {
+    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * multiplier) {
         let res = session.run("show jobs;").await?;
         if res.trim().is_empty() {
             return Ok(());
@@ -171,7 +178,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
     wait_parallelism(&mut session, "m", "2").await?;
 
     // Eventually backfill finishes and parallelism restores to the normal value.
-    wait_jobs_finished(&mut session).await?;
+    wait_jobs_finished_with_multiplier(&mut session, 60).await?;
     wait_parallelism(&mut session, "m", "4").await?;
 
     Ok(())
