@@ -22,9 +22,9 @@ use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::FragmentId;
-use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::{PbStreamNode, StartFragmentBackfillMutation};
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
@@ -325,6 +325,29 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::Resetting(..) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn pre_apply_throttle<'a>(
+        &mut self,
+        fragment_nodes: impl IntoIterator<Item = (FragmentId, &'a PbStreamNode)>,
+    ) {
+        let fragment_infos = match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                &mut info.fragment_infos
+            }
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(..) => return,
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        };
+
+        for (fragment_id, stream_node) in fragment_nodes {
+            if let Some(fragment_info) = fragment_infos.get_mut(&fragment_id) {
+                fragment_info.nodes = stream_node.clone();
             }
         }
     }
