@@ -6221,14 +6221,11 @@ impl Parser<'_> {
     }
 
     /// Parse an OFFSET clause
-    pub fn parse_offset(&mut self) -> ModalResult<String> {
-        let value = self.parse_number_value()?;
-        // TODO(Kexiang): support LIMIT expr
-        if self.consume_token(&Token::DoubleColon) {
-            self.expect_keyword(Keyword::BIGINT)?;
-        }
+    pub fn parse_offset(&mut self) -> ModalResult<Expr> {
+        let expr = self.parse_expr()?;
+        // `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
         _ = self.parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
-        Ok(value)
+        Ok(expr)
     }
 
     /// Parse a FETCH clause
@@ -6240,7 +6237,9 @@ impl Parser<'_> {
         {
             None
         } else {
-            let quantity = self.parse_number_value()?;
+            // Accept a general expression (a constant, `1 + 1`, or a bind parameter
+            // `$n`), not just a bare number; it is folded to a constant in the planner.
+            let quantity = self.parse_expr()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
             Some(quantity)
         };

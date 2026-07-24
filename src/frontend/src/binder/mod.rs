@@ -731,6 +731,7 @@ mod tests {
                     ),
                     order: [],
                     limit: None,
+                    limit_clause: "LIMIT",
                     offset: None,
                     with_ties: false,
                     extra_order_exprs: [],
