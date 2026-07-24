@@ -890,9 +890,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.47.0"
+version = "0.49.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07d6f157065c3461096d51aacde0c326fa49f3f6e0199e204c566842cdaa5299"
+checksum = "fad3cd6df81292728e2a8cb1f1dcb4d7e7a1ab59b80c14fbbcba2baf9d5cf86a"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -902,7 +902,7 @@ dependencies = [
  "nuid",
  "pin-project",
  "portable-atomic",
- "rand 0.8.5",
+ "rand 0.10.1",
  "regex",
  "ring",
  "rustls-native-certs 0.8.1",
@@ -912,7 +912,7 @@ dependencies = [
  "serde_json",
  "serde_nanos",
  "serde_repr",
- "thiserror 1.0.63",
+ "thiserror 2.0.17",
  "time",
  "tokio",
  "tokio-rustls 0.26.4",
