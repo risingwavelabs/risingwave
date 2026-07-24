@@ -109,6 +109,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     map.try_insert(
         std::any::type_name::<MysqlCdcProperties>().to_owned(),
         [
+            "auto.schema.change".to_owned(),
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
@@ -120,6 +121,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     map.try_insert(
         std::any::type_name::<PostgresCdcProperties>().to_owned(),
         [
+            "auto.schema.change".to_owned(),
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
@@ -132,6 +134,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     map.try_insert(
         std::any::type_name::<SqlServerCdcProperties>().to_owned(),
         [
+            "auto.schema.change".to_owned(),
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
