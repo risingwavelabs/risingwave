@@ -10,7 +10,7 @@ CREATE TABLE table_in_mysql (
 );
 INSERT INTO table_in_mysql VALUES (1,'11'),(2,'22');
 CREATE TABLE serial_table_in_mysql (
-    id INT NOT NULL AUTO_INCREMENT,
+    id SERIAL,
     name VARCHAR(255),
     PRIMARY KEY (id)
 );
@@ -35,11 +35,7 @@ CREATE TABLE mysql_table_in_rw (
 FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
 
 statement ok
-CREATE TABLE mysql_serial_table_in_rw (
-    id INT PRIMARY KEY,
-    name VARCHAR
-)
-FROM cdc_source_mysql TABLE 'rwcdc.serial_table_in_mysql';
+CREATE TABLE mysql_serial_table_in_rw (*) FROM cdc_source_mysql TABLE 'rwcdc.serial_table_in_mysql';
 
 
 # postgres

@@ -40,12 +40,12 @@ SELECT id, name FROM mysql_serial_table_in_rw;
 
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
-ALTER TABLE serial_table_in_mysql MODIFY COLUMN id SERIAL;
 ALTER TABLE serial_table_in_mysql ADD COLUMN note VARCHAR(255) DEFAULT 'legacy_ok';
 INSERT INTO serial_table_in_mysql (name, note) VALUES ('schema_4','schema_note');
 EOF
 
-# The legacy table keeps the old SERIAL -> INT mapping after auto schema change.
+# The legacy table was created from an upstream MySQL SERIAL column before this PR
+# and keeps the old SERIAL -> INT mapping after an upgraded auto schema change.
 query TTTT retry 10 backoff 3s
 DESCRIBE mysql_serial_table_in_rw;
 ----
