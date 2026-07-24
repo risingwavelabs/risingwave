@@ -59,17 +59,33 @@ impl FunctionCatalog {
         }
         let args_str = args.join(", ");
 
+        let returns = match self.kind {
+            FunctionKind::Table => {
+                if let DataType::Struct(s) = &self.return_type {
+                    let fields = s
+                        .iter()
+                        .map(|(name, ty)| format!("{} {}", name, ty))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("TABLE ({})", fields)
+                } else {
+                    format!("TABLE (column {})", self.return_type)
+                }
+            }
+            _ => format!("{}", self.return_type),
+        };
+
         if let Some(link) = &self.link {
             let name_in_runtime = self.name_in_runtime.as_deref().unwrap_or(&self.name);
             format!(
                 "CREATE FUNCTION {}({}) RETURNS {} AS {} USING LINK '{}'",
-                self.name, args_str, self.return_type, name_in_runtime, link
+                self.name, args_str, returns, name_in_runtime, link
             )
         } else {
             let body = self.body.as_deref().unwrap_or("");
             format!(
                 "CREATE FUNCTION {}({}) RETURNS {} LANGUAGE {} AS $${}$$",
-                self.name, args_str, self.return_type, self.language, body
+                self.name, args_str, returns, self.language, body
             )
         }
     }

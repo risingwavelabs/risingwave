@@ -969,13 +969,21 @@ pub fn handle_show_create_object(
                 .try_find(|schema_name| {
                     let schema_catalog =
                         catalog_reader.get_schema_by_name(&database, schema_name)?;
-                    let funcs: Vec<_> = schema_catalog
+                    let mut funcs: Vec<_> = schema_catalog
                         .get_functions_by_name(&object_name)
                         .into_iter()
                         .flatten()
                         .filter(|f| has_access_to_object(current_user, f.id, f.owner))
                         .cloned()
                         .collect();
+                    funcs.sort_by_key(|f| {
+                        let arg_types = f
+                            .arg_types
+                            .iter()
+                            .map(|t| t.to_string())
+                            .collect::<Vec<_>>();
+                        (arg_types, f.id)
+                    });
                     if funcs.is_empty() {
                         Ok::<_, RwError>(None)
                     } else {
