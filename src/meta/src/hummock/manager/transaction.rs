@@ -338,25 +338,36 @@ where
             }
 
             let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
+            // `None` means deleting the whole table change log. Do not encode this as
+            // `u64::MAX`: the meta store epoch type is signed, so casting the sentinel would
+            // overflow and make the SQL predicate match nothing.
             let delete_iter = deltas
                 .iter()
                 .flat_map(|i| i.change_log_delta.iter())
-                .map(|(table_id, change_log_delta)| (*table_id, change_log_delta.truncate_epoch))
+                .map(|(table_id, change_log_delta)| {
+                    (*table_id, Some(change_log_delta.truncate_epoch))
+                })
                 .chain(
                     gc_change_log_deltas
                         .iter()
-                        .map(|table_id| (*table_id, u64::MAX)),
+                        .map(|table_id| (*table_id, None)),
                 );
 
             let mut stream = stream::iter(delete_iter).chunks(delete_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let mut condition = Condition::any();
                 for (table_id, truncate_epoch) in change_log_batch {
-                    condition = condition.add(
-                        Condition::all()
-                            .add(risingwave_meta_model::hummock_table_change_log::Column::TableId.eq(table_id))
-                            .add(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch.lt(truncate_epoch as Epoch))
+                    let mut table_condition = Condition::all().add(
+                        risingwave_meta_model::hummock_table_change_log::Column::TableId
+                            .eq(table_id),
                     );
+                    if let Some(truncate_epoch) = truncate_epoch {
+                        table_condition = table_condition.add(
+                            risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch
+                                .lt(truncate_epoch as Epoch),
+                        );
+                    }
+                    condition = condition.add(table_condition);
                 }
                 risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
                     .filter(condition)

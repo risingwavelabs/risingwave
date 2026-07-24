@@ -46,6 +46,7 @@ use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
@@ -101,6 +102,10 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
         since_epoch: u64,
     ) -> impl Future<Output = MetaResult<SinceTimestampResolvedEpoch>> + Send + 'a;
+
+    async fn refresh_table_refill_runtime_state_after_recovery(&self) -> MetaResult<()> {
+        Ok(())
+    }
 
     fn post_collect_command(
         &self,
@@ -182,6 +187,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     hummock_manager: HummockManagerRef,
 
+    serving_vnode_mapping: ServingVnodeMappingRef,
+
     source_manager: SourceManagerRef,
 
     _scale_controller: ScaleControllerRef,
@@ -207,6 +214,7 @@ impl GlobalBarrierWorkerContextImpl {
         status: Arc<ArcSwap<BarrierManagerStatus>>,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
@@ -221,6 +229,7 @@ impl GlobalBarrierWorkerContextImpl {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             _scale_controller: scale_controller,
             env,

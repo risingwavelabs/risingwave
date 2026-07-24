@@ -40,6 +40,7 @@ use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
@@ -1229,9 +1230,10 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, EstimateSize)]
 pub struct Watermark {
     pub col_idx: usize,
+    #[estimate_size(ignore)]
     pub data_type: DataType,
     pub val: ScalarImpl,
 }
