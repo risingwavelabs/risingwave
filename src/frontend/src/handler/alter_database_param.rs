@@ -15,11 +15,12 @@
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{ObjectName, SetVariableValue};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::error::Result;
+use crate::handler::alter_resource_group::resolve_resource_group;
 
 pub async fn handle_alter_database_param(
     handler_args: HandlerArgs,
@@ -73,8 +74,53 @@ pub async fn handle_alter_database_param(
     Ok(builder.into())
 }
 
+pub async fn handle_alter_database_resource_group(
+    handler_args: HandlerArgs,
+    database_name: ObjectName,
+    resource_group: Option<SetVariableValue>,
+    _deferred: bool,
+) -> Result<RwPgResponse> {
+    let mut builder = RwPgResponse::builder(StatementType::ALTER_DATABASE);
+
+    let session = handler_args.session;
+
+    let database_name = Binder::resolve_database_name(database_name)?;
+    let database_id = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let database = catalog_reader.get_database_by_name(&database_name)?;
+
+        // The user should be super user or owner to alter the database.
+        session.check_privilege_for_drop_alter_db_schema(database)?;
+
+        database.id()
+    };
+
+    let resource_group = resource_group
+        .map(resolve_resource_group)
+        .transpose()?
+        .flatten();
+
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
+    }
+
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .alter_database_resource_group(database_id, resource_group, _deferred)
+        .await?;
+
+    builder = builder.notice(
+        "The database resource group metadata has been updated, but it will not take effect immediately. Manually trigger recovery for inherited streaming jobs to use the new database resource group."
+            .to_owned(),
+    );
+
+    Ok(builder.into())
+}
+
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -134,5 +180,43 @@ mod tests {
             assert!(db.barrier_interval_ms.is_none());
             assert!(db.checkpoint_frequency.is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_alter_resource_group() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        frontend.run_sql("CREATE DATABASE test_db").await.unwrap();
+
+        frontend
+            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = DEFAULT DEFERRED")
+            .await
+            .unwrap();
+        {
+            let reader = catalog_reader.read_guard();
+            let db = reader.get_database_by_name("test_db").unwrap();
+            assert_eq!(db.resource_group, DEFAULT_RESOURCE_GROUP);
+        }
+
+        frontend
+            .run_sql("ALTER DATABASE test_db RESET RESOURCE_GROUP DEFERRED")
+            .await
+            .unwrap();
+        {
+            let reader = catalog_reader.read_guard();
+            let db = reader.get_database_by_name("test_db").unwrap();
+            assert_eq!(db.resource_group, DEFAULT_RESOURCE_GROUP);
+        }
+
+        let err = frontend
+            .run_sql("ALTER DATABASE test_db SET RESOURCE_GROUP = 1 DEFERRED")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("target resource group must be a valid string or default")
+        );
     }
 }

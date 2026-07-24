@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use fail::fail_point;
 use futures::{StreamExt, stream};
@@ -30,8 +31,8 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use crate::controller::SqlMetaStore;
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
-use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::metrics_utils::trigger_pin_unpin_version_state;
 use crate::manager::{META_NODE_ID, MetadataManager};
 use crate::model::BTreeMapTransaction;
@@ -161,7 +162,6 @@ impl HummockManager {
         let (active_context_ids, mut context_info) = {
             let compaction_guard = self.compaction.read().await;
             let context_info = self.context_info.write().await;
-            let _timer = start_measure_real_process_timer!(self, "release_invalid_contexts");
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
                 compaction_guard
@@ -353,12 +353,11 @@ async fn check_gc_history(
 impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<Arc<HummockVersion>> {
         let versioning = self.versioning.read().await;
         let mut context_info = self.context_info.write().await;
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
-        let _timer = start_measure_real_process_timer!(self, "pin_version");
         let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
@@ -398,7 +397,6 @@ impl HummockManager {
         let mut context_info = self.context_info.write().await;
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
-        let _timer = start_measure_real_process_timer!(self, "unpin_version_before");
         let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,

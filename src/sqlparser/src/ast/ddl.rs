@@ -24,9 +24,19 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterDatabaseOperation {
-    ChangeOwner { new_owner_name: Ident },
-    RenameDatabase { database_name: ObjectName },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    RenameDatabase {
+        database_name: ObjectName,
+    },
     SetParam(ConfigParam),
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -140,6 +150,12 @@ pub enum AlterIndexOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -211,6 +227,12 @@ pub enum AlterSinkOperation {
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
     /// `SET CONFIG (key = value, ...)`
@@ -332,6 +354,18 @@ impl fmt::Display for AlterDatabaseOperation {
             }
             AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
                 write!(f, "SET {} TO {}", param, value)
+            }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
             }
         }
     }
@@ -471,6 +505,18 @@ impl fmt::Display for AlterIndexOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -517,9 +563,9 @@ impl fmt::Display for AlterViewOperation {
                 let deferred = if *deferred { " DEFERRED" } else { "" };
 
                 if let Some(resource_group) = resource_group {
-                    write!(f, "SET RESOURCE_GROUP TO {} {}", resource_group, deferred)
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
                 } else {
-                    write!(f, "RESET RESOURCE_GROUP {}", deferred)
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
                 }
             }
             AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
@@ -560,6 +606,18 @@ impl fmt::Display for AlterSinkOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
             }
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
