@@ -167,13 +167,6 @@ impl CheckpointControl {
         })
     }
 
-    pub(crate) fn database_info(&self, database_id: DatabaseId) -> Option<&InflightDatabaseInfo> {
-        self.databases
-            .get(&database_id)
-            .and_then(|database| database.running_state())
-            .map(|database| &database.database_info)
-    }
-
     /// return Some(failed `database_id` -> `err`)
     pub(crate) fn handle_new_barrier(
         &mut self,
