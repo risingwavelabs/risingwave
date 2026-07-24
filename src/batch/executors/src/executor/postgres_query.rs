@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
+use risingwave_connector::connector_common::{IpVersion, PgConnectionConfig, create_pg_client};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use tokio_postgres;
 
@@ -177,6 +177,19 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
                     None
                 } else {
                     Some(postgres_query_node.ssl_root_cert.clone())
+                },
+                ip_version: if postgres_query_node.ip_version.is_empty() {
+                    IpVersion::default()
+                } else {
+                    postgres_query_node
+                        .ip_version
+                        .parse::<IpVersion>()
+                        .with_context(|| {
+                            format!(
+                                "invalid postgres ip.version `{}`",
+                                postgres_query_node.ip_version
+                            )
+                        })?
                 },
             },
             postgres_query_node.query.clone(),

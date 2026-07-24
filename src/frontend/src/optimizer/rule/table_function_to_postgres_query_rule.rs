@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
+use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction, generic};
 
 /// Transform a special `TableFunction` (with `POSTGRES_QUERY` table function type) into a `LogicalPostgresQuery`
 pub struct TableFunctionToPostgresQueryRule {}
@@ -63,10 +63,10 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
             let query = eval_args[5].clone();
             let ssl_mode = eval_args.get(6).cloned();
             let ssl_root_cert = eval_args.get(7).cloned();
+            let ip_version = eval_args.get(8).cloned();
 
             Some(
-                LogicalPostgresQuery::new(
-                    logical_table_function.ctx(),
+                LogicalPostgresQuery::new(generic::PostgresQuery {
                     schema,
                     hostname,
                     port,
@@ -76,7 +76,9 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
                     query,
                     ssl_mode,
                     ssl_root_cert,
-                )
+                    ip_version,
+                    ctx: logical_table_function.ctx(),
+                })
                 .into(),
             )
         } else {

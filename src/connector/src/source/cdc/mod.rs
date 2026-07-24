@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::connector_common::postgres_ip_version_from_properties;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
@@ -156,6 +157,13 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         properties: BTreeMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
+        if matches!(
+            T::source_type(),
+            CdcSourceType::Postgres | CdcSourceType::Citus
+        ) {
+            postgres_ip_version_from_properties(&properties)?;
+        }
+
         let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");

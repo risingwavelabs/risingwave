@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::net::IpAddr;
 
 use anyhow::{Context, anyhow};
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
@@ -86,6 +87,8 @@ pub struct PgConnectionConfig {
     pub database: String,
     pub ssl_mode: SslMode,
     pub ssl_root_cert: Option<String>,
+    /// Address family to use when resolving and connecting to the Postgres host.
+    pub ip_version: IpVersion,
 }
 
 impl PgConnectionConfig {
@@ -170,7 +173,23 @@ pub fn pg_connection_config_from_properties(
             .and_then(|v| v.parse::<SslMode>().ok())
             .unwrap_or_default(),
         ssl_root_cert: props.get("ssl.root.cert").cloned(),
+        ip_version: postgres_ip_version_from_properties(props)?,
     })
+}
+
+pub fn postgres_ip_version_from_properties(
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<IpVersion> {
+    props
+        .get("ip.version")
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            v.parse::<IpVersion>()
+                .with_context(|| format!("invalid postgres ip.version `{}`", v))
+                .map_err(Into::into)
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 pub async fn create_pg_client_from_properties(
@@ -438,6 +457,82 @@ impl std::str::FromStr for SslMode {
     }
 }
 
+/// Address family preference for Postgres connections.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IpVersion {
+    /// Use the addresses returned by DNS resolution without filtering by family.
+    #[default]
+    #[serde(alias = "")]
+    Any,
+    /// Connect only to `IPv4` addresses.
+    #[serde(alias = "4")]
+    #[serde(alias = "v4")]
+    Ipv4,
+    /// Connect only to `IPv6` addresses.
+    #[serde(alias = "6")]
+    #[serde(alias = "v6")]
+    Ipv6,
+}
+
+impl fmt::Display for IpVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            IpVersion::Any => "any",
+            IpVersion::Ipv4 => "ipv4",
+            IpVersion::Ipv6 => "ipv6",
+        })
+    }
+}
+
+impl std::str::FromStr for IpVersion {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value(serde_json::Value::String(s.to_owned()))
+    }
+}
+
+fn filter_ip_version(
+    addrs: impl IntoIterator<Item = IpAddr>,
+    ip_version: &IpVersion,
+) -> Vec<IpAddr> {
+    let mut filtered = vec![];
+    for addr in addrs {
+        if match ip_version {
+            IpVersion::Any => true,
+            IpVersion::Ipv4 => addr.is_ipv4(),
+            IpVersion::Ipv6 => addr.is_ipv6(),
+        } && !filtered.contains(&addr)
+        {
+            filtered.push(addr);
+        }
+    }
+    filtered
+}
+
+async fn resolve_pg_hostaddrs(config: &PgConnectionConfig) -> anyhow::Result<Vec<IpAddr>> {
+    let addrs = tokio::net::lookup_host((config.host.as_str(), config.port))
+        .await
+        .with_context(|| {
+            format!(
+                "failed to resolve postgres host `{}` for {}",
+                config.host, config.ip_version
+            )
+        })?
+        .map(|addr| addr.ip());
+
+    let addrs = filter_ip_version(addrs, &config.ip_version);
+    if addrs.is_empty() {
+        bail!(
+            "postgres host `{}` did not resolve to any {} address",
+            config.host,
+            config.ip_version
+        );
+    }
+    Ok(addrs)
+}
+
 pub async fn create_pg_client(
     config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
@@ -446,9 +541,19 @@ pub async fn create_pg_client(
     pg_config
         .user(&config.user)
         .password(&config.password)
-        .host(&config.host)
         .port(config.port)
         .dbname(&config.database);
+
+    match &config.ip_version {
+        IpVersion::Any => {
+            pg_config.host(&config.host);
+        }
+        IpVersion::Ipv4 | IpVersion::Ipv6 => {
+            for addr in resolve_pg_hostaddrs(config).await? {
+                pg_config.host(&config.host).hostaddr(addr);
+            }
+        }
+    }
 
     // Configure TCP keepalive if provided
     if let Some(keepalive) = tcp_keepalive {
@@ -724,7 +829,9 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pgvector_dimension;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::{IpVersion, filter_ip_version, parse_pgvector_dimension};
 
     #[test]
     fn test_parse_pgvector_dimension() {
@@ -737,5 +844,30 @@ mod tests {
     fn test_parse_pgvector_dimension_requires_size() {
         let err = parse_pgvector_dimension("vector").unwrap_err();
         assert!(err.to_string().contains("missing dimension"));
+    }
+
+    #[test]
+    fn test_parse_ip_version() {
+        assert_eq!("".parse::<IpVersion>().unwrap(), IpVersion::Any);
+        assert_eq!("any".parse::<IpVersion>().unwrap(), IpVersion::Any);
+        assert_eq!("ipv4".parse::<IpVersion>().unwrap(), IpVersion::Ipv4);
+        assert_eq!("4".parse::<IpVersion>().unwrap(), IpVersion::Ipv4);
+        assert_eq!("ipv6".parse::<IpVersion>().unwrap(), IpVersion::Ipv6);
+        assert_eq!("6".parse::<IpVersion>().unwrap(), IpVersion::Ipv6);
+        assert!("invalid".parse::<IpVersion>().is_err());
+    }
+
+    #[test]
+    fn test_filter_ip_version() {
+        let v4 = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let v6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let addrs = vec![v4, v6, v4];
+
+        assert_eq!(
+            filter_ip_version(addrs.clone(), &IpVersion::Any),
+            vec![v4, v6]
+        );
+        assert_eq!(filter_ip_version(addrs.clone(), &IpVersion::Ipv4), vec![v4]);
+        assert_eq!(filter_ip_version(addrs, &IpVersion::Ipv6), vec![v6]);
     }
 }

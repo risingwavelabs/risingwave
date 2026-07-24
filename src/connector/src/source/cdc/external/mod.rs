@@ -33,7 +33,7 @@ use risingwave_pb::secret::PbSecretRef;
 use serde::{Deserialize, Serialize};
 
 use crate::WithPropertiesExt;
-use crate::connector_common::{PgConnectionConfig, PostgresExternalTable, SslMode};
+use crate::connector_common::{IpVersion, PgConnectionConfig, PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::CdcTableSnapshotSplit;
@@ -301,6 +301,9 @@ pub struct ExternalTableConfig {
     #[serde(alias = "debezium.database.sslrootcert")]
     pub ssl_root_cert: Option<String>,
 
+    #[serde(default, rename = "ip.version")]
+    pub ip_version: IpVersion,
+
     /// `encrypt` specifies whether connect to SQL Server using SSL.
     /// Only "true" means using SSL. All other values are treated as "false".
     #[serde(rename = "database.encrypt", default = "Default::default")]
@@ -340,6 +343,7 @@ impl ExternalTableConfig {
             database: self.database.clone(),
             ssl_mode: self.ssl_mode.clone(),
             ssl_root_cert: self.ssl_root_cert.clone(),
+            ip_version: self.ip_version.clone(),
         })
     }
 }

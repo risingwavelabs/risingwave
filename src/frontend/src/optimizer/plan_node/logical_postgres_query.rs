@@ -14,7 +14,6 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
@@ -22,7 +21,6 @@ use super::{
     BatchPostgresQuery, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     LogicalProject, PlanBase, PredicatePushdown, ToBatch, ToStream, generic,
 };
-use crate::OptimizerContextRef;
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -39,31 +37,7 @@ pub struct LogicalPostgresQuery {
 }
 
 impl LogicalPostgresQuery {
-    pub fn new(
-        ctx: OptimizerContextRef,
-        schema: Schema,
-        hostname: String,
-        port: String,
-        username: String,
-        password: String,
-        database: String,
-        query: String,
-        ssl_mode: Option<String>,
-        ssl_root_cert: Option<String>,
-    ) -> Self {
-        let core = generic::PostgresQuery {
-            schema,
-            hostname,
-            port,
-            username,
-            password,
-            database,
-            query,
-            ssl_mode,
-            ssl_root_cert,
-            ctx,
-        };
-
+    pub fn new(core: generic::PostgresQuery) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
 
         LogicalPostgresQuery { base, core }

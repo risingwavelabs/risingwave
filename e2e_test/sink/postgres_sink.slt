@@ -15,6 +15,72 @@ PGDATABASE=sink_test createdb
 statement ok
 set sink_decouple = false;
 
+################### test ip.version
+
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py start --target-host "$PGHOST" --target-port "$PGPORT" --listen-host 127.0.0.1 --listen-port 28433 --pid-file /tmp/rw_pg_tcp_proxy_28433.pid --log-file /tmp/rw_pg_tcp_proxy_28433.log
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_ip_version_sink_table (id BIGINT PRIMARY KEY, v BIGINT)"
+
+statement ok
+CREATE TABLE rw_ip_version_sink_table (
+    id BIGINT PRIMARY KEY,
+    v BIGINT
+);
+
+statement ok
+CREATE SINK postgres_ip_version_sink_ipv4 FROM rw_ip_version_sink_table WITH (
+    connector='postgres',
+    host='localhost',
+    port='28433',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_ip_version_sink_table',
+    type='upsert',
+    primary_key='id',
+    ip.version='ipv4',
+);
+
+statement ok
+INSERT INTO rw_ip_version_sink_table VALUES (1, 10), (2, 20);
+
+statement ok
+flush;
+
+query II retry 4 backoff 1s
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_ip_version_sink_table order by id;');
+----
+1 10
+2 20
+
+statement error .*((did not resolve to any ipv6 address)|([Cc]onnection refused)|(Cannot assign requested address)|(Network is unreachable)).*
+CREATE SINK postgres_ip_version_sink_ipv6_on_ipv4 FROM rw_ip_version_sink_table WITH (
+    connector='postgres',
+    host='localhost',
+    port='28433',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_ip_version_sink_table',
+    type='upsert',
+    primary_key='id',
+    ip.version='ipv6',
+);
+
+statement ok
+DROP SINK postgres_ip_version_sink_ipv4;
+
+statement ok
+DROP TABLE rw_ip_version_sink_table;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_ip_version_sink_table"
+
+system ok
+python3 e2e_test/commands/pg_tcp_proxy.py stop --pid-file /tmp/rw_pg_tcp_proxy_28433.pid
+
 ################### test table pk can mismatch
 
 system ok

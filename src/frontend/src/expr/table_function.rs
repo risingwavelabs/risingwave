@@ -21,7 +21,7 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
+use risingwave_connector::connector_common::{IpVersion, PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
@@ -304,6 +304,7 @@ impl TableFunction {
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
         expect_connector_name: &str,
+        function_name: &str,
     ) -> RwResult<Vec<ExprImpl>> {
         let cast_args = match args.len() {
             INLINE_ARG_LEN => {
@@ -352,12 +353,21 @@ impl TableFunction {
                             .cloned()
                             .unwrap_or_default(),
                     ));
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved
+                            .get("ip.version")
+                            .cloned()
+                            .unwrap_or_default(),
+                    ));
                 }
 
                 args_vec
             }
             _ => {
-                return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
+                let message = format!(
+                    "{function_name} function accepts either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)"
+                );
+                return Err(BindError(message).into());
             }
         };
 
@@ -376,6 +386,7 @@ impl TableFunction {
             schema_path,
             args,
             "postgres-cdc",
+            "postgres_query",
         )?;
         let evaled_args = args
             .iter()
@@ -403,6 +414,8 @@ impl TableFunction {
                         .get(7)
                         .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
 
+                    let ip_version = postgres_query_ip_version_arg(&evaled_args)?;
+
                     let port = evaled_args[1]
                         .parse::<u16>()
                         .with_context(|| format!("invalid postgres port `{}`", evaled_args[1]))?;
@@ -414,6 +427,7 @@ impl TableFunction {
                         database: evaled_args[4].clone(),
                         ssl_mode,
                         ssl_root_cert,
+                        ip_version,
                     };
                     let client = create_pg_client(&pg_conn, None).await?;
 
@@ -475,6 +489,7 @@ impl TableFunction {
             schema_path,
             args,
             "mysql-cdc",
+            "mysql_query",
         )?;
         let evaled_args = args
             .iter()
@@ -484,7 +499,7 @@ impl TableFunction {
         #[cfg(madsim)]
         {
             return Err(crate::error::ErrorCode::BindError(
-                "postgres_query can't be used in the madsim mode".to_string(),
+                "mysql_query can't be used in the madsim mode".to_string(),
             )
             .into());
         }
@@ -704,6 +719,18 @@ impl TableFunction {
             ..self
         }
     }
+}
+
+fn postgres_query_ip_version_arg(evaled_args: &[String]) -> anyhow::Result<IpVersion> {
+    evaled_args
+        .get(8)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse::<IpVersion>()
+                .with_context(|| format!("invalid postgres ip.version `{}`", s))
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 impl std::fmt::Debug for TableFunction {
