@@ -106,19 +106,22 @@ enum ClickHouseEngine {
     SharedCollapsingMergeTree(String),
     SharedVersionedCollapsingMergeTree(String),
     SharedGraphiteMergeTree,
+    /// A Distributed table that wraps the resolved inner (local) table engine.
+    Distributed(Box<ClickHouseEngine>),
     Null,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
-        matches!(
-            self,
+        match self {
             ClickHouseEngine::CollapsingMergeTree(_)
-                | ClickHouseEngine::VersionedCollapsingMergeTree(_)
-                | ClickHouseEngine::ReplicatedCollapsingMergeTree(_)
-                | ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(_)
-                | ClickHouseEngine::SharedCollapsingMergeTree(_)
-                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
-        )
+            | ClickHouseEngine::VersionedCollapsingMergeTree(_)
+            | ClickHouseEngine::ReplicatedCollapsingMergeTree(_)
+            | ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(_)
+            | ClickHouseEngine::SharedCollapsingMergeTree(_)
+            | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_) => true,
+            ClickHouseEngine::Distributed(inner) => inner.is_collapsing_engine(),
+            _ => false,
+        }
     }
 
     pub fn is_delete_replacing_engine(&self) -> bool {
@@ -126,6 +129,7 @@ impl ClickHouseEngine {
             ClickHouseEngine::ReplacingMergeTree(delete_col) => delete_col.is_some(),
             ClickHouseEngine::ReplicatedReplacingMergeTree(delete_col) => delete_col.is_some(),
             ClickHouseEngine::SharedReplacingMergeTree(delete_col) => delete_col.is_some(),
+            ClickHouseEngine::Distributed(inner) => inner.is_delete_replacing_engine(),
             _ => false,
         }
     }
@@ -139,6 +143,7 @@ impl ClickHouseEngine {
             ClickHouseEngine::SharedReplacingMergeTree(Some(delete_col)) => {
                 Some(delete_col.clone())
             }
+            ClickHouseEngine::Distributed(inner) => inner.get_delete_col(),
             _ => None,
         }
     }
@@ -155,21 +160,23 @@ impl ClickHouseEngine {
             ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.clone())
             }
+            ClickHouseEngine::Distributed(inner) => inner.get_sign_name(),
             _ => None,
         }
     }
 
     pub fn is_shared_tree(&self) -> bool {
-        matches!(
-            self,
+        match self {
             ClickHouseEngine::SharedMergeTree
-                | ClickHouseEngine::SharedReplacingMergeTree(_)
-                | ClickHouseEngine::SharedSummingMergeTree
-                | ClickHouseEngine::SharedAggregatingMergeTree
-                | ClickHouseEngine::SharedCollapsingMergeTree(_)
-                | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
-                | ClickHouseEngine::SharedGraphiteMergeTree
-        )
+            | ClickHouseEngine::SharedReplacingMergeTree(_)
+            | ClickHouseEngine::SharedSummingMergeTree
+            | ClickHouseEngine::SharedAggregatingMergeTree
+            | ClickHouseEngine::SharedCollapsingMergeTree(_)
+            | ClickHouseEngine::SharedVersionedCollapsingMergeTree(_)
+            | ClickHouseEngine::SharedGraphiteMergeTree => true,
+            ClickHouseEngine::Distributed(inner) => inner.is_shared_tree(),
+            _ => false,
+        }
     }
 
     pub fn from_query_engine(
@@ -302,6 +309,11 @@ impl ClickHouseEngine {
                 Ok(ClickHouseEngine::SharedCollapsingMergeTree(sign_name))
             }
             "SharedGraphiteMergeTree" => Ok(ClickHouseEngine::SharedGraphiteMergeTree),
+            // Distributed is handled separately in query_column_engine_from_ck by resolving the
+            // inner (local) table engine. Nested Distributed tables are not supported.
+            "Distributed" => Err(SinkError::ClickHouse(
+                "Nested Distributed tables are not supported".to_owned(),
+            )),
             _ => Err(SinkError::ClickHouse(format!(
                 "Cannot find clickhouse engine {:?}",
                 engine_name.engine
@@ -562,12 +574,25 @@ impl Sink for ClickHouseSink {
             && !clickhouse_engine.is_collapsing_engine()
             && !clickhouse_engine.is_delete_replacing_engine()
         {
-            return match clickhouse_engine {
-                ClickHouseEngine::ReplicatedReplacingMergeTree(None) | ClickHouseEngine::ReplacingMergeTree(None) | ClickHouseEngine::SharedReplacingMergeTree(None) =>  {
-                    Err(SinkError::ClickHouse("To enable upsert with a `ReplacingMergeTree`, you must set a `clickhouse.delete.column` to the UInt8 column in ClickHouse used to signify deletes. See https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree#is_deleted for more information".to_owned()))
+            // Produce a specific error message depending on the engine (and its inner engine for
+            // Distributed tables) so the user knows exactly what to fix.
+            let err = match &clickhouse_engine {
+                ClickHouseEngine::ReplicatedReplacingMergeTree(None)
+                | ClickHouseEngine::ReplacingMergeTree(None)
+                | ClickHouseEngine::SharedReplacingMergeTree(None) => {
+                    SinkError::ClickHouse("To enable upsert with a `ReplacingMergeTree`, you must set a `clickhouse.delete.column` to the UInt8 column in ClickHouse used to signify deletes. See https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree#is_deleted for more information".to_owned())
                 }
-                _ => Err(SinkError::ClickHouse("If you want to use upsert, please use either `VersionedCollapsingMergeTree`, `CollapsingMergeTree` or the `ReplacingMergeTree` in ClickHouse".to_owned()))
+                ClickHouseEngine::Distributed(inner) => match inner.as_ref() {
+                    ClickHouseEngine::ReplicatedReplacingMergeTree(None)
+                    | ClickHouseEngine::ReplacingMergeTree(None)
+                    | ClickHouseEngine::SharedReplacingMergeTree(None) => {
+                        SinkError::ClickHouse("To enable upsert with a Distributed table backed by `ReplacingMergeTree`, you must set a `clickhouse.delete.column` to the UInt8 column used to signify deletes. See https://clickhouse.com/docs/en/engines/table-engines/mergetree-family/replacingmergetree#is_deleted for more information".to_owned())
+                    }
+                    _ => SinkError::ClickHouse("If you want to use upsert with a Distributed table, the underlying local table must use `VersionedCollapsingMergeTree`, `CollapsingMergeTree`, or `ReplacingMergeTree` with a delete column".to_owned()),
+                },
+                _ => SinkError::ClickHouse("If you want to use upsert, please use either `VersionedCollapsingMergeTree`, `CollapsingMergeTree` or the `ReplacingMergeTree` in ClickHouse".to_owned()),
             };
+            return Err(err);
         }
 
         self.check_column_name_and_type(&clickhouse_column)?;
@@ -838,45 +863,190 @@ struct ClickhouseQueryEngine {
     create_table_query: String,
 }
 
+/// Extracts the top-level, comma-separated arguments of the `Distributed(...)`
+/// engine clause in a `ClickHouse` `CREATE TABLE` statement, if one is present.
+///
+/// A single quote- and paren-aware scan does the work: a `,`, `(` or `)` nested
+/// inside a quoted string (`'db(a,b)'`) or an inner function call
+/// (`currentDatabase()`, `cityHash64(a, b)`) is not mistaken for an argument
+/// separator or for the end of the clause.
+///
+/// `rfind` is used so that an earlier accidental `Distributed(` in a comment or a
+/// column `DEFAULT` expression cannot win — the `ENGINE` clause is always last in
+/// `ClickHouse` DDL. Returns `None` when there is no `Distributed(` clause or its
+/// parentheses are unbalanced.
+fn distributed_engine_args(create_table_query: &str) -> Option<Vec<&str>> {
+    let open = create_table_query.rfind("Distributed(")? + "Distributed(".len();
+    let rest = &create_table_query[open..];
+
+    let mut args = Vec::new();
+    let mut arg_start = 0usize;
+    let mut depth = 1i32; // the '(' of `Distributed(` is already consumed
+    let mut in_quote: Option<char> = None;
+    let mut chars = rest.char_indices();
+    while let Some((pos, c)) = chars.next() {
+        if let Some(q) = in_quote {
+            if c == '\\' {
+                chars.next();
+            } else if c == q {
+                in_quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' | '`' => in_quote = Some(c),
+            '(' => depth += 1,
+            ',' if depth == 1 => {
+                args.push(&rest[arg_start..pos]);
+                arg_start = pos + c.len_utf8();
+            }
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    args.push(&rest[arg_start..pos]);
+                    return Some(args);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Strips one matching pair of surrounding quotes (`'`, `"` or backtick) from a
+/// trimmed argument, leaving inner content — including any inner quotes — intact.
+fn strip_arg_quotes(s: &str) -> &str {
+    let s = s.trim();
+    for q in ['\'', '"', '`'] {
+        if let Some(inner) = s.strip_prefix(q).and_then(|rest| rest.strip_suffix(q)) {
+            return inner;
+        }
+    }
+    s
+}
+
+/// Returns true if `s` is (ignoring whitespace and case) the constant
+/// expression `currentDatabase()`, which `ClickHouse` accepts as the database
+/// argument of a Distributed engine to mean "the database the table itself
+/// lives in" — the same meaning as an empty string.
+fn is_current_database_call(s: &str) -> bool {
+    let normalized: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    normalized.eq_ignore_ascii_case("currentDatabase()")
+}
+
+/// Parse the inner `(database, table)` pair from a Distributed table's DDL.
+///
+/// `ClickHouse` Distributed DDL looks like:
+/// `ENGINE = Distributed('cluster', 'inner_db', 'inner_table', [sharding_key])`
+/// `ENGINE = Distributed(logs, default, hits[, sharding_key[, policy_name]])`
+/// The database may be an empty string `''`, or a constant expression such as
+/// `currentDatabase()`, either of which mean the same database as the
+/// Distributed table. See
+/// <https://clickhouse.com/docs/engines/table-engines/special/distributed>.
+fn parse_distributed_inner_table(
+    create_table_query: &str,
+    default_db: &str,
+) -> Option<(String, String)> {
+    // Distributed(cluster, database, table, [sharding_key, [policy_name]]) — we
+    // only need `database` and `table`; any trailing arguments are ignored.
+    let args = distributed_engine_args(create_table_query)?;
+    let [_cluster, database, table, ..] = args.as_slice() else {
+        return None;
+    };
+
+    let stripped_db = strip_arg_quotes(database);
+    // Both an empty string and `currentDatabase()` mean the Distributed table's
+    // own database, which the caller passes in as `default_db`.
+    let inner_db = if stripped_db.is_empty() || is_current_database_call(database) {
+        default_db.to_owned()
+    } else {
+        stripped_db.to_owned()
+    };
+    let inner_table = strip_arg_quotes(table);
+    if inner_table.is_empty() {
+        return None;
+    }
+    Some((inner_db, inner_table.to_owned()))
+}
+
 async fn query_column_engine_from_ck(
     client: ClickHouseClient,
     config: &ClickHouseConfig,
 ) -> Result<(Vec<SystemColumn>, ClickHouseEngine)> {
-    let query_engine = QUERY_ENGINE;
-    let query_column = QUERY_COLUMN;
-
-    let clickhouse_engine = client
-        .query(query_engine)
+    let engine_rows = client
+        .query(QUERY_ENGINE)
         .bind(config.common.database.clone())
         .bind(config.common.table.clone())
         .fetch_all::<ClickhouseQueryEngine>()
         .await?;
-    let mut clickhouse_column = client
-        .query(query_column)
+    let mut column_rows = client
+        .query(QUERY_COLUMN)
         .bind(config.common.database.clone())
         .bind(config.common.table.clone())
         .bind("position")
         .fetch_all::<SystemColumn>()
         .await?;
-    if clickhouse_engine.is_empty() || clickhouse_column.is_empty() {
+    if engine_rows.is_empty() || column_rows.is_empty() {
         return Err(SinkError::ClickHouse(format!(
             "table {:?}.{:?} is not find in clickhouse",
             config.common.database, config.common.table
         )));
     }
 
-    let clickhouse_engine =
-        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap(), config)?;
+    let engine_row = engine_rows.first().unwrap();
+    let clickhouse_engine = if engine_row.engine == "Distributed" {
+        // Resolve the inner (local) table so that engine-specific behaviour
+        // (collapsing sign, delete column, upsert support …) is derived from
+        // the underlying table rather than from the Distributed shell.
+        let (inner_db, inner_table) =
+            parse_distributed_inner_table(&engine_row.create_table_query, &config.common.database)
+                .ok_or_else(|| {
+                    SinkError::ClickHouse(format!(
+                        "Cannot parse inner table from Distributed DDL: {:?}",
+                        engine_row.create_table_query
+                    ))
+                })?;
+
+        let inner_engine_rows = client
+            .query(QUERY_ENGINE)
+            .bind(inner_db.clone())
+            .bind(inner_table.clone())
+            .fetch_all::<ClickhouseQueryEngine>()
+            .await?;
+        if inner_engine_rows.is_empty() {
+            return Err(SinkError::ClickHouse(format!(
+                "Inner table {inner_db:?}.{inner_table:?} not found in ClickHouse"
+            )));
+        }
+
+        // Use the inner table's column metadata so that `is_in_primary_key` is
+        // correct (Distributed tables always report 0 for that field).
+        let inner_column_rows = client
+            .query(QUERY_COLUMN)
+            .bind(inner_db)
+            .bind(inner_table)
+            .bind("position")
+            .fetch_all::<SystemColumn>()
+            .await?;
+        if !inner_column_rows.is_empty() {
+            column_rows = inner_column_rows;
+        }
+
+        let inner_engine =
+            ClickHouseEngine::from_query_engine(inner_engine_rows.first().unwrap(), config)?;
+        ClickHouseEngine::Distributed(Box::new(inner_engine))
+    } else {
+        ClickHouseEngine::from_query_engine(engine_row, config)?
+    };
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
-        clickhouse_column.retain(|a| sign.ne(&a.name))
+        column_rows.retain(|a| sign.ne(&a.name));
     }
-
     if let Some(delete_col) = &clickhouse_engine.get_delete_col() {
-        clickhouse_column.retain(|a| delete_col.ne(&a.name))
+        column_rows.retain(|a| delete_col.ne(&a.name));
     }
 
-    Ok((clickhouse_column, clickhouse_engine))
+    Ok((column_rows, clickhouse_engine))
 }
 
 /// Serialize this structure to simulate the `struct` call clickhouse interface
@@ -1174,5 +1344,154 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
 impl From<::clickhouse::error::Error> for SinkError {
     fn from(value: ::clickhouse::error::Error) -> Self {
         SinkError::ClickHouse(value.to_report_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_distributed_inner_table;
+
+    #[test]
+    fn test_parse_distributed_inner_table_quoted_literals() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db', 'inner_table', rand())";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("inner_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_empty_database_means_default() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', '', 'inner_table')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_current_database_call() {
+        // Regression test: the database argument may be a constant expression like
+        // `currentDatabase()`, which contains its own parentheses. A naive parser
+        // that stops at the first `)` would wrongly truncate the argument list here.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed(logs, currentDatabase(), hits, rand())";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_nested_parens_and_commas_in_quotes() {
+        // A quoted argument containing a comma and parentheses must not be split
+        // or truncated early.
+        let ddl =
+            "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'db(a,b)', 'inner_table')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("db(a,b)".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_missing_table_returns_none() {
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db')";
+        assert_eq!(parse_distributed_inner_table(ddl, "default_db"), None);
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_unquoted_identifiers_no_sharding_key() {
+        // https://clickhouse.com/docs/engines/table-engines/special/distributed example:
+        // ENGINE = Distributed(logs, default, hits)
+        let ddl = "CREATE TABLE hits_all AS hits ENGINE = Distributed(logs, default, hits)";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_with_nested_comma() {
+        // sharding_key may be "any expression from constants and table columns", e.g.
+        // a multi-argument hash function containing its own top-level commas.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed(logs, default, hits, cityHash64(user_id, tenant_id))";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_settings_clause_after_engine() {
+        // A trailing SETTINGS clause (outside the Distributed(...) parens) must not
+        // confuse the matching-paren search.
+        let ddl = "CREATE TABLE hits_all AS hits ENGINE = Distributed(logs, default, hits) SETTINGS fsync_after_insert=0, fsync_directories=0";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_with_policy_name() {
+        // Distributed(cluster, database, table[, sharding_key[, policy_name]]) — the
+        // optional policy_name is a trailing string literal we don't need, but its
+        // presence (and its own quoting) must not break parsing of database/table.
+        let ddl = "CREATE TABLE db.t (x Int32) ENGINE = Distributed('cluster', 'inner_db', 'inner_table', rand(), 'policy_name')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("inner_db".to_owned(), "inner_table".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_full_ddl_template_with_on_cluster() {
+        // Full documented template: ON CLUSTER, column defs with DEFAULT expressions
+        // containing their own parens/commas, and a trailing SETTINGS clause. None of
+        // that should confuse the search for the ENGINE = Distributed(...) clause,
+        // since we always locate the *last* "Distributed(" and match its own closing
+        // parenthesis.
+        let ddl = "CREATE TABLE IF NOT EXISTS db.hits_all ON CLUSTER logs \
+            (\
+                `EventDate` Date, \
+                `Cost` Decimal(10, 2) DEFAULT round(1.5, 2), \
+                `UserID` UInt64\
+            ) ENGINE = Distributed(logs, currentDatabase(), hits, cityHash64(UserID, EventDate)) \
+            SETTINGS fsync_after_insert=0, fsync_directories=0";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("default_db".to_owned(), "hits".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_plain_column() {
+        // ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id)
+        let ddl = "CREATE TABLE db.t (trip_id UInt64) ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id)";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("trip_local".to_owned(), "trips".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_sharding_key_and_policy_name() {
+        // ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id, 'policy_2s2r')
+        let ddl = "CREATE TABLE db.t (trip_id UInt64) ENGINE = Distributed('cluster_2s2r', 'trip_local', 'trips', trip_id, 'policy_2s2r')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "default_db"),
+            Some(("trip_local".to_owned(), "trips".to_owned()))
+        );
+    }
+
+    #[test]
+    fn test_parse_distributed_inner_table_current_database_resolves_to_default() {
+        // `currentDatabase()` resolves to whatever database the caller passes in
+        // as the default (the database the Distributed table itself lives in).
+        let ddl = "CREATE TABLE lab_db.t (x Int32) ENGINE = Distributed('cluster', currentDatabase(), 'hits')";
+        assert_eq!(
+            parse_distributed_inner_table(ddl, "lab_db"),
+            Some(("lab_db".to_owned(), "hits".to_owned()))
+        );
     }
 }
