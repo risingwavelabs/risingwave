@@ -18,9 +18,10 @@
 // `UPDATE_EXPECT=1`.
 // To update content, change source/sink/connection WITH options definitions (for example,
 // `#[with_option(allow_alter_on_fly)]` on struct fields), then run `./risedev generate-with-options`.
-// `./risedev generate-with-options` runs two UPDATE_EXPECT tests:
+// `./risedev generate-with-options` runs three UPDATE_EXPECT tests:
 // 1) refresh `with_options_{source,sink,connection}.yaml`;
-// 2) regenerate this file from those YAML files.
+// 2) regenerate this file from those YAML files;
+// 3) regenerate the Iceberg Engine option classifier.
 
 #![rustfmt::skip]
 

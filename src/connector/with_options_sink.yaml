@@ -679,16 +679,19 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+    iceberg_engine: true
   - name: order_key
     field_type: String
     required: false
     default: Default::default
+    iceberg_engine: true
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: create_table_if_not_exists
     field_type: bool
     required: false
@@ -708,28 +711,33 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction_interval_sec
     field_type: u64
     comments: The interval of iceberg compaction
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: enable_snapshot_expiration
     field_type: bool
     comments: Whether to enable iceberg expired snapshots.
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: write_mode
     field_type: IcebergWriteMode
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
+    iceberg_engine: true
   - name: format_version
     field_type: FormatVersion
     comments: Iceberg format version for table creation.
     required: false
     default: 'FormatVersion :: V2'
+    iceberg_engine: true
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
@@ -738,40 +746,47 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_retain_last
     field_type: i32
     comments: The number of snapshots to retain
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_clear_expired_files
     field_type: bool
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: snapshot_expiration_clear_expired_meta_data
     field_type: bool
     required: false
     default: 'true'
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: enable_manifest_rewrite
     field_type: bool
     comments: Whether to periodically rewrite fragmented Iceberg data manifests.
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: manifest_rewrite_target_size_bytes
     field_type: u64
     comments: Target size in bytes for rewritten Iceberg data manifests.
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: manifest_rewrite_min_count_to_merge
     field_type: usize
     comments: Minimum number of manifests required to rewrite an under-filled batch.
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
@@ -781,26 +796,31 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.small_files_threshold_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.delete_files_count_threshold
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.trigger_snapshot_count
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.target_file_size_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.type
     field_type: CompactionType
     comments: |-
@@ -809,6 +829,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_compression
     field_type: String
     comments: |-
@@ -818,6 +839,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_max_row_group_rows
     field_type: usize
     comments: |-
@@ -826,6 +848,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: compaction.write_parquet_max_row_group_bytes
     field_type: usize
     comments: |-
@@ -834,6 +857,7 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+    iceberg_engine: true
   - name: enable_pk_index
     field_type: bool
     comments: |-
@@ -842,6 +866,7 @@ IcebergConfig:
       position deletes instead of equality deletes.
     required: false
     default: Default::default
+    iceberg_engine: true
 KafkaConfig:
   fields:
   - name: topic
