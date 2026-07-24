@@ -742,6 +742,13 @@ validate_new_cluster() {
   echo "--- ASOF JOIN TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_restart.slt"
 
+  echo "--- CDC TEST: Enabling auto schema change on upgraded MySQL CDC source"
+  local mysql_cdc_source_id
+  mysql_cdc_source_id=$(run_sql_scalar "SELECT id FROM rw_catalog.rw_sources WHERE name = 'cdc_source_mysql';")
+  run_risectl meta alter-source-properties-safe \
+    --source-id "$mysql_cdc_source_id" \
+    --props '{"auto.schema.change":"true"}'
+
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
 

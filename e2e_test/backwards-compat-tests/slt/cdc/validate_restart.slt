@@ -38,9 +38,6 @@ SELECT id, name FROM mysql_serial_table_in_rw;
 1 cdc_1
 3 cdc_3
 
-statement ok
-ALTER SOURCE cdc_source_mysql CONNECTOR WITH (auto.schema.change='true');
-
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
 ALTER TABLE serial_table_in_mysql MODIFY COLUMN id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;
