@@ -39,7 +39,6 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
@@ -446,10 +445,39 @@ impl CacheRefiller {
         new_pinned_version: PinnedVersion,
     ) {
         for delta in &mut deltas {
-            let is_insert_only = delta.delete_sst_object_ids.is_empty();
-            delta
-                .insert_sst_infos
-                .retain(|sst| self.should_refill_sst_before_meta_load(sst, is_insert_only));
+            let for_serving = self.role.for_serving();
+            // Writer-appended L0 SSTs are already warm on the streaming side. Their data refill
+            // may therefore only be needed by serving workers.
+            let for_streaming =
+                self.role.for_streaming() && !delta.delete_sst_object_ids.is_empty();
+
+            if !for_serving && !for_streaming {
+                delta.insert_sst_infos.clear();
+                continue;
+            }
+
+            // This is deliberately a table-ID-only, whole-SST admission check before Meta load.
+            // The DataCacheRefillTaskGenerator keeps the exact block/vnode decision after Meta
+            // load, so this check must retain an SST when any contained table can be relevant.
+            delta.insert_sst_infos.retain(|sst| {
+                sst.table_ids.iter().any(|table_id| {
+                    // A missing entry means there is no table override, not that the table is
+                    // absent. Preserve the configured legacy/default policy in that case.
+                    let policy = self
+                        .table_cache_refill_policies
+                        .get(table_id)
+                        .copied()
+                        .unwrap_or(self.default_policy);
+
+                    if policy == CacheRefillPolicy::Disabled {
+                        return false;
+                    }
+
+                    (for_serving && (policy.is_unscoped_enabled() || policy.is_serving_scoped()))
+                        || (for_streaming
+                            && (policy.is_unscoped_enabled() || policy.is_streaming_scoped()))
+                })
+            });
         }
         let context = self.new_cache_refill_context(&deltas);
         let handle = (self.spawn_refill_task)(
@@ -465,37 +493,6 @@ impl CacheRefiller {
         let item = Item { handle, event };
         self.queue.push_back(item);
         GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.add(1);
-    }
-
-    fn should_refill_table_before_meta_load(
-        &self,
-        table_id: TableId,
-        is_insert_only: bool,
-    ) -> bool {
-        let policy = self
-            .table_cache_refill_policies
-            .get(&table_id)
-            .copied()
-            .unwrap_or(self.default_policy);
-        let serving_candidate =
-            self.role.for_serving() && self.serving_table_vnode_mapping.contains_key(&table_id);
-
-        if is_insert_only {
-            return (policy.is_unscoped_enabled() || policy.is_serving_scoped())
-                && serving_candidate;
-        }
-
-        policy.is_unscoped_enabled()
-            || (policy.is_streaming_scoped() && self.role.for_streaming())
-            || (policy.is_serving_scoped() && serving_candidate)
-    }
-
-    /// Returns whether an SST may contain at least one table eligible for data refill before its
-    /// metadata is loaded.
-    fn should_refill_sst_before_meta_load(&self, sst: &SstableInfo, is_insert_only: bool) -> bool {
-        sst.table_ids
-            .iter()
-            .any(|table_id| self.should_refill_table_before_meta_load(*table_id, is_insert_only))
     }
 
     fn new_cache_refill_context(&self, deltas: &[SstDeltaInfo]) -> CacheRefillContext {
@@ -1459,121 +1456,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_should_refill_sst_before_meta_load_by_role_and_mapping() {
-        let table_id = TableId::from(1);
-        let sst = SstableInfo::from(SstableInfoInner {
-            table_ids: vec![table_id],
-            ..Default::default()
-        });
-        let cases = [
-            (Role::Both, CacheRefillPolicy::Disabled, false, true, false),
-            (
-                Role::Serving,
-                CacheRefillPolicy::Enabled,
-                false,
-                false,
-                true,
-            ),
-            (
-                Role::Streaming,
-                CacheRefillPolicy::Streaming,
-                false,
-                false,
-                true,
-            ),
-            (
-                Role::Serving,
-                CacheRefillPolicy::Streaming,
-                false,
-                true,
-                false,
-            ),
-            (Role::Serving, CacheRefillPolicy::Serving, false, true, true),
-            (
-                Role::Serving,
-                CacheRefillPolicy::Serving,
-                false,
-                false,
-                false,
-            ),
-            (Role::Both, CacheRefillPolicy::Both, false, false, true),
-            (Role::Serving, CacheRefillPolicy::Both, false, true, true),
-            (Role::Serving, CacheRefillPolicy::Both, false, false, false),
-            (Role::Serving, CacheRefillPolicy::Enabled, true, true, true),
-            (
-                Role::Serving,
-                CacheRefillPolicy::Serving,
-                true,
-                false,
-                false,
-            ),
-            (Role::Serving, CacheRefillPolicy::Both, true, true, true),
-            (Role::Streaming, CacheRefillPolicy::Both, true, true, false),
-            (Role::Both, CacheRefillPolicy::Streaming, true, true, false),
-        ];
-
-        for (role, policy, is_insert_only, has_serving_mapping, expected) in cases {
-            let mut refiller = CacheRefiller::new(
-                role,
-                test_refill_config(CacheRefillPolicy::Disabled),
-                mock_sstable_store().await,
-                CacheRefiller::default_spawn_refill_task(),
-            );
-            refiller.replace_table_cache_refill_policies(HashMap::from([(table_id, policy)]));
-            if has_serving_mapping {
-                refiller.replace_serving_table_vnode_mapping(HashMap::from([(
-                    table_id,
-                    Bitmap::zeros(VirtualNode::COUNT_FOR_TEST),
-                )]));
-            }
-            assert_eq!(
-                refiller.should_refill_sst_before_meta_load(&sst, is_insert_only),
-                expected,
-            );
-        }
-
-        let rejected_table = TableId::from(2);
-        let accepted_table = TableId::from(3);
-        let mut refiller = CacheRefiller::new(
-            Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
-            mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
-        );
-        refiller.replace_table_cache_refill_policies(HashMap::from([
-            (rejected_table, CacheRefillPolicy::Disabled),
-            (accepted_table, CacheRefillPolicy::Streaming),
-        ]));
-        assert!(!refiller.should_refill_sst_before_meta_load(
-            &SstableInfo::from(SstableInfoInner {
-                table_ids: vec![TableId::from(4), rejected_table],
-                ..Default::default()
-            }),
-            false,
-        ));
-        assert!(refiller.should_refill_sst_before_meta_load(
-            &SstableInfo::from(SstableInfoInner {
-                table_ids: vec![rejected_table, accepted_table],
-                ..Default::default()
-            }),
-            false,
-        ));
-
-        let refiller = CacheRefiller::new(
-            Role::Serving,
-            test_refill_config(CacheRefillPolicy::Enabled),
-            mock_sstable_store().await,
-            CacheRefiller::default_spawn_refill_task(),
-        );
-        assert!(refiller.should_refill_sst_before_meta_load(&sst, false));
-    }
-
-    #[tokio::test]
     async fn test_cache_refill_prunes_whole_ssts_before_meta_load() {
         let streaming_table = TableId::from(1);
         let serving_table = TableId::from(2);
         let disabled_table = TableId::from(3);
-        let vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let sstable_store = mock_sstable_store().await;
         let sst_info = |table_ids: Vec<TableId>| {
             SstableInfo::from(SstableInfoInner {
@@ -1581,44 +1467,37 @@ mod tests {
                 ..Default::default()
             })
         };
-        let capture_pruned_table_ids = |role,
-                                        policies: HashMap<TableId, CacheRefillPolicy>,
-                                        streaming_table_vnodes: HashMap<TableId, Bitmap>,
-                                        serving_table_vnodes: HashMap<TableId, Bitmap>,
-                                        delta| {
-            let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
-            let captured_deltas_clone = captured_deltas.clone();
-            let spawn_refill_task: SpawnRefillTask = Arc::new(move |deltas, _, _, _| {
-                *captured_deltas_clone.lock() = Some(deltas);
-                tokio::spawn(async {})
-            });
-            let mut refiller = CacheRefiller::new(
-                role,
-                test_refill_config(CacheRefillPolicy::Disabled),
-                sstable_store.clone(),
-                spawn_refill_task,
-            );
-            refiller.replace_table_cache_refill_policies(policies);
-            for (table_id, bitmap) in streaming_table_vnodes {
-                refiller.update_streaming_table_vnodes(table_id, Some(bitmap));
-            }
-            refiller.replace_serving_table_vnode_mapping(serving_table_vnodes);
-            refiller.start_cache_refill(
-                vec![delta],
-                pinned_version_for_test(),
-                pinned_version_for_test(),
-            );
-            captured_deltas
-                .lock()
-                .take()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .insert_sst_infos
-                .into_iter()
-                .map(|sst| sst.table_ids.clone())
-                .collect::<Vec<_>>()
-        };
+        let capture_pruned_table_ids =
+            |role, default_policy, policies: HashMap<TableId, CacheRefillPolicy>, delta| {
+                let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
+                let captured_deltas_clone = captured_deltas.clone();
+                let spawn_refill_task: SpawnRefillTask = Arc::new(move |deltas, _, _, _| {
+                    *captured_deltas_clone.lock() = Some(deltas);
+                    tokio::spawn(async {})
+                });
+                let mut refiller = CacheRefiller::new(
+                    role,
+                    test_refill_config(default_policy),
+                    sstable_store.clone(),
+                    spawn_refill_task,
+                );
+                refiller.replace_table_cache_refill_policies(policies);
+                refiller.start_cache_refill(
+                    vec![delta],
+                    pinned_version_for_test(),
+                    pinned_version_for_test(),
+                );
+                captured_deltas
+                    .lock()
+                    .take()
+                    .unwrap()
+                    .pop()
+                    .unwrap()
+                    .insert_sst_infos
+                    .into_iter()
+                    .map(|sst| sst.table_ids.clone())
+                    .collect::<Vec<_>>()
+            };
 
         let normal_delta = |insert_sst_infos| SstDeltaInfo {
             insert_sst_infos,
@@ -1634,12 +1513,11 @@ mod tests {
         assert_eq!(
             capture_pruned_table_ids(
                 Role::Both,
+                CacheRefillPolicy::Disabled,
                 HashMap::from([
                     (disabled_table, CacheRefillPolicy::Disabled),
                     (streaming_table, CacheRefillPolicy::Enabled),
                 ]),
-                HashMap::new(),
-                HashMap::new(),
                 normal_delta(vec![
                     sst_info(vec![disabled_table]),
                     sst_info(vec![streaming_table]),
@@ -1651,18 +1529,82 @@ mod tests {
         assert_eq!(
             capture_pruned_table_ids(
                 Role::Both,
+                CacheRefillPolicy::Disabled,
                 HashMap::from([
-                    (streaming_table, CacheRefillPolicy::Both),
-                    (serving_table, CacheRefillPolicy::Both),
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
                 ]),
-                HashMap::from([(streaming_table, vnodes.clone())]),
-                HashMap::from([(serving_table, vnodes)]),
                 insert_only_delta(vec![
                     sst_info(vec![streaming_table]),
                     sst_info(vec![serving_table]),
                 ]),
             ),
             vec![vec![serving_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Serving,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            vec![vec![serving_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            vec![vec![streaming_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                insert_only_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            Vec::<Vec<TableId>>::new(),
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Enabled,
+                HashMap::from([(disabled_table, CacheRefillPolicy::Disabled)]),
+                normal_delta(vec![
+                    sst_info(vec![disabled_table]),
+                    sst_info(vec![TableId::from(4)]),
+                    sst_info(vec![disabled_table, TableId::from(4)]),
+                ]),
+            ),
+            vec![
+                vec![TableId::from(4)],
+                vec![disabled_table, TableId::from(4)]
+            ],
         );
     }
 
