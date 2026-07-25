@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::{replace, take};
 use std::time::Duration;
 
@@ -124,7 +124,7 @@ pub(super) enum CreatingStreamingJobStatus {
         tracking_job: TrackingJob,
         info: CreatingJobInfo,
         log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
-        barriers_to_inject: Option<Vec<BarrierInfo>>,
+        pending_barriers: VecDeque<BarrierInfo>,
     },
     /// All backfill actors have started consuming upstream, and the job
     /// will be finished when all previously injected barriers have been collected
@@ -156,7 +156,7 @@ impl CreatingStreamingJobStatus {
                     pending_non_checkpoint_barriers.push(*snapshot_epoch);
 
                     let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
-                    let barriers_to_inject: Vec<_> = [BarrierInfo {
+                    let pending_barriers: VecDeque<_> = [BarrierInfo {
                         curr_epoch: TracedEpoch::new(Epoch(*snapshot_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
@@ -183,14 +183,14 @@ impl CreatingStreamingJobStatus {
                         info,
                         log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                             snapshot_backfill_actors.iter().cloned(),
-                            barriers_to_inject
-                                .last()
+                            pending_barriers
+                                .back()
                                 .map(|barrier_info| {
                                     barrier_info.prev_epoch().saturating_sub(snapshot_epoch)
                                 })
                                 .unwrap_or(0),
                         ),
-                        barriers_to_inject: Some(barriers_to_inject),
+                        pending_barriers,
                     };
                 }
             }
@@ -245,6 +245,7 @@ impl CreatingStreamingJobStatus {
         &mut self,
         barrier_info: &BarrierInfo,
         mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
+        barrier_amplification_factor: usize,
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -285,14 +286,15 @@ impl CreatingStreamingJobStatus {
                 )]
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
-                barriers_to_inject, ..
-            } => barriers_to_inject
-                .take()
-                .into_iter()
-                .flatten()
-                .chain([barrier_info.clone()])
-                .map(|barrier_info| (barrier_info, None))
-                .collect(),
+                pending_barriers, ..
+            } => drain_pending_barriers(
+                pending_barriers,
+                barrier_info.clone(),
+                barrier_amplification_factor,
+            )
+            .into_iter()
+            .map(|barrier_info| (barrier_info, None))
+            .collect(),
             CreatingStreamingJobStatus::Finishing { .. }
             | CreatingStreamingJobStatus::Resetting(..) => {
                 vec![]
@@ -327,5 +329,65 @@ impl CreatingStreamingJobStatus {
                 unreachable!()
             }
         }
+    }
+}
+
+fn drain_pending_barriers(
+    pending_barriers: &mut VecDeque<BarrierInfo>,
+    new_upstream_barrier: BarrierInfo,
+    barrier_amplification_factor: usize,
+) -> Vec<BarrierInfo> {
+    pending_barriers.push_back(new_upstream_barrier);
+    let barrier_count = pending_barriers.len().min(barrier_amplification_factor);
+    pending_barriers.drain(..barrier_count).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn barrier(prev_epoch: u64, curr_epoch: u64) -> BarrierInfo {
+        BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+            curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
+            kind: BarrierKind::Barrier,
+        }
+    }
+
+    fn epochs(barriers: &[BarrierInfo]) -> Vec<(u64, u64)> {
+        barriers
+            .iter()
+            .map(|barrier| (barrier.prev_epoch(), barrier.curr_epoch()))
+            .collect()
+    }
+
+    #[test]
+    fn test_drain_pending_barriers_with_amplification_factor() {
+        let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 2);
+        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(3, 4), (4, 5)]
+        );
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(5, 6), 2);
+        assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
+        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(5, 6)]);
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(6, 7), 2);
+        assert_eq!(epochs(&injected), vec![(5, 6), (6, 7)]);
+        assert!(pending_barriers.is_empty());
+    }
+
+    #[test]
+    fn test_drain_pending_barriers_without_backlog() {
+        let mut pending_barriers = VecDeque::new();
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(1, 2), 100);
+
+        assert_eq!(epochs(&injected), vec![(1, 2)]);
+        assert!(pending_barriers.is_empty());
     }
 }

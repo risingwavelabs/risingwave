@@ -108,6 +108,8 @@ pub struct MetaOpts {
     pub in_flight_barrier_nums: usize,
     /// The maximum number of lagged barriers when finishing snapshot backfill.
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
+    /// The maximum number of barriers injected into a snapshot backfill job per upstream barrier.
+    pub snapshot_backfill_barrier_amplification_factor: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -326,6 +328,7 @@ impl MetaOpts {
             parallelism_control_trigger_first_delay_sec: 30,
             in_flight_barrier_nums: 40,
             snapshot_backfill_finish_max_lagged_barriers: 100,
+            snapshot_backfill_barrier_amplification_factor: 100,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
