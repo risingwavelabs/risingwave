@@ -28,14 +28,17 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
+    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableDesc, TableOption,
 };
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::current_cluster_version;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_cont, visit_stream_node_cont_mut,
+};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_meta_model::object::ObjectType;
@@ -65,6 +68,7 @@ use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
 use risingwave_pb::meta::{
     PbObject, PbObjectGroup, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
 };
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
