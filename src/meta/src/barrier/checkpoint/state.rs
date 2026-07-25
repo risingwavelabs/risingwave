@@ -260,9 +260,9 @@ impl DatabaseCheckpointControl {
                 }
             }
             Some(Command::Throttle { config, .. }) => {
-                for (fragment_id, throttle_config) in config {
+                for (fragment_id, (_, stream_node)) in config {
                     self.database_info
-                        .pre_apply_throttle(*fragment_id, throttle_config);
+                        .pre_apply_throttle(*fragment_id, stream_node);
                 }
             }
             _ => {}
@@ -571,11 +571,16 @@ impl DatabaseCheckpointControl {
                         1,
                         "should not alter rate limit of snapshot backfill job with other jobs"
                     );
+                    creating_job.pre_apply_throttle(
+                        config
+                            .iter()
+                            .map(|(fragment_id, (_, stream_node))| (*fragment_id, stream_node)),
+                    );
                     Some((
                         Mutation::Throttle(ThrottleMutation {
                             fragment_throttle: config
                                 .iter()
-                                .map(|(fragment_id, config)| (*fragment_id, *config))
+                                .map(|(fragment_id, (config, _))| (*fragment_id, *config))
                                 .collect(),
                         }),
                         take(notifiers),

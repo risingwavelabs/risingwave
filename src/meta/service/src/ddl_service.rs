@@ -1694,7 +1694,7 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (jobs, fragments) = self
+            let (jobs, fragment_nodes) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
@@ -1702,18 +1702,13 @@ impl DdlService for DdlServiceImpl {
                 throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
                 rate_limit: source_rate_limit,
             };
+            let config = fragment_nodes
+                .into_iter()
+                .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(
-                    database_id,
-                    Command::Throttle {
-                        jobs,
-                        config: fragments
-                            .into_iter()
-                            .map(|fragment_id| (fragment_id, throttle_config))
-                            .collect(),
-                    },
-                )
+                .run_command(database_id, Command::Throttle { jobs, config })
                 .await?;
         }
 

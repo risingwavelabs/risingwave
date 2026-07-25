@@ -45,8 +45,9 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
-    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
-    StopMutation, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    PbStreamNode, PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation,
+    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -358,7 +359,7 @@ pub enum Command {
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
         jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, ThrottleConfig>,
+        config: HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -1010,7 +1011,10 @@ impl Command {
             Command::Throttle { config, .. } => {
                 let config = config.clone();
                 Some(Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: config,
+                    fragment_throttle: config
+                        .iter()
+                        .map(|(fragment_id, (throttle_config, _))| (*fragment_id, *throttle_config))
+                        .collect(),
                 }))
             }
 

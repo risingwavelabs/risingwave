@@ -31,7 +31,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation};
+use risingwave_pb::stream_plan::{AddMutation, PbStreamNode, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use status::CreatingStreamingJobStatus;
@@ -736,6 +736,13 @@ impl CreatingStreamingJobControl {
         } else {
             false
         }
+    }
+
+    pub(crate) fn pre_apply_throttle<'a>(
+        &mut self,
+        fragment_nodes: impl IntoIterator<Item = (FragmentId, &'a PbStreamNode)>,
+    ) {
+        self.status.pre_apply_throttle(fragment_nodes);
     }
 }
 
