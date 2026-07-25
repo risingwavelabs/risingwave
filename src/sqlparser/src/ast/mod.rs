@@ -30,9 +30,10 @@ use winnow::ModalResult;
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
-    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
-    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterRateLimit,
+    AlterRateLimitType, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef,
+    ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
+    WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
