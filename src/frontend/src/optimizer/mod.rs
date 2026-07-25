@@ -44,6 +44,7 @@ mod optimizer_context;
 pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+pub mod variant_key;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
@@ -56,7 +57,9 @@ pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -75,6 +78,7 @@ use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{CardinalityVisitor, StreamKeyChecker, has_batch_exchange};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
+use self::variant_key::VARIANT_KEY_HINT;
 use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -322,8 +326,32 @@ impl LogicalPlanRoot {
 }
 
 impl BatchOptimizedLogicalPlanRoot {
+    /// Rejects `VARIANT` wherever a batch plan would group, deduplicate or order by it. See
+    /// [`crate::optimizer::variant_key`] for why this is batch's last line of defense.
+    fn reject_variant_keys(&self) -> Result<()> {
+        if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
+            return Err(ErrorCode::NotSupported(err, VARIANT_KEY_HINT.to_owned()).into());
+        }
+        let schema = self.plan.schema();
+        for order in &self.required_order.column_orders {
+            let field = &schema[order.column_index];
+            if field.data_type().contains_variant() {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "VARIANT column \"{}\" should not be in the ORDER BY.",
+                        FieldDisplay(field)
+                    ),
+                    VARIANT_KEY_HINT.to_owned(),
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
+        self.reject_variant_keys()?;
         if TemporalJoinValidator::exist_dangling_temporal_scan(self.plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
@@ -685,11 +713,7 @@ impl LogicalPlanRoot {
         let plan = {
             {
                 if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
-                    return Err(ErrorCode::NotSupported(
-                        err,
-                        "Using VARIANT columns as stream keys is not supported.".to_owned(),
-                    )
-                    .into());
+                    return Err(ErrorCode::NotSupported(err, VARIANT_KEY_HINT.to_owned()).into());
                 }
                 if !ctx
                     .session_ctx()

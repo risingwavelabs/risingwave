@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::mem::{size_of, size_of_val};
+use std::sync::LazyLock;
 
-use bytes::Bytes;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::common::buffer::CompressionType;
@@ -23,6 +23,9 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Scalar, VariantRef, VariantVal};
+
+/// Returned by raw iteration for NULL entries, whose empty buffer is not a valid variant.
+static NULL_VARIANT_PLACEHOLDER: LazyLock<VariantVal> = LazyLock::new(VariantVal::null);
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VariantArrayBuilder {
@@ -35,7 +38,7 @@ pub struct VariantArrayBuilder {
 pub struct VariantArray {
     bitmap: Bitmap,
     offsets: Vec<u32>,
-    data: Bytes,
+    data: Box<[u8]>,
 }
 
 impl ArrayBuilder for VariantArrayBuilder {
@@ -59,10 +62,10 @@ impl ArrayBuilder for VariantArrayBuilder {
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
         match value {
             Some(value) => {
-                let bytes = value.value_serialize();
+                let bytes = value.as_bytes();
                 for _ in 0..n {
                     self.bitmap.append(true);
-                    self.data.extend_from_slice(&bytes);
+                    self.data.extend_from_slice(bytes);
                     self.push_current_offset();
                 }
             }
@@ -97,7 +100,7 @@ impl ArrayBuilder for VariantArrayBuilder {
         Self::ArrayType {
             bitmap: self.bitmap.finish(),
             offsets: self.offsets,
-            data: Bytes::from(self.data),
+            data: self.data.into_boxed_slice(),
         }
     }
 }
@@ -122,7 +125,7 @@ impl VariantArray {
             offsets.len() == bitmap.len() + 1,
             "variant offsets length must equal array length + 1"
         );
-        let data = Bytes::copy_from_slice(&array.values[1].body);
+        let data: Box<[u8]> = array.values[1].body.as_slice().into();
         validate_offsets(&offsets, data.len())?;
         validate_serialized_values(&bitmap, &offsets, &data)?;
 
@@ -149,6 +152,9 @@ impl Array for VariantArray {
     type RefItem<'a> = VariantRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        if unsafe { !self.bitmap.is_set_unchecked(idx) } {
+            return NULL_VARIANT_PLACEHOLDER.as_scalar_ref();
+        }
         VariantRef::from_serialized(self.serialized_at_unchecked(idx))
             .expect("variant array element should contain valid variant bytes")
     }
@@ -262,4 +268,22 @@ fn validate_serialized_values(bitmap: &Bitmap, offsets: &[u32], data: &[u8]) -> 
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_iter_tolerates_null_slots() {
+        let array: VariantArray = [Some("1".parse::<VariantVal>().unwrap()), None]
+            .into_iter()
+            .collect();
+
+        assert!(array.value_at(0).is_some());
+        assert!(array.value_at(1).is_none());
+
+        let texts: Vec<_> = array.raw_iter().map(|v| v.to_string()).collect();
+        assert_eq!(texts, ["1", "null"]);
+    }
 }

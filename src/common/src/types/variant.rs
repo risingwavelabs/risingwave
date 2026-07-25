@@ -293,17 +293,21 @@ impl VariantVal {
 }
 
 impl<'a> VariantRef<'a> {
-    pub fn value_serialize(&self) -> Vec<u8> {
+    /// Same bytes as [`Self::value_serialize`], without the copy.
+    pub fn as_bytes(&self) -> &'a [u8] {
         expect_serialized_value(self.data);
-        self.data.to_vec()
+        self.data
+    }
+
+    pub fn value_serialize(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
     }
 
     pub fn memcmp_serialize(
         &self,
         serializer: &mut Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
-        let bytes = self.value_serialize();
-        Serialize::serialize(&serde_bytes::Bytes::new(&bytes), serializer)
+        Serialize::serialize(&serde_bytes::Bytes::new(self.as_bytes()), serializer)
     }
 
     pub fn from_serialized(buf: &'a [u8]) -> Option<Self> {
@@ -662,11 +666,10 @@ fn append_datum_value(
             append_json_value(&serde_json::Value::from_str(&v.to_string())?, builder)?
         }
         (ScalarRefImpl::Variant(v), _) => builder.append_value(v.parquet_variant()),
-        (ScalarRefImpl::Int256(_), _)
-        | (ScalarRefImpl::Interval(_), _)
-        | (ScalarRefImpl::Vector(_), _) => {
-            bail!("{data_type} cannot be converted to variant without a standard Variant type")
-        }
+        // Variant V1 has no primitive for these, so store the text form, as `to_jsonb` does.
+        (ScalarRefImpl::Int256(v), _) => builder.append_value(v.to_text().as_str()),
+        (ScalarRefImpl::Interval(v), _) => builder.append_value(v.to_text().as_str()),
+        (ScalarRefImpl::Vector(v), _) => builder.append_value(v.to_text().as_str()),
         (ScalarRefImpl::List(v), DataType::List(list_type)) => {
             let mut list = builder
                 .try_new_list()
@@ -702,6 +705,15 @@ fn append_datum_value(
     Ok(())
 }
 
+/// Variant objects require unique field names, but RisingWave struct types allow duplicates.
+/// Callers iterate fields in name order, so comparing against the previous name suffices.
+fn reject_duplicate_field(previous: Option<&str>, field_name: &str) -> anyhow::Result<()> {
+    if previous == Some(field_name) {
+        bail!("variant object cannot have duplicate field name `{field_name}`");
+    }
+    Ok(())
+}
+
 fn append_struct(
     value: super::StructRef<'_>,
     struct_type: &StructType,
@@ -714,7 +726,10 @@ fn append_struct(
         .iter_fields_ref()
         .zip_eq_fast(struct_type.iter())
         .sorted_by(|(_, (field_a, _)), (_, (field_b, _))| field_a.cmp(field_b));
+    let mut previous_field_name = None;
     for (value, (field_name, field_type)) in fields {
+        reject_duplicate_field(previous_field_name, field_name)?;
+        previous_field_name = Some(field_name);
         let mut field_builder = ObjectFieldBuilder::new(field_name, &mut object);
         append_datum_value(value, field_type, &mut field_builder)?;
     }
@@ -766,8 +781,11 @@ fn append_variant_value(
             let mut object_builder = builder
                 .try_new_object()
                 .context("failed to create variant object")?;
+            let mut previous_field_name = None;
             for field in object.iter_try() {
                 let (field_name, value) = field.context("failed to read variant object")?;
+                reject_duplicate_field(previous_field_name, field_name)?;
+                previous_field_name = Some(field_name);
                 let mut field_builder = ObjectFieldBuilder::new(field_name, &mut object_builder);
                 append_variant_value(value, &mut field_builder)?;
             }
@@ -1228,24 +1246,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_canonical_sql_only_scalars() {
-        assert!(
-            VariantVal::try_from_scalar_ref(
-                Some(ScalarRefImpl::Interval(Interval::from_month_day_usec(
-                    1, 2, 3
-                ))),
-                &DataType::Interval,
-            )
-            .is_err()
+    fn stores_sql_only_scalars_as_text() {
+        let interval = Interval::from_month_day_usec(1, 2, 3);
+        let text = interval.to_text();
+        assert_same_variant(
+            &scalar_variant(ScalarRefImpl::Interval(interval), &DataType::Interval),
+            &scalar_variant(ScalarRefImpl::Utf8(&text), &DataType::Varchar),
         );
 
         let int256 = Int256::from(1);
-        assert!(
-            VariantVal::try_from_scalar_ref(
-                Some(int256.as_scalar_ref().into()),
-                &DataType::Int256,
-            )
-            .is_err()
+        let text = int256.as_scalar_ref().to_text();
+        assert_same_variant(
+            &scalar_variant(int256.as_scalar_ref().into(), &DataType::Int256),
+            &scalar_variant(ScalarRefImpl::Utf8(&text), &DataType::Varchar),
         );
     }
 
@@ -1306,6 +1319,37 @@ mod tests {
         assert_eq!(
             json.as_scalar_ref().value_serialize(),
             variant.as_scalar_ref().value_serialize()
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_struct_field_names() {
+        let struct_type = DataType::Struct(StructType::new(vec![
+            ("a", DataType::Int32),
+            ("a", DataType::Varchar),
+        ]));
+        let struct_value = StructValue::new(vec![
+            Some(ScalarRefImpl::Int32(1).into()),
+            Some(ScalarRefImpl::Utf8("x").into()),
+        ]);
+        let err = VariantVal::try_from_scalar_ref(
+            Some(ScalarRefImpl::Struct(struct_value.as_scalar_ref())),
+            &struct_type,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate field name `a`"),
+            "unexpected error: {err}"
+        );
+
+        let outer_type = DataType::Struct(StructType::new(vec![("s", struct_type)]));
+        let outer_value = StructValue::new(vec![Some(struct_value.into())]);
+        assert!(
+            VariantVal::try_from_scalar_ref(
+                Some(ScalarRefImpl::Struct(outer_value.as_scalar_ref())),
+                &outer_type,
+            )
+            .is_err()
         );
     }
 

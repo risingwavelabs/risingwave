@@ -45,6 +45,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
+use crate::optimizer::variant_key::VARIANT_KEY_HINT;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -356,7 +357,7 @@ impl StreamMaterialize {
                         "VARIANT column \"{}\" is part of the storage primary key",
                         column.name(),
                     ),
-                    "VARIANT values only have byte-wise equality and ordering, so they cannot be used in primary keys, index keys, or ORDER BY of materialized views.".to_owned(),
+                    VARIANT_KEY_HINT.to_owned(),
                 )
                 .into());
             }

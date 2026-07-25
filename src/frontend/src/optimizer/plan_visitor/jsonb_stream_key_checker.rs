@@ -20,6 +20,8 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::PlanVisitor;
 
+/// Positions checked only for `Variant` are deliberately not checked for `Jsonb`: widening the
+/// pre-existing JSONB gate would reject queries that work today.
 #[derive(Debug, Clone, Copy)]
 enum StreamKeyCheckMode {
     Jsonb,
@@ -135,6 +137,22 @@ impl LogicalPlanVisitor for StreamKeyChecker {
         for idx in plan.group_key().indices() {
             if self.is_restricted_key_type(&data_types[idx]) {
                 return Some(self.err_msg("aggregation group key", &schema[idx]));
+            }
+        }
+        // An aggregate call's own ORDER BY / DISTINCT lands in the state table key too.
+        if matches!(self.mode, StreamKeyCheckMode::Variant) {
+            for call in plan.agg_calls() {
+                for idx in call.order_by.iter().map(|c| c.column_index) {
+                    if self.is_restricted_key_type(&data_types[idx]) {
+                        return Some(self.err_msg("aggregation order key", &schema[idx]));
+                    }
+                }
+                for input in call.distinct.then_some(&call.inputs).into_iter().flatten() {
+                    let idx = input.index();
+                    if self.is_restricted_key_type(&data_types[idx]) {
+                        return Some(self.err_msg("distinct aggregation argument", &schema[idx]));
+                    }
+                }
             }
         }
         self.visit_inputs(plan)

@@ -7,8 +7,8 @@ create table variant_table_definition (
 
 query TTTTTT
 select
-    variant_typeof(parse_variant('1')),
-    variant_typeof(parse_variant('1.5')),
+    variant_typeof('1'::variant),
+    variant_typeof('1.5'::variant),
     variant_typeof(to_variant(1::int4)),
     variant_typeof(to_variant(1::int8)),
     variant_typeof(to_variant(1.0::decimal)),
@@ -67,13 +67,13 @@ with typed as (
 ), variants(input_type, value) as (
     values
         ('sql_null', to_variant(null::integer)),
-        ('parse_json_null', parse_variant('null')),
-        ('parse_json_boolean', parse_variant('true')),
-        ('parse_json_integer', parse_variant('1')),
-        ('parse_json_float', parse_variant('1.5')),
-        ('parse_json_string', parse_variant('"hello"')),
-        ('parse_json_array', parse_variant('[1,2]')),
-        ('parse_json_object', parse_variant('{"a":1}'))
+        ('parse_json_null', 'null'::variant),
+        ('parse_json_boolean', 'true'::variant),
+        ('parse_json_integer', '1'::variant),
+        ('parse_json_float', '1.5'::variant),
+        ('parse_json_string', '"hello"'::variant),
+        ('parse_json_array', '[1,2]'::variant),
+        ('parse_json_object', '{"a":1}'::variant)
     union all
     select 'boolean', to_variant(b) from typed
     union all
@@ -152,7 +152,7 @@ int32 int32
 
 query TTTTTTTTT
 with v as (
-    select parse_variant('{"a":[1,1.5,true,null,"x",{"b":[2]}]}') as value
+    select '{"a":[1,1.5,true,null,"x",{"b":[2]}]}'::variant as value
 )
 select
     variant_typeof(variant_get(value, '$.a')),
@@ -170,7 +170,7 @@ array int64 double boolean null string object array int64
 
 query BBB
 with v as (
-    select parse_variant('{"a":[1]}') as value
+    select '{"a":[1]}'::variant as value
 )
 select
     variant_get(value, '$.missing') is null,
@@ -181,7 +181,7 @@ from v;
 t t t
 
 statement error invalid variant path
-select variant_get(parse_variant('{"a":[1]}'), '$.');
+select variant_get('{"a":[1]}'::variant, '$.');
 
 query TTTTTTT
 with v as (
@@ -190,7 +190,7 @@ with v as (
         to_variant(array[
             to_variant(1::smallint),
             to_variant(1::integer),
-            parse_variant('1')
+            '1'::variant
         ]::variant[]) as variant_values
 )
 select
@@ -214,18 +214,40 @@ select
     to_variant('NaN'::float8)::jsonb = '"NaN"'::jsonb,
     to_variant('Infinity'::float8)::varchar,
     to_variant('-Infinity'::float8)::varchar,
-    variant_typeof(parse_variant('"NaN"'));
+    variant_typeof('"NaN"'::variant);
 ----
 double "NaN" t "Infinity" "-Infinity" string
 
-statement error cannot be converted to variant
-select to_variant(interval '1 day');
+# Variant V1 has no primitive for these, so they are stored as text, exactly as to_jsonb does.
 
-statement error cannot be converted to variant
-select to_variant(hex_to_int256('0x11'));
+query TBTBTB
+select
+    variant_typeof(to_variant(interval '1 day')),
+    to_variant(interval '1 day')::varchar = to_jsonb(interval '1 day')::varchar,
+    variant_typeof(to_variant(hex_to_int256('0x11'))),
+    to_variant(hex_to_int256('0x11'))::varchar = to_jsonb(hex_to_int256('0x11'))::varchar,
+    variant_typeof(to_variant('[1,2,3]'::vector(3))),
+    to_variant('[1,2,3]'::vector(3))::varchar = to_jsonb('[1,2,3]'::vector(3))::varchar;
+----
+string t string t string t
 
-statement error cannot be converted to variant
-select to_variant('[1,2,3]'::vector(3));
+# Nested inside a list, struct or map they are stored the same way.
+
+query TTT
+select
+    variant_typeof(variant_get(to_variant(array[interval '1 day']), '$[0]')),
+    variant_typeof(variant_get(to_variant(row(interval '1 day')), '$.f1')),
+    variant_typeof(variant_get(to_variant(map{'k': interval '1 day'}), '$.k'));
+----
+string string string
+
+# Variant objects require unique field names while RisingWave struct types do not.
+
+statement error duplicate field name
+select to_variant(row(1, 'x')::struct<a int, a varchar>);
+
+statement error duplicate field name
+select to_variant(row(row(1, 'x')::struct<a int, a varchar>)::struct<s struct<a int, a varchar>>);
 
 statement ok
 drop table variant_full_type_t;
@@ -253,6 +275,63 @@ select payload from variant_key_source_t order by payload;
 
 statement ok
 drop table variant_key_source_t;
+
+# VARIANT has byte-wise equality only, so batch grouping, ordering and set operations are
+# rejected too.
+
+statement ok
+create table variant_batch_t (id int, v variant, s struct<v variant>);
+
+statement error should not be in the aggregation group key
+select v, count(*) from variant_batch_t group by v;
+
+statement error should not be in the aggregation group key
+select distinct v from variant_batch_t;
+
+statement error should not be in the aggregation group key
+select distinct s from variant_batch_t;
+
+statement error should not be in the aggregation group key
+select v from variant_batch_t union select v from variant_batch_t;
+
+statement error should not be in the aggregation group key
+select v from variant_batch_t intersect select v from variant_batch_t;
+
+statement error should not be in the aggregation group key
+select v from variant_batch_t except select v from variant_batch_t;
+
+statement error should not be in the ORDER BY
+select v from variant_batch_t order by v;
+
+statement error should not be in the TopN order key
+select v from variant_batch_t order by v limit 10;
+
+# An aggregate call's own ORDER BY / DISTINCT compares by value too.
+
+statement error should not be in the aggregation order key
+select array_agg(id order by v) from variant_batch_t;
+
+# `count(distinct)` is splittable, so logical optimization turns the distinct into a group key
+# before the batch check runs. `array_agg(distinct)` is not, and keeps the distinct argument.
+statement error should not be in the aggregation group key
+select count(distinct v) from variant_batch_t;
+
+statement error should not be in the distinct aggregation argument
+select array_agg(distinct v) from variant_batch_t;
+
+# Positions that neither compare nor deduplicate stay allowed.
+
+statement ok
+select v from variant_batch_t union all select v from variant_batch_t;
+
+statement ok
+select v, variant_typeof(v) from variant_batch_t order by id;
+
+statement ok
+select count(*) from variant_batch_t;
+
+statement ok
+drop table variant_batch_t;
 
 # VARIANT columns are rejected for row encodings without variant parser support.
 

@@ -32,7 +32,7 @@ from variant_stream_t;
 
 statement ok
 insert into variant_stream_t values
-    (1, parse_variant('{"a":10,"b":[1,2]}')),
+    (1, '{"a":10,"b":[1,2]}'::variant),
     (2, to_variant('plain'::varchar));
 
 query ITT rowsort
@@ -42,7 +42,7 @@ select id, a::varchar, kind from variant_state_mv;
 2 NULL string
 
 statement ok
-update variant_stream_t set payload = parse_variant('{"a":20}') where id = 1;
+update variant_stream_t set payload = '{"a":20}'::variant where id = 1;
 
 query ITT rowsort
 select id, a::varchar, kind from variant_state_mv;
@@ -75,6 +75,14 @@ select id from (
     select id, rank() over (partition by s order by id) as rank
     from variant_nested_t)
 where rank <= 2;
+
+statement error should not be in the aggregation order key
+create materialized view variant_bad_agg_order as
+select array_agg(id order by s) from variant_nested_t;
+
+statement error should not be in the distinct aggregation argument
+create materialized view variant_bad_agg_distinct as
+select count(distinct s) from variant_nested_t;
 
 statement ok
 drop table variant_nested_t;

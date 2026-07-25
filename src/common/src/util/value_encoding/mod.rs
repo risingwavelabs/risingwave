@@ -231,7 +231,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
-        ScalarRefImpl::Variant(v) => serialize_str(&v.value_serialize(), buf),
+        ScalarRefImpl::Variant(v) => serialize_str(v.as_bytes(), buf),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
@@ -259,7 +259,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         // not exact as we use internal encoding size to estimate the json string size
         ScalarRefImpl::Jsonb(v) => v.capacity(),
-        ScalarRefImpl::Variant(v) => estimate_serialize_str_size(&v.value_serialize()),
+        ScalarRefImpl::Variant(v) => estimate_serialize_str_size(v.as_bytes()),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),

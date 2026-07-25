@@ -151,10 +151,6 @@ struct ConstantLookupExpression<E> {
 }
 
 impl<E> ConstantLookupExpression<E> {
-    #[expect(
-        clippy::mutable_key_type,
-        reason = "constant lookup stores immutable scalar constants as expression keys"
-    )]
     fn new(
         return_type: DataType,
         arms: HashMap<ScalarImpl, E>,
@@ -263,10 +259,6 @@ impl<E: AsyncExpression> AsyncExpression for ConstantLookupExpression<E> {
     }
 }
 
-#[expect(
-    clippy::mutable_key_type,
-    reason = "constant lookup builds an immutable scalar-keyed dispatch table"
-)]
 #[build_function("constant_lookup(...) -> any", type_infer = "unreachable")]
 fn build_constant_lookup_expr(
     return_type: DataType,

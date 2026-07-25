@@ -321,12 +321,10 @@ impl Strong {
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::JsonbPopulateMap
-            | ExprType::ParseVariant
             | ExprType::ToVariant
             | ExprType::VariantGet
             | ExprType::TryVariantGet
             | ExprType::VariantTypeof
-            | ExprType::VariantToJsonb
             | ExprType::MapFromEntries
             | ExprType::MapAccess
             | ExprType::MapKeys
