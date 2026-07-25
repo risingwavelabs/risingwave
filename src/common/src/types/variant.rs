@@ -238,6 +238,12 @@ impl VariantVal {
         value: Option<ScalarRefImpl<'_>>,
         data_type: &DataType,
     ) -> anyhow::Result<Self> {
+        // A whole jsonb document needs only one text parse, not one per pass.
+        if let Some(ScalarRefImpl::Jsonb(v)) = value
+            && matches!(data_type, DataType::Jsonb)
+        {
+            return Self::from_jsonb(v);
+        }
         let mut field_names = BTreeSet::new();
         collect_datum_field_names(value, data_type, &mut field_names)?;
         let mut builder = canonical_builder(&field_names);
@@ -250,9 +256,7 @@ impl VariantVal {
     /// Use only on trusted bytes; external bytes must go through
     /// [`Self::from_serialized_untrusted`] to re-establish the canonical invariants.
     pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
-        let (metadata, value) = split_serialized_value(buf)?;
-        ParquetVariant::try_new(metadata, value).ok()?;
-        Some(Self { data: buf.into() })
+        VariantRef::from_serialized(buf).map(|v| v.to_owned_scalar())
     }
 
     /// Decodes a tagged buffer from an untrusted origin (e.g. pgwire binary parameters),
@@ -272,7 +276,7 @@ impl VariantVal {
     }
 
     pub fn from_jsonb(jsonb: JsonbRef<'_>) -> anyhow::Result<Self> {
-        Self::from_json_value(&serde_json::Value::from_str(&jsonb.to_string())?)
+        Self::from_json_value(&jsonb_to_json_value(jsonb)?)
     }
 
     pub fn metadata(&self) -> &[u8] {
@@ -284,7 +288,8 @@ impl VariantVal {
     }
 
     pub fn parquet_variant(&self) -> ParquetVariant<'_, '_> {
-        ParquetVariant::new(self.metadata(), self.value())
+        let (metadata, value) = expect_serialized_value(&self.data);
+        ParquetVariant::new(metadata, value)
     }
 
     pub fn serialized_len(&self) -> usize {
@@ -295,7 +300,7 @@ impl VariantVal {
 impl<'a> VariantRef<'a> {
     /// Same bytes as [`Self::value_serialize`], without the copy.
     pub fn as_bytes(&self) -> &'a [u8] {
-        expect_serialized_value(self.data);
+        debug_assert!(split_serialized_value(self.data).is_some());
         self.data
     }
 
@@ -316,6 +321,13 @@ impl<'a> VariantRef<'a> {
         Some(Self { data: buf })
     }
 
+    /// Wraps bytes already validated by [`Self::from_serialized`], such as a slot of a
+    /// [`VariantArray`](crate::array::VariantArray), which validates on the way in.
+    pub fn from_serialized_unchecked(buf: &'a [u8]) -> Self {
+        debug_assert!(split_serialized_value(buf).is_some());
+        Self { data: buf }
+    }
+
     pub fn metadata(&self) -> &'a [u8] {
         expect_serialized_value(self.data).0
     }
@@ -325,7 +337,8 @@ impl<'a> VariantRef<'a> {
     }
 
     pub fn parquet_variant(&self) -> ParquetVariant<'a, 'a> {
-        ParquetVariant::new(self.metadata(), self.value())
+        let (metadata, value) = expect_serialized_value(self.data);
+        ParquetVariant::new(metadata, value)
     }
 
     pub fn is_variant_null(&self) -> bool {
@@ -462,21 +475,12 @@ fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
     if buf.len() < METADATA_LEN_SIZE {
         return None;
     }
-    let metadata_len = metadata_len_from_serialized(buf)? as usize;
+    let metadata_len = u32::from_le_bytes(buf[..METADATA_LEN_SIZE].try_into().unwrap()) as usize;
     let metadata_end = METADATA_LEN_SIZE.checked_add(metadata_len)?;
     if metadata_end > buf.len() {
         return None;
     }
     Some((&buf[METADATA_LEN_SIZE..metadata_end], &buf[metadata_end..]))
-}
-
-fn metadata_len_from_serialized(buf: &[u8]) -> Option<u32> {
-    if buf.len() < METADATA_LEN_SIZE {
-        return None;
-    }
-    Some(u32::from_le_bytes(
-        buf[..METADATA_LEN_SIZE].try_into().unwrap(),
-    ))
 }
 
 fn expect_serialized_value(buf: &[u8]) -> (&[u8], &[u8]) {
@@ -494,6 +498,12 @@ fn strip_current_encoding_tag(buf: &[u8]) -> Option<&[u8]> {
 
 fn canonical_builder(field_names: &BTreeSet<String>) -> VariantBuilder {
     VariantBuilder::new().with_field_names(field_names.iter().map(String::as_str))
+}
+
+/// Parses a jsonb value through its text form. The round trip is deliberate: `serde_json`'s parser
+/// enforces a nesting limit, while walking `jsonbb` directly would recurse without a bound.
+fn jsonb_to_json_value(jsonb: JsonbRef<'_>) -> anyhow::Result<serde_json::Value> {
+    Ok(serde_json::Value::from_str(&jsonb.to_string())?)
 }
 
 fn collect_json_field_names(json: &serde_json::Value, field_names: &mut BTreeSet<String>) {
@@ -558,7 +568,7 @@ fn collect_datum_field_names(
 
     match (value, data_type) {
         (ScalarRefImpl::Jsonb(v), _) => {
-            collect_json_field_names(&serde_json::Value::from_str(&v.to_string())?, field_names);
+            collect_json_field_names(&jsonb_to_json_value(v)?, field_names);
         }
         (ScalarRefImpl::Variant(v), _) => {
             collect_variant_field_names_inner(v.parquet_variant(), field_names)?;
@@ -583,7 +593,31 @@ fn collect_datum_field_names(
                 collect_datum_field_names(value, map_type.value(), field_names)?;
             }
         }
-        _ => {}
+        // Listed rather than `_`: a field name this pass misses is absent from the dictionary,
+        // which silently yields a non-canonical encoding.
+        (
+            ScalarRefImpl::Bool(_)
+            | ScalarRefImpl::Int16(_)
+            | ScalarRefImpl::Int32(_)
+            | ScalarRefImpl::Int64(_)
+            | ScalarRefImpl::Int256(_)
+            | ScalarRefImpl::Serial(_)
+            | ScalarRefImpl::Float32(_)
+            | ScalarRefImpl::Float64(_)
+            | ScalarRefImpl::Decimal(_)
+            | ScalarRefImpl::Utf8(_)
+            | ScalarRefImpl::Bytea(_)
+            | ScalarRefImpl::Date(_)
+            | ScalarRefImpl::Time(_)
+            | ScalarRefImpl::Timestamp(_)
+            | ScalarRefImpl::Timestamptz(_)
+            | ScalarRefImpl::Interval(_)
+            | ScalarRefImpl::Vector(_)
+            | ScalarRefImpl::List(_)
+            | ScalarRefImpl::Struct(_)
+            | ScalarRefImpl::Map(_),
+            _,
+        ) => {}
     }
     Ok(())
 }
@@ -662,9 +696,7 @@ fn append_datum_value(
         (ScalarRefImpl::Time(v), _) => builder.append_value(v.0),
         (ScalarRefImpl::Timestamp(v), _) => builder.append_value(v.0),
         (ScalarRefImpl::Timestamptz(v), _) => builder.append_value(v.to_datetime_utc()),
-        (ScalarRefImpl::Jsonb(v), _) => {
-            append_json_value(&serde_json::Value::from_str(&v.to_string())?, builder)?
-        }
+        (ScalarRefImpl::Jsonb(v), _) => append_json_value(&jsonb_to_json_value(v)?, builder)?,
         (ScalarRefImpl::Variant(v), _) => builder.append_value(v.parquet_variant()),
         // Variant V1 has no primitive for these, so store the text form, as `to_jsonb` does.
         (ScalarRefImpl::Int256(v), _) => builder.append_value(v.to_text().as_str()),

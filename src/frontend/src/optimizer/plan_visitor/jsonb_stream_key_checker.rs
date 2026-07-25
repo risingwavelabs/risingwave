@@ -20,32 +20,18 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::PlanVisitor;
 
+/// Finds the first plan position where the checked type would become part of a key, and names the
+/// SQL clause responsible so the error points at what the user wrote.
+///
 /// Positions checked only for `Variant` are deliberately not checked for `Jsonb`: widening the
-/// pre-existing JSONB gate would reject queries that work today.
+/// pre-existing JSONB gate would be a breaking change.
 #[derive(Debug, Clone, Copy)]
-enum StreamKeyCheckMode {
+pub enum StreamKeyChecker {
     Jsonb,
     Variant,
 }
 
-#[derive(Debug, Clone)]
-pub struct StreamKeyChecker {
-    mode: StreamKeyCheckMode,
-}
-
 impl StreamKeyChecker {
-    pub fn jsonb() -> Self {
-        Self {
-            mode: StreamKeyCheckMode::Jsonb,
-        }
-    }
-
-    pub fn variant() -> Self {
-        Self {
-            mode: StreamKeyCheckMode::Variant,
-        }
-    }
-
     fn visit_inputs(&mut self, plan: &impl LogicalPlanNode) -> Option<String> {
         let results = plan.inputs().into_iter().map(|input| self.visit(input));
         Self::default_behavior().apply(results)
@@ -61,17 +47,17 @@ impl StreamKeyChecker {
     }
 
     fn is_restricted_key_type(&self, data_type: &DataType) -> bool {
-        match self.mode {
-            StreamKeyCheckMode::Jsonb => matches!(data_type, DataType::Jsonb),
+        match self {
+            Self::Jsonb => matches!(data_type, DataType::Jsonb),
             // Unlike the pre-existing JSONB behavior, VARIANT is rejected even when nested.
-            StreamKeyCheckMode::Variant => data_type.contains_variant(),
+            Self::Variant => data_type.contains_variant(),
         }
     }
 
     fn type_name(&self) -> &'static str {
-        match self.mode {
-            StreamKeyCheckMode::Jsonb => "JSONB",
-            StreamKeyCheckMode::Variant => "VARIANT",
+        match self {
+            Self::Jsonb => "JSONB",
+            Self::Variant => "VARIANT",
         }
     }
 }
@@ -140,7 +126,7 @@ impl LogicalPlanVisitor for StreamKeyChecker {
             }
         }
         // An aggregate call's own ORDER BY / DISTINCT lands in the state table key too.
-        if matches!(self.mode, StreamKeyCheckMode::Variant) {
+        if matches!(self, Self::Variant) {
             for call in plan.agg_calls() {
                 for idx in call.order_by.iter().map(|c| c.column_index) {
                     if self.is_restricted_key_type(&data_types[idx]) {

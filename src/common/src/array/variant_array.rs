@@ -12,138 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::{size_of, size_of_val};
 use std::sync::LazyLock;
 
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_pb::common::Buffer;
-use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::data::{PbArray, PbArrayType};
 
-use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
-use crate::bitmap::{Bitmap, BitmapBuilder};
+use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder};
+use crate::bitmap::Bitmap;
 use crate::types::{DataType, Scalar, VariantRef, VariantVal};
 
 /// Returned by raw iteration for NULL entries, whose empty buffer is not a valid variant.
 static NULL_VARIANT_PLACEHOLDER: LazyLock<VariantVal> = LazyLock::new(VariantVal::null);
 
-#[derive(Debug, Clone, EstimateSize)]
-pub struct VariantArrayBuilder {
-    bitmap: BitmapBuilder,
-    offsets: Vec<u32>,
-    data: Vec<u8>,
-}
-
+/// `VariantArray` is a collection of Parquet Variant values. It's a wrapper of [`BytesArray`],
+/// and every non-null slot holds bytes accepted by [`VariantRef::from_serialized`].
 #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct VariantArray {
-    bitmap: Bitmap,
-    offsets: Vec<u32>,
-    data: Box<[u8]>,
-}
-
-impl ArrayBuilder for VariantArrayBuilder {
-    type ArrayType = VariantArray;
-
-    fn new(capacity: usize) -> Self {
-        let mut offsets = Vec::with_capacity(capacity + 1);
-        offsets.push(0);
-        Self {
-            bitmap: BitmapBuilder::with_capacity(capacity),
-            offsets,
-            data: Vec::new(),
-        }
-    }
-
-    fn with_type(capacity: usize, ty: DataType) -> Self {
-        assert_eq!(ty, DataType::Variant);
-        Self::new(capacity)
-    }
-
-    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
-        match value {
-            Some(value) => {
-                let bytes = value.as_bytes();
-                for _ in 0..n {
-                    self.bitmap.append(true);
-                    self.data.extend_from_slice(bytes);
-                    self.push_current_offset();
-                }
-            }
-            None => {
-                for _ in 0..n {
-                    self.bitmap.append(false);
-                    self.push_current_offset();
-                }
-            }
-        }
-    }
-
-    fn append_array(&mut self, other: &Self::ArrayType) {
-        for idx in 0..other.len() {
-            self.append(other.value_at(idx));
-        }
-    }
-
-    fn pop(&mut self) -> Option<()> {
-        self.bitmap.pop()?;
-        self.offsets.pop();
-        let last_offset = *self.offsets.last().expect("offsets always has one element") as usize;
-        self.data.truncate(last_offset);
-        Some(())
-    }
-
-    fn len(&self) -> usize {
-        self.bitmap.len()
-    }
-
-    fn finish(self) -> Self::ArrayType {
-        Self::ArrayType {
-            bitmap: self.bitmap.finish(),
-            offsets: self.offsets,
-            data: self.data.into_boxed_slice(),
-        }
-    }
-}
-
-impl VariantArrayBuilder {
-    fn push_current_offset(&mut self) {
-        let offset = u32::try_from(self.data.len()).expect("variant array data exceeds u32::MAX");
-        self.offsets.push(offset);
-    }
-}
-
-impl VariantArray {
-    pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
-        ensure!(
-            array.values.len() == 2,
-            "Must have exactly 2 buffers in a variant array"
-        );
-
-        let bitmap: Bitmap = array.get_null_bitmap()?.into();
-        let offsets = decode_offsets(&array.values[0].body)?;
-        ensure!(
-            offsets.len() == bitmap.len() + 1,
-            "variant offsets length must equal array length + 1"
-        );
-        let data: Box<[u8]> = array.values[1].body.as_slice().into();
-        validate_offsets(&offsets, data.len())?;
-        validate_serialized_values(&bitmap, &offsets, &data)?;
-
-        Ok(VariantArray {
-            bitmap,
-            offsets,
-            data,
-        }
-        .into())
-    }
-
-    fn serialized_at_unchecked(&self, idx: usize) -> &[u8] {
-        unsafe {
-            let begin = *self.offsets.get_unchecked(idx) as usize;
-            let end = *self.offsets.get_unchecked(idx + 1) as usize;
-            self.data.get_unchecked(begin..end)
-        }
-    }
+    bytes: BytesArray,
 }
 
 impl Array for VariantArray {
@@ -152,51 +37,84 @@ impl Array for VariantArray {
     type RefItem<'a> = VariantRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        if unsafe { !self.bitmap.is_set_unchecked(idx) } {
+        if unsafe { !self.bytes.null_bitmap().is_set_unchecked(idx) } {
             return NULL_VARIANT_PLACEHOLDER.as_scalar_ref();
         }
-        VariantRef::from_serialized(self.serialized_at_unchecked(idx))
-            .expect("variant array element should contain valid variant bytes")
+        VariantRef::from_serialized_unchecked(unsafe { self.bytes.raw_value_at_unchecked(idx) })
     }
 
+    #[inline]
     fn len(&self) -> usize {
-        self.offsets.len() - 1
+        self.bytes.len()
     }
 
+    #[inline]
     fn to_protobuf(&self) -> PbArray {
         PbArray {
-            null_bitmap: Some(self.null_bitmap().to_protobuf()),
-            values: vec![
-                Buffer {
-                    compression: CompressionType::None as i32,
-                    body: encode_offsets(&self.offsets),
-                },
-                Buffer {
-                    compression: CompressionType::None as i32,
-                    body: self.data.to_vec(),
-                },
-            ],
             array_type: PbArrayType::Variant as i32,
-            struct_array_data: None,
-            list_array_data: None,
+            ..self.bytes.to_protobuf()
         }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        &self.bitmap
+        self.bytes.null_bitmap()
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        self.bitmap
+        self.bytes.into_null_bitmap()
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
-        assert_eq!(bitmap.len(), self.len());
-        self.bitmap = bitmap;
+        self.bytes.set_bitmap(bitmap);
     }
 
     fn data_type(&self) -> DataType {
         DataType::Variant
+    }
+}
+
+#[derive(Debug, Clone, EstimateSize)]
+pub struct VariantArrayBuilder {
+    bytes: BytesArrayBuilder,
+}
+
+impl ArrayBuilder for VariantArrayBuilder {
+    type ArrayType = VariantArray;
+
+    fn new(capacity: usize) -> Self {
+        Self {
+            bytes: BytesArrayBuilder::new(capacity),
+        }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Variant);
+        Self::new(capacity)
+    }
+
+    #[inline]
+    fn append_n(&mut self, n: usize, value: Option<VariantRef<'_>>) {
+        self.bytes.append_n(n, value.map(|v| v.as_bytes()));
+    }
+
+    #[inline]
+    fn append_array(&mut self, other: &VariantArray) {
+        self.bytes.append_array(&other.bytes);
+    }
+
+    #[inline]
+    fn pop(&mut self) -> Option<()> {
+        self.bytes.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    fn finish(self) -> VariantArray {
+        VariantArray {
+            bytes: self.bytes.finish(),
+        }
     }
 }
 
@@ -205,10 +123,7 @@ impl FromIterator<Option<VariantVal>> for VariantArray {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            match i {
-                Some(x) => builder.append(Some(x.as_scalar_ref())),
-                None => builder.append(None),
-            }
+            builder.append(i.as_ref().map(|v| v.as_scalar_ref()));
         }
         builder.finish()
     }
@@ -220,70 +135,75 @@ impl FromIterator<VariantVal> for VariantArray {
     }
 }
 
-fn encode_offsets(offsets: &[u32]) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(size_of_val(offsets));
-    for offset in offsets {
-        buf.extend_from_slice(&offset.to_le_bytes());
-    }
-    buf
-}
-
-fn decode_offsets(buf: &[u8]) -> ArrayResult<Vec<u32>> {
-    ensure!(
-        buf.len().is_multiple_of(size_of::<u32>()),
-        "variant offset buffer length must be a multiple of 4"
-    );
-    Ok(buf
-        .chunks_exact(size_of::<u32>())
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
-        .collect())
-}
-
-fn validate_offsets(offsets: &[u32], data_len: usize) -> ArrayResult<()> {
-    ensure!(
-        offsets.first() == Some(&0),
-        "variant offsets must start from 0"
-    );
-    ensure!(
-        offsets.last().copied().unwrap_or_default() as usize == data_len,
-        "variant final offset must equal data length"
-    );
-    ensure!(
-        offsets.windows(2).all(|pair| pair[0] <= pair[1]),
-        "variant offsets must be monotonic"
-    );
-    Ok(())
-}
-
-fn validate_serialized_values(bitmap: &Bitmap, offsets: &[u32], data: &[u8]) -> ArrayResult<()> {
-    for (idx, not_null) in bitmap.iter().enumerate() {
-        if !not_null {
-            continue;
-        }
-        let begin = offsets[idx] as usize;
-        let end = offsets[idx + 1] as usize;
-        ensure!(
-            VariantRef::from_serialized(&data[begin..end]).is_some(),
-            "variant array element {idx} must use current valid variant encoding"
-        );
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::array::ArrayImpl;
+
+    fn variant(text: &str) -> VariantVal {
+        text.parse().unwrap()
+    }
 
     #[test]
     fn raw_iter_tolerates_null_slots() {
-        let array: VariantArray = [Some("1".parse::<VariantVal>().unwrap()), None]
-            .into_iter()
-            .collect();
+        let array: VariantArray = [Some(variant("1")), None].into_iter().collect();
 
         assert!(array.value_at(0).is_some());
         assert!(array.value_at(1).is_none());
 
         let texts: Vec<_> = array.raw_iter().map(|v| v.to_string()).collect();
         assert_eq!(texts, ["1", "null"]);
+    }
+
+    #[test]
+    fn protobuf_round_trip_preserves_values_and_nulls() {
+        let array: VariantArray = [
+            Some(variant("1")),
+            None,
+            Some(variant(r#"{"a":[1,2],"b":"x"}"#)),
+            Some(variant("null")),
+        ]
+        .into_iter()
+        .collect();
+
+        let decoded = ArrayImpl::from_protobuf(&array.to_protobuf(), array.len()).unwrap();
+        assert_eq!(ArrayImpl::from(array), decoded);
+    }
+
+    #[test]
+    fn rejects_invalid_serialized_values_from_protobuf() {
+        let array: VariantArray = [Some(variant("1"))].into_iter().collect();
+        let mut proto = array.to_protobuf();
+        // Keep the original length, so the failure comes from validating the bytes rather than
+        // from the data buffer running short.
+        proto.values[1].body = vec![0xFF; proto.values[1].body.len()];
+
+        let err = ArrayImpl::from_protobuf(&proto, 1).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("failed to read variant from bytes"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn append_array_concatenates() {
+        let left: VariantArray = [Some(variant("1")), None].into_iter().collect();
+        let right: VariantArray = [Some(variant(r#""x""#))].into_iter().collect();
+
+        let mut builder = VariantArrayBuilder::new(3);
+        builder.append_array(&left);
+        builder.append_array(&right);
+        let joined = builder.finish();
+
+        assert_eq!(joined.len(), 3);
+        let texts: Vec<_> = joined
+            .iter()
+            .map(|v| v.map(|v| v.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            [Some("1".to_owned()), None, Some("\"x\"".to_owned())]
+        );
     }
 }

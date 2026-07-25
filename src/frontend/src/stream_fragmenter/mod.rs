@@ -47,7 +47,7 @@ use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
-use crate::optimizer::variant_key::VARIANT_KEY_HINT;
+use crate::optimizer::variant_key::variant_key_error;
 use crate::stream_fragmenter::parallelism::{
     ResolvedParallelism, derive_backfill_parallelism, derive_parallelism,
 };
@@ -284,13 +284,10 @@ fn reject_variant_in_internal_storage_key(stream_node: &mut StreamNode) -> Resul
             let column_desc = column.column_desc.as_ref().unwrap();
             let data_type: DataType = column_desc.column_type.as_ref().unwrap().into();
             if data_type.contains_variant() {
-                err = Some(RwError::from(NotSupported(
-                    format!(
-                        "VARIANT column \"{}\" is part of the storage primary key of the internal \
-                        state table of `{}`",
-                        column_desc.name, table_name,
-                    ),
-                    VARIANT_KEY_HINT.to_owned(),
+                err = Some(variant_key_error(format!(
+                    "VARIANT column \"{}\" is part of the storage primary key of the internal \
+                    state table of `{}`",
+                    column_desc.name, table_name,
                 )));
                 return;
             }

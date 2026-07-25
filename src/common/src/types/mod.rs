@@ -205,9 +205,6 @@ pub enum DataType {
     #[display("jsonb")]
     #[from_str(regex = "(?i)^jsonb$")]
     Jsonb,
-    #[display("variant")]
-    #[from_str(regex = "(?i)^variant$")]
-    Variant,
     #[display("serial")]
     #[from_str(regex = "(?i)^serial$")]
     Serial,
@@ -220,6 +217,9 @@ pub enum DataType {
     #[display("vector({0})")]
     #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
     Vector(usize),
+    #[display("variant")]
+    #[from_str(regex = "(?i)^variant$")]
+    Variant,
 }
 
 impl !PartialOrd for DataType {}
@@ -683,15 +683,19 @@ impl DataType {
 
     /// Whether this type is `VARIANT` or contains a nested `VARIANT`.
     pub fn contains_variant(&self) -> bool {
-        match self {
-            DataType::Variant => true,
-            DataType::List(list_type) => list_type.elem().contains_variant(),
-            DataType::Struct(struct_type) => struct_type.types().any(DataType::contains_variant),
-            DataType::Map(map_type) => {
-                map_type.key().contains_variant() || map_type.value().contains_variant()
+        matches!(self, DataType::Variant)
+            || match self {
+                DataType::List(list_type) => list_type.elem().contains_variant(),
+                DataType::Struct(struct_type) => {
+                    struct_type.types().any(DataType::contains_variant)
+                }
+                DataType::Map(map_type) => {
+                    map_type.key().contains_variant() || map_type.value().contains_variant()
+                }
+                // Listed rather than `_`: a new composite type answering `false` here would slip
+                // past every VARIANT-as-key gate.
+                data_types::simple!() => false,
             }
-            _ => false,
-        }
     }
 }
 
@@ -1705,6 +1709,13 @@ mod tests {
             DataType::from_str("varchar[]").unwrap(),
             DataType::Varchar.list()
         );
+        assert_eq!(DataType::from_str("variant").unwrap(), DataType::Variant);
+        assert_eq!(DataType::from_str("VARIANT").unwrap(), DataType::Variant);
+        assert_eq!(
+            DataType::from_str("variant[]").unwrap(),
+            DataType::Variant.list()
+        );
+
         assert_eq!(DataType::from_str("date[]").unwrap(), DataType::Date.list());
         assert_eq!(DataType::from_str("time[]").unwrap(), DataType::Time.list());
         assert_eq!(

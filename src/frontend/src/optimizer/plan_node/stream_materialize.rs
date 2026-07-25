@@ -38,14 +38,14 @@ use super::{
 };
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::variant_key::VARIANT_KEY_HINT;
+use crate::optimizer::variant_key::variant_key_error;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -352,14 +352,10 @@ impl StreamMaterialize {
         for order in &table_pk {
             let column = &columns[order.column_index];
             if column.data_type().contains_variant() {
-                return Err(ErrorCode::NotSupported(
-                    format!(
-                        "VARIANT column \"{}\" is part of the storage primary key",
-                        column.name(),
-                    ),
-                    VARIANT_KEY_HINT.to_owned(),
-                )
-                .into());
+                return Err(variant_key_error(format!(
+                    "VARIANT column \"{}\" is part of the storage primary key",
+                    column.name(),
+                )));
             }
         }
 

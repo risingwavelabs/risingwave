@@ -21,6 +21,7 @@ use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
+use crate::handler::create_function::reject_variant_in_udf_signature;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_aggregate(
@@ -83,14 +84,7 @@ pub async fn handle_create_aggregate(
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
-    // Aggregate UDFs exchange data via Arrow, which does not support VARIANT yet.
-    if return_type.contains_variant() || arg_types.iter().any(|t| t.contains_variant()) {
-        return Err(ErrorCode::NotSupported(
-            "VARIANT type in aggregate function signature".to_owned(),
-            "VARIANT is not supported in UDFs yet".to_owned(),
-        )
-        .into());
-    }
+    reject_variant_in_udf_signature(&return_type, &arg_types, "aggregate function")?;
 
     // resolve database and schema id
     let session = &handler_args.session;

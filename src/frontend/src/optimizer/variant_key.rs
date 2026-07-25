@@ -29,8 +29,15 @@
 //! Best-effort: `StreamKeyChecker`, which names the offending SQL clause early. Whatever it misses
 //! is still caught above, only with a less specific message.
 
+use crate::error::{ErrorCode, RwError};
+
 /// Shared hint for every `VARIANT`-as-key rejection, so a test can assert one stable string
 /// regardless of which layer fired.
 pub const VARIANT_KEY_HINT: &str = "VARIANT values only have byte-wise equality and ordering, so \
     they cannot be used as a key: in a primary key, index, grouping or join key, ORDER BY, or set \
     operation.";
+
+/// Builds the rejection error so that every layer reports the same shape.
+pub fn variant_key_error(message: impl Into<String>) -> RwError {
+    ErrorCode::NotSupported(message.into(), VARIANT_KEY_HINT.to_owned()).into()
+}

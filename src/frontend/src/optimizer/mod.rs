@@ -78,7 +78,7 @@ use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{CardinalityVisitor, StreamKeyChecker, has_batch_exchange};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
-use self::variant_key::VARIANT_KEY_HINT;
+use self::variant_key::variant_key_error;
 use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -329,21 +329,17 @@ impl BatchOptimizedLogicalPlanRoot {
     /// Rejects `VARIANT` wherever a batch plan would group, deduplicate or order by it. See
     /// [`crate::optimizer::variant_key`] for why this is batch's last line of defense.
     fn reject_variant_keys(&self) -> Result<()> {
-        if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
-            return Err(ErrorCode::NotSupported(err, VARIANT_KEY_HINT.to_owned()).into());
+        if let Some(err) = StreamKeyChecker::Variant.visit(self.plan.clone()) {
+            return Err(variant_key_error(err));
         }
         let schema = self.plan.schema();
         for order in &self.required_order.column_orders {
             let field = &schema[order.column_index];
             if field.data_type().contains_variant() {
-                return Err(ErrorCode::NotSupported(
-                    format!(
-                        "VARIANT column \"{}\" should not be in the ORDER BY.",
-                        FieldDisplay(field)
-                    ),
-                    VARIANT_KEY_HINT.to_owned(),
-                )
-                .into());
+                return Err(variant_key_error(format!(
+                    "VARIANT column \"{}\" should not be in the ORDER BY.",
+                    FieldDisplay(field)
+                )));
             }
         }
         Ok(())
@@ -712,14 +708,14 @@ impl LogicalPlanRoot {
 
         let plan = {
             {
-                if let Some(err) = StreamKeyChecker::variant().visit(self.plan.clone()) {
-                    return Err(ErrorCode::NotSupported(err, VARIANT_KEY_HINT.to_owned()).into());
+                if let Some(err) = StreamKeyChecker::Variant.visit(self.plan.clone()) {
+                    return Err(variant_key_error(err));
                 }
                 if !ctx
                     .session_ctx()
                     .config()
                     .streaming_allow_jsonb_in_stream_key()
-                    && let Some(err) = StreamKeyChecker::jsonb().visit(self.plan.clone())
+                    && let Some(err) = StreamKeyChecker::Jsonb.visit(self.plan.clone())
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
