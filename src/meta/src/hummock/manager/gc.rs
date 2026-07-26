@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -22,11 +22,12 @@ use chrono::DateTime;
 use futures::future::try_join_all;
 use futures::{StreamExt, TryStreamExt, future};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{
-    HummockObjectId, HummockRawObjectId, VALID_OBJECT_ID_SUFFIXES, get_object_data_path,
-    get_object_id_from_path,
+    HummockEpoch, HummockObjectId, HummockRawObjectId, VALID_OBJECT_ID_SUFFIXES,
+    get_object_data_path, get_object_id_from_path,
 };
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence, hummock_version_delta};
@@ -461,7 +462,10 @@ impl HummockManager {
         Ok(())
     }
 
-    pub async fn delete_time_travel_metadata(&self) -> MetaResult<()> {
+    pub async fn delete_time_travel_metadata(
+        &self,
+        pinned_snapshot_epochs: HashMap<TableId, HashSet<HummockEpoch>>,
+    ) -> MetaResult<()> {
         let current_epoch_time = Epoch::now().physical_time();
         let epoch_watermark = Epoch::from_physical_time(
             current_epoch_time.saturating_sub(
@@ -472,7 +476,8 @@ impl HummockManager {
             ),
         )
         .0;
-        self.truncate_time_travel_metadata(epoch_watermark).await?;
+        self.truncate_time_travel_metadata(epoch_watermark, pinned_snapshot_epochs)
+            .await?;
         Ok(())
     }
 
