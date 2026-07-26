@@ -362,6 +362,12 @@ impl<S: StateStore> BackfillState<S> {
         })
     }
 
+    pub(super) fn total_row_count(&self) -> usize {
+        self.latest_progress()
+            .filter_map(|(_, progress)| progress.map(|progress| progress.row_count))
+            .sum()
+    }
+
     pub(super) async fn commit(
         &mut self,
         barrier_epoch: EpochPair,

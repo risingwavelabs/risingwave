@@ -74,3 +74,20 @@
   expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
+- name: MV pk stops after stream key in order by
+  sql: |
+    create table t (a int, b int, c int);
+    select
+        b,
+        min(a) as a,
+        min(c) as c
+    from
+        t
+    group by
+        b
+    order by
+        a,
+        b,
+        c;
+  expected_outputs:
+  - stream_plan

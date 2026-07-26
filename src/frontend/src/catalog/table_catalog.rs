@@ -71,8 +71,8 @@ use crate::user::UserId;
 ///
 /// - **Order Key**: the primary key for storage, used to sort and access data.
 ///
-///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
-///   the remaining columns in pk will follow behind.
+///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key
+///   until the stream key is covered. The remaining stream-key columns will follow behind.
 ///
 ///   If there's no `ORDER BY` clause, the order key will be the same as pk.
 ///

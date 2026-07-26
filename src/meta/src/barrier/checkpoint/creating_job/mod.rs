@@ -544,7 +544,6 @@ impl CreatingStreamingJobControl {
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Initial,
         );
-
         Ok((
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,

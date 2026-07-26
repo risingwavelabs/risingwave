@@ -112,12 +112,16 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common_rate_limit::RateLimit;
+use risingwave_storage::error::ErrorKind as StorageErrorKind;
+use risingwave_storage::hummock::HummockErrorInner;
+use thiserror_ext::AsReport;
 use upstream_table_ext::*;
 
 use crate::executor::backfill::snapshot_backfill::consume_upstream::upstream_table_trait::UpstreamTable;
 use crate::executor::backfill::snapshot_backfill::state::{
     EpochBackfillProgress, VnodeBackfillProgress,
 };
+use crate::executor::error::ErrorKind as StreamExecutorErrorKind;
 use crate::executor::prelude::{Stream, StreamExt};
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
@@ -147,7 +151,31 @@ enum ConsumeUpstreamStreamState<'a, T: UpstreamTable> {
         future: NextEpochFuture<'a>,
         prev_epoch_finished_vnodes: Option<(u64, HashMap<VirtualNode, usize>)>,
     },
+    StoppedOnRetentionMiss,
     Err,
+}
+
+fn is_retention_or_snapshot_expired_error(error: &StreamExecutorError) -> bool {
+    let StreamExecutorErrorKind::Storage(storage_error) = error.inner() else {
+        return false;
+    };
+    let StorageErrorKind::Hummock(hummock_error) = storage_error.inner() else {
+        return false;
+    };
+
+    matches!(
+        hummock_error.inner(),
+        HummockErrorInner::ChangeLogRetentionMiss { .. }
+            | HummockErrorInner::TimeTravelVersionExpired { .. }
+            | HummockErrorInner::CommittedEpochMismatch { .. }
+    )
+}
+
+fn log_retention_or_snapshot_expired(error: &StreamExecutorError) {
+    tracing::warn!(
+        error = %error.as_report(),
+        "stop consuming cross-database upstream because upstream retention or snapshot availability was exceeded"
+    );
 }
 
 pub(super) struct ConsumeUpstreamStream<'a, T: UpstreamTable> {
@@ -161,6 +189,26 @@ pub(super) struct ConsumeUpstreamStream<'a, T: UpstreamTable> {
 }
 
 impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
+    pub(super) fn update_rate_limiter(&mut self, new_rate_limit: RateLimit) {
+        self.rate_limit = new_rate_limit;
+        let chunk_size = self.chunk_size;
+        match &mut self.state {
+            ConsumeUpstreamStreamState::ConsumingSnapshotStream { stream, .. } => {
+                stream.update_rate_limiter(new_rate_limit, chunk_size);
+            }
+            ConsumeUpstreamStreamState::ConsumingChangeLogStream { stream, .. } => {
+                stream.update_rate_limiter(new_rate_limit, chunk_size);
+            }
+            ConsumeUpstreamStreamState::ResolvingNextEpoch { .. }
+            | ConsumeUpstreamStreamState::CreatingChangeLogStream { .. }
+            | ConsumeUpstreamStreamState::CreatingSnapshotStream { .. } => {}
+            ConsumeUpstreamStreamState::StoppedOnRetentionMiss => {}
+            ConsumeUpstreamStreamState::Err => {
+                unreachable!("should not be accessed on Err")
+            }
+        }
+    }
+
     pub(super) fn consume_builder(&mut self) -> Option<StreamChunk> {
         match &mut self.state {
             ConsumeUpstreamStreamState::ConsumingSnapshotStream { stream, .. } => {
@@ -172,6 +220,7 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
             ConsumeUpstreamStreamState::ResolvingNextEpoch { .. }
             | ConsumeUpstreamStreamState::CreatingChangeLogStream { .. }
             | ConsumeUpstreamStreamState::CreatingSnapshotStream { .. } => None,
+            ConsumeUpstreamStreamState::StoppedOnRetentionMiss => None,
             ConsumeUpstreamStreamState::Err => {
                 unreachable!("should not be accessed on Err")
             }
@@ -222,6 +271,7 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
                     }
                 }
             }
+            ConsumeUpstreamStreamState::StoppedOnRetentionMiss => {}
             ConsumeUpstreamStreamState::Err => {
                 unreachable!("should not be accessed on Err")
             }
@@ -236,13 +286,16 @@ impl<T: UpstreamTable> Stream for ConsumeUpstreamStream<'_, T> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let result: Result<!, StreamExecutorError> = try {
             loop {
+                let rate_limit = self.rate_limit;
+                let chunk_size = self.chunk_size;
                 match &mut self.state {
                     ConsumeUpstreamStreamState::CreatingSnapshotStream {
                         future,
                         snapshot_epoch,
                         pre_finished_vnodes,
                     } => {
-                        let stream = ready!(future.as_mut().poll(cx))?;
+                        let mut stream = ready!(future.as_mut().poll(cx))?;
+                        stream.update_rate_limiter(rate_limit, chunk_size);
                         let snapshot_epoch = *snapshot_epoch;
                         let pre_finished_vnodes = take(pre_finished_vnodes);
                         self.state = ConsumeUpstreamStreamState::ConsumingSnapshotStream {
@@ -284,7 +337,8 @@ impl<T: UpstreamTable> Stream for ConsumeUpstreamStream<'_, T> {
                         pre_finished_vnodes,
                         ..
                     } => {
-                        let stream = ready!(future.as_mut().poll(cx))?;
+                        let mut stream = ready!(future.as_mut().poll(cx))?;
+                        stream.update_rate_limiter(rate_limit, chunk_size);
                         let epoch = *epoch;
                         let pre_finished_vnodes = take(pre_finished_vnodes);
                         self.state = ConsumeUpstreamStreamState::ConsumingChangeLogStream {
@@ -385,14 +439,27 @@ impl<T: UpstreamTable> Stream for ConsumeUpstreamStream<'_, T> {
                         };
                         continue;
                     }
+                    ConsumeUpstreamStreamState::StoppedOnRetentionMiss => {
+                        return Poll::Pending;
+                    }
                     ConsumeUpstreamStreamState::Err => {
                         unreachable!("should not be accessed on Err")
                     }
                 }
             }
         };
-        self.state = ConsumeUpstreamStreamState::Err;
-        Poll::Ready(Some(result.map(|unreachable| unreachable)))
+        match result {
+            Err(error) if is_retention_or_snapshot_expired_error(&error) => {
+                log_retention_or_snapshot_expired(&error);
+                self.state = ConsumeUpstreamStreamState::StoppedOnRetentionMiss;
+                Poll::Pending
+            }
+            Err(error) => {
+                self.state = ConsumeUpstreamStreamState::Err;
+                Poll::Ready(Some(Err(error)))
+            }
+            Ok(unreachable) => match unreachable {},
+        }
     }
 }
 
@@ -529,5 +596,51 @@ impl<'a, T: UpstreamTable> ConsumeUpstreamStream<'a, T> {
             chunk_size,
             rate_limit,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_storage::hummock::HummockError;
+
+    use super::*;
+
+    fn stream_error_from_hummock(error: HummockError) -> StreamExecutorError {
+        let storage_error: risingwave_storage::error::StorageError = error.into();
+        storage_error.into()
+    }
+
+    #[test]
+    fn test_change_log_retention_miss_error() {
+        let retention_miss = stream_error_from_hummock(HummockError::change_log_retention_miss(
+            TableId::new(233),
+            10678350547714048,
+        ));
+        assert!(is_retention_or_snapshot_expired_error(&retention_miss));
+
+        let missing_time_travel_version = stream_error_from_hummock(
+            HummockError::time_travel_version_expired(TableId::new(233), 10678350547714048),
+        );
+        assert!(is_retention_or_snapshot_expired_error(
+            &missing_time_travel_version
+        ));
+
+        let committed_epoch_mismatch =
+            stream_error_from_hummock(HummockError::committed_epoch_mismatch(
+                TableId::new(233),
+                10682740646084608,
+                10678350547714048,
+            ));
+        assert!(is_retention_or_snapshot_expired_error(
+            &committed_epoch_mismatch
+        ));
+
+        let dropped_table =
+            stream_error_from_hummock(HummockError::next_epoch("table 233 has been dropped"));
+        assert!(!is_retention_or_snapshot_expired_error(&dropped_table));
+
+        let other_error = StreamExecutorError::from(anyhow::anyhow!("other error"));
+        assert!(!is_retention_or_snapshot_expired_error(&other_error));
     }
 }

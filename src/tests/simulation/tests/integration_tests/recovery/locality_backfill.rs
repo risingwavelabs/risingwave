@@ -14,8 +14,8 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
-use risingwave_simulation::cluster::{Cluster, Configuration};
+use anyhow::{Result, bail};
+use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
 const SET_LOCALITY_BACKFILL: &str = "SET enable_locality_backfill = true;";
@@ -27,6 +27,27 @@ const CREATE_MV: &str = "CREATE MATERIALIZED VIEW mv AS SELECT count(*) FROM t G
 const ALTER_RATE_LIMIT_DEFAULT: &str =
     "ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = DEFAULT;";
 const WAIT: &str = "WAIT;";
+const WAIT_INTERNAL_STATE_SECS: u64 = 60;
+
+async fn wait_internal_state_table_non_empty(
+    session: &mut Session,
+    state_table_name: &str,
+    context: &str,
+) -> Result<i64> {
+    for _ in 0..WAIT_INTERNAL_STATE_SECS * 10 {
+        let state_count = session
+            .run(&format!("SELECT COUNT(*) FROM {};", state_table_name))
+            .await?;
+        let state_count_val = state_count.parse::<i64>()?;
+        if state_count_val > 0 {
+            return Ok(state_count_val);
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    bail!("State table should have rows {}, got 0", context);
+}
 
 /// Test that locality backfill internal tables behave correctly during recovery.
 /// This test verifies:
@@ -70,20 +91,9 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
         "Progress table should exist"
     );
 
-    // Step 6: Wait for some backfill progress
-    sleep(Duration::from_secs(5)).await;
-
-    // Step 7: Check internal tables before recovery
+    // Step 6: Check internal tables before recovery
     // State table should be non-empty (contains vnode positions during backfill)
-    let state_count = session
-        .run(&format!("SELECT COUNT(*) FROM {};", state_table_name))
-        .await?;
-    let state_count_val = state_count.parse::<i64>()?;
-    assert!(
-        state_count_val > 0,
-        "State table should have rows during backfill, got {}",
-        state_count_val
-    );
+    wait_internal_state_table_non_empty(&mut session, &state_table_name, "during backfill").await?;
 
     // Progress table should be empty
     let progress_count = session
@@ -94,21 +104,12 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
         "Progress table should be empty during backfill"
     );
 
-    // Step 8: Trigger recovery
+    // Step 7: Trigger recovery
     cluster.run("RECOVER").await?;
-    sleep(Duration::from_secs(10)).await;
 
-    // Step 9: Check internal tables after recovery
+    // Step 8: Check internal tables after recovery
     // State table should still be non-empty
-    let state_count_after = session
-        .run(&format!("SELECT COUNT(*) FROM {};", state_table_name))
-        .await?;
-    let state_count_after_val = state_count_after.parse::<i64>()?;
-    assert!(
-        state_count_after_val > 0,
-        "State table should have rows after recovery, got {}",
-        state_count_after_val
-    );
+    wait_internal_state_table_non_empty(&mut session, &state_table_name, "after recovery").await?;
 
     // Progress table should still be empty
     let progress_count_after = session
@@ -119,11 +120,11 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
         "Progress table should still be empty after recovery"
     );
 
-    // Step 10: Remove rate limit and wait for completion
+    // Step 9: Remove rate limit and wait for completion
     session.run(ALTER_RATE_LIMIT_DEFAULT).await?;
     session.run(WAIT).await?;
 
-    // Step 11: Verify MV result
+    // Step 10: Verify MV result
     // Each value from 1 to 10000 appears once, so count(*) group by a should give 10000 rows with count=1
     let mv_count = session.run("SELECT COUNT(*) FROM mv;").await?;
     assert_eq!(

@@ -178,6 +178,8 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
 
+    pub crossdb_last_consumed_min_epoch: LabelGuardedIntGaugeVec,
+
     pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_write_pause_duration_ns: LabelGuardedIntCounterVec,
@@ -1117,6 +1119,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let crossdb_last_consumed_min_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "crossdb_last_consumed_min_epoch",
+            "Last consumed min epoch for cross-database changelog stream scan",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_runtime_loop_count = register_int_counter_with_registry!(
             "lru_runtime_loop_count",
             "The counts of the eviction loop in LRU manager per second",
@@ -1354,6 +1364,7 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
+            crossdb_last_consumed_min_epoch,
             sync_kv_log_store_read_count,
             sync_kv_log_store_read_size,
             sync_kv_log_store_write_pause_duration_ns,
