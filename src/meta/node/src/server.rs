@@ -652,17 +652,21 @@ pub async fn start_service_as_election_leader(
         backup_manager.clone(),
         &env.opts,
         {
-            let barrier_manager = barrier_manager.clone();
+            let catalog_controller = metadata_manager.catalog_controller.clone();
             Box::new(move || {
-                let barrier_manager = barrier_manager.clone();
+                let catalog_controller = catalog_controller.clone();
                 Box::pin(async move {
-                    barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
-                        true
-                    })
+                    catalog_controller
+                        .get_pinned_snapshot_epochs()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect pinned snapshot epochs. pause vacuum time travel");
+                            None
+                        })
                 })
             })
-        }
+        },
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),

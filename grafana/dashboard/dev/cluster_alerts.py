@@ -1,6 +1,15 @@
 from ..common import *
 from . import section
 
+cross_db_last_consumed_min_epoch = (
+    f"max({metric('crossdb_last_consumed_min_epoch', table_id_filter_enabled=True)} != 0) by (table_id, actor_id, fragment_id)"
+)
+cross_db_log_expiry_headroom = (
+    f"({epoch_to_unix_millis(cross_db_last_consumed_min_epoch)} / 1000"
+    f" + on(table_id) group_left max({metric('streaming_table_change_log_retention_seconds', node_filter_enabled=False, table_id_filter_enabled=True)} != 0) by (table_id)"
+    f" - time())"
+)
+
 @section
 def _(outer_panels: Panels):
     panels = outer_panels
