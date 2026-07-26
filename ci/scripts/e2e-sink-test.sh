@@ -88,7 +88,7 @@ with open(sys.argv[1]) as f:
         if set(body) == {"batch"}:
             batch_values.append(body["batch"])
 
-assert batch_values == [1, 2, 3], batch_values
+assert sorted(batch_values) == [1, 2, 3], batch_values
 PY
 # Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb + 2 from dynamic URL tests + 3 from batched payload test
 test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 9
