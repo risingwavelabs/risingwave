@@ -69,13 +69,15 @@ impl FunctionCatalog {
                         .join(", ");
                     format!("TABLE ({})", fields)
                 } else {
+                    // Note: Single-column table UDFs lose their output column name in the catalog.
+                    // This output is not an exact reconstruction, it uses a dummy name 'column'.
                     format!("TABLE (column {})", self.return_type)
                 }
             }
             _ => format!("{}", self.return_type),
         };
 
-        if let Some(link) = &self.link {
+        let mut sql = if let Some(link) = &self.link {
             let name_in_runtime = self.name_in_runtime.as_deref().unwrap_or(&self.name);
             format!(
                 "CREATE FUNCTION {}({}) RETURNS {} AS {} USING LINK '{}'",
@@ -87,7 +89,24 @@ impl FunctionCatalog {
                 "CREATE FUNCTION {}({}) RETURNS {} LANGUAGE {} AS $${}$$",
                 self.name, args_str, returns, self.language, body
             )
+        };
+
+        let mut with_options = Vec::new();
+        if self.always_retry_on_network_error {
+            with_options.push("always_retry_on_network_error = true".to_owned());
         }
+        if let Some(is_async) = self.is_async {
+            with_options.push(format!("async = {}", is_async));
+        }
+        if let Some(is_batched) = self.is_batched {
+            with_options.push(format!("batch = {}", is_batched));
+        }
+
+        if !with_options.is_empty() {
+            sql.push_str(&format!(" WITH ({})", with_options.join(", ")));
+        }
+
+        sql
     }
 }
 

@@ -969,6 +969,13 @@ pub fn handle_show_create_object(
                 .try_find(|schema_name| {
                     let schema_catalog =
                         catalog_reader.get_schema_by_name(&database, schema_name)?;
+                    if !has_schema_usage_privilege(
+                        current_user,
+                        schema_catalog.id(),
+                        schema_catalog.owner,
+                    ) {
+                        return Ok::<_, RwError>(None);
+                    }
                     let mut funcs: Vec<_> = schema_catalog
                         .get_functions_by_name(&object_name)
                         .into_iter()
