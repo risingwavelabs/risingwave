@@ -948,6 +948,39 @@ fn test_reject_zero_max_snapshots_num() {
     );
 }
 
+#[test]
+fn test_reject_zero_compaction_size_settings() {
+    for option in [
+        "compaction_interval_sec",
+        "compaction.small_files_threshold_mb",
+        "compaction.delete_files_count_threshold",
+        "compaction.target_file_size_mb",
+        "compaction.write_parquet_max_row_group_rows",
+        "compaction.write_parquet_max_row_group_bytes",
+    ] {
+        let mut values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("catalog.name", "test-catalog"),
+            ("catalog.type", "storage"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        values.insert(option.to_owned(), "0".to_owned());
+
+        let err = IcebergConfig::from_btreemap(values).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("`{option}` must be greater than 0")),
+            "unexpected error for {option}: {err}"
+        );
+    }
+}
+
 /// Test parquet compression parsing.
 #[test]
 fn test_parse_parquet_compression() {
