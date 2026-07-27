@@ -674,7 +674,6 @@ seed_old_cluster() {
 
   echo "--- CDC TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed.slt"
-  enable_mysql_cdc_auto_schema_change "old-cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed_schema_change.slt"
 
   echo "--- CDC TEST: Validating old cluster"

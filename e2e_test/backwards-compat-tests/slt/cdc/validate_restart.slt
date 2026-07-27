@@ -6,6 +6,12 @@ SELECT id, name FROM mysql_table_in_rw;
 1 xxx
 2 22
 
+query III rowsort retry 10 backoff 3s
+SELECT id, legacy_serial, name FROM mysql_table_in_rw;
+----
+1 1 xxx
+2 2 22
+
 system ok
 mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
 INSERT INTO table_in_mysql (id, name) VALUES (3,'33');
@@ -36,8 +42,8 @@ query TTTT retry 10 backoff 3s
 DESCRIBE mysql_table_in_rw;
 ----
 id integer false NULL
-name character varying false NULL
 legacy_serial integer false NULL
+name character varying false NULL
 note character varying false NULL
 _rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL

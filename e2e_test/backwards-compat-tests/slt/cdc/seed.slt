@@ -6,9 +6,10 @@ CREATE DATABASE rwcdc;
 USE rwcdc;
 CREATE TABLE table_in_mysql (
     id INT PRIMARY KEY,
+    legacy_serial INT NOT NULL AUTO_INCREMENT UNIQUE,
     name VARCHAR(255)
 );
-INSERT INTO table_in_mysql VALUES (1,'11'),(2,'22');
+INSERT INTO table_in_mysql (id, name) VALUES (1,'11'),(2,'22');
 EOF
 
 statement ok
@@ -24,6 +25,7 @@ CREATE SOURCE cdc_source_mysql WITH (
 statement ok
 CREATE TABLE mysql_table_in_rw (
     id INT PRIMARY KEY,
+    legacy_serial INT,
     name VARCHAR
 )
 FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
