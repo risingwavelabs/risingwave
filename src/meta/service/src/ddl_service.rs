@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
+use risingwave_connector::source::cdc::external::cdc_auto_schema_change_existing_type_compatible;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
@@ -36,7 +37,7 @@ use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroup
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, OptionalAssociatedSourceId};
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
@@ -1397,37 +1398,68 @@ impl DdlService for DdlServiceImpl {
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
-                        let col = ColumnCatalog::from(col.clone());
-                        if col.is_generated() || col.is_hidden() {
-                            None
-                        } else {
-                            Some((col.column_desc.name.clone(), col.data_type().clone()))
-                        }
-                    }));
+                let original_column_types: HashMap<String, DataType> = table
+                    .columns
+                    .iter()
+                    .filter_map(|col| {
+                        cdc_auto_schema_change_comparable_column(&ColumnCatalog::from(col.clone()))
+                    })
+                    .collect();
 
-                let mut new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
-                        let col = ColumnCatalog::from(col.clone());
-                        if col.is_generated() || col.is_hidden() {
-                            None
-                        } else {
-                            Some((col.column_desc.name.clone(), col.data_type().clone()))
-                        }
-                    }));
+                let original_column_names: HashSet<String> =
+                    HashSet::from_iter(original_column_types.keys().cloned());
 
-                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
-                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
-                for col in &table.columns {
-                    let col = ColumnCatalog::from(col.clone());
-                    if col.is_connector_additional_column()
-                        && !col.is_hidden()
-                        && !col.is_generated()
-                    {
-                        new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
+                let collect_new_columns = |table_change: &TableSchemaChange| {
+                    let mut new_columns: HashSet<(String, DataType)> =
+                        HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
+                            let col = ColumnCatalog::from(col.clone());
+                            cdc_auto_schema_change_comparable_column(&col)
+                        }));
+
+                    // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns.
+                    // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx).
+                    for col in &table.columns {
+                        let col = ColumnCatalog::from(col.clone());
+                        if col.is_connector_additional_column()
+                            && !col.is_hidden()
+                            && !col.is_generated()
+                        {
+                            new_columns
+                                .insert((col.column_desc.name.clone(), col.data_type().clone()));
+                        }
                     }
-                }
+
+                    new_columns
+                };
+
+                let new_columns = collect_new_columns(&table_change);
+
+                let new_column_names: HashSet<String> =
+                    HashSet::from_iter(new_columns.iter().map(|(name, _)| name.clone()));
+                let is_add_or_drop_by_name = original_column_names.is_subset(&new_column_names)
+                    || original_column_names.is_superset(&new_column_names);
+
+                // Debezium schema change events carry the full table schema. Preserve existing
+                // validator-compatible RW types before both validation and replacement planning.
+                let table_change =
+                    if original_column_names != new_column_names && is_add_or_drop_by_name {
+                        normalize_cdc_auto_schema_change_existing_column_types(
+                            table_change.clone(),
+                            PbCdcTableType::try_from(table.cdc_table_type.unwrap_or_default())
+                                .unwrap_or(PbCdcTableType::Unspecified),
+                            &original_column_types,
+                        )
+                    } else {
+                        table_change.clone()
+                    };
+
+                let original_columns: HashSet<(String, DataType)> = HashSet::from_iter(
+                    original_column_types
+                        .iter()
+                        .map(|(name, data_type)| (name.clone(), data_type.clone())),
+                );
+
+                let new_columns = collect_new_columns(&table_change);
 
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
@@ -1956,4 +1988,91 @@ fn add_auto_schema_change_fail_event_log(
         fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
+}
+
+fn cdc_auto_schema_change_comparable_column(column: &ColumnCatalog) -> Option<(String, DataType)> {
+    if column.is_generated() || column.is_hidden() {
+        None
+    } else {
+        Some((column.column_desc.name.clone(), column.data_type().clone()))
+    }
+}
+
+fn normalize_cdc_auto_schema_change_existing_column_types(
+    mut table_change: TableSchemaChange,
+    cdc_table_type: PbCdcTableType,
+    original_column_types: &HashMap<String, DataType>,
+) -> TableSchemaChange {
+    for column in &mut table_change.columns {
+        let mut column_catalog = ColumnCatalog::from(column.clone());
+        if column_catalog.is_generated() || column_catalog.is_hidden() {
+            continue;
+        }
+
+        if let Some(original_type) = original_column_types.get(&column_catalog.column_desc.name)
+            && cdc_auto_schema_change_existing_type_compatible(
+                cdc_table_type,
+                original_type,
+                column_catalog.data_type(),
+            )
+        {
+            column_catalog.column_desc.data_type = original_type.clone();
+            *column = column_catalog.to_protobuf();
+        }
+    }
+
+    table_change
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_pb::ddl_service::table_schema_change::TableChangeType;
+
+    use super::*;
+
+    fn pb_column(name: &str, data_type: DataType) -> risingwave_pb::plan_common::ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::placeholder(), data_type))
+            .to_protobuf()
+    }
+
+    fn pb_table_change(
+        columns: Vec<risingwave_pb::plan_common::ColumnCatalog>,
+    ) -> TableSchemaChange {
+        TableSchemaChange {
+            change_type: TableChangeType::Alter as _,
+            cdc_table_id: "1.db.t".to_owned(),
+            columns,
+            upstream_ddl: "ALTER TABLE t ADD COLUMN note VARCHAR(255)".to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_cdc_auto_schema_change_normalizes_compatible_existing_column_types() {
+        let original_column_types = HashMap::from([
+            ("id".to_owned(), DataType::Int64),
+            ("v".to_owned(), DataType::Varchar),
+        ]);
+        let table_change = pb_table_change(vec![
+            pb_column("id", DataType::Int32),
+            pb_column("v", DataType::Varchar),
+            pb_column("note", DataType::Varchar),
+        ]);
+
+        let normalized = normalize_cdc_auto_schema_change_existing_column_types(
+            table_change,
+            PbCdcTableType::Mysql,
+            &original_column_types,
+        );
+        let columns = normalized
+            .columns
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .map(|column| (column.column_desc.name, column.column_desc.data_type))
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(columns["id"], DataType::Int64);
+        assert_eq!(columns["v"], DataType::Varchar);
+        assert_eq!(columns["note"], DataType::Varchar);
+    }
 }
