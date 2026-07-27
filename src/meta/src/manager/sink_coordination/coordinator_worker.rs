@@ -44,7 +44,7 @@ use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
 use tracing::{error, warn};
 
-use crate::manager::sink_coordination::exactly_once_util::{
+use crate::manager::exactly_once_util::{
     clean_aborted_records, commit_and_prune_epoch, list_sink_states_ordered_by_epoch,
     persist_pre_commit_metadata,
 };
@@ -519,7 +519,6 @@ enum CoordinatorWorkerEvent {
 }
 
 impl CoordinatorWorker {
-    #[expect(clippy::large_stack_frames)]
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,

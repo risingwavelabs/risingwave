@@ -57,6 +57,7 @@ use tonic::{Request, Response, Status};
 
 use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
@@ -87,6 +88,7 @@ impl DdlServiceImpl {
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
         barrier_scheduler: BarrierScheduler,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -96,6 +98,7 @@ impl DdlServiceImpl {
             barrier_manager,
             sink_manager.clone(),
             iceberg_compaction_manager.clone(),
+            iceberg_pk_index_sink_manager,
         )
         .await;
         Self {
@@ -131,6 +134,7 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
                 table,
             }) => StreamingJob::MaterializedView(table.unwrap()),
+            replace_job_plan::ReplaceJob::ReplaceSink(_) => unreachable!("use replace sink path"),
         };
 
         ReplaceStreamJobInfo {
@@ -387,6 +391,8 @@ impl DdlService for DdlServiceImpl {
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                         refresh_interval_sec: None,
+                        replace_sink: None,
+                        since_timestamp_epoch: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -450,6 +456,11 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
+        let since_timestamp_epoch = req.since_timestamp_epoch;
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -457,9 +468,11 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             dependencies,
-            resource_type: Self::default_streaming_job_resource_type(),
+            resource_type,
             if_not_exists: req.if_not_exists,
             refresh_interval_sec: None,
+            replace_sink: None,
+            since_timestamp_epoch,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -556,6 +569,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: req.refresh_interval_sec,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -599,6 +614,10 @@ impl DdlService for DdlServiceImpl {
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
 
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
@@ -607,9 +626,11 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                resource_type: Self::default_streaming_job_resource_type(),
+                resource_type,
                 if_not_exists: req.if_not_exists,
+                replace_sink: None,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -701,6 +722,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -842,14 +865,41 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceJobPlanRequest>,
     ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
-        let req = request.into_inner().get_plan().cloned()?;
+        let ReplaceJobPlan {
+            fragment_graph,
+            replace_job,
+        } = request.into_inner().get_plan().cloned()?;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamJob(
-                Self::extract_replace_table_info(req),
-            ))
-            .await?;
+        let command = match replace_job {
+            Some(replace_job_plan::ReplaceJob::ReplaceSink(replace_sink)) => {
+                let replace_job_plan::ReplaceSink {
+                    sink,
+                    old_sink_id,
+                    dependencies,
+                    resource_type,
+                } = replace_sink;
+                DdlCommand::CreateStreamingJob {
+                    stream_job: StreamingJob::Sink(sink.unwrap()),
+                    fragment_graph: fragment_graph.unwrap(),
+                    dependencies: dependencies.into_iter().collect::<HashSet<_>>(),
+                    resource_type: resource_type
+                        .and_then(|resource_type| resource_type.resource_type)
+                        .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
+                    if_not_exists: false,
+                    refresh_interval_sec: None,
+                    replace_sink: Some(old_sink_id),
+                    since_timestamp_epoch: None,
+                }
+            }
+            replace_job => {
+                DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(ReplaceJobPlan {
+                    fragment_graph,
+                    replace_job,
+                }))
+            }
+        };
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(ReplaceJobPlanResponse {
             status: None,
@@ -1542,19 +1592,40 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterResourceGroupResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_job_id();
         let deferred = req.get_deferred();
         let resource_group = req.resource_group;
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.as_job_id(),
+                job_id,
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        request: Request<AlterDatabaseResourceGroupRequest>,
+    ) -> Result<Response<AlterDatabaseResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseResourceGroup(
+                req.database_id,
+                req.resource_group,
+                req.deferred,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterDatabaseResourceGroupResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_database_param(
@@ -1625,6 +1696,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn rewrite_iceberg_table_manifests(
+        &self,
+        request: Request<RewriteIcebergTableManifestsRequest>,
+    ) -> Result<Response<RewriteIcebergTableManifestsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        self.iceberg_compaction_manager
+            .check_and_rewrite_manifests(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to rewrite manifests for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
+            })?;
+
+        Ok(Response::new(RewriteIcebergTableManifestsResponse {
+            status: None,
+        }))
+    }
+
     async fn create_iceberg_table(
         &self,
         request: Request<CreateIcebergTableRequest>,
@@ -1680,6 +1774,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -1765,6 +1861,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await;
 
@@ -1790,7 +1888,7 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (jobs, fragments) = self
+            let (jobs, fragment_nodes) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(source_id, source_rate_limit)
                 .await?;
@@ -1798,18 +1896,13 @@ impl DdlService for DdlServiceImpl {
                 throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
                 rate_limit: source_rate_limit,
             };
+            let config = fragment_nodes
+                .into_iter()
+                .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(
-                    database_id,
-                    Command::Throttle {
-                        jobs,
-                        config: fragments
-                            .into_iter()
-                            .map(|fragment_id| (fragment_id, throttle_config))
-                            .collect(),
-                    },
-                )
+                .run_command(database_id, Command::Throttle { jobs, config })
                 .await?;
         }
 

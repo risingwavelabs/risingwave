@@ -24,7 +24,8 @@ pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
 
 pub(crate) use batch_refresh_job::{
-    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+    BatchRefreshJobCheckpointControl, BatchRefreshJobTriggerContext, BatchRefreshLogicalFragments,
+    BatchRefreshRenderResult,
 };
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
@@ -81,19 +82,6 @@ impl IndependentCheckpointJobControl {
         match self {
             Self::CreatingStreamingJob(j) => Some(j.gen_backfill_progress()),
             Self::BatchRefresh(j) => j.gen_backfill_progress(),
-        }
-    }
-
-    /// Returns `true` if this job is actively consuming a snapshot.
-    ///
-    /// For creating streaming jobs this is always `true` (they exist only while
-    /// backfilling). Batch refresh jobs are only snapshot-backfilling while in
-    /// `ConsumingSnapshot` or `FinishingSnapshot`; once they transition to `Idle`
-    /// they no longer pin upstream log epochs.
-    pub(crate) fn is_snapshot_backfilling(&self) -> bool {
-        match self {
-            Self::CreatingStreamingJob(_) => true,
-            Self::BatchRefresh(j) => j.is_snapshot_backfilling(),
         }
     }
 

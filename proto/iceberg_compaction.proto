@@ -64,6 +64,10 @@ message IcebergCompactionTask {
   uint32 sink_id = 4;
 }
 
+message CancelCompactTask {
+  uint64 task_id = 1;
+}
+
 message SubscribeIcebergCompactionEventResponse {
   // PullTaskAck is a response, the meta will return a PullTaskAck after distributing the task requested by the PullTask.
   // The Compactor receives the PullTaskAck and remakes its state and tries to initiate the next PullTask.
@@ -72,6 +76,7 @@ message SubscribeIcebergCompactionEventResponse {
   oneof event {
     IcebergCompactionTask compact_task = 1;
     PullTaskAck pull_task_ack = 2;
+    CancelCompactTask cancel_compact_task = 3;
   }
 
   uint64 create_at = 7;

@@ -31,6 +31,8 @@ use crate::task::cdc_progress::CdcProgressReporter;
 
 pub struct StreamCdcScanExecutorBuilder;
 
+impl_stream_node_body!(StreamCdcScan(StreamCdcScanNode) => StreamCdcScanExecutorBuilder);
+
 impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
     type Node = StreamCdcScanNode;
 

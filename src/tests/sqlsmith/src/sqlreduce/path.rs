@@ -292,18 +292,13 @@ impl AstNode {
             ) if *field == AstField::Query => Some(AstNode::Query(query.clone())),
 
             // More CreateView field access
-            (
-                AstNode::Statement(Statement::CreateView {
-                    name: _,
-                    columns: _,
-                    ..
-                }),
-                PathComponent::Field(field),
-            ) => match field {
-                AstField::Name => None,    // ObjectName is complex, skip for now
-                AstField::Columns => None, // Column list is complex, skip for now
-                _ => None,
-            },
+            (AstNode::Statement(Statement::CreateView { .. }), PathComponent::Field(field)) => {
+                match field {
+                    AstField::Name => None,    // ObjectName is complex, skip for now
+                    AstField::Columns => None, // Column list is complex, skip for now
+                    _ => None,
+                }
+            }
 
             // Query navigation - enhanced
             (AstNode::Query(query), PathComponent::Field(field)) => match field {
@@ -400,15 +395,7 @@ impl AstNode {
                 (Expr::Cast { expr, .. }, AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
                 (Expr::IsNull(expr), AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
                 (Expr::IsNotNull(expr), AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
-                (
-                    Expr::Between {
-                        expr,
-                        low: _,
-                        high: _,
-                        ..
-                    },
-                    AstField::Expr,
-                ) => Some(AstNode::Expr(*expr.clone())),
+                (Expr::Between { expr, .. }, AstField::Expr) => Some(AstNode::Expr(*expr.clone())),
                 (Expr::Between { low, .. }, AstField::Low) => Some(AstNode::Expr(*low.clone())),
                 (Expr::Between { high, .. }, AstField::High) => Some(AstNode::Expr(*high.clone())),
                 _ => None,

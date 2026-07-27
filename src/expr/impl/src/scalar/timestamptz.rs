@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::LocalResult;
+use chrono::{LocalResult, Utc};
 use chrono_tz::Tz;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{
@@ -28,6 +28,15 @@ pub fn time_zone_err(inner_err: String) -> ExprError {
         name: "time_zone",
         reason: inner_err.into(),
     }
+}
+
+/// Returns the wall-clock timestamp at evaluation time.
+///
+/// `volatile` tells the function registry this result can change across evaluations with the same
+/// inputs, so stream planning treats it as an impure expression.
+#[function("clock_timestamp() -> timestamptz", volatile)]
+fn clock_timestamp() -> Timestamptz {
+    Utc::now().into()
 }
 
 #[function("sec_to_timestamptz(float8) -> timestamptz")]
@@ -213,6 +222,11 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
+
+    #[test]
+    fn test_clock_timestamp() {
+        assert!(clock_timestamp().timestamp_micros() > 0);
+    }
 
     #[test]
     fn test_time_zone_conversion() {

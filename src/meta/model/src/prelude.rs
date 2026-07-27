@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use Source as SourceModel;
+pub use Table as TableModel;
 pub use risingwave_pb::id::*;
-pub use {Source as SourceModel, Table as TableModel};
 
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
@@ -22,7 +23,7 @@ pub use super::compaction_status::Entity as CompactionStatus;
 pub use super::compaction_task::Entity as CompactionTask;
 pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
-pub use super::fragment::Entity as Fragment;
+pub use super::fragment::{Column as FragmentColumn, Entity as Fragment};
 pub use super::fragment_relation::Entity as FragmentRelation;
 pub use super::fragment_splits::Entity as FragmentSplits;
 pub use super::function::Entity as Function;

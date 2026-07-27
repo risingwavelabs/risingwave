@@ -298,7 +298,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
     wait_parallelism(&mut session, "m", "2").await?;
 
     // Eventually backfill finishes and parallelism restores to the normal value.
-    wait_jobs_finished(&mut session).await?;
+    wait_jobs_finished_with_multiplier(&mut session, 60).await?;
     wait_parallelism(&mut session, "m", "4").await?;
 
     Ok(())

@@ -32,6 +32,8 @@ use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
 
+impl_stream_node_body!(HashJoin(HashJoinNode) => HashJoinExecutorBuilder);
+
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     type Node = HashJoinNode;
 

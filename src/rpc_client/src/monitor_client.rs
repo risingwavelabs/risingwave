@@ -44,7 +44,7 @@ pub struct MonitorClient {
 
 impl MonitorClient {
     pub async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
             .monitored_connect("grpc-monitor-client", Default::default())
             .await?

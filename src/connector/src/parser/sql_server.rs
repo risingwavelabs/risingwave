@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
@@ -199,11 +199,23 @@ impl<'a> tiberius::IntoSql<'a> for TimestamptzTiberiusWrapper {
 
 impl<'a> tiberius::FromSql<'a> for TimestamptzTiberiusWrapper {
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
-        let instant = DateTime::<Utc>::from_sql(value)?;
-        let time = instant
-            .map(Timestamptz::from)
-            .map(TimestamptzTiberiusWrapper::from);
-        tiberius::Result::Ok(time)
+        let instant = time::OffsetDateTime::from_sql(value)?;
+        instant
+            .map(|instant| {
+                let micros = instant
+                    .unix_timestamp_nanos()
+                    .checked_div(1000)
+                    .and_then(|micros| i64::try_from(micros).ok())
+                    .ok_or_else(|| {
+                        tiberius::error::Error::Conversion(
+                            "datetimeoffset is out of range for RisingWave timestamptz".into(),
+                        )
+                    })?;
+                Ok(TimestamptzTiberiusWrapper::from(Timestamptz::from_micros(
+                    micros,
+                )))
+            })
+            .transpose()
     }
 }
 

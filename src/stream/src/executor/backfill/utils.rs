@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::cmp::{max, min};
+use std::cmp::{Ordering, max, min};
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -27,11 +27,11 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum, cmp_datum_iter};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
@@ -297,22 +297,13 @@ impl BackfillProgressPerVnode {
     }
 }
 
-pub(crate) fn mark_chunk(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let chunk = chunk.compact_vis();
-    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
-}
-
 pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.compact_vis();
@@ -323,7 +314,49 @@ pub(crate) fn mark_cdc_chunk(
         last_cdc_offset,
         pk_in_output_indices,
         pk_order,
+        pk_needs_unsigned_i64_compare,
     )
+}
+
+/// Compare two primary-key rows column by column, recovering the upstream unsigned order
+/// for `BIGINT UNSIGNED` pk columns.
+///
+/// `pk_needs_unsigned_i64_compare[i]` is true only for upstream `BIGINT UNSIGNED`. Frontend
+/// up-casts narrower unsigned integers so they stay non-negative in RisingWave, and unsigned
+/// float/double/decimal types must keep their native comparison semantics. Only `BIGINT UNSIGNED`
+/// can overflow into a negative `i64`, so we reinterpret both sides as `u64` to restore upstream
+/// MySQL ordering. The `ScalarRefImpl::Int64` match below is a defensive guard for that contract.
+pub(crate) fn cmp_pk_unsigned_aware<'a>(
+    lhs: impl Iterator<Item = DatumRef<'a>>,
+    rhs: impl Iterator<Item = DatumRef<'a>>,
+    pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
+) -> Ordering {
+    for (((l, r), order), &needs_unsigned_i64_compare) in lhs
+        .zip_eq_debug(rhs)
+        .zip_eq_debug(pk_order.iter())
+        .zip_eq_debug(pk_needs_unsigned_i64_compare.iter())
+    {
+        let ord = match (needs_unsigned_i64_compare, l, r) {
+            (true, Some(ScalarRefImpl::Int64(a)), Some(ScalarRefImpl::Int64(b))) => {
+                let ord = (a as u64).cmp(&(b as u64));
+                // Apply the column's sort direction, matching `cmp_datum`. CDC backfill always
+                // reads the snapshot ascending, so the descending branch is only for parity.
+                if order.is_descending() {
+                    ord.reverse()
+                } else {
+                    ord
+                }
+            }
+            // Signed column, NULL, up-cast unsigned integer, or non-integer unsigned column:
+            // the original comparison is already correct.
+            _ => cmp_datum(l, r, *order),
+        };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    Ordering::Equal
 }
 
 /// Mark chunk:
@@ -385,39 +418,6 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     Ok(chunk)
 }
 
-/// Mark chunk:
-/// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
-/// ignore it. We implement it by changing the visibility bitmap.
-fn mark_chunk_inner(
-    chunk: StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: &[usize],
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let (data, ops) = chunk.into_parts();
-    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-    let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
-    let mut unmatched_update_delete = false;
-    let mut visible_update_delete = false;
-    for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
-        let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos;
-        let visible = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le();
-        new_visibility.append(visible);
-
-        normalize_unmatched_updates(
-            &mut new_ops,
-            &mut unmatched_update_delete,
-            &mut visible_update_delete,
-            visible,
-            i,
-            op,
-        );
-    }
-    let (columns, _) = data.into_parts();
-    StreamChunk::with_visibility(new_ops, columns, new_visibility.finish())
-}
-
 /// We will rewrite unmatched U-/U+ into +/- ops.
 /// They can be unmatched because while they will always have the same stream key,
 /// their storage pk might be different. Here we use storage pk (`current_pos`) to filter them,
@@ -471,6 +471,7 @@ fn mark_cdc_chunk_inner(
     last_cdc_offset: Option<CdcOffset>,
     pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
@@ -491,7 +492,13 @@ fn mark_cdc_chunk_inner(
             if in_binlog_range {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos;
-                cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le()
+                cmp_pk_unsigned_aware(
+                    lhs.iter(),
+                    rhs.iter(),
+                    pk_order,
+                    pk_needs_unsigned_i64_compare,
+                )
+                .is_le()
             } else {
                 false
             }
@@ -711,57 +718,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
-/// Flush the data
-pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    epoch: EpochPair,
-    old_state: &mut Option<Vec<Datum>>,
-    current_partial_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    let vnodes = table.vnodes().clone();
-    if let Some(old_state) = old_state {
-        if old_state[1..] != current_partial_state[1..] {
-            vnodes.iter_vnodes_scalar().for_each(|vnode| {
-                let datum = Some(vnode.into());
-                current_partial_state[0].clone_from(&datum);
-                old_state[0] = datum;
-                table.write_record(Record::Update {
-                    old_row: &old_state[..],
-                    new_row: &(*current_partial_state),
-                })
-            });
-        }
-    } else {
-        // No existing state, create a new entry.
-        vnodes.iter_vnodes_scalar().for_each(|vnode| {
-            let datum = Some(vnode.into());
-            // fill the state
-            current_partial_state[0] = datum;
-            table.write_record(Record::Insert {
-                new_row: &(*current_partial_state),
-            })
-        });
-    }
-    table.commit_assert_no_update_vnode_bitmap(epoch).await
-}
-
-/// We want to avoid allocating a row for every vnode.
-/// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the following segments of the row:
-/// 1. `current_pos`
-/// 2. `backfill_finished`
-/// 3. `row_count`
-pub(crate) fn build_temporary_state(
-    row_state: &mut [Datum],
-    is_finished: bool,
-    current_pos: &OwnedRow,
-    row_count: u64,
-) {
-    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-    row_state[current_pos.len() + 1] = Some(is_finished.into());
-    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
-}
-
 /// Update backfill pos by vnode.
 pub(crate) fn update_pos_by_vnode(
     vnode: VirtualNode,
@@ -928,31 +884,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     }
 
     table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    Ok(())
-}
-
-/// Schema
-/// | vnode | pk | `backfill_finished` | `row_count` |
-///
-/// For `current_pos` and `old_pos` are just pk of upstream.
-/// They should be strictly increasing.
-pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
-    epoch: EpochPair,
-    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    is_finished: bool,
-    current_pos: &Option<OwnedRow>,
-    row_count: u64,
-    old_state: &mut Option<Vec<Datum>>,
-    current_state: &mut [Datum],
-) -> StreamExecutorResult<()> {
-    if let Some(current_pos_inner) = current_pos {
-        // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
-        flush_data(table, epoch, old_state, current_state).await?;
-        *old_state = Some(current_state.into());
-    } else {
-        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
-    }
     Ok(())
 }
 

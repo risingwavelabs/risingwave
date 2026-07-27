@@ -415,9 +415,7 @@ impl Binder {
 
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        let Statement::Query(query) = ast
-            .into_iter()
-            .exactly_one()
+        let Statement::Query(query) = Itertools::exactly_one(ast.into_iter())
             .expect("a view should contain only one statement")
         else {
             unreachable!("a view should contain a query statement");

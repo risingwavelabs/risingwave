@@ -68,6 +68,7 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
     pub fragment_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
+    pub project_expr_inflight_window_size: LabelGuardedIntGaugeVec,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec,
@@ -499,6 +500,14 @@ impl StreamingMetrics {
         )
         .unwrap()
         .relabel_debug_1(level);
+
+        let project_expr_inflight_window_size = register_guarded_int_gauge_vec_with_registry!(
+            "stream_project_expr_inflight_window_size",
+            "Number of messages waiting in ProjectExecutor's ordered projection window",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let actor_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_actor_count",
@@ -1322,6 +1331,7 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             fragment_channel_buffered_bytes,
             actor_current_epoch,
+            project_expr_inflight_window_size,
             source_output_row_count,
             source_split_change_count,
             source_backfill_row_count,
@@ -1919,6 +1929,7 @@ pub struct OverWindowMetrics {
     pub over_window_same_output_count: LabelGuardedIntCounter,
 }
 
+#[derive(Clone)]
 pub struct StateTableMetrics {
     pub iter_count: LabelGuardedIntCounter,
     pub get_count: LabelGuardedIntCounter,

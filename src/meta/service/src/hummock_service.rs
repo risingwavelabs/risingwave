@@ -108,17 +108,27 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<ReplayVersionDeltaRequest>,
     ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
-        let req = request.into_inner();
-        let (version, compaction_groups) = self
-            .hummock_manager
-            .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
-                &req.version_delta.unwrap(),
+        #[cfg(any(test, feature = "test"))]
+        {
+            let req = request.into_inner();
+            let (version, compaction_groups) = self
+                .hummock_manager
+                .replay_version_delta(HummockVersionDelta::from_rpc_protobuf(
+                    &req.version_delta.unwrap(),
+                ))
+                .await?;
+            Ok(Response::new(ReplayVersionDeltaResponse {
+                version: Some(version.into()),
+                modified_compaction_groups: compaction_groups,
+            }))
+        }
+        #[cfg(not(any(test, feature = "test")))]
+        {
+            let _ = request;
+            Err(Status::unimplemented(
+                "replay_version_delta is only available in test builds",
             ))
-            .await?;
-        Ok(Response::new(ReplayVersionDeltaResponse {
-            version: Some(version.into()),
-            modified_compaction_groups: compaction_groups,
-        }))
+        }
     }
 
     async fn trigger_compaction_deterministic(
@@ -138,7 +148,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<DisableCommitEpochResponse>, Status> {
         let version = self.hummock_manager.disable_commit_epoch().await;
         Ok(Response::new(DisableCommitEpochResponse {
-            current_version: Some(version.into()),
+            current_version: Some(PbHummockVersion::from(&*version)),
         }))
     }
 
@@ -349,7 +359,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version = self.hummock_manager.pin_version(req.context_id).await?;
         Ok(Response::new(PinVersionResponse {
-            pinned_version: Some(version.into()),
+            pinned_version: Some(PbHummockVersion::from(&*version)),
         }))
     }
 
@@ -396,7 +406,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
         let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
         Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
-            checkpoint_version: Some(checkpoint_version.into()),
+            checkpoint_version: Some(PbHummockVersion::from(&*checkpoint_version)),
         }))
     }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, VecDeque};
+use std::ops::RangeBounds;
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
@@ -44,6 +45,25 @@ impl<T> TableChangeLogCommon<T> {
         self.0.iter_mut()
     }
 
+    pub fn first(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.front()
+    }
+
+    pub fn last(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.back()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.get(index)
+    }
+
+    pub fn range(
+        &self,
+        range: impl RangeBounds<usize>,
+    ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
+        self.0.range(range)
+    }
+
     pub fn add_change_log(&mut self, new_change_log: EpochNewChangeLogCommon<T>) {
         if let Some(prev_log) = self.0.back() {
             assert!(prev_log.checkpoint_epoch < new_change_log.first_epoch());
@@ -61,7 +81,7 @@ impl<T> TableChangeLogCommon<T> {
         self.0.is_empty()
     }
 
-    pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
+    pub fn binary_search_by_checkpoint_epoch(&self, epoch: u64) -> Result<usize, usize> {
         self.0
             .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
     }

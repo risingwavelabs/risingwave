@@ -24,6 +24,8 @@ use crate::task::ExecutorParams;
 
 pub struct VectorIndexWriteExecutorBuilder;
 
+impl_stream_node_body!(VectorIndexWrite(VectorIndexWriteNode) => VectorIndexWriteExecutorBuilder);
+
 impl ExecutorBuilder for VectorIndexWriteExecutorBuilder {
     type Node = VectorIndexWriteNode;
 

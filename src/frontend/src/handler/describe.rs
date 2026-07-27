@@ -56,13 +56,14 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                         .pk_col_ids
                         .iter()
                         .map(|&column_id| {
-                            s.catalog
-                                .columns
-                                .iter()
-                                .filter(|x| x.column_id() == column_id)
-                                .map(|x| x.column_desc.clone())
-                                .exactly_one()
-                                .unwrap()
+                            Itertools::exactly_one(
+                                s.catalog
+                                    .columns
+                                    .iter()
+                                    .filter(|x| x.column_id() == column_id)
+                                    .map(|x| x.column_desc.clone()),
+                            )
+                            .unwrap()
                         })
                         .collect_vec();
                     (

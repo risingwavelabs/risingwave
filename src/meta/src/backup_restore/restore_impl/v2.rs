@@ -18,7 +18,9 @@ use itertools::Itertools;
 use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
-use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
+use risingwave_backup::meta_snapshot_v2::{
+    MetaSnapshotV2, MetadataV2, decode_hummock_sequences_from_stream,
+};
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use sea_orm::{DbErr, EntityTrait};
 
@@ -59,11 +61,12 @@ impl Loader<MetadataV2> for LoaderV2 {
 
         // validate and rewrite seq
         if newest_id > target_id {
-            let newest_snapshot: MetaSnapshotV2 = self.backup_store.get(newest_id).await?;
+            let newest_hummock_sequences = decode_hummock_sequences_from_stream(
+                self.backup_store.get_bytes_stream(newest_id).await?,
+            )
+            .await?;
             for seq in &target_snapshot.metadata.hummock_sequences {
-                let newest = newest_snapshot
-                    .metadata
-                    .hummock_sequences
+                let newest = newest_hummock_sequences
                     .iter()
                     .find(|s| s.name == seq.name)
                     .unwrap_or_else(|| {
@@ -74,7 +77,7 @@ impl Loader<MetadataV2> for LoaderV2 {
                     });
                 assert!(newest.seq >= seq.seq, "violate monotonicity requirement");
             }
-            target_snapshot.metadata.hummock_sequences = newest_snapshot.metadata.hummock_sequences;
+            target_snapshot.metadata.hummock_sequences = newest_hummock_sequences;
             tracing::info!(
                 "snapshot {} is rewritten by snapshot {}:\n",
                 target_id,
@@ -101,6 +104,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
     async fn write(&self, target_snapshot: MetaSnapshot<MetadataV2>) -> BackupResult<()> {
         let metadata = target_snapshot.metadata;
         let db = &self.meta_store.conn;
+        ensure_all_meta_store_tables_are_empty(db).await?;
         insert_models(metadata.seaql_migrations.clone(), db).await?;
         insert_models(metadata.clusters.clone(), db).await?;
         insert_models(metadata.version_stats.clone(), db).await?;
@@ -201,6 +205,28 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         }
         Ok(())
     }
+}
+
+async fn ensure_all_meta_store_tables_are_empty(
+    db: &impl sea_orm::ConnectionTrait,
+) -> BackupResult<()> {
+    macro_rules! ensure_entity_empty {
+        ($($entity_mod:ident),* $(,)?) => {
+            $(
+                if risingwave_meta_model::$entity_mod::Entity::find()
+                    .one(db)
+                    .await
+                    .map_err(map_db_err)?
+                    .is_some()
+                {
+                    return Err(BackupError::NonemptyMetaStorage);
+                }
+            )*
+        };
+    }
+
+    risingwave_meta_model::for_all_meta_model_entities!(ensure_entity_empty);
+    Ok(())
 }
 
 fn map_db_err(e: DbErr) -> BackupError {

@@ -20,6 +20,8 @@ use crate::from_proto::*;
 
 pub struct RowMergeExecutorBuilder;
 
+impl_stream_node_body!(RowMerge(RowMergeNode) => RowMergeExecutorBuilder);
+
 impl ExecutorBuilder for RowMergeExecutorBuilder {
     type Node = RowMergeNode;
 

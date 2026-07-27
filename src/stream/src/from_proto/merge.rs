@@ -68,7 +68,7 @@ impl MergeExecutorBuilder {
         };
 
         let upstreams = if always_single_input {
-            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
+            MergeExecutorUpstream::Singleton(Itertools::exactly_one(inputs.into_iter()).unwrap())
         } else {
             MergeExecutorUpstream::Merge(MergeExecutor::new_merge_upstream(
                 inputs,
@@ -89,6 +89,8 @@ impl MergeExecutorBuilder {
         )))
     }
 }
+
+impl_stream_node_body!(Merge(MergeNode) => MergeExecutorBuilder);
 
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;

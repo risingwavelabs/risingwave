@@ -56,8 +56,8 @@
     explain create table t (v int, w int as v+1, watermark for w as w) append only
   explain_output: |
     StreamMaterialize { columns: [v, w, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [w] }
-    └─StreamRowIdGen { row_id_index: 2 }
-      └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }], output_watermarks: [[$expr1]] }
+    └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }], output_watermarks: [[$expr1]] }
+      └─StreamRowIdGen { row_id_index: 2 }
         └─StreamUnion { all: true }
           ├─StreamExchange [no_shuffle] { dist: SomeShard }
           │ └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }

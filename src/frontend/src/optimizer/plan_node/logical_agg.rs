@@ -672,7 +672,7 @@ impl LogicalAggBuilder {
                 | PbAggKind::VarPop
                 | PbAggKind::VarSamp),
             ) => {
-                let arg = agg_call.args().iter().exactly_one().unwrap();
+                let arg = Itertools::exactly_one(agg_call.args().iter()).unwrap();
                 let squared_arg = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![arg.clone(), arg.clone()],

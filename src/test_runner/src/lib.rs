@@ -15,7 +15,6 @@
 // This is a stub lib.rs.
 
 #![feature(test)]
-#![feature(custom_test_frameworks)]
 pub mod test_runner;
 
 extern crate test;

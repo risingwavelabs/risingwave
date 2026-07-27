@@ -271,7 +271,7 @@ impl Drop for Receiver {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
     use std::pin::pin;
 
     use futures::FutureExt;

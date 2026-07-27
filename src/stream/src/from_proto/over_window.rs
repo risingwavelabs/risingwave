@@ -28,6 +28,8 @@ use crate::task::ExecutorParams;
 
 pub struct OverWindowExecutorBuilder;
 
+impl_stream_node_body!(OverWindow(PbOverWindowNode) => OverWindowExecutorBuilder);
+
 impl ExecutorBuilder for OverWindowExecutorBuilder {
     type Node = PbOverWindowNode;
 

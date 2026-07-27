@@ -29,11 +29,12 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
-    EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
-    LakekeeperService, MetaNodeService, MinioService, MoatService, MqttService, MySqlService,
-    NatsService, PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME,
-    RedisService, SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task,
-    TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    ElasticSearchService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
+    KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService, MongoDbService,
+    MongoDbSetupTask, MotoService, MqttService, MySqlService, NatsService, OpenSearchService,
+    PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
+    TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -246,6 +247,14 @@ fn task_main(
                     ctx.pb
                         .set_message(format!("using Opendal, namenode =  {}", c.namenode));
                 }
+                ServiceConfig::Moto(c) => {
+                    MotoService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("moto http://{}:{}/", c.address, c.port));
+                }
                 ServiceConfig::Kafka(c) => {
                     let mut service = KafkaService::new(c.clone());
                     service.execute(&mut ctx)?;
@@ -346,6 +355,31 @@ fn task_main(
                     }
                     ctx.pb
                         .set_message(format!("sqlserver {}:{}", c.address, c.port));
+                }
+                ServiceConfig::MongoDb(c) => {
+                    MongoDbService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    MongoDbSetupTask::new(c.clone()).execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("mongodb {}:{}", c.address, c.port));
+                }
+                ServiceConfig::ElasticSearch(c) => {
+                    ElasticSearchService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("elasticsearch http://{}:{}", c.address, c.port));
+                }
+                ServiceConfig::OpenSearch(c) => {
+                    OpenSearchService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("opensearch http://{}:{}", c.address, c.port));
                 }
                 ServiceConfig::Nats(c) => {
                     NatsService::new(c.clone()).execute(&mut ctx)?;

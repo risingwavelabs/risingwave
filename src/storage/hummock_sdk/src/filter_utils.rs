@@ -33,51 +33,50 @@ pub fn should_use_blocked_xor_filter_by_kv_count(
     kv_count > threshold
 }
 
-pub fn parse_sstable_filter_kind(kind: &str) -> Result<PbSstableFilterType, String> {
-    match kind.trim().to_ascii_lowercase().as_str() {
+pub fn parse_sstable_filter_type(filter_type: &str) -> Result<PbSstableFilterType, String> {
+    match filter_type {
+        "none" => Ok(PbSstableFilterType::SstableFilterNone),
         "xor16" => Ok(PbSstableFilterType::SstableFilterXor16),
         "xor8" => Ok(PbSstableFilterType::SstableFilterXor8),
-        _ => Err(format!("unsupported sstable filter kind: {kind}")),
+        _ => Err(format!("unsupported sstable filter type: {filter_type}")),
     }
 }
 
 pub fn parse_sstable_filter_layout(layout: &str) -> Result<PbSstableFilterLayout, String> {
-    match layout.trim().to_ascii_lowercase().as_str() {
-        "" | "auto" => Ok(PbSstableFilterLayout::Auto),
-        "plain" | "normal" | "nonblocked" | "non_blocked" | "non-blocked" => {
-            Ok(PbSstableFilterLayout::Plain)
-        }
-        "blocked" | "block" | "block_based" | "block-based" => Ok(PbSstableFilterLayout::Blocked),
+    match layout {
+        "auto" => Ok(PbSstableFilterLayout::Auto),
+        "plain" => Ok(PbSstableFilterLayout::Plain),
+        "blocked" => Ok(PbSstableFilterLayout::Blocked),
         _ => Err(format!("unsupported sstable filter layout: {layout}")),
     }
 }
 
-pub fn get_sstable_filter_kind(
+pub fn get_sstable_filter_type(
     compaction_config: &CompactionConfig,
     _base_level: usize,
     level: usize,
 ) -> Result<PbSstableFilterType, String> {
-    if compaction_config.sstable_filter_kind.is_empty() {
-        // Backward compatibility: old compaction configs did not carry sstable_filter_kind.
+    if compaction_config.sstable_filter_type.is_empty() {
+        // Backward compatibility: old compaction configs did not carry the filter type field.
         // Default to xor16 for all levels.
         return Ok(PbSstableFilterType::SstableFilterXor16);
     }
 
-    let raw_kind = compaction_config
-        .sstable_filter_kind
+    let raw_filter_type = compaction_config
+        .sstable_filter_type
         .get(level)
-        .ok_or_else(|| format!("sstable_filter_kind is not configured for level {level}"))?;
+        .ok_or_else(|| format!("sstable_filter_type is not configured for level {level}"))?;
 
-    parse_sstable_filter_kind(raw_kind)
+    parse_sstable_filter_type(raw_filter_type)
 }
 
-pub fn must_resolve_sstable_filter_kind(
+pub fn must_resolve_sstable_filter_type(
     compaction_config: &CompactionConfig,
     base_level: usize,
     level: usize,
 ) -> PbSstableFilterType {
-    get_sstable_filter_kind(compaction_config, base_level, level)
-        .unwrap_or_else(|err| panic!("invalid sstable_filter_kind compaction config: {err}"))
+    get_sstable_filter_type(compaction_config, base_level, level)
+        .unwrap_or_else(|err| panic!("invalid sstable_filter_type compaction config: {err}"))
 }
 
 pub fn get_sstable_filter_layout(
@@ -111,21 +110,26 @@ mod tests {
     use risingwave_pb::hummock::CompactionConfig;
 
     use super::{
-        PbSstableFilterLayout, PbSstableFilterType, get_sstable_filter_kind,
-        get_sstable_filter_layout, parse_sstable_filter_kind, parse_sstable_filter_layout,
+        PbSstableFilterLayout, PbSstableFilterType, get_sstable_filter_layout,
+        get_sstable_filter_type, parse_sstable_filter_layout, parse_sstable_filter_type,
     };
 
     #[test]
-    fn test_parse_sstable_filter_kind() {
+    fn test_parse_sstable_filter_type() {
         assert_eq!(
-            parse_sstable_filter_kind("xor16").unwrap(),
+            parse_sstable_filter_type("none").unwrap(),
+            PbSstableFilterType::SstableFilterNone
+        );
+        assert_eq!(
+            parse_sstable_filter_type("xor16").unwrap(),
             PbSstableFilterType::SstableFilterXor16
         );
         assert_eq!(
-            parse_sstable_filter_kind("XOR8").unwrap(),
+            parse_sstable_filter_type("xor8").unwrap(),
             PbSstableFilterType::SstableFilterXor8
         );
-        assert!(parse_sstable_filter_kind("bfuse8").is_err());
+        assert!(parse_sstable_filter_type("XOR8").is_err());
+        assert!(parse_sstable_filter_type("bfuse8").is_err());
     }
 
     #[test]
@@ -135,67 +139,54 @@ mod tests {
             PbSstableFilterLayout::Auto
         );
         assert_eq!(
-            parse_sstable_filter_layout("").unwrap(),
-            PbSstableFilterLayout::Auto
-        );
-        assert_eq!(
             parse_sstable_filter_layout("plain").unwrap(),
-            PbSstableFilterLayout::Plain
-        );
-        assert_eq!(
-            parse_sstable_filter_layout("NORMAL").unwrap(),
             PbSstableFilterLayout::Plain
         );
         assert_eq!(
             parse_sstable_filter_layout("blocked").unwrap(),
             PbSstableFilterLayout::Blocked
         );
-        assert_eq!(
-            parse_sstable_filter_layout("block-based").unwrap(),
-            PbSstableFilterLayout::Blocked
-        );
+        assert!(parse_sstable_filter_layout("blocked ").is_err());
+        assert!(parse_sstable_filter_layout("none").is_err());
         assert!(parse_sstable_filter_layout("unknown").is_err());
     }
 
     #[test]
-    fn test_get_sstable_filter_kind_for_level() {
+    fn test_get_sstable_filter_type() {
         let config = CompactionConfig {
-            sstable_filter_kind: vec!["xor8".to_owned(), "xor16".to_owned(), "xor8".to_owned()],
+            sstable_filter_type: vec!["xor8".to_owned(), "none".to_owned(), "xor16".to_owned()],
             ..Default::default()
         };
         assert_eq!(
-            get_sstable_filter_kind(&config, 2, 0).unwrap(),
+            get_sstable_filter_type(&config, 2, 0).unwrap(),
             PbSstableFilterType::SstableFilterXor8
         );
         assert_eq!(
-            get_sstable_filter_kind(&config, 2, 1).unwrap(),
+            get_sstable_filter_type(&config, 2, 1).unwrap(),
+            PbSstableFilterType::SstableFilterNone
+        );
+        assert_eq!(
+            get_sstable_filter_type(&config, 2, 2).unwrap(),
             PbSstableFilterType::SstableFilterXor16
         );
-        assert_eq!(
-            get_sstable_filter_kind(&config, 2, 2).unwrap(),
-            PbSstableFilterType::SstableFilterXor8
-        );
-        assert!(get_sstable_filter_kind(&config, 2, 3).is_err());
-    }
+        assert!(get_sstable_filter_type(&config, 2, 3).is_err());
 
-    #[test]
-    fn test_get_sstable_filter_kind_default_when_missing() {
         let config = CompactionConfig {
-            sstable_filter_kind: vec![],
+            sstable_filter_type: vec![],
             ..Default::default()
         };
         assert_eq!(
-            get_sstable_filter_kind(&config, 2, 0).unwrap(),
+            get_sstable_filter_type(&config, 2, 0).unwrap(),
             PbSstableFilterType::SstableFilterXor16
         );
         assert_eq!(
-            get_sstable_filter_kind(&config, 2, 6).unwrap(),
+            get_sstable_filter_type(&config, 2, 6).unwrap(),
             PbSstableFilterType::SstableFilterXor16
         );
     }
 
     #[test]
-    fn test_get_sstable_filter_layout_for_level() {
+    fn test_get_sstable_filter_layout() {
         let config = CompactionConfig {
             sstable_filter_layout: vec![
                 "plain".to_owned(),
@@ -217,10 +208,7 @@ mod tests {
             PbSstableFilterLayout::Blocked
         );
         assert!(get_sstable_filter_layout(&config, 2, 3).is_err());
-    }
 
-    #[test]
-    fn test_get_sstable_filter_layout_default_when_missing() {
         let config = CompactionConfig {
             sstable_filter_layout: vec![],
             ..Default::default()

@@ -22,8 +22,8 @@ use std::sync::atomic::Ordering;
 
 pub use ahash::RandomState;
 use hashbrown0_14 as _;
-use hashbrown0_15::HashTable;
-use hashbrown0_15::hash_table::Entry;
+use hashbrown0_16::HashTable;
+use hashbrown0_16::hash_table::Entry;
 
 use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 

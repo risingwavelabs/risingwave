@@ -137,11 +137,12 @@ impl MetaNodeService {
             }
             MetaBackend::Postgres => {
                 let pg_config = config.provide_postgres_backend.as_ref().unwrap();
-                let pg_store_config = pg_config
-                    .iter()
-                    .filter(|c| c.application == Application::Metastore)
-                    .exactly_one()
-                    .expect("more than one or no pg store config found for metastore");
+                let pg_store_config = Itertools::exactly_one(
+                    pg_config
+                        .iter()
+                        .filter(|c| c.application == Application::Metastore),
+                )
+                .expect("more than one or no pg store config found for metastore");
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
@@ -160,11 +161,12 @@ impl MetaNodeService {
             }
             MetaBackend::Mysql => {
                 let mysql_config = config.provide_mysql_backend.as_ref().unwrap();
-                let mysql_store_config = mysql_config
-                    .iter()
-                    .filter(|c| c.application == Application::Metastore)
-                    .exactly_one()
-                    .expect("more than one or no mysql store config found for metastore");
+                let mysql_store_config = Itertools::exactly_one(
+                    mysql_config
+                        .iter()
+                        .filter(|c| c.application == Application::Metastore),
+                )
+                .expect("more than one or no mysql store config found for metastore");
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")

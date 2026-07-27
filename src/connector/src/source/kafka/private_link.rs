@@ -168,7 +168,7 @@ pub fn insert_privatelink_broker_rewrite_map(
             // requires the NLB has enabled the cross-zone load balancing
             broker_rewrite_map.insert(
                 broker.to_owned(),
-                format!("{}:{}", &svc.endpoint_dns_name, link.port),
+                format!("{}:{}", svc.endpoint_dns_name, link.port),
             );
         }
     }

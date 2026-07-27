@@ -131,6 +131,8 @@ impl UnknownFields for S3Config {
     }
 }
 
+crate::impl_sink_unknown_fields!(S3Config);
+
 impl OpendalSinkBackend for S3Sink {
     type Properties = S3Config;
 

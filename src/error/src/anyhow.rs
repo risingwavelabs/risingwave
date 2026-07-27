@@ -182,4 +182,5 @@ macro_rules! def_anyhow_variant {
     }
 }
 
-pub use {def_anyhow_newtype, def_anyhow_variant};
+pub use def_anyhow_newtype;
+pub use def_anyhow_variant;

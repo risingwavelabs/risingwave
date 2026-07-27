@@ -773,10 +773,10 @@ where
                 vnode = ?vnode,
                 current_pos = ?current_pos,
                 range_bounds = ?range_bounds,
-                "iter_with_vnode_and_output_indices"
+                "iter_with_vnode"
             );
             let vnode_row_iter = upstream_table
-                .iter_with_vnode_and_output_indices(
+                .iter_with_vnode(
                     vnode,
                     &range_bounds,
                     PrefetchOptions::prefetch_for_small_range_scan(),

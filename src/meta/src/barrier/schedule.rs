@@ -509,7 +509,7 @@ impl PeriodicBarriers {
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        let force_checkpoint_database = self.force_checkpoint_databases.drain().next();
+        let force_checkpoint_database = self.force_checkpoint_databases.extract_if(|_| true).next();
         let new_barrier = if let Some(database_id) = force_checkpoint_database {
             self.reset_database_timer(database_id);
             NewBarrier {
@@ -785,7 +785,11 @@ impl ScheduledBarriers {
                         unreachable!("only drop and cancel streaming jobs should be buffered");
                     }
                 }
-                notifiers.into_iter().for_each(|notify| {
+                // `run_command` waits for both the started and collected notifications. These
+                // buffered commands are pre-applied during recovery without injecting a real
+                // barrier, so complete both waiters here.
+                notifiers.into_iter().for_each(|mut notify| {
+                    notify.notify_started();
                     notify.notify_collected();
                 });
             }
@@ -869,6 +873,14 @@ mod tests {
             unimplemented!()
         }
 
+        async fn resolve_log_store_epoch<'a>(
+            &'a self,
+            _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+            _since_epoch: u64,
+        ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+            Ok(Default::default())
+        }
+
         async fn post_collect_command(
             &self,
             _command: crate::barrier::command::PostCollectCommand,
@@ -933,6 +945,32 @@ mod tests {
         async fn handle_refresh_finished_table_ids(
             &self,
             _refresh_finished_table_ids: Vec<JobId>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn load_batch_refresh_trigger_context(
+            &self,
+            _job_id: JobId,
+            _database_id: DatabaseId,
+            _last_committed_epoch: u64,
+        ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+        {
+            unimplemented!()
+        }
+
+        async fn pre_commit_iceberg_pk_index_sink_metadata(
+            &self,
+            _reports: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
+            >,
+        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+            unimplemented!()
+        }
+
+        async fn commit_iceberg_pk_index_sink_metadata(
+            &self,
+            _sink_ids: Vec<risingwave_meta_model::SinkId>,
         ) -> MetaResult<()> {
             unimplemented!()
         }
@@ -1097,6 +1135,34 @@ mod tests {
         assert!(barrier.checkpoint);
         assert_eq!(barrier.database_id, DatabaseId::from(1));
         assert!(barrier.command.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_multiple_force_checkpoints() {
+        let databases = vec![
+            create_test_database(1, Some(100), Some(10)),
+            create_test_database(2, Some(100), Some(10)),
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(100), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(1));
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(2));
+
+        let barrier1 = periodic.next_barrier(&context).now_or_never().unwrap();
+        let barrier2 = periodic.next_barrier(&context).now_or_never().unwrap();
+
+        assert!(barrier1.checkpoint);
+        assert!(barrier1.command.is_none());
+        assert!(barrier2.checkpoint);
+        assert!(barrier2.command.is_none());
+        assert_eq!(
+            HashSet::from([barrier1.database_id, barrier2.database_id]),
+            HashSet::from([DatabaseId::from(1), DatabaseId::from(2)])
+        );
+        assert!(periodic.force_checkpoint_databases.is_empty());
     }
 
     #[tokio::test]

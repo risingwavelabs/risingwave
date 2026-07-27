@@ -116,7 +116,8 @@ impl SinkWriterCoordinationHandle {
     ) -> Poll<anyhow::Result<coordinate_request::Msg>> {
         let result = try {
             let request = ready!(self.request_stream.try_poll_next_unpin(cx))
-                .ok_or_else(|| anyhow!("end of request stream"))??;
+                .ok_or_else(|| anyhow!("end of request stream"))?
+                .map_err(anyhow::Error::from)?;
             let request = request.msg.ok_or_else(|| anyhow!("None msg in request"))?;
             match &request {
                 coordinate_request::Msg::StartRequest(_)

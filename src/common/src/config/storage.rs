@@ -261,6 +261,19 @@ pub struct StorageConfig {
         deserialize_with = "deserialize_iceberg_compaction_pull_interval_ms"
     )]
     pub iceberg_compaction_pull_interval_ms: u64,
+    /// Enable prefetching entire data files before compacting them.
+    ///
+    /// When enabled, each input file is downloaded with a single HTTP GET before compaction
+    /// begins, replacing the default pattern of N+1 range reads (1 footer + N column chunks)
+    /// with a single sequential read per file. This reduces object storage READ API calls
+    /// from D×(1+N) to D per compaction cycle.
+    ///
+    /// Trade-off: higher peak memory — one full file is held in memory per concurrent
+    /// compaction task. Enable only when object storage API cost is a priority and memory headroom is
+    /// sufficient. See also the memory-protection config knobs such as
+    /// `iceberg_compaction_task_parallelism_ratio`.
+    #[serde(default = "default::storage::iceberg_compaction_enable_prefetch")]
+    pub iceberg_compaction_enable_prefetch: bool,
 
     #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
     pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
@@ -393,11 +406,20 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
 
-    /// Skip check recent filter on data refill.
+    /// Skip checking recent filter on data refill.
     ///
     /// This option is suitable for a single compute node or debugging.
     #[serde(default = "default::cache_refill::skip_recent_filter")]
     pub skip_recent_filter: bool,
+
+    /// Skip checking inheritance filter on data refill.
+    ///
+    /// The inheritance filter only runs after recent-filter admission, so this
+    /// option has no effect when `skip_recent_filter` is enabled.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_inheritance_filter")]
+    pub skip_inheritance_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1170,6 +1192,10 @@ pub mod default {
             5000
         }
 
+        pub fn iceberg_compaction_enable_prefetch() -> bool {
+            false
+        }
+
         pub fn iceberg_compaction_target_binpack_group_size_mb() -> Option<u64> {
             Some(100 * 1024) // 100GB
         }
@@ -1294,6 +1320,10 @@ pub mod default {
         }
 
         pub fn skip_recent_filter() -> bool {
+            false
+        }
+
+        pub fn skip_inheritance_filter() -> bool {
             false
         }
     }

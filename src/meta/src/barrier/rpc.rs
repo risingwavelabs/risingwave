@@ -197,7 +197,7 @@ impl ControlStreamManager {
         node: WorkerNode,
         partial_graphs: impl Iterator<Item = PartialGraphId>,
         term_id: &String,
-        context: &impl GlobalBarrierWorkerContext,
+        context: Arc<impl GlobalBarrierWorkerContext>,
     ) {
         let node_id = node.id;
         if let Entry::Occupied(entry) = self.workers.entry(node_id) {
@@ -267,6 +267,21 @@ impl ControlStreamManager {
             }
         }
         error!(?node_host, "fail to create worker node after retry");
+        assert!(
+            self.workers
+                .insert(
+                    node_id,
+                    (
+                        node.clone(),
+                        WorkerNodeState::Reconnecting(ControlStreamManager::retry_connect(
+                            node,
+                            term_id.to_owned(),
+                            context,
+                        ))
+                    )
+                )
+                .is_none()
+        );
     }
 
     pub(super) fn remove_worker(&mut self, node: WorkerNode) {
@@ -663,6 +678,8 @@ impl PartialGraphRecoverer<'_> {
                 subscriptions_to_add: Default::default(),
                 backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
 
@@ -721,6 +738,30 @@ impl PartialGraphRecoverer<'_> {
                     })
             })
             .collect();
+
+        // Batch-refresh jobs are rendered outside `jobs`, but their upstream tables
+        // must still start with log-store-enabled subscribers after recovery.
+        for (job_id, render_result) in &batch_refresh {
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                render_result
+                    .fragment_infos
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+
+            for upstream_table_id in snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+            {
+                subscribers
+                    .entry(*upstream_table_id)
+                    .or_default()
+                    .try_insert(job_id.as_subscriber_id(), SubscriberType::SnapshotBackfill)
+                    .expect("non-duplicate");
+            }
+        }
 
         let mut database_jobs = HashMap::new();
         let mut snapshot_backfill_jobs = HashMap::new();
@@ -1111,15 +1152,6 @@ impl PartialGraphRecoverer<'_> {
                 .find_map(|e| *e)
                 .unwrap_or(committed_epoch);
 
-            // Register subscribers for the upstream tables.
-            for upstream_table_id in &upstream_table_ids {
-                subscribers
-                    .entry(*upstream_table_id)
-                    .or_default()
-                    .try_insert(job_id.as_subscriber_id(), SubscriberType::SnapshotBackfill)
-                    .expect("non-duplicate");
-            }
-
             let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
             let job_backfill_orders =
                 StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
@@ -1139,6 +1171,11 @@ impl PartialGraphRecoverer<'_> {
                 false,
             );
 
+            let refresh_interval_sec = job_extra_info
+                .get(&job_id)
+                .and_then(|info| info.refresh_interval_sec)
+                .expect("batch refresh job should have refresh_interval_sec in job extra info");
+
             let job = BatchRefreshJobCheckpointControl::recover(
                 database_id,
                 job_id,
@@ -1150,6 +1187,7 @@ impl PartialGraphRecoverer<'_> {
                 mutation,
                 render_result,
                 self,
+                refresh_interval_sec,
             )?;
             independent_checkpoint_job_controls
                 .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));

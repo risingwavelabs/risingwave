@@ -60,7 +60,7 @@ impl PgConstraint {
         let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
         PgConstraint {
             oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
-            conname: format!("{}_pkey", &table.name),
+            conname: format!("{}_pkey", table.name),
             connamespace: schema.id(),
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
@@ -97,7 +97,7 @@ impl PgConstraint {
             .collect();
         PgConstraint {
             oid: table.id.as_object_id(), // Use table_id as a mock oid of constraint here.
-            conname: format!("{}_pkey", &table.name),
+            conname: format!("{}_pkey", table.name),
             connamespace: schema.id(),
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
