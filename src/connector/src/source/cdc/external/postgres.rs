@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use anyhow::Context;
@@ -244,34 +244,41 @@ impl PostgresExternalTableReader {
             return Ok(HashSet::new());
         }
 
-        let select_keys = primary_keys
-            .iter()
-            .map(|column| Self::quote_column(column))
-            .join(",");
-        let statement = client
-            .prepare(&format!(
-                "SELECT {select_keys} FROM {} LIMIT 0",
-                Self::get_normalized_table_name(table_name)
-            ))
-            .await?;
-        if statement.columns().len() != primary_keys.len() {
-            return Err(anyhow::anyhow!(
-                "PostgreSQL returned {} primary-key columns while RisingWave expected {}",
-                statement.columns().len(),
-                primary_keys.len()
+        let column_type_oids = client
+            .query(
+                "SELECT a.attname, a.atttypid \
+                 FROM pg_attribute a \
+                 JOIN pg_class tbl ON tbl.oid = a.attrelid \
+                 JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
+                 WHERE ns.nspname = $1 AND tbl.relname = $2 \
+                   AND a.attnum > 0 AND NOT a.attisdropped",
+                &[&table_name.schema_name, &table_name.table_name],
             )
-            .into());
-        }
+            .await?
+            .into_iter()
+            .map(|row| (row.get::<_, String>(0), row.get::<_, u32>(1)))
+            .collect::<HashMap<_, _>>();
 
         let mut binary_collated_columns = HashSet::new();
-        for (column_name, column) in primary_keys.iter().zip_eq_fast(statement.columns()) {
-            if Self::is_binary_collated_pk_type(column.type_()) {
+        for column_name in primary_keys {
+            let type_oid = column_type_oids.get(column_name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "PostgreSQL system catalog did not return primary-key column `{column_name}` \
+                     from table {}",
+                    Self::get_normalized_table_name(table_name)
+                )
+            })?;
+            let Some(pg_type) = PgType::from_oid(*type_oid) else {
+                // User-defined and domain types are outside the exact built-in type policy.
+                continue;
+            };
+            if Self::is_binary_collated_pk_type(&pg_type) {
                 binary_collated_columns.insert(column_name.clone());
-            } else if let Some(reason) = Self::unsupported_pk_type_reason(column.type_()) {
+            } else if let Some(reason) = Self::unsupported_pk_type_reason(&pg_type) {
                 return Err(anyhow::anyhow!(
                     "PostgreSQL CDC primary-key column `{column_name}` has type {}, which is not \
                      supported because {reason}",
-                    column.type_()
+                    pg_type
                 )
                 .into());
             }
@@ -311,9 +318,12 @@ impl PostgresExternalTableReader {
     }
 
     /// Warn when the primary-key index itself cannot satisfy the explicit
-    /// `COLLATE pg_catalog."C"` ordering. A separate matching btree/expression index may
-    /// still satisfy the query.
-    async fn warn_if_primary_key_index_needs_binary_collation(
+    /// `COLLATE pg_catalog."C"` ordering and PostgreSQL may need a sort.
+    ///
+    /// This does not affect correctness: snapshot SQL always uses the explicit collation,
+    /// and [`Self::validate_server_encoding`] separately rejects non-UTF8 servers. A separate
+    /// matching btree/expression index may satisfy the query.
+    async fn warn_if_primary_key_index_may_require_sort(
         client: &tokio_postgres::Client,
         table_name: &SchemaTableName,
         binary_collated_columns: &HashSet<String>,
@@ -412,7 +422,7 @@ impl PostgresExternalTableReader {
         .await?;
         if !binary_collated_pk_columns.is_empty() {
             Self::validate_server_encoding(&client).await?;
-            Self::warn_if_primary_key_index_needs_binary_collation(
+            Self::warn_if_primary_key_index_may_require_sort(
                 &client,
                 &schema_table_name,
                 &binary_collated_pk_columns,
