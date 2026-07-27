@@ -318,7 +318,7 @@ impl WaitCheckpointTask {
                     .collect::<Vec<String>>();
 
                 match ack_policy {
-                    JetStreamAckPolicy::None => (),
+                    JetStreamAckPolicy::None | JetStreamAckPolicy::FlowControl => (),
                     JetStreamAckPolicy::Explicit => {
                         for reply_subject in reply_subjects {
                             if reply_subject.is_empty() {
