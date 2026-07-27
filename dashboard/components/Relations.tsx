@@ -313,7 +313,11 @@ export function Relations<R extends Relation>(
     withStreamingJobs?: boolean
   }
 ) {
-  const { response: relationList, refresh, loading } = useFetch(async () => {
+  const {
+    response: relationList,
+    refresh,
+    loading,
+  } = useFetch(async () => {
     const streamingJobsPromise = options?.withStreamingJobs
       ? getStreamingJobs()
       : undefined
