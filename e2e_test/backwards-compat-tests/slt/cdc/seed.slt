@@ -23,12 +23,7 @@ CREATE SOURCE cdc_source_mysql WITH (
 );
 
 statement ok
-CREATE TABLE mysql_table_in_rw (
-    id INT PRIMARY KEY,
-    legacy_serial INT,
-    name VARCHAR
-)
-FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
+CREATE TABLE mysql_table_in_rw (*) FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
 
 
 # postgres
