@@ -199,7 +199,8 @@ struct Jwks {
 /// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-4> for more details.
 #[derive(Debug, Deserialize)]
 struct Jwk {
-    kid: String,         // Key ID
+    kty: Option<String>, // Key Type
+    kid: Option<String>, // Key ID (OPTIONAL per RFC 7517 section 4.5)
     alg: Option<String>, // Algorithm (OPTIONAL per RFC 7517 section 4.4)
     n: Option<String>,   // RSA modulus
     e: Option<String>,   // RSA exponent
@@ -246,13 +247,8 @@ fn validate_jwt_with_jwks(
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
 
-    // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
+    // 1. Retrieve the kid from the header to find compatible JWKs in the JWK Set.
     let kid = header.kid.ok_or("JWT header missing 'kid' field")?;
-    let jwk = jwks
-        .keys
-        .iter()
-        .find(|k| k.kid == kid)
-        .ok_or(format!("No matching key found in JWKS for kid: '{}'", kid))?;
 
     // 2. Decide which algorithm to use.
     //
@@ -262,31 +258,37 @@ fn validate_jwt_with_jwks(
     // allow-list. The allow-list is what ultimately blocks alg-confusion: an
     // attacker-chosen `alg` from the token header alone must never be trusted
     // to select the verification algorithm.
-    let alg = match jwk.alg.as_deref() {
-        Some(jwk_alg) => {
-            let jwk_alg = Algorithm::from_str(jwk_alg)?;
-            if jwk_alg != header.alg {
-                return Err("alg in jwt header does not match with alg in jwk".into());
-            }
-            jwk_alg
-        }
-        None => header.alg,
-    };
-    if !ALLOWED_JWT_ALGORITHMS.contains(&alg) {
-        return Err(format!("JWT alg {:?} is not allowed", alg).into());
+    if !ALLOWED_JWT_ALGORITHMS.contains(&header.alg) {
+        return Err(format!("JWT alg {:?} is not allowed", header.alg).into());
     }
 
+    // A JWK Set can contain unrelated key types, keys without an optional `kid`,
+    // and equivalent keys of different types that share a `kid`. Scan all
+    // candidates instead of letting the first same-`kid` key shadow a usable
+    // RSA key later in the set.
+    let jwk = jwks
+        .keys
+        .iter()
+        .filter(|jwk| jwk.kid.as_deref() == Some(kid.as_str()))
+        .find(|jwk| {
+            jwk.kty.as_deref() == Some("RSA")
+                && jwk.n.is_some()
+                && jwk.e.is_some()
+                && match jwk.alg.as_deref() {
+                    Some(alg) => Algorithm::from_str(alg).is_ok_and(|alg| alg == header.alg),
+                    None => true,
+                }
+        })
+        .ok_or_else(|| format!("No compatible RSA key found in JWKS for kid: '{}'", kid))?;
+
     // 3. Decode the JWT and validate the claims.
-    let n = jwk
-        .n
-        .as_deref()
-        .ok_or_else(|| format!("JWK for kid '{}' missing RSA modulus 'n'", kid))?;
+    let n = jwk.n.as_deref().expect("RSA candidate must have a modulus");
     let e = jwk
         .e
         .as_deref()
-        .ok_or_else(|| format!("JWK for kid '{}' missing RSA exponent 'e'", kid))?;
+        .expect("RSA candidate must have an exponent");
     let decoding_key = DecodingKey::from_rsa_components(n, e)?;
-    let mut validation = Validation::new(alg);
+    let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
     validation.set_audience(&[audience_from_cluster_id(cluster_id)]); // JWT 'aud' claim must match cluster_id
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
@@ -693,7 +695,8 @@ mod tests {
 
             Jwks {
                 keys: vec![Jwk {
-                    kid: kid.to_owned(),
+                    kty: Some("RSA".to_owned()),
+                    kid: Some(kid.to_owned()),
                     alg: alg.map(ToOwned::to_owned),
                     n: Some(n),
                     e: Some(e),
@@ -869,7 +872,7 @@ mod tests {
             assert!(
                 error
                     .to_string()
-                    .contains("No matching key found in JWKS for kid: 'missing-kid'")
+                    .contains("No compatible RSA key found in JWKS for kid: 'missing-kid'")
             );
         }
 
@@ -900,7 +903,7 @@ mod tests {
             assert!(
                 error
                     .to_string()
-                    .contains("No matching key found in JWKS for kid: 'missing-kid'")
+                    .contains("No compatible RSA key found in JWKS for kid: 'missing-kid'")
             );
         }
 
@@ -1068,7 +1071,8 @@ mod tests {
             let (private_key, public_key) = create_test_rsa_keys();
             let mut jwks = create_test_jwks(&public_key, "rsa-kid", Some("RS256"));
             jwks.keys.push(Jwk {
-                kid: "ec-kid".to_owned(),
+                kty: Some("EC".to_owned()),
+                kid: Some("ec-kid".to_owned()),
                 alg: Some("ES256".to_owned()),
                 n: None,
                 e: None,
@@ -1096,32 +1100,67 @@ mod tests {
         }
 
         #[test]
-        fn test_jwks_deserializes_mixed_rsa_and_ec_keys() {
+        fn test_jwks_deserializes_ec_key_without_kid() {
             let jwks: Jwks = serde_json::from_value(json!({
                 "keys": [
+                    {
+                        "alg": "ES256",
+                        "kty": "EC",
+                        "crv": "P-256",
+                        "x": "x-coordinate",
+                        "y": "y-coordinate"
+                    },
                     {
                         "kid": "rsa-kid",
                         "alg": "RS256",
                         "kty": "RSA",
                         "n": "modulus",
                         "e": "AQAB"
-                    },
-                    {
-                        "kid": "ec-kid",
-                        "alg": "ES256",
-                        "kty": "EC",
-                        "crv": "P-256",
-                        "x": "x-coordinate",
-                        "y": "y-coordinate"
                     }
                 ]
             }))
             .unwrap();
 
             assert_eq!(jwks.keys.len(), 2);
-            assert_eq!(jwks.keys[0].n.as_deref(), Some("modulus"));
-            assert!(jwks.keys[1].n.is_none());
-            assert!(jwks.keys[1].e.is_none());
+            assert!(jwks.keys[0].kid.is_none());
+            assert_eq!(jwks.keys[1].kid.as_deref(), Some("rsa-kid"));
+            assert_eq!(jwks.keys[1].n.as_deref(), Some("modulus"));
+        }
+
+        #[test]
+        fn test_jwt_uses_compatible_rsa_key_when_ec_key_has_same_kid() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let mut jwks = create_test_jwks(&public_key, "shared-kid", Some("RS256"));
+            jwks.keys.insert(
+                0,
+                Jwk {
+                    kty: Some("EC".to_owned()),
+                    kid: Some("shared-kid".to_owned()),
+                    alg: Some("ES256".to_owned()),
+                    n: None,
+                    e: None,
+                },
+            );
+
+            let jwt = create_jwt_token(
+                &private_key,
+                "shared-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                Some("urn:risingwave:cluster:test-cluster-id"),
+                get_future_timestamp(),
+                HashMap::new(),
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "test-cluster-id",
+                &HashMap::new(),
+            );
+
+            assert!(result.unwrap());
         }
 
         #[test]
@@ -1190,7 +1229,7 @@ mod tests {
             let error = result.unwrap_err();
             assert_eq!(
                 error.to_string(),
-                "alg in jwt header does not match with alg in jwk"
+                "No compatible RSA key found in JWKS for kid: 'test-kid'"
             );
         }
     }
