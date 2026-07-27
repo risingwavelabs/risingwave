@@ -36,7 +36,6 @@ use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
@@ -101,16 +100,8 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
-    CompactionType, ENABLE_COMPACTION, ENABLE_PK_INDEX, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
-    validate_order_key_columns,
+    ENABLE_COMPACTION, IcebergConfig, IcebergSink, is_iceberg_engine_option,
+    parse_partition_by_exprs, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1782,6 +1773,82 @@ pub async fn handle_create_table(
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
+fn build_iceberg_engine_sink_options(
+    mut sink_options: BTreeMap<String, String>,
+    user_options: &WithOptions,
+    table: &TableCatalog,
+    primary_key: &[String],
+) -> Result<BTreeMap<String, String>> {
+    sink_options.extend(
+        user_options
+            .iter()
+            .filter(|(key, _)| is_iceberg_engine_option(key))
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+
+    sink_options
+        .entry(ENABLE_COMPACTION.to_owned())
+        .or_insert_with(|| "true".to_owned());
+    sink_options.insert(
+        "type".to_owned(),
+        if table.append_only {
+            "append-only"
+        } else {
+            "upsert"
+        }
+        .to_owned(),
+    );
+
+    // Supply the table primary key while parsing the typed config. In PK-index mode the
+    // planner derives it from the upstream stream key, so it is removed again below.
+    if !table.append_only {
+        sink_options.insert("primary_key".to_owned(), primary_key.join(","));
+    }
+
+    sink_options.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
+    sink_options.insert("is_exactly_once".to_owned(), "true".to_owned());
+
+    let config = IcebergConfig::from_btreemap(sink_options.clone())?;
+
+    if let Some(partition_by) = &config.partition_by {
+        let mut partition_columns = vec![];
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
+            table
+                .columns()
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    ))
+                })?;
+
+            partition_columns.push(column);
+        }
+
+        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, primary_key)
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(
+                    "The partition columns should be the prefix of the primary key".to_owned(),
+                )
+            })?;
+    }
+
+    if let Some(order_key) = &config.order_key {
+        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
+    }
+
+    if config.enable_pk_index {
+        sink_options.remove("primary_key");
+    } else {
+        sink_options.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    }
+
+    Ok(sink_options)
+}
+
 /// Iceberg table engine is composed of hummock table, iceberg sink and iceberg source.
 ///
 /// 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
@@ -1978,26 +2045,19 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_handler_args = handler_args.clone();
 
-    let mut sink_with = with_common.clone();
+    let sink_with = build_iceberg_engine_sink_options(
+        with_common.clone(),
+        &handler_args.with_options,
+        &table,
+        &pks,
+    )?;
 
-    let enable_pk_index = handler_args
-        .with_options
-        .get(ENABLE_PK_INDEX)
-        .is_some_and(|val| val.eq_ignore_ascii_case("true"));
-
-    // Iceberg with pk index does not support auto schema change yet.
-    if !enable_pk_index {
-        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    if let Some(source) = source.as_mut() {
+        source
+            .with_properties
+            .retain(|key, _| !is_iceberg_engine_option(key));
     }
 
-    if table.append_only {
-        sink_with.insert("type".to_owned(), "append-only".to_owned());
-    } else {
-        sink_with.insert("type".to_owned(), "upsert".to_owned());
-        if !enable_pk_index {
-            sink_with.insert("primary_key".to_owned(), pks.join(","));
-        }
-    }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //
     // Note: in theory, we don't need to backfill from the table to the sink,
@@ -2016,541 +2076,6 @@ pub async fn create_iceberg_engine_table(
     // - For table with an upstream job: Specifically, CDC table from shared CDC source.
     //   + Data may come from both upstream connector, and CDC table backfill, so we need to pause both of them.
     //   + For now we don't support APPEND ONLY CDC table, so it's safe.
-    let commit_checkpoint_interval = handler_args
-        .with_options
-        .get(COMMIT_CHECKPOINT_INTERVAL)
-        .map(|v| v.to_owned())
-        .unwrap_or_else(|| "60".to_owned());
-    let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
-        ErrorCode::InvalidInputSyntax(format!(
-            "commit_checkpoint_interval must be greater than 0: {}",
-            commit_checkpoint_interval
-        ))
-    })?;
-
-    if commit_checkpoint_interval == 0 {
-        bail!("commit_checkpoint_interval must be greater than 0");
-    }
-
-    // remove commit_checkpoint_interval from source options, otherwise it will be considered as an unknown field.
-    source
-        .as_mut()
-        .map(|x| x.with_properties.remove(COMMIT_CHECKPOINT_INTERVAL));
-
-    let sink_decouple = session.config().sink_decouple();
-    if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
-        bail!(
-            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
-        )
-    }
-
-    sink_with.insert(
-        COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-        commit_checkpoint_interval.to_string(),
-    );
-    sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
-
-    sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
-
-    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
-        match enable_compaction.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
-            }
-            "false" => {
-                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_compaction must be true or false: {}",
-                    enable_compaction
-                ))
-                .into());
-            }
-        }
-
-        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("enable_compaction"));
-    } else {
-        sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
-    }
-
-    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
-        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "compaction_interval_sec must be greater than 0: {}",
-                commit_checkpoint_interval
-            ))
-        })?;
-        if compaction_interval_sec == 0 {
-            bail!("compaction_interval_sec must be greater than 0");
-        }
-        sink_with.insert(
-            "compaction_interval_sec".to_owned(),
-            compaction_interval_sec.to_string(),
-        );
-        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("compaction_interval_sec"));
-    }
-
-    let has_enabled_snapshot_expiration = if let Some(enable_snapshot_expiration) =
-        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
-    {
-        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
-        match enable_snapshot_expiration.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
-                true
-            }
-            "false" => {
-                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
-                false
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_snapshot_expiration must be true or false: {}",
-                    enable_snapshot_expiration
-                ))
-                .into());
-            }
-        }
-    } else {
-        sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
-        true
-    };
-
-    if has_enabled_snapshot_expiration {
-        // configuration for snapshot expiration
-        if let Some(snapshot_expiration_retain_last) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_RETAIN_LAST)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_RETAIN_LAST.to_owned(),
-                snapshot_expiration_retain_last.to_owned(),
-            );
-            // remove snapshot_expiration_retain_last from source options, otherwise it will be considered as an unknown field.
-            source
-                .as_mut()
-                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_RETAIN_LAST));
-        }
-
-        if let Some(snapshot_expiration_max_age) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS.to_owned(),
-                snapshot_expiration_max_age.to_owned(),
-            );
-            // remove snapshot_expiration_max_age from source options, otherwise it will be considered as an unknown field.
-            source
-                .as_mut()
-                .map(|x| x.with_properties.remove(SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS));
-        }
-
-        if let Some(snapshot_expiration_clear_expired_files) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES.to_owned(),
-                snapshot_expiration_clear_expired_files.to_owned(),
-            );
-            // remove snapshot_expiration_clear_expired_files from source options, otherwise it will be considered as an unknown field.
-            source.as_mut().map(|x| {
-                x.with_properties
-                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES)
-            });
-        }
-
-        if let Some(snapshot_expiration_clear_expired_meta_data) = handler_args
-            .with_options
-            .get(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
-        {
-            sink_with.insert(
-                SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA.to_owned(),
-                snapshot_expiration_clear_expired_meta_data.to_owned(),
-            );
-            // remove snapshot_expiration_clear_expired_meta_data from source options, otherwise it will be considered as an unknown field.
-            source.as_mut().map(|x| {
-                x.with_properties
-                    .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
-            });
-        }
-    }
-
-    if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION) {
-        let format_version = format_version.parse::<u8>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "format_version must be 1, 2 or 3: {}",
-                format_version
-            ))
-        })?;
-        if format_version != 1 && format_version != 2 && format_version != 3 {
-            bail!("format_version must be 1, 2 or 3");
-        }
-        sink_with.insert(FORMAT_VERSION.to_owned(), format_version.to_string());
-
-        // remove format_version from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(FORMAT_VERSION));
-    }
-
-    if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
-        let write_mode = IcebergWriteMode::try_from(write_mode.as_str()).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "invalid write_mode: {}, must be one of: {}, {}",
-                write_mode, ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
-            ))
-        })?;
-
-        match write_mode {
-            IcebergWriteMode::MergeOnRead => {
-                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
-            }
-
-            IcebergWriteMode::CopyOnWrite => {
-                if table.append_only {
-                    return Err(ErrorCode::NotSupported(
-                        "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
-                        "Please use MERGE ON READ instead".to_owned(),
-                    )
-                    .into());
-                }
-
-                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
-            }
-        }
-
-        // remove write_mode from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("write_mode"));
-    } else {
-        sink_with.insert(
-            WRITE_MODE.to_owned(),
-            ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
-        );
-    }
-
-    if let Some(enable_pk_index) = handler_args.with_options.get(ENABLE_PK_INDEX) {
-        match enable_pk_index.to_lowercase().as_str() {
-            "true" => {
-                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "true".to_owned());
-            }
-            "false" => {
-                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "false".to_owned());
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "enable_pk_index must be true or false: {}",
-                    enable_pk_index
-                ))
-                .into());
-            }
-        }
-
-        // remove enable_pk_index from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(ENABLE_PK_INDEX));
-    }
-
-    if let Some(max_snapshots_num_before_compaction) =
-        handler_args.with_options.get(COMPACTION_MAX_SNAPSHOTS_NUM)
-    {
-        let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
-            .parse::<u32>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be greater than 0: {}",
-                    COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
-                ))
-            })?;
-
-        if max_snapshots_num_before_compaction == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_MAX_SNAPSHOTS_NUM
-            ));
-        }
-
-        sink_with.insert(
-            COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
-            max_snapshots_num_before_compaction.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_MAX_SNAPSHOTS_NUM));
-    }
-
-    if let Some(small_files_threshold_mb) = handler_args
-        .with_options
-        .get(COMPACTION_SMALL_FILES_THRESHOLD_MB)
-    {
-        let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_SMALL_FILES_THRESHOLD_MB, small_files_threshold_mb
-            ))
-        })?;
-        if small_files_threshold_mb == 0 {
-            bail!(format!(
-                "{} must be a greater than 0",
-                COMPACTION_SMALL_FILES_THRESHOLD_MB
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_SMALL_FILES_THRESHOLD_MB.to_owned(),
-            small_files_threshold_mb.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_SMALL_FILES_THRESHOLD_MB)
-        });
-    }
-
-    if let Some(delete_files_count_threshold) = handler_args
-        .with_options
-        .get(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
-    {
-        let delete_files_count_threshold =
-            delete_files_count_threshold.parse::<usize>().map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be greater than 0: {}",
-                    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, delete_files_count_threshold
-                ))
-            })?;
-        if delete_files_count_threshold == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_DELETE_FILES_COUNT_THRESHOLD
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_DELETE_FILES_COUNT_THRESHOLD.to_owned(),
-            delete_files_count_threshold.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
-        });
-    }
-
-    if let Some(trigger_snapshot_count) = handler_args
-        .with_options
-        .get(COMPACTION_TRIGGER_SNAPSHOT_COUNT)
-    {
-        let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_TRIGGER_SNAPSHOT_COUNT, trigger_snapshot_count
-            ))
-        })?;
-        if trigger_snapshot_count == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_TRIGGER_SNAPSHOT_COUNT
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_TRIGGER_SNAPSHOT_COUNT.to_owned(),
-            trigger_snapshot_count.to_string(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TRIGGER_SNAPSHOT_COUNT));
-    }
-
-    if let Some(target_file_size_mb) = handler_args
-        .with_options
-        .get(COMPACTION_TARGET_FILE_SIZE_MB)
-    {
-        let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMPACTION_TARGET_FILE_SIZE_MB, target_file_size_mb
-            ))
-        })?;
-        if target_file_size_mb == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_TARGET_FILE_SIZE_MB
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_TARGET_FILE_SIZE_MB.to_owned(),
-            target_file_size_mb.to_string(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
-    }
-
-    if let Some(compaction_type) = handler_args.with_options.get(COMPACTION_TYPE) {
-        let compaction_type = CompactionType::try_from(compaction_type.as_str()).map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "invalid compaction_type: {}, must be one of {:?}",
-                compaction_type,
-                [
-                    CompactionType::Full,
-                    CompactionType::SmallFiles,
-                    CompactionType::FilesWithDelete
-                ]
-            ))
-        })?;
-
-        sink_with.insert(
-            COMPACTION_TYPE.to_owned(),
-            compaction_type.as_str().to_owned(),
-        );
-
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove(COMPACTION_TYPE));
-    }
-
-    if let Some(write_parquet_compression) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_COMPRESSION)
-    {
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_COMPRESSION.to_owned(),
-            write_parquet_compression.to_owned(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_COMPRESSION)
-        });
-    }
-
-    if let Some(write_parquet_max_row_group_rows) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
-    {
-        let write_parquet_max_row_group_rows = write_parquet_max_row_group_rows
-            .parse::<usize>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be a positive integer: {}",
-                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, write_parquet_max_row_group_rows
-                ))
-            })?;
-        if write_parquet_max_row_group_rows == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS.to_owned(),
-            write_parquet_max_row_group_rows.to_string(),
-        );
-        // remove from source options, otherwise it will be considered as an unknown field.
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
-        });
-    }
-
-    if let Some(write_parquet_max_row_group_bytes) = handler_args
-        .with_options
-        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
-    {
-        let write_parquet_max_row_group_bytes = write_parquet_max_row_group_bytes
-            .parse::<usize>()
-            .map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "{} must be a positive integer: {}",
-                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, write_parquet_max_row_group_bytes
-                ))
-            })?;
-        if write_parquet_max_row_group_bytes == 0 {
-            bail!(format!(
-                "{} must be greater than 0",
-                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES
-            ));
-        }
-        sink_with.insert(
-            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES.to_owned(),
-            write_parquet_max_row_group_bytes.to_string(),
-        );
-        source.as_mut().map(|x| {
-            x.with_properties
-                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
-        });
-    }
-
-    let partition_by = handler_args
-        .with_options
-        .get("partition_by")
-        .map(|v| v.to_owned());
-
-    if let Some(partition_by) = &partition_by {
-        let mut partition_columns = vec![];
-        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
-            table
-                .columns()
-                .iter()
-                .find(|col| col.name().eq_ignore_ascii_case(&column))
-                .ok_or_else(|| {
-                    ErrorCode::InvalidInputSyntax(format!(
-                        "Partition source column does not exist in schema: {}",
-                        column
-                    ))
-                })?;
-
-            partition_columns.push(column);
-        }
-
-        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
-            |_| {
-                ErrorCode::InvalidInputSyntax(
-                    "The partition columns should be the prefix of the primary key".to_owned(),
-                )
-            },
-        )?;
-
-        sink_with.insert("partition_by".to_owned(), partition_by.to_owned());
-
-        // remove partition_by from source options, otherwise it will be considered as an unknown field.
-        source
-            .as_mut()
-            .map(|x| x.with_properties.remove("partition_by"));
-    }
-
-    let order_key = handler_args
-        .with_options
-        .get(ORDER_KEY)
-        .map(|v| v.to_owned());
-    if let Some(order_key) = &order_key {
-        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
-            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
-
-        sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
-
-        source.as_mut().map(|x| x.with_properties.remove(ORDER_KEY));
-    }
 
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
