@@ -683,6 +683,9 @@ impl HummockManager {
 
         let mut batch = vec![];
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
+            if !time_travel_table_ids.contains(table_id) {
+                continue;
+            }
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
                 table_id: Set(i64::from(table_id.as_raw_id())),
