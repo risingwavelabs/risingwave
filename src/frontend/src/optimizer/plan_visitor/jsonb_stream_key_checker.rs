@@ -144,6 +144,27 @@ impl LogicalPlanVisitor for StreamKeyChecker {
         self.visit_inputs(plan)
     }
 
+    fn visit_logical_join(&mut self, plan: &LogicalJoin) -> Self::Result {
+        // Only the equi keys become a hash key; the rest of `on` stays a per-row predicate.
+        if matches!(self, Self::Variant) {
+            let left = plan.left();
+            let right = plan.right();
+            let predicate = EqJoinPredicate::create(
+                left.schema().len(),
+                right.schema().len(),
+                plan.on().clone(),
+            );
+            for (left_idx, right_idx) in predicate.eq_indexes() {
+                for (schema, idx) in [(left.schema(), left_idx), (right.schema(), right_idx)] {
+                    if self.is_restricted_key_type(&schema[idx].data_type()) {
+                        return Some(self.err_msg("join key", &schema[idx]));
+                    }
+                }
+            }
+        }
+        self.visit_inputs(plan)
+    }
+
     fn visit_logical_over_window(&mut self, plan: &LogicalOverWindow) -> Self::Result {
         let input = plan.input();
         let schema = input.schema();

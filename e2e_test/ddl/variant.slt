@@ -280,7 +280,7 @@ drop table variant_key_source_t;
 # rejected too.
 
 statement ok
-create table variant_batch_t (id int, v variant, s struct<v variant>);
+create table variant_batch_t (id int, v variant, s struct<v variant>, arr variant[]);
 
 statement error should not be in the aggregation group key
 select v, count(*) from variant_batch_t group by v;
@@ -318,6 +318,27 @@ select count(distinct v) from variant_batch_t;
 
 statement error should not be in the distinct aggregation argument
 select array_agg(distinct v) from variant_batch_t;
+
+# A bare VARIANT has no equality function at all, so a join on it never binds.
+
+statement error function equal\(variant, variant\) does not exist
+select a.id from variant_batch_t a join variant_batch_t b on a.v = b.v;
+
+# Wrapping it in a list or a struct picks up the generic `anyarray` / `struct` equality, which is
+# how a VARIANT can still reach a join key. Batch has no state table to catch it later.
+
+statement error should not be in the join key
+select a.id from variant_batch_t a join variant_batch_t b on a.s = b.s;
+
+statement error should not be in the join key
+select a.id from variant_batch_t a join variant_batch_t b on a.arr = b.arr;
+
+statement error should not be in the join key
+select id from variant_batch_t where arr in (select arr from variant_batch_t);
+
+statement error should not be in the join key
+create materialized view variant_join_mv as
+select a.id from variant_batch_t a join variant_batch_t b on a.arr = b.arr;
 
 # Positions that neither compare nor deduplicate stay allowed.
 

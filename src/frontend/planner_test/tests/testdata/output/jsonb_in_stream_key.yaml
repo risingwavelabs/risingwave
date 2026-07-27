@@ -54,6 +54,17 @@
   stream_error: |-
     Not supported: VARIANT column "t1.s" should not be in the TopN order key.
     HINT: VARIANT values only have byte-wise equality and ordering, so they cannot be used as a key: in a primary key, index, grouping or join key, ORDER BY, or set operation.
+- name: nested variant in join key
+  sql: |
+    create table t1 (id int primary key, s struct<v variant>);
+    create table t2 (id int primary key, s struct<v variant>);
+    select t1.id from t1 join t2 on t1.s = t2.s;
+  batch_error: |-
+    Not supported: VARIANT column "t1.s" should not be in the join key.
+    HINT: VARIANT values only have byte-wise equality and ordering, so they cannot be used as a key: in a primary key, index, grouping or join key, ORDER BY, or set operation.
+  stream_error: |-
+    Not supported: VARIANT column "t1.s" should not be in the join key.
+    HINT: VARIANT values only have byte-wise equality and ordering, so they cannot be used as a key: in a primary key, index, grouping or join key, ORDER BY, or set operation.
 - name: nested variant in over window partition key
   sql: |
     create table t1 (id int primary key, s struct<v variant>);
