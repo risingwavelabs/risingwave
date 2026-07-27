@@ -1,126 +1,83 @@
-# TapData RisingWave Connector Release Readiness
+# TapData RisingWave Connector Release Checklist
 
-This is the current release checklist and evidence summary for connector `1.0.0`. It intentionally
-omits the chronological local execution log. A release is identified by its exact Git revision and
-JAR SHA-256, never by the version string alone.
-
-## Decision
-
-**Code status:** release-candidate quality within the qualified source and deployment matrix.
-
-**Distribution status:** not ready until the canonical repository, CI owner, final clean artifact,
-and publication channel are confirmed.
-
-The dependency upgrade to pgjdbc `42.7.12` and Jackson `2.18.9` invalidated the previously recorded
-JAR checksum. No existing local JAR or historical checksum is a current release artifact.
+This is a stable release checklist. Put commit-specific checksums, task names, row counts, and
+approval links in the external release record or pull request.
 
 ## Supported scope
 
-| Area | 1.0.0 position |
+The connector is target-only and supports:
+
+- WebSocket streaming for keyed insert, update, and delete;
+- WebSocket JSONB append-only for keyless insert streams;
+- JDBC as a compatibility fallback.
+
+WebSocket modes require RisingWave 3.0+. JDBC also provides version, schema, metadata, DDL, and
+privilege checks for every mode.
+
+The qualified source matrix is:
+
+| Source | Requirement |
 |---|---|
-| Connector direction | RisingWave target only |
-| Default transport | WebSocket streaming with a primary key |
-| Keyless transport | WebSocket JSONB append-only or JDBC fallback |
-| RisingWave version | 3.0.0+ for WebSocket; JDBC fallback supports earlier versions |
-| PostgreSQL source | Qualified for snapshot and CDC |
-| MySQL source | Qualified with `binlog_row_image=FULL` |
-| MongoDB source | Qualified with TapData Update Field Completion enabled |
-| Kafka source | Qualified through JSONB append-only mode |
-| SQL Server source | Qualified with SQL Server 2022 Change Tracking through WebSocket and JDBC |
-| Oracle source | Qualified with Oracle 26ai LogMiner through WebSocket and JDBC |
-| RisingWave Cloud | JDBC TLS and WSS were exercised on a development cluster |
-
-## Qualification evidence
-
-The implemented behavior has passed the following local qualification work. These results establish
-feature confidence but do not replace the final exact-artifact run after repository integration.
-
-| Test area | Result |
-|---|---|
-| Maven unit suite | 48 tests passed |
-| Local RisingWave live suite | 37 tests passed |
-| Connection pre-checks | Version, schema, DDL privilege, webhook table, signed init, DML, and ACK |
-| PostgreSQL replication | Snapshot plus keyed insert, update, delete, stop, and restart |
-| MySQL replication | FULL row-image update preserved unchanged fields |
-| MongoDB replication | Filled update preserved fields; `$unset` mapped to SQL `NULL` |
-| Kafka replication | Continuous keyless inserts through JSONB append-only mode |
-| SQL Server replication | Change Tracking snapshot, CDC, types, primary-key change, and restart through WebSocket and JDBC |
-| Oracle replication | LogMiner snapshot, CDC, types, primary-key change, and restart through WebSocket and JDBC |
-| Three-mode soak | One hour; 13/13 samples Running with monotonically increasing row counts and no task errors |
-| CDC semantics | Replace, removed fields, primary-key changes, missing identity, and unknown fields |
-| Scalar values | Numeric, decimal, temporal, JSONB, and binary round trips |
-| JDBC JSONB | Uses PostgreSQL `PGobject(type=jsonb)` and writes successfully |
-| Failure recovery | Disconnect/reconnect and repeated reconnect stress passed |
-| Lost ACK | Keyed replay remained one row; JSONB replay duplicated as documented |
-| Payload boundary | 8 MiB connector split limit stayed below tested self-hosted and Cloud limits |
-| TLS | JDBC TLS and WSS success; invalid TLS configuration failed closed |
-| Packaging | Shaded JDBC/Jackson classes load without TapData classloader conflicts |
+| PostgreSQL | Reconstructable complete row images |
+| MySQL 8.4 | `binlog_row_image=FULL` |
+| MongoDB 7 | `enableFillingModifiedData=true` |
+| Kafka 3.9.1 | JSONB append-only for keyless JSON |
+| SQL Server 2022 | Change Tracking |
+| Oracle 26ai | LogMiner with `autoLog=false` and PK supplemental logging |
 
 ## Correctness boundaries
 
-- Success is reported only after a durable RisingWave ACK.
-- Keyed WebSocket replay is idempotent; JSONB append-only replay is at-least-once and may duplicate.
-- Typed WebSocket and JDBC updates share one CDC normalizer and require a reconstructable complete
-  target row.
-- Primary-key changes require both old and new identities and become delete plus upsert.
-- Unknown relational fields fail because automatic DDL/schema evolution is not implemented.
-- Typed WebSocket assumes the connector owns the complete target table schema. Manually added
-  target-only columns are outside the supported contract.
-- A single serialized source record larger than 8 MiB is rejected; multi-record batches are split.
-- Webhook secrets use RisingWave Secret references and are not persisted as DDL string literals.
+Before release, confirm the documentation states:
 
-## Source and deployment requirements
+- WebSocket streaming requires a primary key and old identity for update/delete;
+- automatic relational schema evolution is unsupported;
+- unknown or incomplete typed rows fail;
+- JSONB append-only rejects update/delete;
+- JSONB is at-least-once and can duplicate after ambiguous ACK loss;
+- a single serialized WebSocket record over 8 MiB fails;
+- SQL Server and Oracle tasks use the real source primary key.
 
-- Keep MySQL `binlog_row_image=FULL`.
-- Keep MongoDB `enableFillingModifiedData=true`; the target cannot distinguish an unsafe partial
-  patch from a valid sparse full document when both arrive as after-only `_id` events.
-- Use SQL Server Change Tracking and the real source primary key as the target update condition.
-- Use Oracle 19c+ manual LogMiner (`autoLog=false`), PK supplemental logging, and the real source
-  primary key as the target update condition.
-- Do not claim exactly-once delivery for keyless JSONB.
-- Use an explicitly approved TapData runtime version and pin production container images by digest.
-- Use WSS and an appropriate JDBC SSL mode for remote deployments.
+## Required evidence
 
-## Remaining release gates
+- [ ] Unit tests pass.
+- [ ] Live RisingWave integration tests pass.
+- [ ] The exact JAR installs in a clean TapData environment.
+- [ ] TapData-stored JAR checksum matches the candidate.
+- [ ] Connection Test passes for WebSocket PK, JSONB, and JDBC.
+- [ ] A real Data Replication WebSocket task passes snapshot and CDC.
+- [ ] JSONB and JDBC smoke tasks pass.
+- [ ] Retained-log stop/restart recovery passes.
+- [ ] Supported-source matrix passes.
+- [ ] Lost-ACK, reconnect, payload, and TLS gates pass.
+- [ ] One-hour representative soak passes.
+- [ ] Repository CI is green.
+- [ ] Code-owner and release-owner approvals are complete.
 
-1. **Repository ownership:** choose one canonical source repository and publication owner.
-2. **Integration:** the branch is rebased onto the destination repository's current main; publish
-   the rewritten branch and open the PR.
-3. **CI:** ensure connector changes trigger at least Maven unit tests and packaging.
-4. **Clean build:** build from a committed worktree with `Git-Dirty: false`.
-5. **Exact-artifact tests:** install the generated JAR in a clean TapData environment and run:
-   - connection pre-checks;
-   - PostgreSQL to keyed WebSocket snapshot and CDC;
-   - JSONB append-only smoke;
-   - JDBC smoke.
-6. **Artifact audit:** inspect manifest provenance and shaded dependency versions.
-7. **Archive:** store the exact JAR, SHA-256, and frozen TapData dependency subset immutably.
-8. **Review:** open a PR and obtain both code-owner and release-owner approval.
+Use [`TAPDATA_RISINGWAVE_ACCEPTANCE_TEST.md`](TAPDATA_RISINGWAVE_ACCEPTANCE_TEST.md) for the
+commands and pass criteria.
 
-## Final artifact record
+## Artifact gate
 
-Complete this section only after all source changes and repository integration are finished:
+Build from a normal clean clone with frozen dependencies. Record:
 
 ```text
-Source repository: <pending>
-Source commit: <pending>
-Artifact: risingwave-connector-1.0.0.jar
-Size: <pending>
-SHA-256: <pending>
-Manifest Git-Commit: <pending>
-Manifest Git-Dirty: false
-Build JDK: <pending>
-Maven: <pending>
-TapData PDK/API: 2.0.8-SNAPSHOT, frozen dependency checksums verified
-pgjdbc: 42.7.12
-Jackson: 2.18.9
-Unit tests: <pending>
-Live tests: <pending>
-TapData black-box smoke: <pending>
-CI/PR: <pending>
+Git commit
+JAR SHA-256
+Manifest Git-Commit and Git-Dirty
+JDK and Maven versions
+Dependency-bundle SHA-256
 ```
 
-## Go/no-go rule
+Reject the artifact if:
 
-Release only when every remaining gate is closed and the archived JAR matches the completed artifact
-record. A green source build or an older qualified JAR is not sufficient.
+- `Git-Dirty` is true;
+- manifest commit does not match the source commit;
+- the TapData-stored JAR differs from the candidate;
+- a released version was rebuilt and replaced without a version change.
+
+## Go/no-go
+
+**Go** only when every required-evidence item is checked and the release statement is limited to
+the qualified scope.
+
+**No-go** if any data-correctness, exact-artifact, CI, or approval gate is open.
