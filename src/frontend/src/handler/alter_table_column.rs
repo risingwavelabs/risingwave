@@ -43,6 +43,7 @@ use crate::{Binder, TableCatalog};
 pub async fn get_new_table_definition_for_cdc_table(
     original_catalog: Arc<TableCatalog>,
     new_columns: &[ColumnCatalog],
+    upstream_ddl: &str,
 ) -> Result<Statement> {
     assert_eq!(
         original_catalog.row_id_index, None,
@@ -75,6 +76,7 @@ pub async fn get_new_table_definition_for_cdc_table(
             original_catalog.cdc_table_type,
             Some(ExternalCdcTableType::MySql)
         ),
+        upstream_ddl,
     );
 
     let new_definition = try_purify_table_source_create_sql_ast(
@@ -93,8 +95,9 @@ fn keep_legacy_mysql_serial_columns(
     original_columns: &[ColumnCatalog],
     new_columns: &[ColumnCatalog],
     is_mysql_cdc_table: bool,
+    upstream_ddl: &str,
 ) -> Vec<ColumnCatalog> {
-    if !is_mysql_cdc_table {
+    if !is_mysql_cdc_table || !mysql_schema_change_can_preserve_legacy_serial(upstream_ddl) {
         return new_columns.to_vec();
     }
 
@@ -122,6 +125,26 @@ fn keep_legacy_mysql_serial_columns(
             column
         })
         .collect()
+}
+
+fn mysql_schema_change_can_preserve_legacy_serial(upstream_ddl: &str) -> bool {
+    let tokens = upstream_ddl
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|token| !token.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect_vec();
+
+    let has_add_or_drop = tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "add" | "drop"));
+    let has_alter_column = tokens
+        .windows(2)
+        .any(|tokens| tokens[0] == "alter" && tokens[1] == "column");
+    let has_unsupported_column_change = tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "modify" | "change" | "rename"));
+
+    has_add_or_drop && !has_alter_column && !has_unsupported_column_change
 }
 
 pub async fn get_replace_table_plan(
@@ -439,7 +462,12 @@ mod tests {
             )),
         ];
 
-        let columns = keep_legacy_mysql_serial_columns(&original_columns, &new_columns, true);
+        let columns = keep_legacy_mysql_serial_columns(
+            &original_columns,
+            &new_columns,
+            true,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255)",
+        );
         let data_types: HashMap<_, _> = columns
             .iter()
             .map(|column| (column.name(), column.data_type().clone()))
@@ -450,7 +478,28 @@ mod tests {
         assert_eq!(data_types["v1"], DataType::Varchar);
         assert_eq!(data_types["new_serial"], DataType::Decimal);
 
-        let columns = keep_legacy_mysql_serial_columns(&original_columns, &new_columns, false);
+        let columns = keep_legacy_mysql_serial_columns(
+            &original_columns,
+            &new_columns,
+            false,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255)",
+        );
+        assert_eq!(columns[0].data_type(), &DataType::Decimal);
+
+        let columns = keep_legacy_mysql_serial_columns(
+            &original_columns,
+            &new_columns,
+            true,
+            "ALTER TABLE table_in_mysql MODIFY COLUMN id DECIMAL",
+        );
+        assert_eq!(columns[0].data_type(), &DataType::Decimal);
+
+        let columns = keep_legacy_mysql_serial_columns(
+            &original_columns,
+            &new_columns,
+            true,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255), MODIFY COLUMN id DECIMAL",
+        );
         assert_eq!(columns[0].data_type(), &DataType::Decimal);
     }
 

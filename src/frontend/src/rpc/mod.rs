@@ -196,7 +196,12 @@ async fn get_new_table_plan(
             .into_iter()
             .map(|c| c.into())
             .collect_vec();
-        get_new_table_definition_for_cdc_table(table_catalog.clone(), &new_version_columns).await?
+        get_new_table_definition_for_cdc_table(
+            table_catalog.clone(),
+            &new_version_columns,
+            &cdc_table_change.upstream_ddl,
+        )
+        .await?
     } else {
         table_catalog.create_sql_ast_purified()?
     };

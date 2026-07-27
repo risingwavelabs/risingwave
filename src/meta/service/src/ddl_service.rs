@@ -81,8 +81,9 @@ fn keep_legacy_mysql_serial_columns_for_schema_change(
     original_columns: &HashSet<(String, DataType)>,
     new_columns: &mut HashSet<(String, DataType)>,
     is_mysql_cdc_table: bool,
+    upstream_ddl: &str,
 ) {
-    if !is_mysql_cdc_table {
+    if !is_mysql_cdc_table || !mysql_schema_change_can_preserve_legacy_serial(upstream_ddl) {
         return;
     }
 
@@ -93,6 +94,26 @@ fn keep_legacy_mysql_serial_columns_for_schema_change(
             new_columns.insert((name.clone(), data_type.clone()));
         }
     }
+}
+
+fn mysql_schema_change_can_preserve_legacy_serial(upstream_ddl: &str) -> bool {
+    let tokens = upstream_ddl
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|token| !token.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+
+    let has_add_or_drop = tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "add" | "drop"));
+    let has_alter_column = tokens
+        .windows(2)
+        .any(|tokens| tokens[0] == "alter" && tokens[1] == "column");
+    let has_unsupported_column_change = tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "modify" | "change" | "rename"));
+
+    has_add_or_drop && !has_alter_column && !has_unsupported_column_change
 }
 
 impl DdlServiceImpl {
@@ -1451,6 +1472,7 @@ impl DdlService for DdlServiceImpl {
                     &original_columns,
                     &mut new_columns,
                     table.cdc_table_type == Some(CdcTableType::Mysql as i32),
+                    &table_change.upstream_ddl,
                 );
 
                 if !(original_columns.is_subset(&new_columns)
@@ -2014,6 +2036,7 @@ mod tests {
             &original_columns,
             &mut new_columns,
             true,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255)",
         );
 
         assert!(new_columns.contains(&("id".to_owned(), DataType::Int32)));
@@ -2027,7 +2050,31 @@ mod tests {
             &original_columns,
             &mut non_mysql_columns,
             false,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255)",
         );
         assert!(non_mysql_columns.contains(&("id".to_owned(), DataType::Decimal)));
+
+        let mut alter_type_columns = HashSet::from([("id".to_owned(), DataType::Decimal)]);
+        keep_legacy_mysql_serial_columns_for_schema_change(
+            &original_columns,
+            &mut alter_type_columns,
+            true,
+            "ALTER TABLE table_in_mysql MODIFY COLUMN id DECIMAL",
+        );
+        assert!(alter_type_columns.contains(&("id".to_owned(), DataType::Decimal)));
+        assert!(!alter_type_columns.contains(&("id".to_owned(), DataType::Int32)));
+
+        let mut mixed_alter_columns = HashSet::from([
+            ("id".to_owned(), DataType::Decimal),
+            ("note".to_owned(), DataType::Varchar),
+        ]);
+        keep_legacy_mysql_serial_columns_for_schema_change(
+            &original_columns,
+            &mut mixed_alter_columns,
+            true,
+            "ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255), MODIFY COLUMN id DECIMAL",
+        );
+        assert!(mixed_alter_columns.contains(&("id".to_owned(), DataType::Decimal)));
+        assert!(!mixed_alter_columns.contains(&("id".to_owned(), DataType::Int32)));
     }
 }
