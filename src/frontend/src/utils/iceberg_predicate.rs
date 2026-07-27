@@ -172,7 +172,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
+                            Some(reference.less_than(datum))
                         }
                         _ => None,
                     }
@@ -189,7 +189,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
+                            Some(reference.less_than_or_equal_to(datum))
                         }
                         _ => None,
                     }
@@ -206,7 +206,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
+                            Some(reference.greater_than(datum))
                         }
                         _ => None,
                     }
@@ -223,7 +223,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
                             let column_name = &fields[lhs.index].name;
                             let reference = Reference::new(column_name);
                             let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
+                            Some(reference.greater_than_or_equal_to(datum))
                         }
                         _ => None,
                     }
@@ -268,5 +268,41 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{FunctionCall, InputRef};
+
+    #[test]
+    fn comparison_pushdown_mirrors_flipped_operators() {
+        let fields = vec![Field::new("x", DataType::Int64)];
+        let col = || InputRef::new(0, DataType::Int64).into();
+        let lit = || Literal::new(Some(ScalarImpl::Int64(5)), DataType::Int64).into();
+
+        let cases: [(ExprType, ExprImpl, ExprImpl, &str); 12] = [
+            (ExprType::Equal, col(), lit(), "x = 5"),
+            (ExprType::Equal, lit(), col(), "x = 5"),
+            (ExprType::NotEqual, col(), lit(), "x != 5"),
+            (ExprType::NotEqual, lit(), col(), "x != 5"),
+            (ExprType::GreaterThan, col(), lit(), "x > 5"),
+            (ExprType::GreaterThan, lit(), col(), "x < 5"),
+            (ExprType::GreaterThanOrEqual, col(), lit(), "x >= 5"),
+            (ExprType::GreaterThanOrEqual, lit(), col(), "x <= 5"),
+            (ExprType::LessThan, col(), lit(), "x < 5"),
+            (ExprType::LessThan, lit(), col(), "x > 5"),
+            (ExprType::LessThanOrEqual, col(), lit(), "x <= 5"),
+            (ExprType::LessThanOrEqual, lit(), col(), "x >= 5"),
+        ];
+        for (op, arg0, arg1, expected) in cases {
+            let expr = FunctionCall::new(op, vec![arg0, arg1]).unwrap().into();
+            let predicate = rw_expr_to_iceberg_predicate(&expr, &fields)
+                .unwrap_or_else(|| panic!("{op:?} should be pushable"));
+            assert_eq!(predicate.to_string(), expected);
+        }
     }
 }

@@ -103,13 +103,16 @@ def _(outer_panels: Panels):
                             ),
                             "CPU Saturation (k8s limit) - {{namespace}}/{{pod}}",
                         ),
+                        # kube-state-metrics may be scraped by multiple sources (HA replicas, BYOC
+                        # federation). Join timestamp<->reason within each source first (full label
+                        # set keeps sources apart), then `max by` dedups across sources.
                         panels.target(
                             alert_when(
-                                "changes(("
-                                + 'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"} '
-                                + "* on (namespace,pod,container) group_left (reason) "
+                                "changes((max by (cluster,namespace,pod,container,reason) ("
+                                + 'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}'
+                                + " * ignoring(reason) group_left(reason) "
                                 + 'kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod",reason!~"Completed"}'
-                                + ")[$__rate_interval:])"
+                                + "))[$__rate_interval:])"
                             ),
                             "[{{reason}}] {{container}} {{pod}}",
                         ),

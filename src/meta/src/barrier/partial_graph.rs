@@ -102,6 +102,12 @@ impl PartialGraphRunningState {
         self.barrier_item_collector.is_empty() && self.completing_epoch.is_none()
     }
 
+    fn pending_barrier_num(&self) -> usize {
+        self.barrier_item_collector.inflight_barrier_num()
+            + self.barrier_item_collector.collected_barrier_num()
+            + usize::from(self.completing_epoch.is_some())
+    }
+
     fn enqueue(&mut self, node_to_collect: NodeToCollect, mut info: PartialGraphBarrierInfo) {
         let epoch = info.barrier_info.epoch();
         assert_ne!(info.barrier_info.kind, BarrierKind::Initial);
@@ -139,7 +145,7 @@ impl PartialGraphRunningState {
                 self.barrier_item_collector.inflight_barrier_num(),
                 self.barrier_item_collector.collected_barrier_num(),
             );
-            Some(temp_ref.collected_barrier(epoch))
+            Some(temp_ref.collected_barrier(epoch, self.pending_barrier_num()))
         } else {
             None
         }
@@ -227,10 +233,15 @@ impl CollectedBarrierTempRef {
         CollectedBarrierTempRef { resps: &EMPTY }
     }
 
-    fn collected_barrier(&self, epoch: EpochPair) -> CollectedBarrier<'_> {
+    fn collected_barrier(
+        &self,
+        epoch: EpochPair,
+        pending_barrier_num: usize,
+    ) -> CollectedBarrier<'_> {
         CollectedBarrier {
             epoch,
             resps: self.resps,
+            pending_barrier_num,
         }
     }
 
@@ -243,13 +254,18 @@ impl CollectedBarrierTempRef {
             PartialGraphManagerEvent::PartialGraph(partial_graph_id, event) => {
                 let event = match event {
                     PartialGraphEvent::BarrierCollected(collected) => {
+                        let pending_barrier_num = collected.pending_barrier_num;
                         let state = manager.running_graph(partial_graph_id);
                         let (epoch, resps, _) = state
                             .barrier_item_collector
                             .last_collected()
                             .expect("should exist");
                         assert_eq!(epoch, collected.epoch);
-                        PartialGraphEvent::BarrierCollected(CollectedBarrier { epoch, resps })
+                        PartialGraphEvent::BarrierCollected(CollectedBarrier {
+                            epoch,
+                            resps,
+                            pending_barrier_num,
+                        })
                     }
                     PartialGraphEvent::Reset(resps) => PartialGraphEvent::Reset(resps),
                     PartialGraphEvent::Initialized => PartialGraphEvent::Initialized,
@@ -268,6 +284,7 @@ impl CollectedBarrierTempRef {
 pub(super) struct CollectedBarrier<'a> {
     pub epoch: EpochPair,
     pub resps: &'a HashMap<WorkerId, BarrierCompleteResponse>,
+    pub pending_barrier_num: usize,
 }
 
 pub(super) enum PartialGraphEvent<'a> {
@@ -522,6 +539,10 @@ impl PartialGraphManager {
         self.running_graph(partial_graph_id)
             .barrier_item_collector
             .inflight_barrier_num()
+    }
+
+    pub(super) fn pending_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
+        self.running_graph(partial_graph_id).pending_barrier_num()
     }
 
     pub(super) fn first_inflight_barrier(

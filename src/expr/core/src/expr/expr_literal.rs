@@ -19,7 +19,7 @@ use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::ExprNode;
 
 use super::{Build, ValueImpl};
-use crate::expr::Expression;
+use crate::expr::{ExpressionInfo, SyncExpression};
 use crate::{ExprError, Result};
 
 /// A literal expression.
@@ -29,20 +29,21 @@ pub struct LiteralExpression {
     literal: Datum,
 }
 
-#[async_trait::async_trait]
-impl Expression for LiteralExpression {
+impl ExpressionInfo for LiteralExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+}
 
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+impl SyncExpression for LiteralExpression {
+    fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
         Ok(ValueImpl::Scalar {
             value: self.literal.clone(),
             capacity: input.capacity(),
         })
     }
 
-    async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
+    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
 
@@ -216,14 +217,14 @@ mod tests {
     #[tokio::test]
     async fn test_literal_eval_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval(&DataChunk::new_dummy(1)).await.unwrap();
+        let result = literal.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(*result, I32Array::from_iter([1]).into());
     }
 
     #[tokio::test]
     async fn test_literal_eval_row_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval_row(&OwnedRow::new(vec![])).await.unwrap();
+        let result = literal.eval_row(&OwnedRow::new(vec![])).unwrap();
         assert_eq!(result, Some(1.into()))
     }
 }

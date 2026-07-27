@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::sync::atomic::Ordering::Relaxed;
+use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
+use tokio::time::sleep;
 
 use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
@@ -278,6 +280,66 @@ async fn test_sink_since_timestamp_starts_from_changelog() -> Result<()> {
     session.run("drop sink test_sink").await?;
     session.run("drop subscription sub_since_sink").await?;
     session.run("drop table t_since_sink").await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_since_timestamp_with_pending_upstream_barriers() -> Result<()> {
+    const BARRIER_DELAY: Duration = Duration::from_secs(1);
+
+    let mut cluster = start_sink_test_cluster().await?;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::SlowBarrier(BARRIER_DELAY));
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("set sink_decouple = false").await?;
+    session
+        .run("create table t_since_sink_pending (id int primary key, name varchar)")
+        .await?;
+    session
+        .run(
+            "create subscription sub_since_sink_pending from t_since_sink_pending \
+             with (retention = '1D')",
+        )
+        .await?;
+    session.flush().await?;
+
+    session
+        .run(
+            "create sink slow_sink from t_since_sink_pending with (\
+             connector = 'test', \
+             type = 'upsert')",
+        )
+        .await?;
+    test_sink.wait_initial_parallelism(1).await?;
+
+    session
+        .run("insert into t_since_sink_pending values (1, 'name-1')")
+        .await?;
+    session.flush().await?;
+    let since_timestamp = session.run("select now()::varchar").await?;
+
+    session
+        .run("insert into t_since_sink_pending values (2, 'name-2')")
+        .await?;
+    session.flush().await?;
+
+    // The simulation barrier interval is 250 ms. Keep the sink blocked long enough for several
+    // later barriers to accumulate behind the checkpoint currently being completed.
+    test_sink.enable_barrier_delay();
+    sleep(BARRIER_DELAY * 3).await;
+
+    session
+        .run(format!(
+            "create sink since_sink from t_since_sink_pending with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
 
     Ok(())
 }

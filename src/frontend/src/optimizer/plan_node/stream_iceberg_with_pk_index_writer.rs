@@ -37,7 +37,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// with pk index sink. It maintains a PK index and writes data files to Iceberg.
 ///
 /// Output schema: `[file_path: Varchar, position: Int64]` — delete-position info for
-/// the downstream `DvMerger`.
+/// the downstream `PositionDeleteMerger`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamIcebergWithPkIndexWriter {
     pub base: PlanBase<Stream>,

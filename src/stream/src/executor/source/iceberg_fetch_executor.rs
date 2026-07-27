@@ -29,7 +29,9 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
+use risingwave_connector::source::iceberg::{
+    IcebergScanOpts, PersistedFileScanTask, scan_task_to_chunk_with_deletes,
+};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_pb::common::ThrottleType;
@@ -77,205 +79,6 @@ pub(crate) struct ChunksWithState {
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
     pub last_read_pos: Datum,
-}
-
-pub(super) use state::PersistedFileScanTask;
-mod state {
-    use std::sync::Arc;
-
-    use anyhow::Context;
-    use iceberg::expr::BoundPredicate;
-    use iceberg::scan::FileScanTask;
-    use iceberg::spec::{DataContentType, DataFileFormat, SchemaRef};
-    use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
-    use serde::{Deserialize, Serialize};
-
-    use crate::executor::StreamExecutorResult;
-
-    fn default_case_sensitive() -> bool {
-        true
-    }
-    /// This corresponds to the actually persisted `FileScanTask` in the state table.
-    ///
-    /// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
-    /// Currently, they have the same definition.
-    ///
-    /// We can handle possible compatibility issues in [`Self::from_task`] and [`Self::to_task`].
-    /// A version id needs to be introduced then.
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    pub struct PersistedFileScanTask {
-        /// The start offset of the file to scan.
-        pub start: u64,
-        /// The length of the file to scan.
-        pub length: u64,
-        /// The number of records in the file to scan.
-        ///
-        /// This is an optional field, and only available if we are
-        /// reading the entire data file.
-        pub record_count: Option<u64>,
-
-        /// The data file path corresponding to the task.
-        pub data_file_path: String,
-
-        /// The data file referenced by a deletion vector.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub referenced_data_file: Option<String>,
-
-        /// The content type of the file to scan.
-        pub data_file_content: DataContentType,
-
-        /// The format of the file to scan.
-        pub data_file_format: DataFileFormat,
-
-        /// The schema of the file to scan.
-        pub schema: SchemaRef,
-        /// The field ids to project.
-        pub project_field_ids: Vec<i32>,
-        /// The predicate to filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub predicate: Option<BoundPredicate>,
-
-        /// The list of delete files that may need to be applied to this data file
-        pub deletes: Vec<PersistedFileScanTask>,
-        /// sequence number
-        pub sequence_number: i64,
-        /// equality ids
-        pub equality_ids: Option<Vec<i32>>,
-
-        pub file_size_in_bytes: u64,
-
-        #[serde(default = "default_case_sensitive")]
-        pub case_sensitive: bool,
-    }
-
-    impl PersistedFileScanTask {
-        /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
-        pub fn decode(jsonb_ref: JsonbRef<'_>) -> StreamExecutorResult<FileScanTask> {
-            let persisted_task: Self =
-                serde_json::from_value(jsonb_ref.to_owned_scalar().take())
-                    .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
-            Ok(Self::to_task(persisted_task))
-        }
-
-        /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
-        pub fn encode(task: FileScanTask) -> JsonbVal {
-            let persisted_task = Self::from_task(task);
-            serde_json::to_value(persisted_task).unwrap().into()
-        }
-
-        /// Converts a persisted task to a [`FileScanTask`].
-        fn to_task(
-            Self {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                referenced_data_file,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes,
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-            }: Self,
-        ) -> FileScanTask {
-            FileScanTask {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                referenced_data_file,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes: deletes
-                    .into_iter()
-                    .map(|task| Arc::new(PersistedFileScanTask::to_task(task)))
-                    .collect(),
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                partition: None,
-                partition_spec: None,
-                name_mapping: None,
-                case_sensitive,
-            }
-        }
-
-        /// Changes a [`FileScanTask`] to a persisted one.
-        fn from_task(
-            FileScanTask {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                referenced_data_file,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes,
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-                ..
-            }: FileScanTask,
-        ) -> Self {
-            Self {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                referenced_data_file,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes: deletes
-                    .into_iter()
-                    .map(PersistedFileScanTask::from_task_ref)
-                    .collect(),
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-            }
-        }
-
-        fn from_task_ref(task: Arc<FileScanTask>) -> Self {
-            Self {
-                start: task.start,
-                length: task.length,
-                record_count: task.record_count,
-                data_file_path: task.data_file_path.clone(),
-                referenced_data_file: task.referenced_data_file.clone(),
-                data_file_content: task.data_file_content,
-                data_file_format: task.data_file_format,
-                schema: task.schema.clone(),
-                project_field_ids: task.project_field_ids.clone(),
-                predicate: task.predicate.clone(),
-                deletes: task
-                    .deletes
-                    .iter()
-                    .cloned()
-                    .map(PersistedFileScanTask::from_task_ref)
-                    .collect(),
-                sequence_number: task.sequence_number,
-                equality_ids: task.equality_ids.clone(),
-                file_size_in_bytes: task.file_size_in_bytes,
-                case_sensitive: task.case_sensitive,
-            }
-        }
-    }
 }
 
 impl<S: StateStore> IcebergFetchExecutor<S> {
@@ -395,6 +198,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    // Iceberg V2 position/equality deletes are exposed as separate delete-file
+                    // tasks for table-engine reads. V3 deletion vectors should be applied by
+                    // iceberg-rs while scanning the data file.
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },

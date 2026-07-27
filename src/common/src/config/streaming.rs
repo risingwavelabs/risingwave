@@ -19,10 +19,12 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 mod async_stack_trace;
+mod cache_refill;
 mod join_encoding_type;
 mod over_window;
 
 pub use async_stack_trace::*;
+pub use cache_refill::*;
 pub use join_encoding_type::*;
 pub use over_window::*;
 
@@ -33,6 +35,16 @@ pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    /// The maximum number of lagged barriers allowed when merging a snapshot backfill job into
+    /// the database graph.
+    #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+
+    /// The maximum number of pending barriers injected into a snapshot backfill job for each new
+    /// upstream barrier. Values below 2 are treated as 2.
+    #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
+    pub snapshot_backfill_barrier_amplification_factor: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -318,6 +330,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
+    /// Cache refill policy for streaming cache refill feature.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    #[serde(default = "default::developer::cache_refill_policy")]
+    pub cache_refill_policy: CacheRefillPolicy,
+
     /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
     #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]
     pub enable_vnode_key_stats_for_materialize: bool,
@@ -380,6 +397,14 @@ pub mod default {
             // quick fix
             // TODO: remove this limitation from code
             10000
+        }
+
+        pub fn snapshot_backfill_finish_max_lagged_barriers() -> usize {
+            100
+        }
+
+        pub fn snapshot_backfill_barrier_amplification_factor() -> usize {
+            100
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {

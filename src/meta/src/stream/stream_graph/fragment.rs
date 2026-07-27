@@ -167,7 +167,7 @@ impl BuildingFragment {
 
                 has_job = true;
             }
-            NodeBody::IcebergWithPkIndexDvMerger(merger_node) => {
+            NodeBody::IcebergWithPkIndexPositionDeleteMerger(merger_node) => {
                 merger_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;

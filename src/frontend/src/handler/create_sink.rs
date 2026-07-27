@@ -194,9 +194,8 @@ pub async fn gen_sink_plan(
     } else {
         OptimizerContext::from_handler_args(handler_args.clone())
     };
-
     let is_auto_schema_change = resolved_with_options
-        .remove(AUTO_SCHEMA_CHANGE_KEY)
+        .get(AUTO_SCHEMA_CHANGE_KEY)
         .map(|value| {
             value.parse::<bool>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(

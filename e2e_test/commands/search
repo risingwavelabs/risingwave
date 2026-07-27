@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+method="${1:-GET}"
+path="${2:-/}"
+shift $(( $# >= 2 ? 2 : $# ))
+
+data_args=()
+case "${method}" in
+  GET|HEAD|DELETE|get|head|delete)
+    ;;
+  *)
+    if [ -p /dev/stdin ]; then
+      data_args=(--data-binary @-)
+    fi
+    ;;
+esac
+
+curl_args=(
+  --fail
+  --show-error
+  --silent
+  --connect-timeout 5
+  --max-time 30
+  -u "${SEARCH_SINK_USER}:${SEARCH_SINK_PASSWORD}"
+  -H 'Content-Type: application/json'
+  -X "${method}"
+  "${SEARCH_SINK_URL}${path}"
+)
+
+if [ "${#data_args[@]}" -gt 0 ]; then
+  curl "${curl_args[@]}" "${data_args[@]}" "$@"
+else
+  curl "${curl_args[@]}" "$@"
+fi

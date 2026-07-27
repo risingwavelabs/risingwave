@@ -44,6 +44,7 @@ memcomparable = "0.2"
 moka = { version = "0.12.0", features = ["sync"] }
 multimap = "0.10"
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 paste = "1"
 pin-project = "1"
 prometheus = { version = "0.14", features = ["process"] }
@@ -88,7 +89,7 @@ risingwave_connector = { workspace = true, features = ["test"] }
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
-  "test",
+    "test",
 ] }
 risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"

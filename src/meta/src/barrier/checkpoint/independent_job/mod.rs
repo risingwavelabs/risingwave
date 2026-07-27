@@ -85,19 +85,6 @@ impl IndependentCheckpointJobControl {
         }
     }
 
-    /// Returns `true` if this job is actively consuming a snapshot.
-    ///
-    /// For creating streaming jobs this is always `true` (they exist only while
-    /// backfilling). Batch refresh jobs are only snapshot-backfilling while in
-    /// `ConsumingSnapshot` or `FinishingSnapshot`; once they transition to `Idle`
-    /// they no longer pin upstream log epochs.
-    pub(crate) fn is_snapshot_backfilling(&self) -> bool {
-        match self {
-            Self::CreatingStreamingJob(_) => true,
-            Self::BatchRefresh(j) => j.is_snapshot_backfilling(),
-        }
-    }
-
     /// Collect a barrier and return whether a checkpoint should be forced in the next barrier.
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
         match self {

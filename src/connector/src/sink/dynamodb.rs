@@ -82,7 +82,12 @@ pub struct DynamoDbConfig {
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub batch_write_retry_backoff_ms: u64,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(DynamoDbConfig);
 
 impl EnforceSecret for DynamoDbConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
@@ -146,6 +151,8 @@ impl Sink for DynamoDbSink {
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         risingwave_common::license::Feature::DynamoDbSink

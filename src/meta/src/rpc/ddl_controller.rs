@@ -76,7 +76,7 @@ use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkI
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
@@ -287,7 +287,7 @@ pub struct DdlController {
     barrier_manager: BarrierManagerRef,
     sink_manager: SinkCoordinatorManager,
     iceberg_compaction_manager: IcebergCompactionManagerRef,
-    iceberg_v3_sink_manager: IcebergV3SinkManager,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -410,7 +410,7 @@ impl DdlController {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         iceberg_compaction_manager: IcebergCompactionManagerRef,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -421,7 +421,7 @@ impl DdlController {
             barrier_manager,
             sink_manager,
             iceberg_compaction_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -682,9 +682,13 @@ impl DdlController {
 
     /// Shared source is handled in [`Self::create_streaming_job`]
     async fn create_non_shared_source(&self, source: Source) -> MetaResult<NotificationVersion> {
-        let handle = create_source_worker(&source, self.source_manager.metrics.clone())
-            .await
-            .context("failed to create source worker")?;
+        let handle = create_source_worker(
+            &source,
+            self.source_manager.metrics.clone(),
+            self.env.await_tree_reg().clone(),
+        )
+        .await
+        .context("failed to create source worker")?;
 
         let (source_id, version) = self
             .metadata_manager
@@ -1239,12 +1243,14 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
+                let abort_result = self
                     .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                if aborted {
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
+                if abort_result.aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1335,15 +1341,16 @@ impl DdlController {
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
-                // For Iceberg V3 sinks, spawn the per-sink commit worker now
+                // For Iceberg pk-index sinks, spawn the per-sink commit worker now
                 // so it's ready to receive epoch reports from the very first
                 // barrier instead of relying on lazy registration on every
                 // commit.
-                if crate::manager::iceberg_v3_sink::is_iceberg_v3_sink(&sink.properties) {
+                if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(&sink.properties)
+                {
                     let iceberg_config =
-                        crate::manager::iceberg_v3_sink::build_iceberg_config(sink)?;
-                    self.iceberg_v3_sink_manager
-                        .register_v3_sink(sink.id, iceberg_config)
+                        crate::manager::iceberg_pk_index_sink::build_iceberg_config(sink)?;
+                    self.iceberg_pk_index_sink_manager
+                        .register_sink(sink.id, iceberg_config)
                         .await
                         .map_err(|e| anyhow!(e).context("register v3 sink worker"))?;
                 }
@@ -1452,7 +1459,8 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
-            removed_iceberg_v3_sink_ids,
+            removed_iceberg_sink_ids,
+            removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
@@ -1529,21 +1537,23 @@ impl DdlController {
         // stop sink coordinators for iceberg table sinks
         if !iceberg_sink_ids.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids.clone())
+                .stop_sink_coordinator(iceberg_sink_ids)
                 .await;
-
-            for sink_id in iceberg_sink_ids {
-                self.iceberg_compaction_manager
-                    .clear_iceberg_maintenance_by_sink_id(sink_id);
-            }
         }
 
-        // Unregister per-sink commit coordinators for any dropped V3 iceberg sink,
+        // Covers user-created iceberg sinks dropped via CASCADE, which are not in
+        // `removed_iceberg_table_sinks` above.
+        for sink_id in removed_iceberg_sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(sink_id);
+        }
+
+        // Unregister per-sink commit coordinators for any dropped pk-index iceberg sink,
         // including user-created sinks with arbitrary names (not just the
         // `__iceberg_sink_%` auto-created ones above).
-        if !removed_iceberg_v3_sink_ids.is_empty() {
-            self.iceberg_v3_sink_manager
-                .unregister_v3_sinks(removed_iceberg_v3_sink_ids);
+        if !removed_iceberg_pk_index_sink_ids.is_empty() {
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
         }
 
         // remove secrets.
@@ -1852,10 +1862,13 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                self.metadata_manager
+                let abort_result = self
+                    .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
+                self.iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

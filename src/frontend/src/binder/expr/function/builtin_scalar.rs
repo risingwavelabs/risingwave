@@ -781,6 +781,8 @@ impl Binder {
                 ("pg_sleep", raw_call(ExprType::PgSleep)),
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 ("random", raw_call(ExprType::Random)),
+                ("clock_timestamp", raw_call(ExprType::ClockTimestamp)),
+                ("gen_random_uuid", raw_call(ExprType::GenRandomUuid)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
 

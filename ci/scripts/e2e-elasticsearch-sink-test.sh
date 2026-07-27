@@ -3,6 +3,19 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+export PATH="$(pwd)/e2e_test/commands:${PATH}"
+export ELASTICSEARCH_USER="elastic"
+export ELASTICSEARCH_PASSWORD="risingwave"
+export RISEDEV_ELASTICSEARCH_URL="http://elasticsearch:9200"
+export RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON="connector='elasticsearch',url='${RISEDEV_ELASTICSEARCH_URL}',username='${ELASTICSEARCH_USER}',password='${ELASTICSEARCH_PASSWORD}'"
+export SEARCH_SINK_CONNECTOR="elasticsearch"
+export SEARCH_SINK_CONNECTION_TYPE="elasticsearch"
+export SEARCH_SINK_URL="${RISEDEV_ELASTICSEARCH_URL}"
+export SEARCH_SINK_USER="${ELASTICSEARCH_USER}"
+export SEARCH_SINK_PASSWORD="${ELASTICSEARCH_PASSWORD}"
+export SEARCH_SINK_WITH_OPTIONS_COMMON="${RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON}"
+export SEARCH_SINK_ROUTE_WITH_OPTIONS="connector='elasticsearch',connection=es_conn"
+
 ES_HEALTH_RESPONSE=$(mktemp)
 trap 'rm -f "$ES_HEALTH_RESPONSE"' EXIT
 

@@ -905,6 +905,12 @@ impl MetaClient {
         Ok(resp.task_id)
     }
 
+    pub async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()> {
+        let request = RewriteIcebergTableManifestsRequest { sink_id };
+        let _resp = self.inner.rewrite_iceberg_table_manifests(request).await?;
+        Ok(())
+    }
+
     pub async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
         let request = ExpireIcebergTableSnapshotsRequest { sink_id };
         let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
@@ -2752,6 +2758,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }

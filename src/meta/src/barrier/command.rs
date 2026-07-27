@@ -46,9 +46,9 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation,
-    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
-    UpdateMutation,
+    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
+    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -520,7 +520,7 @@ pub enum Command {
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
         jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, ThrottleConfig>,
+        config: HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -853,7 +853,7 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             truncate_tables,
-            iceberg_v3_sink_metadata,
+            iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos = match &barrier_info.post_collect_command {
@@ -942,8 +942,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
-        task.iceberg_v3_sink_metadata
-            .extend(iceberg_v3_sink_metadata);
+        task.iceberg_pk_index_sink_metadata
+            .extend(iceberg_pk_index_sink_metadata);
     }
 }
 
@@ -995,12 +995,16 @@ impl Command {
     }
 
     /// Build the `Throttle` mutation.
-    pub(super) fn throttle_to_mutation(config: &HashMap<FragmentId, ThrottleConfig>) -> Mutation {
+    pub(super) fn throttle_to_mutation(
+        config: &HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
+    ) -> Mutation {
         {
             {
-                let config = config.clone();
                 Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: config,
+                    fragment_throttle: config
+                        .iter()
+                        .map(|(fragment_id, (throttle_config, _))| (*fragment_id, *throttle_config))
+                        .collect(),
                 })
             }
         }

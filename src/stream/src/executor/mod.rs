@@ -40,8 +40,9 @@ use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -102,7 +103,6 @@ mod no_op;
 mod now;
 mod over_window;
 pub mod project;
-mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
 mod sink;
@@ -155,7 +155,7 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+    IcebergWriterImpl, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
@@ -169,7 +169,6 @@ pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
 pub use over_window::*;
-pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
@@ -244,10 +243,6 @@ impl ExecutorInfo {
 pub trait Execute: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
-    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
-        self.execute()
-    }
-
     fn boxed(self) -> Box<dyn Execute>
     where
         Self: Sized + Send + 'static,
@@ -290,10 +285,6 @@ impl Executor {
 
     pub fn execute(self) -> BoxedMessageStream {
         self.execute.execute()
-    }
-
-    pub fn execute_with_epoch(self, epoch: u64) -> BoxedMessageStream {
-        self.execute.execute_with_epoch(epoch)
     }
 }
 
@@ -1239,9 +1230,10 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, EstimateSize)]
 pub struct Watermark {
     pub col_idx: usize,
+    #[estimate_size(ignore)]
     pub data_type: DataType,
     pub val: ScalarImpl,
 }
@@ -1269,7 +1261,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &NonStrictExpression<impl Expression>,
+        expr: &NonStrictExpression,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;

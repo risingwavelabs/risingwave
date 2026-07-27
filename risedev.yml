@@ -352,6 +352,10 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+      - use: moto
+        address: moto
+        port: 5000
+        user-managed: true
       - use: mysql
         port: 3306
         address: mysql
@@ -377,6 +381,11 @@ profile:
         exporter-port: 1261
       - use: lakekeeper
         port: 8181
+
+  iceberg-glue:
+    steps:
+      - use: minio
+      - use: moto
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
@@ -1256,6 +1265,21 @@ profile:
         database: risedev
         user-managed: true
 
+  local-mongodb-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-mongodb-sink-test
+      - use: sqlite
+        id: sqlite-local-mongodb-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mongodb
+
   local-nats-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -1270,6 +1294,22 @@ profile:
       - use: frontend
       - use: compactor
       - use: nats
+
+  local-search-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-search-sink-test
+      - use: sqlite
+        id: sqlite-local-search-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+      - use: opensearch
 
   local-mqtt-test:
     config-path: src/config/ci.toml
@@ -1286,6 +1326,21 @@ profile:
       - use: compactor
       - use: mqtt
 
+  local-elasticsearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-elasticsearch-sink-test
+      - use: sqlite
+        id: sqlite-local-elasticsearch-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+
   deltalake-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1299,6 +1354,21 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
+
+  local-opensearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-opensearch-sink-test
+      - use: sqlite
+        id: sqlite-local-opensearch-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: opensearch
 
   postgres-with-latency:
     steps:
@@ -1831,6 +1901,37 @@ template:
     # to serve at the above address and port in any way they see fit.
     user-managed: false
 
+  # MongoDB service backed by docker.
+  mongodb:
+    id: mongodb-${port}
+    address: "127.0.0.1"
+    port: 27017
+    image: "mongo:8"
+    persist-data: true
+    user-managed: false
+
+  # Elasticsearch service backed by docker.
+  elasticsearch:
+    id: elasticsearch-${port}
+    address: "127.0.0.1"
+    port: 9200
+    user: elastic
+    password: "risingwave"
+    image: "docker.elastic.co/elasticsearch/elasticsearch:7.11.0"
+    persist-data: false
+    user-managed: false
+
+  # OpenSearch service backed by docker.
+  opensearch:
+    id: opensearch-${port}
+    address: "127.0.0.1"
+    port: 9201
+    user: admin
+    password: "Risingwave123!"
+    image: "opensearchproject/opensearch:2.19.1"
+    persist-data: false
+    user-managed: false
+
   # NATS service backed by docker.
   nats:
     id: nats-${port}
@@ -1879,6 +1980,28 @@ template:
 
     # Storage backend - MinIO for S3-compatible storage
     provide-minio: "minio*"
+
+  # Moto AWS emulator, used as a local Glue Data Catalog endpoint for Iceberg tests.
+  moto:
+    # Id to be picked-up by services
+    id: moto-${port}
+
+    # Address of Moto endpoint
+    address: "127.0.0.1"
+
+    # Listen port of Moto endpoint
+    port: 5001
+
+    # Docker image for Moto server
+    image: "motoserver/moto:5.0.3"
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+    # Storage backend - MinIO for S3-compatible Iceberg warehouse files
+    provide-minio: "minio*"
+
   moat:
     # Id to be picked-up by services
     id: moat-${port}

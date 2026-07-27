@@ -57,13 +57,15 @@ use crate::barrier::{
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
     rendered_layout_matches_current,
@@ -307,9 +309,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -322,13 +326,15 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             scale_controller,
             env.clone(),
             barrier_scheduler,
             refresh_manager,
             sink_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await
@@ -409,9 +415,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
 
-            self.recovery(paused, RecoveryReason::Bootstrap)
-                .instrument(span)
-                .await;
+            // Keep the bootstrap recovery future boxed so the outer barrier worker future
+            // stays below clippy's large-futures threshold.
+            Box::pin(
+                self.recovery(paused, RecoveryReason::Bootstrap)
+                    .instrument(span),
+            )
+            .await;
         }
 
         Box::pin(self.run_inner(shutdown_rx)).await
@@ -559,11 +569,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
-                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
-                                    warn!("failed to may have snapshot backfill job");
-                                }
-                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -675,9 +680,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     }
                                     Ok(None) => {
                                         info!(%database_id, "database removed after reloading empty runtime info");
-                                        // mark ready to unblock subsequent request
-                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
+                                        self.context
+                                            .refresh_table_refill_runtime_state_after_recovery()
+                                            .await?;
+                                        // Mark ready only after the refill runtime state is refreshed.
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     }
                                     Err(e) => {
                                         entering_initializing.fail_reload_runtime_info(e);
@@ -685,8 +693,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
-                                self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
+                                let database_id = entering_running.database_id();
                                 entering_running.enter();
+                                self.context
+                                    .refresh_table_refill_runtime_state_after_recovery()
+                                    .await?;
+                                self.context
+                                    .mark_ready(MarkReadyOptions::Database(database_id));
                             }
                             CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
                                 self.handle_batch_refresh_trigger(database_id, job_id).await?;
@@ -1243,7 +1256,17 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     unreachable!("no barrier collected event on initializing")
                                 }
                                 PartialGraphEvent::Reset(_) => {
-                                    unreachable!("no partial graph reset on initializing")
+                                    // Reset responses only carry diagnostic root errors. Recovery
+                                    // itself only needs to track the partial graphs still resetting.
+                                    let (database_id, _) =
+                                        from_partial_graph_id(partial_graph_id);
+                                    let resetting_partial_graphs = failed_databases
+                                        .get_mut(&database_id)
+                                        .expect("reset partial graph should belong to a failed database");
+                                    assert!(
+                                        resetting_partial_graphs.remove(&partial_graph_id),
+                                        "partial graph {partial_graph_id} should be resetting"
+                                    );
                                 }
                                 PartialGraphEvent::Error(worker_id) => {
                                     let (database_id, _) = from_partial_graph_id(partial_graph_id);
@@ -1314,6 +1337,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     database_infos,
                 );
 
+                self.context
+                    .refresh_table_refill_runtime_state_after_recovery()
+                    .await?;
+
                 Ok((
                     active_streaming_nodes,
                     partial_graph_manager,
@@ -1361,10 +1388,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
-                        }
-                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                            // may recover snapshot backfill jobs
-                            let _ = tx.send(true);
                         }
                     }
                 }

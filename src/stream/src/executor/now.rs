@@ -18,8 +18,8 @@ use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
 use risingwave_expr::expr::{
-    EvalErrorReport, ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
-    build_func_non_strict,
+    EvalErrorReport, InputRefExpression, LiteralExpression, NonStrictExpression,
+    SyncExpressionBoxExt, build_func_non_strict,
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;

@@ -1449,7 +1449,7 @@ impl LogicalJoin {
         }
     }
 
-    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<BatchPlanRef> {
+    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<Option<BatchPlanRef>> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1461,10 +1461,7 @@ impl LogicalJoin {
             .core
             .clone_with_inputs(self.core.left.to_batch()?, self.core.right.to_batch()?);
 
-        Ok(self
-            .to_batch_lookup_join(predicate, join)?
-            .expect("Fail to convert to lookup join")
-            .into())
+        Ok(self.to_batch_lookup_join(predicate, join)?.map(Into::into))
     }
 
     fn to_stream_asof_join(

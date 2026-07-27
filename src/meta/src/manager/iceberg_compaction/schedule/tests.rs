@@ -109,6 +109,7 @@ fn empty_inner() -> IcebergCompactionManagerInner {
     IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
         snapshot_expiration_sink_ids: HashSet::new(),
+        manifest_rewrite_sink_ids: HashSet::new(),
         manual_compaction_waiters: HashMap::new(),
     }
 }
@@ -425,21 +426,22 @@ fn test_report_timeout_is_based_on_processing_deadline() {
 }
 
 #[test]
-fn test_revert_pre_dispatch_failure_restores_idle_without_losing_backlog() {
+fn test_revert_pre_dispatch_failure_requeues_at_now_without_losing_backlog() {
     let now = Instant::now();
     for additional_commits in [0, 3] {
         let mut track = new_track(now, 120, 10, 5);
         track.start_processing();
         record_commits(&mut track, additional_commits);
 
-        track.revert_pre_dispatch_failure();
+        let revert_at = now + Duration::from_secs(30);
+        track.revert_pre_dispatch_failure(revert_at);
 
         assert_eq!(track.pending_commit_count, 5 + additional_commits);
         match track.state {
             CompactionTrackState::Idle {
                 next_compaction_time,
                 ..
-            } => assert_eq!(next_compaction_time, now + Duration::from_secs(120)),
+            } => assert_eq!(next_compaction_time, revert_at),
             CompactionTrackState::PendingDispatch { .. }
             | CompactionTrackState::InFlight { .. } => {
                 panic!("track should be restored to idle")
@@ -713,13 +715,14 @@ async fn test_apply_sink_update_creates_missing_track() {
 }
 
 #[tokio::test]
-async fn test_apply_sink_update_tracks_snapshot_expiration_without_compaction() {
+async fn test_apply_sink_update_tracks_metadata_maintenance_without_compaction() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(144);
     let now = Instant::now();
     let mut config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
     config.enable_compaction = false;
     config.enable_snapshot_expiration = true;
+    config.enable_manifest_rewrite = true;
     let mut guard = empty_inner();
 
     manager.apply_sink_update(
@@ -735,6 +738,7 @@ async fn test_apply_sink_update_tracks_snapshot_expiration_without_compaction() 
 
     assert!(!guard.sink_schedules.contains_key(&sink_id));
     assert!(guard.snapshot_expiration_sink_ids.contains(&sink_id));
+    assert!(guard.manifest_rewrite_sink_ids.contains(&sink_id));
 }
 
 #[tokio::test]
@@ -1024,6 +1028,7 @@ async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
         let mut guard = manager.inner.write();
         guard.sink_schedules.insert(sink_id, track);
         guard.snapshot_expiration_sink_ids.insert(sink_id);
+        guard.manifest_rewrite_sink_ids.insert(sink_id);
     }
 
     manager.clear_iceberg_maintenance_by_sink_id(sink_id);
@@ -1032,6 +1037,7 @@ async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
         let guard = manager.inner.read();
         assert!(!guard.sink_schedules.contains_key(&sink_id));
         assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
+        assert!(!guard.manifest_rewrite_sink_ids.contains(&sink_id));
     }
 
     let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
@@ -1550,4 +1556,40 @@ async fn test_get_top_n_retries_timed_out_inflight_task() {
         track.state,
         CompactionTrackState::PendingDispatch { .. }
     ));
+}
+
+#[tokio::test]
+async fn test_pre_dispatch_failure_requeues_track_behind_overdue_candidates() {
+    let manager = build_test_manager().await;
+    let failing = SinkId::new(480);
+    let healthy = SinkId::new(481);
+    let now = Instant::now();
+    // The failing track is the most overdue, so it wins the only slot first.
+    let mut failing_track = new_track(now, 120, 10, 1);
+    failing_track.state = CompactionTrackState::Idle {
+        next_compaction_time: now - Duration::from_secs(100),
+        next_task_type_override: None,
+    };
+    let mut healthy_track = new_track(now, 120, 10, 1);
+    healthy_track.state = CompactionTrackState::Idle {
+        next_compaction_time: now - Duration::from_secs(50),
+        next_task_type_override: None,
+    };
+    {
+        let mut guard = manager.inner.write();
+        guard.sink_schedules.insert(failing, failing_track);
+        guard.sink_schedules.insert(healthy, healthy_track);
+    }
+
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].sink_id, failing);
+    // Dropping the handle simulates a pre-dispatch failure.
+    drop(handles);
+
+    // The failing track is re-queued at the revert time, so the still-overdue
+    // healthy track wins the next slot instead of being starved.
+    let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+    assert_eq!(handles.len(), 1);
+    assert_eq!(handles[0].sink_id, healthy);
 }

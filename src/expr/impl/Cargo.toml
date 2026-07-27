@@ -47,6 +47,7 @@ md5 = { package = "md-5", version = "0.10.6" }
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = { workspace = true }
+prometheus = "0.14"
 rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
@@ -68,6 +69,7 @@ tokio = { workspace = true }
 # For arrow-udf-runtime/remote
 tonic = { workspace = true, optional = true }
 tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
 zstd = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]

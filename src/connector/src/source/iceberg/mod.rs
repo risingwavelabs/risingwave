@@ -13,9 +13,10 @@
 // limitations under the License.
 
 pub mod parquet_file_handler;
+pub mod planner;
 
 pub mod metrics;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -29,6 +30,10 @@ use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
+pub use planner::{
+    IcebergIncrementalScan, IcebergScanMetricsLabels, IcebergScanPlan, IcebergScanPlanner,
+    IcebergScanProjection, IcebergScanTaskBatchMode, IcebergScanTaskPlanner, PersistedFileScanTask,
+};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
@@ -38,7 +43,9 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
-use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
+use crate::connector_common::{
+    IcebergCommon, IcebergTableIdentifier, iceberg_java_catalog_props_from_options,
+};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
@@ -86,29 +93,32 @@ impl EnforceSecret for IcebergProperties {
 }
 
 impl IcebergProperties {
-    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
-        let mut java_catalog_props = HashMap::new();
+    fn java_catalog_props(&self) -> HashMap<String, String> {
+        let mut java_catalog_props = iceberg_java_catalog_props_from_options(
+            self.unknown_fields
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
         if let Some(jdbc_user) = self.jdbc_user.clone() {
             java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
-        // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common.create_catalog(&java_catalog_props).await
+        java_catalog_props
+    }
+
+    pub async fn create_catalog(&self) -> ConnectorResult<Arc<dyn Catalog>> {
+        self.common
+            .resolve_catalog_config(self.java_catalog_props())?
+            .create_catalog()
+            .await
     }
 
     pub async fn load_table(&self) -> ConnectorResult<Table> {
-        let mut java_catalog_props = HashMap::new();
-        if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
-        }
-        if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
-        }
-        // TODO: support java_catalog_props for iceberg source
         self.common
-            .load_table(&self.table, &java_catalog_props)
+            .resolve_catalog_config(self.java_catalog_props())?
+            .load_table(&self.table)
             .await
     }
 }
@@ -124,19 +134,6 @@ impl SourceProperties for IcebergProperties {
 impl UnknownFields for IcebergProperties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct IcebergFileScanTaskJsonStr(String);
-
-impl IcebergFileScanTaskJsonStr {
-    pub fn deserialize(&self) -> FileScanTask {
-        serde_json::from_str(&self.0).unwrap()
-    }
-
-    pub fn serialize(task: &FileScanTask) -> Self {
-        Self(serde_json::to_string(task).unwrap())
     }
 }
 
@@ -182,12 +179,17 @@ pub struct IcebergSplit {
 }
 
 impl IcebergSplit {
+    #[allow(deprecated)]
     pub fn empty(iceberg_scan_type: IcebergScanType) -> Self {
         let task = match iceberg_scan_type {
             IcebergScanType::DataScan => IcebergFileScanTask::Data(vec![]),
             IcebergScanType::EqualityDeleteScan => IcebergFileScanTask::EqualityDelete(vec![]),
             IcebergScanType::PositionDeleteScan => IcebergFileScanTask::PositionDelete(vec![]),
-            _ => unimplemented!(),
+            IcebergScanType::Unspecified | IcebergScanType::CountStar => {
+                // These scan types do not carry file tasks. Keep the split serializable without
+                // introducing a new empty-task variant.
+                IcebergFileScanTask::Data(vec![])
+            }
         };
         Self {
             split_id: 0,
@@ -207,11 +209,15 @@ impl SplitMetaData for IcebergSplit {
     }
 
     fn encode_to_json(&self) -> JsonbVal {
-        serde_json::to_value(self.clone()).unwrap().into()
+        serde_json::to_value(self.clone())
+            .expect("iceberg split serialization should not fail")
+            .into()
     }
 
     fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
-        unimplemented!()
+        // Iceberg source progress is tracked by persisted file tasks in the stream state table.
+        // A split does not carry an intra-file offset until partial-file reads are supported.
+        Ok(())
     }
 }
 
@@ -430,61 +436,7 @@ impl IcebergSplitEnumerator {
         file_scan_tasks: Vec<FileScanTask>,
         split_num: usize,
     ) -> Vec<Vec<FileScanTask>> {
-        use std::cmp::{Ordering, Reverse};
-
-        #[derive(Default)]
-        struct FileScanTaskGroup {
-            idx: usize,
-            tasks: Vec<FileScanTask>,
-            total_length: u64,
-        }
-
-        impl Ord for FileScanTaskGroup {
-            fn cmp(&self, other: &Self) -> Ordering {
-                // when total_length is the same, we will sort by index
-                if self.total_length == other.total_length {
-                    self.idx.cmp(&other.idx)
-                } else {
-                    self.total_length.cmp(&other.total_length)
-                }
-            }
-        }
-
-        impl PartialOrd for FileScanTaskGroup {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                Some(self.cmp(other))
-            }
-        }
-
-        impl Eq for FileScanTaskGroup {}
-
-        impl PartialEq for FileScanTaskGroup {
-            fn eq(&self, other: &Self) -> bool {
-                self.total_length == other.total_length
-            }
-        }
-
-        let mut heap = BinaryHeap::new();
-        // push all groups into heap
-        for idx in 0..split_num {
-            heap.push(Reverse(FileScanTaskGroup {
-                idx,
-                tasks: vec![],
-                total_length: 0,
-            }));
-        }
-
-        for file_task in file_scan_tasks {
-            let mut group = heap.peek_mut().unwrap();
-            group.0.total_length += file_task.length;
-            group.0.tasks.push(file_task);
-        }
-
-        // convert heap into vec and extract tasks
-        heap.into_vec()
-            .into_iter()
-            .map(|reverse_group| reverse_group.0.tasks)
-            .collect()
+        IcebergScanTaskPlanner::split_n_vecs(file_scan_tasks, split_num)
     }
 }
 

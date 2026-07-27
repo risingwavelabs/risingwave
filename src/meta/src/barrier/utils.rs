@@ -31,7 +31,7 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata;
+use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata;
 
 use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::command::PostCollectCommand;
@@ -49,7 +49,7 @@ pub(super) fn collect_resp_info(
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
     HashSet<TableId>,
-    Vec<IcebergV3SinkMetadata>,
+    Vec<IcebergPkIndexSinkMetadata>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
@@ -57,7 +57,7 @@ pub(super) fn collect_resp_info(
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     let mut vector_index_adds = HashMap::new();
     let mut truncate_tables: HashSet<TableId> = HashSet::new();
-    let mut iceberg_v3_sink_metadata = Vec::new();
+    let mut iceberg_pk_index_sink_metadata = Vec::new();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
@@ -85,7 +85,7 @@ pub(super) fn collect_resp_info(
                 .expect("non-duplicate");
         }
         truncate_tables.extend(resp.truncate_tables);
-        iceberg_v3_sink_metadata.extend(resp.iceberg_v3_sink_metadata);
+        iceberg_pk_index_sink_metadata.extend(resp.iceberg_pk_index_sink_metadata);
     }
 
     (
@@ -107,7 +107,7 @@ pub(super) fn collect_resp_info(
         old_value_ssts,
         vector_index_adds,
         truncate_tables,
-        iceberg_v3_sink_metadata,
+        iceberg_pk_index_sink_metadata,
     )
 }
 
@@ -146,7 +146,7 @@ pub(super) fn collect_independent_job_commit_epoch_info(
         old_value_sst,
         vector_index_adds,
         truncate_tables,
-        iceberg_v3_sink_metadata,
+        iceberg_pk_index_sink_metadata,
     ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
     let commit_info = &mut task.commit_info;
@@ -190,8 +190,8 @@ pub(super) fn collect_independent_job_commit_epoch_info(
                 .expect("non-duplicate");
         }
     };
-    task.iceberg_v3_sink_metadata
-        .extend(iceberg_v3_sink_metadata);
+    task.iceberg_pk_index_sink_metadata
+        .extend(iceberg_pk_index_sink_metadata);
 }
 
 pub(super) type NodeToCollect = HashSet<WorkerId>;

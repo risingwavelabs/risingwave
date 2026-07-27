@@ -1185,21 +1185,17 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        {
-            let merged = merge_streaming_config_section(
-                &StreamingConfig::default(),
-                &updated_config_override,
-            )
-            .context("invalid streaming job config override")?;
+        let merged =
+            merge_streaming_config_section(&StreamingConfig::default(), &updated_config_override)
+                .context("invalid streaming job config override")?;
 
-            // Reject unrecognized entries.
-            // Note: If these unrecognized entries are pre-existing, we also reject them here.
-            // Users are able to fix them by issuing a `RESET` first.
-            if let Some(merged) = merged {
-                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
-                if !unrecognized_keys.is_empty() {
-                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
-                }
+        // Reject unrecognized entries.
+        // Note: If these unrecognized entries are pre-existing, we also reject them here.
+        // Users are able to fix them by issuing a `RESET` first.
+        if let Some(merged) = &merged {
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 

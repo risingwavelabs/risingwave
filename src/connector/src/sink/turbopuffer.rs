@@ -77,7 +77,12 @@ pub struct TurbopufferConfig {
     #[with_option(allow_alter_on_fly)]
     pub max_linger_second: u64,
     pub r#type: String, // accept "append-only" or "upsert"
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(TurbopufferConfig);
 
 impl EnforceSecret for TurbopufferConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
@@ -254,6 +259,8 @@ impl Sink for TurbopufferSink {
     type LogSinker = TurbopufferLogSinker;
 
     const SINK_NAME: &'static str = TURBOPUFFER_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         Ok(())
@@ -934,6 +941,7 @@ mod tests {
             write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
+            unknown_fields: Default::default(),
         };
         let mut writer = TurbopufferSinkWriter::new(
             config,
@@ -1042,6 +1050,7 @@ mod tests {
             write_batch_size: 2,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
+            unknown_fields: Default::default(),
         };
         let mut writer = TurbopufferSinkWriter::new(
             config,
@@ -1102,6 +1111,7 @@ mod tests {
             write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
+            unknown_fields: Default::default(),
         };
         let mut writer = TurbopufferSinkWriter::new(
             config,
@@ -1365,6 +1375,7 @@ mod tests {
             write_batch_size: DEFAULT_WRITE_BATCH_SIZE,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
+            unknown_fields: Default::default(),
         };
         let writer = TurbopufferSinkWriter::new(
             config,
@@ -1523,6 +1534,7 @@ mod tests {
             write_batch_size,
             max_linger_second: DEFAULT_MAX_LINGER_SECOND,
             r#type: "upsert".to_owned(),
+            unknown_fields: Default::default(),
         };
         TurbopufferSinkWriter::new(
             config,

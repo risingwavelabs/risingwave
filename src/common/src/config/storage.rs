@@ -406,11 +406,20 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
 
-    /// Skip check recent filter on data refill.
+    /// Skip checking recent filter on data refill.
     ///
     /// This option is suitable for a single compute node or debugging.
     #[serde(default = "default::cache_refill::skip_recent_filter")]
     pub skip_recent_filter: bool,
+
+    /// Skip checking inheritance filter on data refill.
+    ///
+    /// The inheritance filter only runs after recent-filter admission, so this
+    /// option has no effect when `skip_recent_filter` is enabled.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_inheritance_filter")]
+    pub skip_inheritance_filter: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1311,6 +1320,10 @@ pub mod default {
         }
 
         pub fn skip_recent_filter() -> bool {
+            false
+        }
+
+        pub fn skip_inheritance_filter() -> bool {
             false
         }
     }
