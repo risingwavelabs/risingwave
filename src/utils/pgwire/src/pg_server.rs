@@ -222,6 +222,7 @@ const ALLOWED_JWT_ALGORITHMS: &[Algorithm] = &[
     Algorithm::PS384,
     Algorithm::PS512,
 ];
+const RSA_JWK_KEY_TYPE: &str = "RSA";
 
 async fn validate_jwt(
     jwt: &str,
@@ -271,7 +272,7 @@ fn validate_jwt_with_jwks(
         .iter()
         .filter(|jwk| jwk.kid.as_deref() == Some(kid.as_str()))
         .find(|jwk| {
-            jwk.kty.as_deref() == Some("RSA")
+            jwk.kty.as_deref() == Some(RSA_JWK_KEY_TYPE)
                 && jwk.n.is_some()
                 && jwk.e.is_some()
                 && match jwk.alg.as_deref() {
