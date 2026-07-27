@@ -16,7 +16,7 @@ query TTTT retry 10 backoff 3s
 DESCRIBE mysql_table_in_rw;
 ----
 id integer false NULL
-legacy_serial numeric false NULL
+legacy_serial bigint false NULL
 name character varying false NULL
 _rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL

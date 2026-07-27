@@ -77,7 +77,7 @@ pub struct DdlServiceImpl {
     barrier_scheduler: BarrierScheduler,
 }
 
-fn keep_legacy_mysql_serial_int32_columns_for_schema_change(
+fn keep_legacy_mysql_serial_columns_for_schema_change(
     original_columns: &HashSet<(String, DataType)>,
     new_columns: &mut HashSet<(String, DataType)>,
     is_mysql_cdc_table: bool,
@@ -87,8 +87,10 @@ fn keep_legacy_mysql_serial_int32_columns_for_schema_change(
     }
 
     for (name, data_type) in original_columns {
-        if data_type == &DataType::Int32 && new_columns.remove(&(name.clone(), DataType::Decimal)) {
-            new_columns.insert((name.clone(), DataType::Int32));
+        if matches!(data_type, DataType::Int32 | DataType::Int64)
+            && new_columns.remove(&(name.clone(), DataType::Decimal))
+        {
+            new_columns.insert((name.clone(), data_type.clone()));
         }
     }
 }
@@ -1445,7 +1447,7 @@ impl DdlService for DdlServiceImpl {
                     }
                 }
 
-                keep_legacy_mysql_serial_int32_columns_for_schema_change(
+                keep_legacy_mysql_serial_columns_for_schema_change(
                     &original_columns,
                     &mut new_columns,
                     table.cdc_table_type == Some(CdcTableType::Mysql as i32),
@@ -1991,22 +1993,24 @@ mod tests {
 
     use risingwave_common::types::DataType;
 
-    use super::keep_legacy_mysql_serial_int32_columns_for_schema_change;
+    use super::keep_legacy_mysql_serial_columns_for_schema_change;
 
     #[test]
-    fn test_keep_legacy_mysql_serial_int32_columns_for_schema_change() {
+    fn test_keep_legacy_mysql_serial_columns_for_schema_change() {
         let original_columns = HashSet::from([
             ("id".to_owned(), DataType::Int32),
+            ("legacy_bigint".to_owned(), DataType::Int64),
             ("name".to_owned(), DataType::Varchar),
         ]);
         let mut new_columns = HashSet::from([
             ("id".to_owned(), DataType::Decimal),
+            ("legacy_bigint".to_owned(), DataType::Decimal),
             ("name".to_owned(), DataType::Varchar),
             ("note".to_owned(), DataType::Varchar),
             ("new_serial".to_owned(), DataType::Decimal),
         ]);
 
-        keep_legacy_mysql_serial_int32_columns_for_schema_change(
+        keep_legacy_mysql_serial_columns_for_schema_change(
             &original_columns,
             &mut new_columns,
             true,
@@ -2014,10 +2018,12 @@ mod tests {
 
         assert!(new_columns.contains(&("id".to_owned(), DataType::Int32)));
         assert!(!new_columns.contains(&("id".to_owned(), DataType::Decimal)));
+        assert!(new_columns.contains(&("legacy_bigint".to_owned(), DataType::Int64)));
+        assert!(!new_columns.contains(&("legacy_bigint".to_owned(), DataType::Decimal)));
         assert!(new_columns.contains(&("new_serial".to_owned(), DataType::Decimal)));
 
         let mut non_mysql_columns = HashSet::from([("id".to_owned(), DataType::Decimal)]);
-        keep_legacy_mysql_serial_int32_columns_for_schema_change(
+        keep_legacy_mysql_serial_columns_for_schema_change(
             &original_columns,
             &mut non_mysql_columns,
             false,

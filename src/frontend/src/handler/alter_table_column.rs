@@ -68,7 +68,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         constraints.clear();
     }
 
-    let new_columns = keep_legacy_serial_int32_columns(
+    let new_columns = keep_legacy_mysql_serial_columns(
         original_catalog.columns(),
         new_columns,
         matches!(
@@ -89,7 +89,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     Ok(new_definition)
 }
 
-fn keep_legacy_serial_int32_columns(
+fn keep_legacy_mysql_serial_columns(
     original_columns: &[ColumnCatalog],
     new_columns: &[ColumnCatalog],
     is_mysql_cdc_table: bool,
@@ -108,14 +108,16 @@ fn keep_legacy_serial_int32_columns(
         .cloned()
         .map(|mut column| {
             if let Some(original_column) = original_columns.get(column.name())
-                // MySQL `SERIAL` used to be inferred as `Int32`. After fixing it to
-                // `Decimal`, Debezium's full-column schema-change payload may re-report
-                // an existing legacy column with the corrected type. Keep the persisted
-                // type for existing columns; newly added columns still use the new mapping.
-                && original_column.data_type() == &DataType::Int32
+                // MySQL `SERIAL` used to be inferred as `Int32`, and explicit CDC
+                // schemas could also persist it as `Int64`. After fixing serial
+                // derivation to `Decimal`, Debezium's full-column schema-change payload
+                // may re-report an existing column with the corrected type. Keep the
+                // persisted type for existing columns; newly added columns still use
+                // the new mapping.
+                && matches!(original_column.data_type(), DataType::Int32 | DataType::Int64)
                 && column.data_type() == &DataType::Decimal
             {
-                column.column_desc.data_type = DataType::Int32;
+                column.column_desc.data_type = original_column.data_type().clone();
             }
             column
         })
@@ -399,19 +401,29 @@ mod tests {
     };
     use risingwave_common::types::DataType;
 
-    use super::keep_legacy_serial_int32_columns;
+    use super::keep_legacy_mysql_serial_columns;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
 
     #[test]
-    fn test_keep_legacy_serial_int32_columns() {
+    fn test_keep_legacy_mysql_serial_columns() {
         let original_columns = vec![
             ColumnCatalog::visible(ColumnDesc::named("id", ColumnId::new(1), DataType::Int32)),
-            ColumnCatalog::visible(ColumnDesc::named("v1", ColumnId::new(2), DataType::Varchar)),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "legacy_bigint",
+                ColumnId::new(2),
+                DataType::Int64,
+            )),
+            ColumnCatalog::visible(ColumnDesc::named("v1", ColumnId::new(3), DataType::Varchar)),
         ];
         let new_columns = vec![
             ColumnCatalog::visible(ColumnDesc::named(
                 "id",
+                ColumnId::placeholder(),
+                DataType::Decimal,
+            )),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "legacy_bigint",
                 ColumnId::placeholder(),
                 DataType::Decimal,
             )),
@@ -427,17 +439,18 @@ mod tests {
             )),
         ];
 
-        let columns = keep_legacy_serial_int32_columns(&original_columns, &new_columns, true);
+        let columns = keep_legacy_mysql_serial_columns(&original_columns, &new_columns, true);
         let data_types: HashMap<_, _> = columns
             .iter()
             .map(|column| (column.name(), column.data_type().clone()))
             .collect();
 
         assert_eq!(data_types["id"], DataType::Int32);
+        assert_eq!(data_types["legacy_bigint"], DataType::Int64);
         assert_eq!(data_types["v1"], DataType::Varchar);
         assert_eq!(data_types["new_serial"], DataType::Decimal);
 
-        let columns = keep_legacy_serial_int32_columns(&original_columns, &new_columns, false);
+        let columns = keep_legacy_mysql_serial_columns(&original_columns, &new_columns, false);
         assert_eq!(columns[0].data_type(), &DataType::Decimal);
     }
 
