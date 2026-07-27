@@ -39,14 +39,11 @@ use super::{
 use crate::util::iter_util::ZipEqFast;
 
 const METADATA_LEN_SIZE: usize = size_of::<u32>();
-const ENCODING_VERSION_LEN: usize = size_of::<u8>();
-const VARIANT_ENCODING_VERSION: u8 = 1;
 
 /// Owned value of the `variant` type.
 ///
-/// The inner bytes are a RisingWave format tag followed by the Apache Parquet / Iceberg Variant
-/// `metadata` and `value` sections. This is the first RisingWave `variant` encoding, so all
-/// internal bytes must use the current tagged format.
+/// The inner bytes are the little-endian metadata length followed by the Apache Parquet / Iceberg
+/// Variant `metadata` and `value` sections.
 #[derive(Debug, Clone)]
 pub struct VariantVal {
     data: Box<[u8]>,
@@ -146,7 +143,7 @@ impl PartialOrd for VariantRef<'_> {
 
 impl Ord for VariantRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Must agree with `memcmp_serialize`, which encodes the whole tagged buffer.
+        // Must agree with `memcmp_serialize`, which encodes the whole serialized buffer.
         self.data.cmp(other.data)
     }
 }
@@ -205,10 +202,7 @@ impl VariantVal {
         );
         let metadata_len =
             u32::try_from(metadata.len()).expect("variant metadata exceeds u32::MAX bytes");
-        let mut data = Vec::with_capacity(
-            ENCODING_VERSION_LEN + METADATA_LEN_SIZE + metadata.len() + value.len(),
-        );
-        data.put_u8(VARIANT_ENCODING_VERSION);
+        let mut data = Vec::with_capacity(METADATA_LEN_SIZE + metadata.len() + value.len());
         data.put_u32_le(metadata_len);
         data.extend_from_slice(metadata);
         data.extend_from_slice(value);
@@ -259,7 +253,7 @@ impl VariantVal {
         VariantRef::from_serialized(buf).map(|v| v.to_owned_scalar())
     }
 
-    /// Decodes a tagged buffer from an untrusted origin (e.g. pgwire binary parameters),
+    /// Decodes a buffer from an untrusted origin (e.g. pgwire binary parameters),
     /// re-canonicalizing it so non-canonical inputs (unsorted dictionaries, non-canonical
     /// float bit patterns) cannot break `Eq`/`Hash`/`Ord`.
     pub fn from_serialized_untrusted(buf: &[u8]) -> anyhow::Result<Self> {
@@ -471,7 +465,6 @@ impl ToSql for VariantRef<'_> {
 }
 
 fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
-    let buf = strip_current_encoding_tag(buf)?;
     if buf.len() < METADATA_LEN_SIZE {
         return None;
     }
@@ -484,16 +477,7 @@ fn split_serialized_value(buf: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 fn expect_serialized_value(buf: &[u8]) -> (&[u8], &[u8]) {
-    split_serialized_value(buf).expect("variant should use current serialized format")
-}
-
-fn strip_current_encoding_tag(buf: &[u8]) -> Option<&[u8]> {
-    let (&version, rest) = buf.split_first()?;
-    if version == VARIANT_ENCODING_VERSION {
-        Some(rest)
-    } else {
-        None
-    }
+    split_serialized_value(buf).expect("variant should use a valid serialized format")
 }
 
 fn canonical_builder(field_names: &BTreeSet<String>) -> VariantBuilder {
@@ -1395,14 +1379,17 @@ mod tests {
     }
 
     #[test]
-    fn serializes_current_canonical_snapshot() {
+    fn serializes_canonical_snapshot() {
         let v: VariantVal = r#"{"a":1,"c":[true,null]}"#.parse().unwrap();
         let bytes = v.as_scalar_ref().value_serialize();
         assert_eq!(
             hex::encode(&bytes),
-            "0107000000110200010261630202000100091018010000000000000003020001020400"
+            "07000000110200010261630202000100091018010000000000000003020001020400"
         );
-        assert_eq!(bytes[0], VARIANT_ENCODING_VERSION);
+        assert_eq!(
+            u32::from_le_bytes(bytes[..METADATA_LEN_SIZE].try_into().unwrap()),
+            7
+        );
         assert_eq!(VariantVal::value_deserialize(&bytes).unwrap(), v);
         assert!(VariantVal::value_deserialize(&bytes[1..]).is_none());
         assert!(VariantRef::from_serialized(&bytes[1..]).is_none());
