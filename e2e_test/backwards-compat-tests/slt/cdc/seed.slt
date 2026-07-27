@@ -6,7 +6,7 @@ CREATE DATABASE rwcdc;
 USE rwcdc;
 CREATE TABLE table_in_mysql (
     id INT PRIMARY KEY,
-    legacy_serial INT NOT NULL AUTO_INCREMENT UNIQUE,
+    legacy_serial SERIAL,
     name VARCHAR(255)
 );
 INSERT INTO table_in_mysql (id, name) VALUES (1,'11'),(2,'22');

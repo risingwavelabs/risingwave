@@ -36,8 +36,8 @@ ALTER TABLE table_in_mysql ADD COLUMN note VARCHAR(255) DEFAULT 'legacy_ok';
 INSERT INTO table_in_mysql (id, name, note) VALUES (4,'schema_4','schema_note');
 EOF
 
-# The legacy SERIAL column was added by old-version auto schema change and keeps
-# the old SERIAL -> INT mapping after an upgraded auto schema change.
+# The legacy SERIAL column was created before this PR and keeps the old
+# SERIAL -> INT mapping after an upgraded auto schema change.
 query TTTT retry 10 backoff 3s
 DESCRIBE mysql_table_in_rw;
 ----
