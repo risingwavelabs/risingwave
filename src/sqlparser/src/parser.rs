@@ -3684,6 +3684,19 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SINK SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
@@ -3693,19 +3706,8 @@ impl Parser<'_> {
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG/RESOURCE_GROUP after SET",
+                    "SCHEMA/PARALLELISM/RESOURCE_GROUP/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
-            }
-        } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
-            if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-                return self.expected("TO or = after ALTER SINK SET RESOURCE_GROUP");
-            }
-            let value = self.parse_set_variable()?;
-            let deferred = self.parse_keyword(Keyword::DEFERRED);
-
-            AlterSinkOperation::SetResourceGroup {
-                resource_group: Some(value),
-                deferred,
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) {
