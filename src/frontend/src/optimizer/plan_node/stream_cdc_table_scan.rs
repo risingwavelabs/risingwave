@@ -280,6 +280,7 @@ impl StreamCdcTableScan {
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             disable_backfill: options.disable_backfill,
             options: Some(options),
+            resnapshot_table_desc: state.cdc_resnapshot_table_desc().cloned(),
         }));
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
