@@ -891,21 +891,13 @@ impl CreatingStreamingJobControl {
             Some((mutation, notifiers)) => (Some(mutation), notifiers),
             None => (None, vec![]),
         };
-        let available_barrier_num = self
-            .max_pending_barrier_num
-            .saturating_sub(partial_graph_manager.pending_barrier_num(self.partial_graph_id));
-        // Explicit commands share the database graph's soft-limit semantics and must be forwarded
-        // even when the partial graph has reached the configured pending-barrier limit.
-        let barrier_num_to_inject = if mutation.is_some() {
-            available_barrier_num.max(1)
-        } else {
-            available_barrier_num
-        };
         {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(
+                partial_graph_manager,
+                self.partial_graph_id,
+                self.max_pending_barrier_num,
                 barrier_info,
                 mutation.take(),
-                barrier_num_to_inject,
             ) {
                 Self::inject_barrier(
                     self.partial_graph_id,
