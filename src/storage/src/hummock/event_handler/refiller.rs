@@ -470,16 +470,25 @@ impl CacheRefiller {
                         .copied()
                         .unwrap_or(self.default_policy);
 
-                    if policy == CacheRefillPolicy::Disabled {
-                        return false;
+                    // Enabled preserves legacy full refill. For scoped policies, mapping keys are
+                    // only a whole-SST coarse gate; bitmap bits still filter blocks post-Meta.
+                    match policy {
+                        CacheRefillPolicy::Enabled => for_streaming || for_serving,
+                        CacheRefillPolicy::Disabled => false,
+                        CacheRefillPolicy::Streaming => {
+                            for_streaming
+                                && self.streaming_table_vnode_mapping.contains_key(table_id)
+                        }
+                        CacheRefillPolicy::Serving => {
+                            for_serving && self.serving_table_vnode_mapping.contains_key(table_id)
+                        }
+                        CacheRefillPolicy::Both => {
+                            (for_streaming
+                                && self.streaming_table_vnode_mapping.contains_key(table_id))
+                                || (for_serving
+                                    && self.serving_table_vnode_mapping.contains_key(table_id))
+                        }
                     }
-
-                    let serving_matches = for_serving
-                        && self.serving_table_vnode_mapping.contains_key(table_id)
-                        && (policy.is_unscoped_enabled() || policy.is_serving_scoped());
-                    let streaming_matches = for_streaming
-                        && (policy.is_unscoped_enabled() || policy.is_streaming_scoped());
-                    serving_matches || streaming_matches
                 })
             });
         }
@@ -1477,6 +1486,7 @@ mod tests {
         let capture_pruned_table_ids = |role,
                                         default_policy,
                                         policies: HashMap<TableId, CacheRefillPolicy>,
+                                        streaming_table_vnodes: HashMap<TableId, Bitmap>,
                                         serving_table_vnodes: HashMap<TableId, Bitmap>,
                                         delta| {
             let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
@@ -1492,6 +1502,9 @@ mod tests {
                 spawn_refill_task,
             );
             refiller.replace_table_cache_refill_policies(policies);
+            for (table_id, vnodes) in streaming_table_vnodes {
+                refiller.update_streaming_table_vnodes(table_id, Some(vnodes));
+            }
             refiller.replace_serving_table_vnode_mapping(serving_table_vnodes);
             refiller.start_cache_refill(
                 vec![delta],
@@ -1530,6 +1543,7 @@ mod tests {
                     (streaming_table, CacheRefillPolicy::Enabled),
                 ]),
                 HashMap::new(),
+                HashMap::new(),
                 normal_delta(vec![
                     sst_info(vec![disabled_table]),
                     sst_info(vec![streaming_table]),
@@ -1546,6 +1560,7 @@ mod tests {
                     (streaming_table, CacheRefillPolicy::Streaming),
                     (internal_table, CacheRefillPolicy::Serving),
                 ]),
+                HashMap::from([(streaming_table, serving_vnodes.clone())]),
                 HashMap::new(),
                 normal_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1564,6 +1579,7 @@ mod tests {
                     (serving_table, CacheRefillPolicy::Serving),
                     (internal_table, CacheRefillPolicy::Serving),
                 ]),
+                HashMap::from([(streaming_table, serving_vnodes.clone())]),
                 HashMap::from([(serving_table, serving_vnodes.clone())]),
                 insert_only_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1582,6 +1598,7 @@ mod tests {
                     (streaming_table, CacheRefillPolicy::Streaming),
                     (serving_table, CacheRefillPolicy::Serving),
                 ]),
+                HashMap::new(),
                 HashMap::from([(serving_table, serving_vnodes.clone())]),
                 normal_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1599,6 +1616,7 @@ mod tests {
                     (streaming_table, CacheRefillPolicy::Enabled),
                     (serving_table, CacheRefillPolicy::Enabled),
                 ]),
+                HashMap::new(),
                 HashMap::from([(serving_table, serving_vnodes.clone())]),
                 normal_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1606,17 +1624,40 @@ mod tests {
                     sst_info(vec![streaming_table, serving_table]),
                 ]),
             ),
-            vec![vec![serving_table], vec![streaming_table, serving_table],],
+            vec![
+                vec![streaming_table],
+                vec![serving_table],
+                vec![streaming_table, serving_table],
+            ],
         );
 
         assert_eq!(
             capture_pruned_table_ids(
-                Role::Streaming,
+                Role::Both,
                 CacheRefillPolicy::Disabled,
                 HashMap::from([
-                    (streaming_table, CacheRefillPolicy::Streaming),
-                    (serving_table, CacheRefillPolicy::Serving),
+                    (streaming_table, CacheRefillPolicy::Both),
+                    (serving_table, CacheRefillPolicy::Both),
                 ]),
+                HashMap::new(),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            Vec::<Vec<TableId>>::new(),
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Both),
+                    (serving_table, CacheRefillPolicy::Both),
+                ]),
+                HashMap::from([(streaming_table, serving_vnodes.clone())]),
                 HashMap::new(),
                 normal_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1628,12 +1669,49 @@ mod tests {
 
         assert_eq!(
             capture_pruned_table_ids(
+                Role::Both,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Both),
+                    (serving_table, CacheRefillPolicy::Both),
+                ]),
+                HashMap::new(),
+                HashMap::from([(serving_table, serving_vnodes.clone())]),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            vec![vec![serving_table]],
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
                 Role::Streaming,
                 CacheRefillPolicy::Disabled,
                 HashMap::from([
                     (streaming_table, CacheRefillPolicy::Streaming),
                     (serving_table, CacheRefillPolicy::Serving),
                 ]),
+                HashMap::new(),
+                HashMap::new(),
+                normal_delta(vec![
+                    sst_info(vec![streaming_table]),
+                    sst_info(vec![serving_table]),
+                ]),
+            ),
+            Vec::<Vec<TableId>>::new(),
+        );
+
+        assert_eq!(
+            capture_pruned_table_ids(
+                Role::Streaming,
+                CacheRefillPolicy::Disabled,
+                HashMap::from([
+                    (streaming_table, CacheRefillPolicy::Streaming),
+                    (serving_table, CacheRefillPolicy::Serving),
+                ]),
+                HashMap::new(),
                 HashMap::new(),
                 insert_only_delta(vec![
                     sst_info(vec![streaming_table]),
@@ -1648,6 +1726,7 @@ mod tests {
                 Role::Both,
                 CacheRefillPolicy::Enabled,
                 HashMap::from([(disabled_table, CacheRefillPolicy::Disabled)]),
+                HashMap::new(),
                 HashMap::new(),
                 normal_delta(vec![
                     sst_info(vec![disabled_table]),
