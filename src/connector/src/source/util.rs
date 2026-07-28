@@ -66,17 +66,19 @@ pub fn fill_adaptive_split(
             Ok(new_splits)
         }
         SplitImpl::Rabbitmq(split) => {
-            let actor_count = actor_count.max(1);
-            let connection_count = split.max_connections().min(actor_count).max(1);
+            // RabbitMQ split ids and payloads must not depend on actor count. Meta preserves
+            // existing split objects by id during rescaling, so changing the queue subset of a
+            // surviving id would otherwise duplicate queues on scale-out or drop them on
+            // scale-in. Build a fixed set of connection buckets instead; Meta may assign
+            // multiple buckets to one actor when parallelism is lower than the bucket count.
+            let split_count = split.max_connections().min(split.all_queues().len()).max(1);
             let mut new_splits = BTreeMap::new();
-            for idx in 0..actor_count {
+            for idx in 0..split_count {
                 let queues = split
                     .all_queues()
                     .iter()
                     .enumerate()
-                    .filter(|(queue_idx, _)| {
-                        idx < connection_count && queue_idx % connection_count == idx
-                    })
+                    .filter(|(queue_idx, _)| queue_idx % split_count == idx)
                     .map(|(_, queue)| queue.clone())
                     .collect::<Vec<_>>();
                 let split_id: Arc<str> = idx.to_string().into();
@@ -91,9 +93,8 @@ pub fn fill_adaptive_split(
                 );
             }
             tracing::debug!(
-                "Filled adaptive splits for RabbitMQ source, {} splits in total, {} active connections",
-                new_splits.len(),
-                connection_count
+                "Filled adaptive splits for RabbitMQ source, {} stable connection buckets",
+                new_splits.len()
             );
             Ok(new_splits)
         }
@@ -174,7 +175,7 @@ mod tests {
         ));
 
         let splits = fill_adaptive_split(&template, 4).unwrap();
-        assert_eq!(splits.len(), 4);
+        assert_eq!(splits.len(), 2);
 
         let rabbitmq_splits = splits
             .values()
@@ -198,6 +199,29 @@ mod tests {
         assert!(queues.contains(&"q0".to_owned()));
         assert!(queues.contains(&"q1".to_owned()));
         assert!(queues.contains(&"q2".to_owned()));
+    }
+
+    #[test]
+    fn test_fill_adaptive_split_rabbitmq_is_stable_across_rescale() {
+        let template = SplitImpl::Rabbitmq(RabbitmqSplit::template(
+            vec![
+                "q0".to_owned(),
+                "q1".to_owned(),
+                "q2".to_owned(),
+                "q3".to_owned(),
+            ],
+            3,
+        ));
+
+        let expected = fill_adaptive_split(&template, 1).unwrap();
+        for actor_count in [2, 3, 4, 8] {
+            assert_eq!(
+                fill_adaptive_split(&template, actor_count).unwrap(),
+                expected,
+                "RabbitMQ split ids and queue payloads must not change when rescaling to \
+                 {actor_count} actors"
+            );
+        }
     }
 
     #[test]
