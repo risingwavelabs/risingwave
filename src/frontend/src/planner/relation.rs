@@ -84,14 +84,11 @@ impl Planner {
     fn plan_iceberg_metadata_table(&mut self, table: BoundIcebergMetadataTable) -> Result<PlanRef> {
         let timezone = self.ctx().get_session_timezone();
         let time_travel_info = to_iceberg_time_travel_as_of(&table.as_of, &timezone)?;
-        let output_col_idx = (0..table.metadata_type.schema().len()).collect();
         let core = crate::optimizer::plan_node::generic::IcebergMetadataScan {
             metadata_type: table.metadata_type,
-            output_col_idx,
             properties: table.properties,
             secret_refs: table.secret_refs,
             time_travel_info,
-            filter: Default::default(),
             ctx: self.ctx(),
         };
         Ok(LogicalIcebergMetadataScan::new(core).into())

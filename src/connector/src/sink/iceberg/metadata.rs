@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use iceberg::table::Table;
 use risingwave_common::array::DataChunk;
@@ -24,20 +23,12 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
 
-const MAX_CONCURRENT_MANIFEST_READS: usize = 8;
-
 /// The supported per-table Iceberg metadata relations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IcebergMetadataTableType {
     Snapshots,
     Manifests,
     Files,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct IcebergMetadataFilter {
-    pub content: Option<String>,
-    pub manifest_path: Option<String>,
 }
 
 impl IcebergMetadataTableType {
@@ -153,19 +144,13 @@ pub async fn scan_iceberg_metadata(
     table: Table,
     metadata_type: IcebergMetadataTableType,
     time_travel_info: Option<IcebergTimeTravelInfo>,
-    filter: IcebergMetadataFilter,
-    limit: Option<u64>,
     chunk_size: usize,
 ) {
     let mut builder = DataChunkBuilder::new(metadata_type.schema().data_types(), chunk_size);
-    let mut remaining_limit = limit.map(|limit| usize::try_from(limit).unwrap_or(usize::MAX));
 
     match metadata_type {
         IcebergMetadataTableType::Snapshots => {
             for snapshot in table.metadata().snapshots() {
-                if matches!(remaining_limit, Some(0)) {
-                    break;
-                }
                 let committed_at = Timestamptz::from_millis(snapshot.timestamp_ms())
                     .ok_or_else(|| anyhow!("invalid Iceberg snapshot timestamp"))?;
                 let summary =
@@ -181,9 +166,6 @@ pub async fn scan_iceberg_metadata(
                 };
                 if let Some(chunk) = append_row(&mut builder, row)? {
                     yield chunk;
-                }
-                if let Some(remaining_limit) = &mut remaining_limit {
-                    *remaining_limit -= 1;
                 }
             }
         }
@@ -203,21 +185,7 @@ pub async fn scan_iceberg_metadata(
 
             if metadata_type == IcebergMetadataTableType::Manifests {
                 for manifest in manifest_list.entries() {
-                    if matches!(remaining_limit, Some(0)) {
-                        break;
-                    }
                     let content = manifest.content.to_string();
-                    if filter
-                        .content
-                        .as_ref()
-                        .is_some_and(|expected| expected != &content)
-                        || filter
-                            .manifest_path
-                            .as_ref()
-                            .is_some_and(|expected| expected != &manifest.manifest_path)
-                    {
-                        continue;
-                    }
                     let row = IcebergManifestRow {
                         content,
                         path: manifest.manifest_path.clone(),
@@ -261,48 +229,14 @@ pub async fn scan_iceberg_metadata(
                     if let Some(chunk) = append_row(&mut builder, row)? {
                         yield chunk;
                     }
-                    if let Some(remaining_limit) = &mut remaining_limit {
-                        *remaining_limit -= 1;
-                    }
                 }
             } else {
-                let mut manifests = stream::iter(
-                    manifest_list
-                        .entries()
-                        .iter()
-                        .filter(|manifest| {
-                            filter
-                                .manifest_path
-                                .as_ref()
-                                .is_none_or(|expected| expected == &manifest.manifest_path)
-                        })
-                        .cloned(),
-                )
-                .map(|manifest_file| {
-                    let table = table.clone();
-                    async move {
-                        let manifest_path = manifest_file.manifest_path.clone();
-                        let manifest = manifest_file.load_manifest(table.file_io()).await?;
-                        Ok::<_, ConnectorError>((manifest_path, manifest))
-                    }
-                })
-                .buffer_unordered(MAX_CONCURRENT_MANIFEST_READS);
-
-                while let Some(manifest) = manifests.next().await {
-                    let (manifest_path, manifest) = manifest?;
+                for manifest_file in manifest_list.entries() {
+                    let manifest_path = manifest_file.manifest_path.clone();
+                    let manifest = manifest_file.load_manifest(table.file_io()).await?;
                     for entry in manifest.entries().iter().filter(|entry| entry.is_alive()) {
-                        if matches!(remaining_limit, Some(0)) {
-                            break;
-                        }
                         let file = entry.data_file();
                         let content = format!("{:?}", file.content_type());
-                        if filter
-                            .content
-                            .as_ref()
-                            .is_some_and(|expected| expected != &content)
-                        {
-                            continue;
-                        }
                         let row = IcebergFileRow {
                             content,
                             file_path: file.file_path().to_owned(),
@@ -326,12 +260,6 @@ pub async fn scan_iceberg_metadata(
                         if let Some(chunk) = append_row(&mut builder, row)? {
                             yield chunk;
                         }
-                        if let Some(remaining_limit) = &mut remaining_limit {
-                            *remaining_limit -= 1;
-                        }
-                    }
-                    if matches!(remaining_limit, Some(0)) {
-                        break;
                     }
                 }
             }

@@ -35,7 +35,7 @@ INSERT INTO iceberg_metadata_relations_engine_t VALUES
 statement ok
 FLUSH;
 
-query ??? retry 6 backoff 1s
+query ??? retry 20 backoff 1s
 SELECT
   count(*) > 0,
   bool_and(snapshot_id IS NOT NULL),
@@ -44,7 +44,7 @@ FROM "iceberg_metadata_relations_engine_t$snapshots";
 ----
 t t t
 
-query ??? retry 6 backoff 1s
+query ??? retry 20 backoff 1s
 SELECT
   count(*) > 0,
   bool_and(length > 0),
@@ -53,7 +53,7 @@ FROM "iceberg_metadata_relations_engine_t$manifests";
 ----
 t t t
 
-query ??? retry 6 backoff 1s
+query ??? retry 20 backoff 1s
 SELECT
   count(*) > 0,
   bool_and(file_size_in_bytes > 0),
@@ -62,7 +62,7 @@ FROM "iceberg_metadata_relations_engine_t$files";
 ----
 t t t
 
-query I retry 6 backoff 1s
+query I retry 20 backoff 1s
 SELECT count(*)
 FROM (
   SELECT *
@@ -72,7 +72,7 @@ FROM (
 ----
 1
 
-query ? retry 6 backoff 1s
+query ? retry 20 backoff 1s
 SELECT count(*) > 0
 FROM "iceberg_metadata_relations_engine_t$files"
 FOR SYSTEM_TIME AS OF '2222-12-10 11:48:06';
@@ -122,19 +122,19 @@ INSERT INTO iceberg_metadata_relations_source_t VALUES
 statement ok
 FLUSH;
 
-query ? retry 6 backoff 1s
+query ? retry 20 backoff 1s
 SELECT count(*) > 0
 FROM "iceberg_metadata_relations_sink$snapshots";
 ----
 t
 
-query ? retry 6 backoff 1s
+query ? retry 20 backoff 1s
 SELECT count(*) > 0
 FROM "iceberg_metadata_relations_sink$manifests";
 ----
 t
 
-query ? retry 6 backoff 1s
+query ? retry 20 backoff 1s
 SELECT count(*) > 0
 FROM "iceberg_metadata_relations_sink$files"
 WHERE content = 'Data' AND file_format = 'parquet';

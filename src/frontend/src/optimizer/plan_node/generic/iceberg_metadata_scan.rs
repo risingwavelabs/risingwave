@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 
 use educe::Educe;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_connector::sink::iceberg::{IcebergMetadataFilter, IcebergMetadataTableType};
+use risingwave_common::catalog::Schema;
+use risingwave_connector::sink::iceberg::IcebergMetadataTableType;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_pb::secret::PbSecretRef;
 
@@ -28,11 +28,9 @@ use crate::optimizer::property::FunctionalDependencySet;
 #[educe(PartialEq, Eq, Hash)]
 pub struct IcebergMetadataScan {
     pub metadata_type: IcebergMetadataTableType,
-    pub output_col_idx: Vec<usize>,
     pub properties: BTreeMap<String, String>,
     pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub time_travel_info: Option<IcebergTimeTravelInfo>,
-    pub filter: IcebergMetadataFilter,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
@@ -41,13 +39,7 @@ pub struct IcebergMetadataScan {
 
 impl GenericPlanNode for IcebergMetadataScan {
     fn schema(&self) -> Schema {
-        let full_schema = self.metadata_type.schema();
-        Schema::new(
-            self.output_col_idx
-                .iter()
-                .map(|index| full_schema.fields[*index].clone())
-                .collect(),
-        )
+        self.metadata_type.schema()
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
@@ -59,19 +51,6 @@ impl GenericPlanNode for IcebergMetadataScan {
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        FunctionalDependencySet::new(self.output_col_idx.len())
-    }
-}
-
-impl IcebergMetadataScan {
-    pub fn columns(&self) -> Vec<ColumnDesc> {
-        let full_schema = self.metadata_type.schema();
-        self.output_col_idx
-            .iter()
-            .map(|index| {
-                let Field { data_type, name } = full_schema.fields[*index].clone();
-                ColumnDesc::named(name, ColumnId::new(*index as i32), data_type)
-            })
-            .collect()
+        FunctionalDependencySet::new(self.metadata_type.schema().len())
     }
 }

@@ -89,19 +89,14 @@ message IcebergMetadataScanNode {
     METADATA_TYPE_FILES = 3;
   }
 
-  repeated plan_common.ColumnDesc columns = 1;
-  map<string, string> with_properties = 2;
-  map<string, secret.SecretRef> secret_refs = 3;
-  MetadataType metadata_type = 4;
+  map<string, string> with_properties = 1;
+  map<string, secret.SecretRef> secret_refs = 2;
+  MetadataType metadata_type = 3;
 
   oneof time_travel {
-    int64 snapshot_id = 5;
-    int64 timestamp_ms = 6;
+    int64 snapshot_id = 4;
+    int64 timestamp_ms = 5;
   }
-
-  optional string content_filter = 7;
-  optional string manifest_path_filter = 8;
-  optional uint64 limit = 9;
 }
 
 message FileScanNode {

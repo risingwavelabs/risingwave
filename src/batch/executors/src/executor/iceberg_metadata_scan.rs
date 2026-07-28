@@ -15,11 +15,9 @@
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_connector::WithOptionsSecResolved;
-use risingwave_connector::sink::iceberg::{
-    IcebergMetadataFilter, IcebergMetadataTableType, scan_iceberg_metadata,
-};
+use risingwave_connector::sink::iceberg::{IcebergMetadataTableType, scan_iceberg_metadata};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_pb::batch_plan::iceberg_metadata_scan_node::{MetadataType, TimeTravel};
@@ -33,9 +31,6 @@ pub struct IcebergMetadataScanExecutor {
     properties: risingwave_connector::source::iceberg::IcebergProperties,
     metadata_type: IcebergMetadataTableType,
     time_travel_info: Option<IcebergTimeTravelInfo>,
-    filter: IcebergMetadataFilter,
-    output_indices: Vec<usize>,
-    limit: Option<u64>,
     identity: String,
     chunk_size: usize,
 }
@@ -63,11 +58,9 @@ impl IcebergMetadataScanExecutor {
             table,
             self.metadata_type,
             self.time_travel_info,
-            self.filter,
-            self.limit,
             self.chunk_size,
         ) {
-            yield chunk?.project(&self.output_indices);
+            yield chunk?;
         }
     }
 }
@@ -107,26 +100,6 @@ impl BoxedExecutorBuilder for IcebergMetadataScanExecutorBuilder {
                     IcebergTimeTravelInfo::TimestampMs(*timestamp_ms)
                 }
             });
-        let full_column_count = metadata_type.schema().len();
-        let output_indices = node
-            .columns
-            .iter()
-            .map(|column| {
-                let index = usize::try_from(column.column_id).map_err(|_| {
-                    anyhow!(
-                        "invalid Iceberg metadata column id {}",
-                        column.column_id
-                    )
-                })?;
-                if index >= full_column_count {
-                    return Err(anyhow!(
-                        "Iceberg metadata column id {index} exceeds schema width {full_column_count}"
-                    ));
-                }
-                Ok(index)
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
         let config = ConnectorProperties::extract(
             WithOptionsSecResolved::new(node.with_properties.clone(), node.secret_refs.clone()),
             false,
@@ -136,16 +109,10 @@ impl BoxedExecutorBuilder for IcebergMetadataScanExecutorBuilder {
         };
 
         Ok(Box::new(IcebergMetadataScanExecutor {
-            schema: Schema::from_iter(node.columns.iter().map(Field::from)),
+            schema: metadata_type.schema(),
             properties: *properties,
             metadata_type,
             time_travel_info,
-            filter: IcebergMetadataFilter {
-                content: node.content_filter.clone(),
-                manifest_path: node.manifest_path_filter.clone(),
-            },
-            output_indices,
-            limit: node.limit,
             identity: source.plan_node().get_identity().clone(),
             chunk_size: source.context().get_config().developer.chunk_size,
         }))

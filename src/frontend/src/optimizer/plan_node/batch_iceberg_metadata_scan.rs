@@ -33,37 +33,19 @@ use crate::optimizer::property::{Distribution, Order};
 pub struct BatchIcebergMetadataScan {
     pub base: PlanBase<Batch>,
     pub core: generic::IcebergMetadataScan,
-    limit: Option<u64>,
 }
 
 impl BatchIcebergMetadataScan {
     pub fn new(core: generic::IcebergMetadataScan) -> Self {
         let base = PlanBase::new_batch_with_core(&core, Distribution::Single, Order::any());
-        Self {
-            base,
-            core,
-            limit: None,
-        }
+        Self { base, core }
     }
 
     fn clone_with_dist(&self) -> Self {
         Self {
             base: self.base.clone_with_new_distribution(Distribution::Single),
             core: self.core.clone(),
-            limit: self.limit,
         }
-    }
-
-    pub fn clone_with_limit(&self, limit: Option<u64>) -> Self {
-        Self {
-            base: self.base.clone(),
-            core: self.core.clone(),
-            limit,
-        }
-    }
-
-    pub fn limit(&self) -> Option<u64> {
-        self.limit
     }
 }
 
@@ -71,22 +53,13 @@ impl_plan_tree_node_for_leaf! { Batch, BatchIcebergMetadataScan }
 
 impl Distill for BatchIcebergMetadataScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let mut fields = vec![
+        let fields = vec![
             (
                 "metadata_type",
                 Pretty::debug(&self.core.metadata_type.suffix()),
             ),
             ("columns", column_names_pretty(self.schema())),
         ];
-        if let Some(content) = &self.core.filter.content {
-            fields.push(("content_filter", Pretty::from(content.clone())));
-        }
-        if let Some(manifest_path) = &self.core.filter.manifest_path {
-            fields.push(("manifest_path_filter", Pretty::from(manifest_path.clone())));
-        }
-        if let Some(limit) = self.limit {
-            fields.push(("limit", Pretty::debug(&limit)));
-        }
         childless_record("BatchIcebergMetadataScan", fields)
     }
 }
@@ -124,19 +97,10 @@ impl ToBatchPb for BatchIcebergMetadataScan {
                 });
 
         NodeBody::IcebergMetadataScan(IcebergMetadataScanNode {
-            columns: self
-                .core
-                .columns()
-                .iter()
-                .map(|column| column.to_protobuf())
-                .collect(),
             with_properties: self.core.properties.clone(),
             secret_refs: self.core.secret_refs.clone(),
             metadata_type: metadata_type as i32,
             time_travel,
-            content_filter: self.core.filter.content.clone(),
-            manifest_path_filter: self.core.filter.manifest_path.clone(),
-            limit: self.limit,
         })
     }
 }
