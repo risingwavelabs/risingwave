@@ -120,7 +120,7 @@ impl StreamActorManager {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
 
-        let info = Self::get_executor_info(
+        let upstream_info = Self::get_executor_info(
             upstream_node,
             Self::get_executor_id(actor_context, upstream_node),
         );
@@ -133,7 +133,7 @@ impl StreamActorManager {
             local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             actor_context.clone(),
-            info,
+            upstream_info,
             upstream_merge,
             chunk_size,
         )
@@ -146,6 +146,11 @@ impl StreamActorManager {
             .iter()
             .map(|&i| i as usize)
             .collect_vec();
+        let info = Self::get_executor_info(
+            stream_node,
+            Self::get_executor_id(actor_context, stream_node),
+        );
+        let stream_key = info.stream_key.clone();
 
         let column_ids = node
             .upstream_column_ids
@@ -172,6 +177,7 @@ impl StreamActorManager {
             state_table,
             upstream,
             output_indices,
+            stream_key,
             actor_context.clone(),
             progress,
             chunk_size,
@@ -181,11 +187,6 @@ impl StreamActorManager {
             node.snapshot_backfill_epoch,
         )
         .boxed();
-
-        let info = Self::get_executor_info(
-            stream_node,
-            Self::get_executor_id(actor_context, stream_node),
-        );
 
         if crate::consistency::insane() {
             let mut troubled_info = info.clone();

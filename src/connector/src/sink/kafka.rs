@@ -128,12 +128,6 @@ pub struct RdKafkaPropertiesProducer {
     #[with_option(allow_alter_on_fly)]
     message_send_max_retries: Option<usize>,
 
-    /// The backoff time in milliseconds before retrying a protocol request.
-    #[serde(rename = "properties.retry.backoff.ms")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
-    retry_backoff_ms: Option<usize>,
-
     /// Maximum number of messages batched in one `MessageSet`
     #[serde(rename = "properties.batch.num.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -196,9 +190,6 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = self.message_send_max_retries {
             c.set("message.send.max.retries", v.to_string());
-        }
-        if let Some(v) = self.retry_backoff_ms {
-            c.set("retry.backoff.ms", v.to_string());
         }
         if let Some(v) = self.batch_num_messages {
             c.set("batch.num.messages", v.to_string());
@@ -648,13 +639,17 @@ mod test {
             // RdKafkaPropertiesCommon
             "properties.message.max.bytes".to_owned() => "12345".to_owned(),
             "properties.receive.message.max.bytes".to_owned() => "54321".to_owned(),
+            "properties.reconnect.backoff.ms".to_owned() => "1000".to_owned(),
+            "properties.reconnect.backoff.max.ms".to_owned() => "30000".to_owned(),
+            "properties.socket.connection.setup.timeout.ms".to_owned() => "60000".to_owned(),
+            "properties.retry.backoff.ms".to_owned() => "200".to_owned(),
+            "properties.retry.backoff.max.ms".to_owned() => "2000".to_owned(),
             // RdKafkaPropertiesProducer
             "properties.queue.buffering.max.messages".to_owned() => "114514".to_owned(),
             "properties.queue.buffering.max.kbytes".to_owned() => "114514".to_owned(),
             "properties.queue.buffering.max.ms".to_owned() => "114.514".to_owned(),
             "properties.enable.idempotence".to_owned() => "false".to_owned(),
             "properties.message.send.max.retries".to_owned() => "114514".to_owned(),
-            "properties.retry.backoff.ms".to_owned() => "114514".to_owned(),
             "properties.batch.num.messages".to_owned() => "114514".to_owned(),
             "properties.batch.size".to_owned() => "114514".to_owned(),
             "properties.compression.codec".to_owned() => "zstd".to_owned(),
@@ -663,6 +658,33 @@ mod test {
             "properties.request.required.acks".to_owned() => "-1".to_owned(),
         };
         let c = KafkaConfig::from_btreemap(props).unwrap();
+        assert_eq!(c.rdkafka_properties_common.message_max_bytes, Some(12345));
+        assert_eq!(
+            c.rdkafka_properties_common.receive_message_max_bytes,
+            Some(54321)
+        );
+        assert_eq!(c.rdkafka_properties_common.reconnect_backoff_ms, Some(1000));
+        assert_eq!(
+            c.rdkafka_properties_common.reconnect_backoff_max_ms,
+            Some(30000)
+        );
+        assert_eq!(
+            c.rdkafka_properties_common
+                .socket_connection_setup_timeout_ms,
+            Some(60000)
+        );
+        assert_eq!(c.rdkafka_properties_common.retry_backoff_ms, Some(200));
+        assert_eq!(c.rdkafka_properties_common.retry_backoff_max_ms, Some(2000));
+        let mut client_config = rdkafka::ClientConfig::new();
+        c.set_client(&mut client_config);
+        assert_eq!(client_config.get("reconnect.backoff.ms"), Some("1000"));
+        assert_eq!(client_config.get("reconnect.backoff.max.ms"), Some("30000"));
+        assert_eq!(
+            client_config.get("socket.connection.setup.timeout.ms"),
+            Some("60000")
+        );
+        assert_eq!(client_config.get("retry.backoff.ms"), Some("200"));
+        assert_eq!(client_config.get("retry.backoff.max.ms"), Some("2000"));
         assert_eq!(
             c.rdkafka_properties_producer.queue_buffering_max_ms,
             Some(114.514f64)

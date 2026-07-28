@@ -1,6 +1,15 @@
 from ..common import *
 from . import section
 
+cross_db_last_consumed_min_epoch = (
+    f"max({metric('crossdb_last_consumed_min_epoch', table_id_filter_enabled=True)} != 0) by (table_id, actor_id, fragment_id)"
+)
+cross_db_log_expiry_headroom = (
+    f"({epoch_to_unix_millis(cross_db_last_consumed_min_epoch)} / 1000"
+    f" + on(table_id) group_left max({metric('streaming_table_change_log_retention_seconds', node_filter_enabled=False, table_id_filter_enabled=True)} != 0) by (table_id)"
+    f" - time())"
+)
+
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
@@ -71,6 +80,16 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"{metric('meta_snapshot_backfill_upstream_lag')} / (2^16) / 1000",
                             "lag @ {{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Cross-DB Change Log Expiry Headroom",
+                    "How long until each cross-database changelog stream scan's last consumed epoch expires under the upstream table's subscription retention. Negative values mean the consumer has fallen behind retention and next_epoch may fail.",
+                    [
+                        panels.target(
+                            cross_db_log_expiry_headroom,
+                            "table {{table_id}} actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),

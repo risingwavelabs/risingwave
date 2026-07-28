@@ -3658,3 +3658,225 @@ async fn test_schedule_group_split_with_normalize_disabled() {
     let ranges = compaction_group_ranges(&current_version);
     assert_eq!(ranges, vec![(64, 80), (65, 81)]);
 }
+
+#[tokio::test]
+async fn test_time_travel_vacuum_pins_snapshot_epoch() {
+    use risingwave_hummock_sdk::level::Levels;
+    use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+        hummock_time_travel_version,
+    };
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder, QuerySelect};
+
+    async fn insert_version(env: &MetaSrvEnv, id: u64, sst: Option<SstableInfo>) {
+        let mut version = HummockVersion::default();
+        version.id = id.into();
+        if let Some(sst) = sst {
+            version.levels.insert(
+                1.into(),
+                Levels {
+                    levels: vec![Level {
+                        table_infos: vec![sst],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            );
+        }
+        hummock_time_travel_version::Entity::insert(hummock_time_travel_version::ActiveModel {
+            version_id: Set(version.id),
+            version: Set((&version.to_protobuf()).into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_sstable_info(env: &MetaSrvEnv, sst: &SstableInfo) {
+        hummock_sstable_info::Entity::insert(hummock_sstable_info::ActiveModel {
+            sst_id: Set(sst.sst_id),
+            object_id: Set(sst.object_id),
+            sstable_info: Set(SstableInfoV2Backend::from(&sst.to_protobuf())),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_delta(env: &MetaSrvEnv, id: u64, prev_id: u64) {
+        let mut delta = risingwave_hummock_sdk::version::HummockVersionDelta::default();
+        delta.id = id.into();
+        delta.prev_id = prev_id.into();
+        hummock_time_travel_delta::Entity::insert(hummock_time_travel_delta::ActiveModel {
+            version_id: Set(delta.id),
+            version_delta: Set((&delta.to_protobuf()).into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_epoch_mapping(env: &MetaSrvEnv, table_id: TableId, epoch: u64, version: u64) {
+        hummock_epoch_to_version::Entity::insert(hummock_epoch_to_version::ActiveModel {
+            epoch: Set(epoch.try_into().unwrap()),
+            table_id: Set(i64::from(table_id.as_raw_id())),
+            version_id: Set(version.into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    let mut opts = MetaOpts::test(false);
+    opts.time_travel_vacuum_max_version_count = Some(1);
+    let (env, hummock_manager, _, _) = setup_compute_env_with_meta_opts(80, opts).await;
+    let table_id = TableId::new(1);
+    let pinned_sst = gen_sstable_info(10, vec![table_id.as_raw_id()], test_epoch(1));
+    insert_sstable_info(&env, &pinned_sst).await;
+    insert_version(&env, 1, Some(pinned_sst)).await;
+    insert_delta(&env, 2, 1).await;
+    insert_delta(&env, 3, 2).await;
+    insert_version(&env, 4, None).await;
+    insert_version(&env, 5, None).await;
+    insert_epoch_mapping(&env, table_id, 100, 2).await;
+    insert_epoch_mapping(&env, table_id, 150, 3).await;
+    insert_epoch_mapping(&env, table_id, 175, 3).await;
+    insert_epoch_mapping(&env, table_id, 200, 4).await;
+    insert_epoch_mapping(&env, table_id, 300, 5).await;
+    insert_epoch_mapping(&env, TableId::new(2), 50, 6).await;
+
+    hummock_manager
+        .truncate_time_travel_metadata(
+            250,
+            HashMap::from([
+                (table_id, HashSet::from([100, 125, 150])),
+                (TableId::new(2), HashSet::from([50])),
+                (TableId::new(999), HashSet::from([100, 250, 300])),
+            ]),
+        )
+        .await
+        .unwrap();
+
+    let epoch_rows = hummock_epoch_to_version::Entity::find()
+        .order_by_asc(hummock_epoch_to_version::Column::Epoch)
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        epoch_rows
+            .iter()
+            .map(|row| u64::try_from(row.epoch).unwrap())
+            .collect_vec(),
+        vec![50, 100, 150, 300]
+    );
+    let version_ids: Vec<risingwave_meta_model::HummockVersionId> =
+        hummock_time_travel_version::Entity::find()
+            .select_only()
+            .column(hummock_time_travel_version::Column::VersionId)
+            .order_by_asc(hummock_time_travel_version::Column::VersionId)
+            .into_tuple()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        version_ids.iter().map(|id| id.as_raw_id()).collect_vec(),
+        vec![1, 4, 5]
+    );
+    let delta_ids: Vec<risingwave_meta_model::HummockVersionId> =
+        hummock_time_travel_delta::Entity::find()
+            .select_only()
+            .column(hummock_time_travel_delta::Column::VersionId)
+            .order_by_asc(hummock_time_travel_delta::Column::VersionId)
+            .into_tuple()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        delta_ids.iter().map(|id| id.as_raw_id()).collect_vec(),
+        vec![2, 3]
+    );
+    assert_eq!(
+        hummock_sstable_info::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        hummock_manager
+            .gc_manager
+            .try_take_may_delete_object_ids(1)
+            .is_none()
+    );
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(100, table_id)
+            .await
+            .unwrap()
+            .id
+            .as_raw_id(),
+        2
+    );
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(150, table_id)
+            .await
+            .unwrap()
+            .id
+            .as_raw_id(),
+        3
+    );
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(300, table_id)
+            .await
+            .unwrap()
+            .id
+            .as_raw_id(),
+        5
+    );
+
+    hummock_manager
+        .truncate_time_travel_metadata(350, HashMap::new())
+        .await
+        .unwrap();
+    assert!(
+        hummock_manager
+            .epoch_to_version(100, table_id)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        hummock_time_travel_version::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        hummock_time_travel_delta::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        hummock_sstable_info::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        hummock_manager
+            .gc_manager
+            .try_take_may_delete_object_ids(1)
+            .unwrap()
+            .into_iter()
+            .map(|object_id| object_id.as_raw().as_raw_id())
+            .collect_vec(),
+        vec![10]
+    );
+}

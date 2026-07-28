@@ -170,6 +170,8 @@ pub struct MetaMetrics {
     pub table_change_log_object_count: IntGaugeVec,
     /// Size of objects per table change log.
     pub table_change_log_object_size: IntGaugeVec,
+    /// Min epoch currently retained in table change log.
+    pub table_change_log_min_epoch: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -221,6 +223,8 @@ pub struct MetaMetrics {
     pub relation_info: IntGaugeVec,
     /// Backfill progress per fragment
     pub backfill_fragment_progress: IntGaugeVec,
+    /// Max subscription retention configured for the table's changelog.
+    pub streaming_table_change_log_retention_seconds: IntGaugeVec,
 
     // ********************************** System Params ************************************
     /// A dummy gauge metric with labels carrying system parameter info.
@@ -557,6 +561,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let table_change_log_min_epoch = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_min_epoch",
+            "min epoch currently retained in table change log",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -742,6 +754,14 @@ impl MetaMetrics {
             "relation_info",
             "Information of the database relation (table/source/sink/materialized view/index/internal)",
             &["id", "database", "schema", "name", "resource_group", "type"],
+            registry
+        )
+        .unwrap();
+
+        let streaming_table_change_log_retention_seconds = register_int_gauge_vec_with_registry!(
+            "streaming_table_change_log_retention_seconds",
+            "Max subscription retention configured for the table change log in seconds",
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -975,6 +995,7 @@ impl MetaMetrics {
             total_object_size,
             table_change_log_object_count,
             table_change_log_object_size,
+            table_change_log_min_epoch,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -1001,6 +1022,7 @@ impl MetaMetrics {
             sink_info,
             relation_info,
             backfill_fragment_progress,
+            streaming_table_change_log_retention_seconds,
             system_param_info,
             l0_compact_level_count,
             compact_task_size,
@@ -1262,8 +1284,18 @@ pub async fn refresh_relation_info_metrics(
             return;
         }
     };
+    let subscriptions = match catalog_controller.list_subscriptions().await {
+        Ok(subscriptions) => subscriptions,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get subscription objects");
+            return;
+        }
+    };
 
     meta_metrics.relation_info.reset();
+    meta_metrics
+        .streaming_table_change_log_retention_seconds
+        .reset();
 
     for (id, db, schema, name, resource_group, table_type) in table_objects {
         let relation_type = match table_type {
@@ -1311,6 +1343,22 @@ pub async fn refresh_relation_info_metrics(
                 &"sink".to_owned(),
             ])
             .set(1);
+    }
+
+    let mut max_retention_by_table = HashMap::new();
+    for subscription in subscriptions {
+        max_retention_by_table
+            .entry(subscription.dependent_table_id)
+            .and_modify(|retention: &mut u64| {
+                *retention = (*retention).max(subscription.retention_seconds);
+            })
+            .or_insert(subscription.retention_seconds);
+    }
+    for (table_id, retention_seconds) in max_retention_by_table {
+        meta_metrics
+            .streaming_table_change_log_retention_seconds
+            .with_label_values(&[&table_id.to_string()])
+            .set(retention_seconds as _);
     }
 }
 

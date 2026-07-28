@@ -49,6 +49,7 @@ pub mod sqlserver;
 feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
+pub mod turbopuffer;
 pub mod utils;
 pub mod writer;
 pub mod prelude {
@@ -127,6 +128,7 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
+                { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
