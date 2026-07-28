@@ -279,7 +279,8 @@ pub fn get_project_mask(
                         tracing::warn!(
                             column = %column.name,
                             declared_type = %rw_data_type,
-                            parquet_field = ?arrow_field,
+                            parquet_type = %arrow_field.data_type(),
+                            parquet_extension = ?arrow_field.extension_type_name(),
                             "parquet column does not match the declared source schema; it will be NULL-filled",
                         );
                         None
