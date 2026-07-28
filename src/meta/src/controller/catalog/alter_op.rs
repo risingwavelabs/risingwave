@@ -1152,6 +1152,12 @@ impl CatalogController {
         entries_to_add: HashMap<String, String>,
         keys_to_remove: Vec<String>,
     ) -> MetaResult<NotificationVersion> {
+        let updates_cache_refill_policy = entries_to_add
+            .contains_key(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
+            || keys_to_remove
+                .iter()
+                .any(|key| key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH);
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1208,6 +1214,21 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+        drop(inner);
+
+        if updates_cache_refill_policy {
+            let policies = self.table_cache_refill_policies_snapshot().await?;
+            self.env
+                .notification_manager()
+                .notify_hummock(
+                    NotificationOperation::Update,
+                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        table_cache_refill_policies: Some(policies),
+                        ..Default::default()
+                    }),
+                )
+                .await;
+        }
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }
