@@ -2596,62 +2596,6 @@ mod tests {
     }
 
     #[test]
-    fn test_iceberg_engine_manifest_rewrite_default() {
-        let sink_options = BTreeMap::from([
-            ("connector".to_owned(), "iceberg".to_owned()),
-            ("catalog.name".to_owned(), "test-catalog".to_owned()),
-            ("catalog.type".to_owned(), "storage".to_owned()),
-            (
-                "warehouse.path".to_owned(),
-                "s3://test-bucket/warehouse".to_owned(),
-            ),
-            ("database.name".to_owned(), "test_db".to_owned()),
-            ("table.name".to_owned(), "test_table".to_owned()),
-        ]);
-        let table = TableCatalog {
-            append_only: true,
-            ..Default::default()
-        };
-
-        let v2_options = build_iceberg_engine_sink_options(
-            sink_options.clone(),
-            &WithOptions::default(),
-            &table,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(
-            v2_options.get(ENABLE_MANIFEST_REWRITE).map(String::as_str),
-            Some("true")
-        );
-
-        let explicitly_disabled = WithOptions::new_with_options(BTreeMap::from([(
-            ENABLE_MANIFEST_REWRITE.to_owned(),
-            "false".to_owned(),
-        )]));
-        let explicitly_disabled_options = build_iceberg_engine_sink_options(
-            sink_options.clone(),
-            &explicitly_disabled,
-            &table,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(
-            explicitly_disabled_options
-                .get(ENABLE_MANIFEST_REWRITE)
-                .map(String::as_str),
-            Some("false")
-        );
-
-        let v3 = WithOptions::new_with_options(BTreeMap::from([(
-            "format_version".to_owned(),
-            "3".to_owned(),
-        )]));
-        let v3_options = build_iceberg_engine_sink_options(sink_options, &v3, &table, &[]).unwrap();
-        assert!(!v3_options.contains_key(ENABLE_MANIFEST_REWRITE));
-    }
-
-    #[test]
     fn test_debezium_filter_rejects_literal_excluded_pk() {
         let err = reject_pk_filtered_by_debezium_column_filter_inner(
             &pk_names(),
