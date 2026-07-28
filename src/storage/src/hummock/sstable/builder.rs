@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 use super::utils::CompressionAlgorithm;
 use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
-    DEFAULT_RESTART_INTERVAL, SstableMeta, SstableWriter, VERSION,
+    DEFAULT_RESTART_INTERVAL, SstableMeta, SstableWriter, SstableWriterPayload, VERSION,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
@@ -682,7 +682,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let writer_output = self
             .writer
-            .finish(meta)
+            .finish(SstableWriterPayload::V2(meta))
             .instrument_await("sstable_writer_finish".verbose())
             .await?;
         // The timestamp is only used during full GC.
@@ -1271,11 +1271,10 @@ pub(super) mod tests {
             test_key_of(TEST_KEYS_COUNT - 1).encode(),
             info.key_range.right
         );
-        let (data, meta) = output.writer_output;
-        assert_eq!(info.file_size, meta.estimated_size as u64);
+        let data = output.writer_output;
         let offset = info.meta_offset as usize;
-        let meta2 = SstableMeta::decode(&data[offset..]).unwrap();
-        assert_eq!(meta2, meta);
+        let meta = SstableMeta::decode(&data[offset..]).unwrap();
+        assert_eq!(info.file_size, meta.estimated_size as u64);
     }
 
     async fn test_with_xor_filter_builder<F: FilterBuilder>(
