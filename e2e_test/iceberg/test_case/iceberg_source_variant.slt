@@ -199,27 +199,21 @@ where id = 3;
 ----
 t object
 
-# Variant is gated out of the DataFusion batch engine, so these queries fall back to
-# the RisingWave engine: bare variant output and canonical (not raw-byte) grouping.
+# Variant is gated out of the DataFusion batch engine, so these queries fall back to the
+# RisingWave engine. Grouping/ordering on a variant column is rejected outright before
+# either engine sees it; `e2e_test/ddl/variant.slt` pins that.
 # Bare top-level variant expression, no cast: renders as the canonical JSON text.
 query T
 select variant_get(v_object, '$.a') from iceberg_variant_source where id = 1;
 ----
 1
 
-# GROUP BY on a variant column: three distinct values (object, null, empty object).
-query I
-select count(*) from iceberg_variant_source group by v_object order by 1;
+# The variant is manufactured by the projection, so the scan schema has none and only a
+# non-scan node schema carries it — the other half of the DataFusion schema gate.
+query T
+select id::varchar::variant from iceberg_variant_source where id = 1;
 ----
 1
-1
-1
-
-# DISTINCT over a variant column: null is excluded, two distinct objects remain.
-query I
-select count(distinct v_object) from iceberg_variant_source;
-----
-2
 
 # A variant-typed subexpression over a variant-free plan schema passes the DataFusion
 # schema gate but must still fall back at plan time (variant-returning fallback expr).
