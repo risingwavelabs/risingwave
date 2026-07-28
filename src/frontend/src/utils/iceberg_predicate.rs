@@ -256,7 +256,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::types::{MapType, ScalarImpl, StructType};
 
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
@@ -287,5 +287,56 @@ mod tests {
                 .unwrap_or_else(|| panic!("{op:?} should be pushable"));
             assert_eq!(predicate.to_string(), expected);
         }
+    }
+
+    fn null_check(op: ExprType, input_type: DataType) -> ExprImpl {
+        let col: ExprImpl = InputRef::new(0, input_type).into();
+        FunctionCall::new_unchecked(op, vec![col], DataType::Boolean).into()
+    }
+
+    #[test]
+    fn non_primitive_columns_are_not_pushed_down() {
+        // iceberg-rust only builds field accessors for primitive columns, so a pushed-down
+        // predicate on any other type fails the scan with "Accessor for Field ... not found".
+        let unpushable = [
+            DataType::Struct(StructType::new(vec![("a", DataType::Int32)])),
+            DataType::list(DataType::Int32),
+            DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
+            DataType::Variant,
+            DataType::Jsonb,
+        ];
+        for data_type in unpushable {
+            let fields = vec![Field::new("c", data_type.clone())];
+            for op in [ExprType::IsNull, ExprType::IsNotNull] {
+                let expr = null_check(op, data_type.clone());
+                assert!(
+                    rw_expr_to_iceberg_predicate(&expr, &fields).is_none(),
+                    "{op:?} on {data_type} must not be pushed down"
+                );
+            }
+        }
+
+        let fields = vec![Field::new("c", DataType::Int64)];
+        for op in [ExprType::IsNull, ExprType::IsNotNull] {
+            let expr = null_check(op, DataType::Int64);
+            assert!(
+                rw_expr_to_iceberg_predicate(&expr, &fields).is_some(),
+                "{op:?} on a primitive column should be pushable"
+            );
+        }
+    }
+
+    #[test]
+    fn pushability_follows_the_iceberg_side_column_type() {
+        // Engine tables remap the scan schema to Hummock types (here jsonb backed by an iceberg
+        // string), so the `InputRef` carries jsonb while the iceberg-side field carries varchar.
+        // Judging by the remapped type would silently drop the pushdown.
+        let expr = null_check(ExprType::IsNotNull, DataType::Jsonb);
+
+        let iceberg_side = vec![Field::new("c", DataType::Varchar)];
+        assert!(rw_expr_to_iceberg_predicate(&expr, &iceberg_side).is_some());
+
+        let remapped = vec![Field::new("c", DataType::Jsonb)];
+        assert!(rw_expr_to_iceberg_predicate(&expr, &remapped).is_none());
     }
 }
