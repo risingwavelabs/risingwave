@@ -29,6 +29,7 @@ import Head from "next/head"
 import Link from "next/link"
 import {
   Fragment,
+  forwardRef,
   type ButtonHTMLAttributes,
   type ComponentProps,
   type CSSProperties,
@@ -193,12 +194,13 @@ const textLinkStyle: CSSProperties = {
   textDecoration: "none",
 }
 
-const TextButton = ({
-  style,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement>) => (
-  <button {...props} style={{ ...textButtonStyle, ...style }} />
-)
+const TextButton = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement>
+>(({ style, ...props }, ref) => (
+  <button ref={ref} {...props} style={{ ...textButtonStyle, ...style }} />
+))
+TextButton.displayName = "TextButton"
 
 const TextLink = ({ style, ...props }: ComponentProps<typeof Link>) => (
   <Link {...props} style={{ ...textLinkStyle, ...style }} />
