@@ -245,7 +245,7 @@ impl CreatingStreamingJobStatus {
         &mut self,
         barrier_info: &BarrierInfo,
         mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
-        barrier_amplification_factor: usize,
+        barrier_num_to_inject: usize,
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -255,6 +255,10 @@ impl CreatingStreamingJobStatus {
                 create_mview_tracker,
                 ..
             } => {
+                pending_upstream_barriers.push(barrier_info.clone());
+                if barrier_num_to_inject == 0 {
+                    return vec![];
+                }
                 let mutation = mutation.or_else(|| {
                     let pending_backfill_nodes = create_mview_tracker
                         .take_pending_backfill_nodes()
@@ -269,7 +273,6 @@ impl CreatingStreamingJobStatus {
                         ))
                     }
                 });
-                pending_upstream_barriers.push(barrier_info.clone());
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(
                         prev_epoch_fake_physical_time,
@@ -287,14 +290,17 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
-            } => drain_pending_barriers(
-                pending_barriers,
-                barrier_info.clone(),
-                barrier_amplification_factor,
-            )
-            .into_iter()
-            .map(|barrier_info| (barrier_info, None))
-            .collect(),
+            } => {
+                let mut mutation = mutation;
+                drain_pending_barriers(
+                    pending_barriers,
+                    barrier_info.clone(),
+                    barrier_num_to_inject,
+                )
+                .into_iter()
+                .map(|barrier_info| (barrier_info, mutation.take()))
+                .collect()
+            }
             CreatingStreamingJobStatus::Finishing { .. }
             | CreatingStreamingJobStatus::Resetting(..) => {
                 vec![]
@@ -358,10 +364,10 @@ impl CreatingStreamingJobStatus {
 fn drain_pending_barriers(
     pending_barriers: &mut VecDeque<BarrierInfo>,
     new_upstream_barrier: BarrierInfo,
-    barrier_amplification_factor: usize,
+    barrier_num_to_inject: usize,
 ) -> Vec<BarrierInfo> {
     pending_barriers.push_back(new_upstream_barrier);
-    let barrier_count = pending_barriers.len().min(barrier_amplification_factor);
+    let barrier_count = pending_barriers.len().min(barrier_num_to_inject);
     pending_barriers.drain(..barrier_count).collect()
 }
 
@@ -385,23 +391,33 @@ mod tests {
     }
 
     #[test]
-    fn test_drain_pending_barriers_with_amplification_factor() {
+    fn test_drain_pending_barriers_with_available_capacity() {
         let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 2);
-        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 0);
+        assert!(injected.is_empty());
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
-            vec![(3, 4), (4, 5)]
+            vec![(1, 2), (2, 3), (3, 4), (4, 5)]
         );
 
         let injected = drain_pending_barriers(&mut pending_barriers, barrier(5, 6), 2);
-        assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
-        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(5, 6)]);
+        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(3, 4), (4, 5), (5, 6)]
+        );
 
         let injected = drain_pending_barriers(&mut pending_barriers, barrier(6, 7), 2);
+        assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(5, 6), (6, 7)]
+        );
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(7, 8), 2);
         assert_eq!(epochs(&injected), vec![(5, 6), (6, 7)]);
-        assert!(pending_barriers.is_empty());
+        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(7, 8)]);
     }
 
     #[test]

@@ -535,12 +535,6 @@ impl PartialGraphManager {
         graph
     }
 
-    pub(super) fn inflight_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
-        self.running_graph(partial_graph_id)
-            .barrier_item_collector
-            .inflight_barrier_num()
-    }
-
     pub(super) fn pending_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
         self.running_graph(partial_graph_id).pending_barrier_num()
     }
@@ -876,5 +870,65 @@ impl PartialGraphManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::Epoch;
+
+    use super::*;
+    use crate::barrier::TracedEpoch;
+
+    struct TestPartialGraphStat;
+
+    impl PartialGraphStat for TestPartialGraphStat {
+        fn observe_barrier_latency(&self, _epoch: EpochPair, _barrier_latency_secs: f64) {}
+
+        fn observe_barrier_num(&self, _inflight_barrier_num: usize, _collected_barrier_num: usize) {
+        }
+    }
+
+    fn barrier_info(prev_epoch: u64, curr_epoch: u64) -> PartialGraphBarrierInfo {
+        PartialGraphBarrierInfo::new(
+            PostCollectCommand::barrier(),
+            BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
+                kind: BarrierKind::Barrier,
+            },
+            vec![],
+            HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn test_pending_barrier_num_includes_collected_and_completing() {
+        let mut state = PartialGraphRunningState::new(Box::new(TestPartialGraphStat));
+        let worker_id: WorkerId = 1.into();
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(2, 1),
+            HashSet::from([worker_id]),
+            barrier_info(1, 2),
+        );
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(3, 2),
+            HashSet::from([worker_id]),
+            barrier_info(2, 3),
+        );
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .collect(1, worker_id, BarrierCompleteResponse::default());
+        state.barrier_item_collector.barrier_collected();
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .take_collected_if(|epoch| epoch.prev == 1)
+            .expect("the first barrier should be collected");
+        state.completing_epoch = Some(1);
+        assert_eq!(state.pending_barrier_num(), 2);
     }
 }
