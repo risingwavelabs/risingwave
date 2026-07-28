@@ -102,6 +102,7 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering main-cron for branch: ${{ env.BRANCH_NAME }}'
+          ignore_pipeline_branch_filter: true
           wait: false
       - name: 'Summarize Buildkite builds'
         if: ${{ always() }}
