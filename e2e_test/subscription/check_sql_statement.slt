@@ -11,7 +11,10 @@ statement ok
 create schema s1;
 
 statement ok
-create subscription s1.sub1 from t1 with(retention = '1D');
+create table s1.t1 (v1 int, v2 int, v3 int);
+
+statement ok
+create subscription s1.sub1 from s1.t1 with(retention = '1D');
 
 statement ok
 declare cur subscription cursor for sub;
@@ -62,6 +65,9 @@ close cur7;
 
 statement ok
 drop subscription s1.sub1;
+
+statement ok
+drop table s1.t1;
 
 statement ok
 drop schema s1;
