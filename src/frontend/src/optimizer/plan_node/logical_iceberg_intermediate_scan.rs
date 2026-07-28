@@ -18,7 +18,7 @@ use educe::Educe;
 use iceberg::expr::Predicate;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 
@@ -170,14 +170,14 @@ impl LogicalIcebergIntermediateScan {
             .catalog
             .as_ref()
             .expect("iceberg intermediate scan must have a source catalog");
+        let by_name: HashMap<&str, &ColumnCatalog> =
+            catalog.columns.iter().map(|c| (c.name(), c)).collect();
         self.core
             .column_catalog
             .iter()
             .map(|col| {
-                let source_col = catalog
-                    .columns
-                    .iter()
-                    .find(|c| c.name() == col.name())
+                let source_col = by_name
+                    .get(col.name())
                     .expect("output column must exist in the source catalog");
                 Field::from(&source_col.column_desc)
             })
