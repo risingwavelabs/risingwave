@@ -21,6 +21,7 @@ use clap::ValueEnum;
 use either::Either;
 use fancy_regex::Regex;
 use fixedbitset::FixedBitSet;
+use iceberg::spec::FormatVersion;
 use itertools::Itertools;
 use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -100,8 +101,8 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    ENABLE_COMPACTION, IcebergConfig, IcebergSink, is_iceberg_engine_option,
-    parse_partition_by_exprs, validate_order_key_columns,
+    ENABLE_COMPACTION, ENABLE_MANIFEST_REWRITE, IcebergConfig, IcebergSink,
+    is_iceberg_engine_option, parse_partition_by_exprs, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1810,6 +1811,14 @@ fn build_iceberg_engine_sink_options(
 
     let config = IcebergConfig::from_btreemap(sink_options.clone())?;
 
+    // Engine tables own their Iceberg maintenance policy, so enable manifest rewrites by default
+    // whenever the table format supports them. Keep V3 disabled until rewrites preserve row lineage.
+    if config.table_format_version() < FormatVersion::V3 {
+        sink_options
+            .entry(ENABLE_MANIFEST_REWRITE.to_owned())
+            .or_insert_with(|| "true".to_owned());
+    }
+
     if let Some(partition_by) = &config.partition_by {
         let mut partition_columns = vec![];
         for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
@@ -2584,6 +2593,62 @@ mod tests {
 
     fn pk_names() -> Vec<String> {
         vec!["plan_id".to_owned(), "site_id".to_owned()]
+    }
+
+    #[test]
+    fn test_iceberg_engine_manifest_rewrite_default() {
+        let sink_options = BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("catalog.name".to_owned(), "test-catalog".to_owned()),
+            ("catalog.type".to_owned(), "storage".to_owned()),
+            (
+                "warehouse.path".to_owned(),
+                "s3://test-bucket/warehouse".to_owned(),
+            ),
+            ("database.name".to_owned(), "test_db".to_owned()),
+            ("table.name".to_owned(), "test_table".to_owned()),
+        ]);
+        let table = TableCatalog {
+            append_only: true,
+            ..Default::default()
+        };
+
+        let v2_options = build_iceberg_engine_sink_options(
+            sink_options.clone(),
+            &WithOptions::default(),
+            &table,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            v2_options.get(ENABLE_MANIFEST_REWRITE).map(String::as_str),
+            Some("true")
+        );
+
+        let explicitly_disabled = WithOptions::new_with_options(BTreeMap::from([(
+            ENABLE_MANIFEST_REWRITE.to_owned(),
+            "false".to_owned(),
+        )]));
+        let explicitly_disabled_options = build_iceberg_engine_sink_options(
+            sink_options.clone(),
+            &explicitly_disabled,
+            &table,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            explicitly_disabled_options
+                .get(ENABLE_MANIFEST_REWRITE)
+                .map(String::as_str),
+            Some("false")
+        );
+
+        let v3 = WithOptions::new_with_options(BTreeMap::from([(
+            "format_version".to_owned(),
+            "3".to_owned(),
+        )]));
+        let v3_options = build_iceberg_engine_sink_options(sink_options, &v3, &table, &[]).unwrap();
+        assert!(!v3_options.contains_key(ENABLE_MANIFEST_REWRITE));
     }
 
     #[test]
