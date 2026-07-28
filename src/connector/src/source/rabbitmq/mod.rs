@@ -339,7 +339,7 @@ impl RabbitmqProperties {
             let channel = connection.create_channel().await?;
             channel
                 .queue_declare(
-                    queue.as_str(),
+                    queue.as_str().into(),
                     QueueDeclareOptions {
                         passive: self.queue_passive(),
                         durable: false,

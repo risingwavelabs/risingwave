@@ -161,8 +161,8 @@ impl SplitReader for RabbitmqSplitReader {
             );
             let consumer = channel
                 .basic_consume(
-                    queue.as_str(),
-                    consumer_tag.as_str(),
+                    queue.as_str().into(),
+                    consumer_tag.as_str().into(),
                     BasicConsumeOptions {
                         no_local: false,
                         no_ack: false,
