@@ -63,9 +63,10 @@ impl DataFusionExecuteChecker {
 
 /// A schema is unsupported by DataFusion if any field is (or nests) a `VARIANT`.
 ///
-/// RisingWave compares and orders variant by its canonical decoded form, while
-/// DataFusion would group/join/sort on the raw `{metadata, value}` struct bytes,
-/// and converting a top-level variant result back to an Arrow array is unsupported.
+/// Converting a variant array to Arrow is unsupported, so a variant anywhere in a node
+/// schema would fail at runtime with no fallback left. Keying on one is already rejected
+/// earlier by [`crate::optimizer::variant_key`], so this gate is what catches the rest —
+/// a variant that is merely carried through a plan, e.g. `select v from t`.
 fn schema_supported_by_datafusion(schema: &Schema) -> bool {
     !schema
         .fields()

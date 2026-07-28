@@ -306,7 +306,10 @@ fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, 
             Some(value) if value.is_valid(idx) => {
                 VariantVal::from_parts(metadata_accessor.value(idx), value.value(idx))
             }
-            // Per spec, a missing `value` means variant null.
+            // Mirrors the upstream `VariantArray::try_value` fallback. Shredded arrays are
+            // rejected above, so reaching this arm means the file is malformed for the
+            // unshredded encoding — `value` is required there — and the row silently becomes
+            // variant null rather than SQL NULL.
             _ => Ok(VariantVal::null()),
         };
 
