@@ -19,6 +19,7 @@ mod commit;
 pub mod commit_retry;
 mod config;
 mod create_table;
+mod engine_options;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
 mod prometheus;
@@ -32,6 +33,7 @@ use anyhow::{Context, anyhow};
 pub use commit::*;
 pub use config::*;
 pub use create_table::*;
+pub use engine_options::*;
 use iceberg::table::Table;
 use risingwave_common::bail;
 use tokio::sync::mpsc::UnboundedSender;

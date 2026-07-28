@@ -71,7 +71,11 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/source_inline/pubsub", "e2e_test/udf/embedded_wasm", "lints"]
+exclude = [
+    "e2e_test/source_inline/pubsub",
+    "e2e_test/udf/embedded_wasm",
+    "lints",
+]
 resolver = "2"
 
 [workspace.package]
@@ -168,14 +172,14 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
