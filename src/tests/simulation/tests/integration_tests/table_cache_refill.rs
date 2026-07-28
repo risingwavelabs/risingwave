@@ -164,12 +164,14 @@ async fn refill_state_rebuilt_after_database_recovery() -> Result<()> {
 #[tokio::test]
 async fn serving_refill_mapping_updated_on_worker_activation() -> Result<()> {
     let mut config = Configuration::for_auto_parallelism(10, true);
-    config.compute_nodes = 2;
+    config.compute_nodes = 0;
     config.compute_node_cores = 1;
-    config.compute_node_roles =
-        HashMap::from([(1, "streaming".to_owned()), (2, "serving".to_owned())]);
 
     let mut cluster = Cluster::start(config).await?;
+    create_compute_node(&cluster, 1, "streaming");
+    create_compute_node(&cluster, 2, "serving");
+    wait_for_compute_worker(&cluster, "192.168.3.1").await?;
+    let existing_worker = wait_for_compute_worker(&cluster, EXISTING_WORKER_HOST).await?;
     let mut session = cluster.start_session();
     let result_table_id = create_stateful_both_mv(&mut session).await?;
 
@@ -177,7 +179,6 @@ async fn serving_refill_mapping_updated_on_worker_activation() -> Result<()> {
     // cause of the state transition observed below.
     session.run("recover;").await?;
 
-    let existing_worker = wait_for_compute_worker(&cluster, EXISTING_WORKER_HOST).await?;
     let before =
         wait_for_meta_ownership(&cluster, existing_worker.id, result_table_id, |ownership| {
             ownership.serving.len() == ownership.vnode_count
@@ -392,10 +393,10 @@ async fn meta_ownership_inner(
     let (job_id, serving_mapping) = serving_mappings
         .get(&result_fragment.fragment_id)
         .context("serving vnode mapping is missing result fragment")?;
-    if job_id.as_raw_id() != result_table_id.as_raw_id() {
+    if *job_id != result_table_id.as_raw_id() {
         return Err(anyhow!(
             "serving vnode mapping belongs to job {}, expected {}",
-            job_id.as_raw_id(),
+            job_id,
             result_table_id.as_raw_id()
         ));
     }
