@@ -102,8 +102,7 @@ use crate::{MetaError, MetaResult};
 
 /// Result of [`CatalogController::try_abort_creating_streaming_job`].
 pub struct AbortCreatingJobResult {
-    /// The job was aborted by this call or already gone. `false` means a background job
-    /// that has progressed past the initial status was left untouched.
+    /// The job was aborted by this call or already gone. `false` means the job was left untouched.
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
@@ -939,7 +938,10 @@ impl CatalogController {
         )))
     }
 
-    /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
+    /// Tries to abort a creating streaming job.
+    ///
+    /// An explicit cancellation always aborts the job. An ordinary creation failure only aborts a
+    /// job in the initial status; a job that has reached the creating status is left to recovery.
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
@@ -967,19 +969,27 @@ impl CatalogController {
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
         if !is_cancelled && let Some(streaming_job) = &streaming_job {
-            assert_ne!(streaming_job.job_status, JobStatus::Created);
-            if streaming_job.create_type == CreateType::Background
-                && streaming_job.job_status == JobStatus::Creating
-            {
+            if streaming_job.job_status == JobStatus::Created {
+                tracing::warn!(
+                    id = %job_id,
+                    "streaming job has already been created"
+                );
+                return Ok(AbortCreatingJobResult {
+                    aborted: false,
+                    database_id: Some(database_id),
+                    aborted_sink_id: None,
+                });
+            }
+            if streaming_job.job_status == JobStatus::Creating {
                 if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
                     && check_if_belongs_to_iceberg_table(&txn, job_id).await?
                 {
                     // If the job belongs to an iceberg table, we still need to clean it.
                 } else {
-                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    // The first barrier has been collected. Leave the job to recovery.
                     tracing::warn!(
                         id = %job_id,
-                        "streaming job is created in background and still in creating status"
+                        "streaming job is still in creating status"
                     );
                     return Ok(AbortCreatingJobResult {
                         aborted: false,
@@ -1293,9 +1303,8 @@ impl CatalogController {
         };
         if replace_sink.is_some() {
             // The old sink is dropped in this transaction before the replacement job may be
-            // marked Created by a later barrier. If meta recovers in that window, foreground
-            // creating jobs are aborted while background jobs are recovered, so replacement
-            // sinks must become background jobs at cutover.
+            // marked Created by a later barrier. Preserve it across recovery even when the legacy
+            // option to clean all foreground creating jobs is enabled.
             streaming_job_model.create_type = Set(CreateType::Background);
         }
         StreamingJobModel::update(streaming_job_model)

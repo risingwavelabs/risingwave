@@ -65,7 +65,6 @@ use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
 use risingwave_pb::meta::{
     PbObject, PbObjectGroup, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
 };
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -578,28 +577,40 @@ impl CatalogController {
         Ok(())
     }
 
-    /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
+    /// Cleans up jobs in `Initial` status. Creating jobs are cleaned up when their creation
+    /// progress cannot be recovered, or when `clean_all_foreground_jobs_on_recovery` is enabled
+    /// and they use foreground creation.
     pub(crate) async fn clean_dirty_creating_jobs(
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<CleanedDirtyStreamingJobs> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let clean_all_foreground_jobs = self.env.opts.clean_all_foreground_jobs_on_recovery;
 
-        let filter_condition = streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
-            streaming_job::Column::JobStatus
-                .eq(JobStatus::Creating)
-                .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
-        );
-
-        let filter_condition = if let Some(database_id) = database_id {
-            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        let candidate_job_filter =
+            streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating]);
+        let candidate_job_filter = if let Some(database_id) = database_id {
+            candidate_job_filter.and(object::Column::DatabaseId.eq(database_id))
         } else {
-            filter_condition
+            candidate_job_filter
         };
-
-        let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        type CandidateJob = (
+            JobId,
+            JobStatus,
+            CreateType,
+            ObjectId,
+            ObjectType,
+            Option<SchemaId>,
+            Option<DatabaseId>,
+        );
+        let candidate_jobs: Vec<CandidateJob> = streaming_job::Entity::find()
             .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::JobStatus,
+                streaming_job::Column::CreateType,
+            ])
             .columns([
                 object::Column::Oid,
                 object::Column::ObjType,
@@ -607,10 +618,49 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
-            .filter(filter_condition)
-            .into_partial_model()
+            .filter(candidate_job_filter)
+            .into_tuple()
             .all(&txn)
             .await?;
+        let creating_job_ids = candidate_jobs
+            .iter()
+            .filter(|(_, job_status, create_type, ..)| {
+                *job_status == JobStatus::Creating
+                    && (!clean_all_foreground_jobs || *create_type == CreateType::Foreground)
+            })
+            .map(|(job_id, ..)| *job_id)
+            .collect_vec();
+
+        let dirty_creating_job_ids: HashSet<JobId> =
+            if clean_all_foreground_jobs || creating_job_ids.is_empty() {
+                creating_job_ids.into_iter().collect()
+            } else {
+                Fragment::find()
+                    .select_only()
+                    .column(fragment::Column::JobId)
+                    .filter(fragment::Column::JobId.is_in(creating_job_ids))
+                    .filter(FragmentTypeMask::contains_non_recoverable_fragment())
+                    .into_tuple()
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .collect()
+            };
+
+        let mut dirty_job_objs = candidate_jobs
+            .into_iter()
+            .filter(|(job_id, job_status, ..)| {
+                *job_status == JobStatus::Initial || dirty_creating_job_ids.contains(job_id)
+            })
+            .map(
+                |(_, _, _, oid, obj_type, schema_id, database_id)| PartialObject {
+                    oid,
+                    obj_type,
+                    schema_id,
+                    database_id,
+                },
+            )
+            .collect_vec();
 
         // Check if there are any pending iceberg table jobs.
         let dirty_iceberg_jobs = find_dirty_iceberg_table_jobs(&txn, database_id).await?;
