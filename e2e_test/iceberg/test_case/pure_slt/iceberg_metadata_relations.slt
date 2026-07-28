@@ -1,4 +1,4 @@
-# Per-table Iceberg metadata relations for Iceberg engine tables and standalone sinks.
+# Per-table Iceberg metadata relations for Iceberg engine tables, sources, and standalone sinks.
 
 statement ok
 CREATE SECRET iceberg_metadata_relations_secret WITH (
@@ -140,6 +140,30 @@ FROM "iceberg_metadata_relations_sink$files"
 WHERE content = 'Data' AND file_format = 'parquet';
 ----
 t
+
+statement ok
+CREATE SOURCE iceberg_metadata_relations_iceberg_source WITH (
+  connector = 'iceberg',
+  warehouse.path = 's3a://icebergdata',
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.access.key = secret iceberg_metadata_relations_secret,
+  s3.secret.key = secret iceberg_metadata_relations_secret,
+  s3.region = 'us-east-1',
+  catalog.name = 'demo',
+  catalog.type = 'storage',
+  database.name = 'demo_db',
+  table.name = 'iceberg_metadata_relations_sink_table'
+);
+
+query ? retry 20 backoff 1s
+SELECT count(*) > 0
+FROM "iceberg_metadata_relations_iceberg_source$files"
+WHERE content = 'Data';
+----
+t
+
+statement ok
+DROP SOURCE iceberg_metadata_relations_iceberg_source;
 
 statement ok
 DROP SINK iceberg_metadata_relations_sink;

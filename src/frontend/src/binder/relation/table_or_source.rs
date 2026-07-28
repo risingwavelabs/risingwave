@@ -334,10 +334,10 @@ impl Binder {
                     (table.clone(), resolved_schema_name.to_owned())
                 })
         };
-        let sink = if let Ok((table, resolved_schema_name)) = table_lookup {
+        let (properties, secret_refs) = if let Ok((table, resolved_schema_name)) = table_lookup {
             if table.engine() != Engine::Iceberg {
                 return Err(ErrorCode::BindError(format!(
-                    "metadata relation \"{relation_name}\" requires an Iceberg engine table or Iceberg sink, but table \"{base_name}\" uses {:?}",
+                    "metadata relation \"{relation_name}\" requires an Iceberg engine table, source, or sink, but table \"{base_name}\" uses {:?}",
                     table.engine()
                 ))
                 .into());
@@ -353,7 +353,8 @@ impl Binder {
                     format!("no Iceberg sink found for table \"{base_name}\"").into(),
                 )
             })?;
-            self.catalog
+            let sink = self
+                .catalog
                 .get_created_sink_by_name(
                     db_name,
                     SchemaPath::Name(&resolved_schema_name),
@@ -366,7 +367,31 @@ impl Binder {
                     )
                 })?
                 .0
-                .clone()
+                .clone();
+            (sink.properties.clone(), sink.secret_refs.clone())
+        } else if let Ok(source) = {
+            let schema_path = self.bind_schema_path(schema_name);
+            self.catalog
+                .get_source_by_name(db_name, schema_path, base_name)
+                .map(|(source, _)| source.clone())
+        } {
+            if !source.is_iceberg_connector() {
+                return Err(ErrorCode::BindError(format!(
+                    "metadata relation \"{relation_name}\" requires an Iceberg source, but source \"{base_name}\" uses a different connector"
+                ))
+                .into());
+            }
+            self.check_privilege(
+                ObjectCheckItem::new(
+                    source.owner,
+                    AclMode::Select,
+                    source.name.clone(),
+                    source.id,
+                ),
+                source.database_id,
+            )?;
+            self.included_relations.insert(source.id.as_object_id());
+            source.with_properties.clone().into_parts()
         } else if let Ok(sink) = {
             let schema_path = self.bind_schema_path(schema_name);
             self.catalog
@@ -384,9 +409,11 @@ impl Binder {
                 sink.database_id,
             )?;
             self.included_relations.insert(sink.id.as_object_id());
-            sink
+            (sink.properties.clone(), sink.secret_refs.clone())
         } else {
-            return Err(CatalogError::not_found("Iceberg table or sink", base_name).into());
+            return Err(
+                CatalogError::not_found("Iceberg table, source, or sink", base_name).into(),
+            );
         };
 
         let columns = metadata_type
@@ -398,8 +425,8 @@ impl Binder {
         Ok((
             Relation::IcebergMetadataTable(Box::new(BoundIcebergMetadataTable {
                 metadata_type,
-                properties: sink.properties.clone(),
-                secret_refs: sink.secret_refs.clone(),
+                properties,
+                secret_refs,
                 as_of: as_of.cloned(),
             })),
             columns,
