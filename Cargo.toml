@@ -380,6 +380,10 @@ redundant_explicit_links = "allow"
 # See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
 lto = "off"
+# Full DWARF dominates the size of `target/` without changing what gets logged: backtraces
+# keep `file:line` and inlined frames either way. Override with
+# `[profile.dev.package.<crate>] debug = 2` when you need to inspect variables in a debugger.
+debug = "line-tables-only"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
 # TODO: re-enable this after it's more stable. It causes many ICE in current version. https://github.com/rust-lang/rust/issues/143342
