@@ -251,7 +251,7 @@ mod tests {
     use crate::hummock::write_limiter::WriteLimiter;
 
     fn serving_vnodes() -> Bitmap {
-        Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3])
+        Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[1, 3])
     }
 
     fn runtime_config(table_id: u32, version: u64) -> PbTableRefillRuntimeConfig {

@@ -1076,7 +1076,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
     use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::version::LocalHummockVersion;
     use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
     use risingwave_pb::hummock::PbHummockVersion;
     use risingwave_pb::id::TableId;
@@ -1113,7 +1113,7 @@ mod tests {
 
     fn pinned_version_for_test() -> PinnedVersion {
         PinnedVersion::new(
-            HummockVersion::from(PbHummockVersion::default()),
+            LocalHummockVersion::from_rpc_protobuf(&PbHummockVersion::default()),
             unbounded_channel().0,
         )
     }
@@ -1325,8 +1325,8 @@ mod tests {
         ];
 
         let table_id = TableId::from(233);
-        let streaming_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1, 3]);
-        let serving_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [2, 4]);
+        let streaming_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[1, 3]);
+        let serving_vnodes = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[2, 4]);
         let sstable_store = mock_sstable_store().await;
         for case in cases {
             let mut refiller = CacheRefiller::new(
@@ -1424,8 +1424,8 @@ mod tests {
     async fn test_normal_refill_applies_policy_and_vnode_ownership() {
         let fixture = DataRefillGeneratorTestFixture::new(None).await;
         let delta = fixture.normal_l0_delta();
-        let owned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0]);
-        let unowned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1]);
+        let owned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[0]);
+        let unowned = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[1]);
         let cases = vec![
             ("Enabled", CacheRefillPolicy::Enabled, None, None, true),
             (
@@ -1612,7 +1612,7 @@ mod tests {
                 "Both + streaming overlap + serving non-overlap",
                 CacheRefillPolicy::Both,
                 Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-                Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [1])),
+                Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[1])),
                 false,
             ),
             (
@@ -1851,14 +1851,17 @@ mod tests {
             }
         };
 
-        let matching_tasks =
-            generate(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode_a])).await;
+        let matching_tasks = generate(Bitmap::from_indices(
+            VirtualNode::COUNT_FOR_TEST,
+            &[vnode_a],
+        ))
+        .await;
         assert_eq!(matching_tasks.len(), 1);
         assert_eq!(matching_tasks[0].blks, 0..1);
 
         let non_matching_tasks = generate(Bitmap::from_indices(
             VirtualNode::COUNT_FOR_TEST,
-            [VirtualNode::ZERO.to_index()],
+            &[VirtualNode::ZERO.to_index()],
         ))
         .await;
         assert!(non_matching_tasks.is_empty());
@@ -1935,15 +1938,15 @@ mod tests {
 
     #[test]
     fn test_vnode_range_overlaps_bitmap_uses_right_exclusive_end() {
-        let right_exclusive = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [12]);
+        let right_exclusive = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[12]);
         assert!(!vnode_range_overlaps_bitmap((10, 12), &right_exclusive));
 
-        let inside_range = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [11]);
+        let inside_range = Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, &[11]);
         assert!(vnode_range_overlaps_bitmap((10, 12), &inside_range));
 
         let last_vnode = Bitmap::from_indices(
             VirtualNode::COUNT_FOR_TEST,
-            [VirtualNode::COUNT_FOR_TEST - 1],
+            &[VirtualNode::COUNT_FOR_TEST - 1],
         );
         assert!(vnode_range_overlaps_bitmap(
             (VirtualNode::COUNT_FOR_TEST - 1, VirtualNode::COUNT_FOR_TEST),

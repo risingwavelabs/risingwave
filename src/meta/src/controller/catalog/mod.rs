@@ -87,7 +87,7 @@ use crate::controller::catalog::util::update_internal_tables;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
-    IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
+    IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, NotificationVersion,
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source,
 };
 use crate::rpc::ddl_controller::DropMode;
@@ -623,6 +623,15 @@ impl CatalogController {
             .iter()
             .map(|job_id| job_id.as_mv_table_id())
             .collect_vec();
+        // Object deletion cascades to fragments. Keep their IDs so serving vnode mappings can be
+        // reconciled after the transaction commits.
+        let dirty_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(dirty_job_ids.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         // Filter out dummy objs for replacement.
         // todo: we'd better introduce a new dummy object type for replacement.
@@ -751,6 +760,11 @@ impl CatalogController {
         inner
             .dropped_tables
             .extend(dropped_tables.into_iter().map(|t| (t.id, t)));
+        if !dirty_fragment_ids.is_empty() {
+            self.env.notification_manager().notify_local_subscribers(
+                LocalNotification::FragmentMappingsDelete(dirty_fragment_ids),
+            );
+        }
 
         let object_group = build_object_group_for_delete(
             to_notify_objs
