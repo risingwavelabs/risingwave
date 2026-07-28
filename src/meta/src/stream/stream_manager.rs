@@ -911,15 +911,12 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let background_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
+        let creating_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        if !background_jobs.is_empty() {
+        if !creating_jobs.is_empty() {
             let blocked_jobs = self
                 .metadata_manager
-                .collect_reschedule_blocked_jobs_for_creating_jobs(&background_jobs, !deferred)
+                .collect_reschedule_blocked_jobs_for_creating_jobs(&creating_jobs, !deferred)
                 .await?;
 
             if blocked_jobs.contains(&job_id) {
@@ -956,22 +953,21 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let background_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
+        if !deferred {
+            let creating_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        if !background_jobs.is_empty() {
-            let unreschedulable = self
-                .metadata_manager
-                .collect_unreschedulable_backfill_jobs(&background_jobs, !deferred)
-                .await?;
+            if !creating_jobs.is_empty() {
+                let jobs_with_unreschedulable_scan = self
+                    .metadata_manager
+                    .collect_online_unreschedulable_backfill_jobs(&creating_jobs)
+                    .await?;
 
-            if unreschedulable.contains(&job_id) {
-                bail!(
-                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
-                    job_id,
-                );
+                if jobs_with_unreschedulable_scan.contains(&job_id) {
+                    bail!(
+                        "Cannot alter the job {} because its creating backfill contains a scan type that does not support online rescheduling",
+                        job_id,
+                    );
+                }
             }
         }
 

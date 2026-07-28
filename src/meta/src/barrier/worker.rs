@@ -1130,7 +1130,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut state_table_committed_epochs,
                 mut state_table_log_epochs,
                 mut mv_depended_subscriptions,
-                mut background_jobs,
+                mut creating_jobs,
                 hummock_version_stats,
                 database_infos,
                 mut cdc_table_snapshot_splits,
@@ -1187,7 +1187,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             &recovery_context.fragment_relations,
                             &stream_actors,
                             &mut source_splits,
-                            &mut background_jobs,
+                            &mut creating_jobs,
                             &mut mv_depended_subscriptions,
                             is_paused,
                             &hummock_version_stats,
@@ -1295,8 +1295,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
                 debug!("collected initial barrier");
-                if !background_jobs.is_empty() {
-                    warn!(job_ids = ?background_jobs.iter().collect_vec(), "unused recovered background mview in recovery");
+                if !creating_jobs.is_empty() {
+                    warn!(job_ids = ?creating_jobs.iter().collect_vec(), "unused recovered creating jobs in recovery");
                 }
                 if !mv_depended_subscriptions.is_empty() {
                     warn!(?mv_depended_subscriptions, "unused subscription infos in recovery");
