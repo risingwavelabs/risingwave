@@ -355,6 +355,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(Hint::Normal),
         prefetch_for_large_query: false,
+        scan_end_user_key: None,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,
     });
