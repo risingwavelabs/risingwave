@@ -387,9 +387,12 @@ with (
 statement ok
 create source variant_alter_source_t (id int)
 with (
-    connector = 'posix_fs',
-    posix_fs.root = '/tmp',
-    match_pattern = '*.json'
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '10',
+    datagen.rows.per.second = '1',
+    datagen.split.num = '1'
 ) format plain encode json;
 
 statement error is not supported for this source encoding yet
