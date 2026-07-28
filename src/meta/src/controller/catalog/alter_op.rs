@@ -630,6 +630,12 @@ impl CatalogController {
         object_id: ObjectId,
         new_schema: SchemaId,
     ) -> MetaResult<NotificationVersion> {
+        if object_type == ObjectType::Subscription {
+            return Err(MetaError::invalid_parameter(
+                "ALTER SUBSCRIPTION SET SCHEMA is not supported",
+            ));
+        }
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         ensure_object_id(ObjectType::Schema, new_schema, &txn).await?;
@@ -781,6 +787,65 @@ impl CatalogController {
                         ));
                     }
                 }
+                // Subscriptions share the namespace of their dependent table, just like indexes.
+                let subscription_objs = Subscription::find()
+                    .find_also_related(Object)
+                    .filter(subscription::Column::DependentTableId.eq(object_id))
+                    .all(&txn)
+                    .await?;
+                if !subscription_objs.is_empty() {
+                    let subscription_ids: Vec<_> = subscription_objs
+                        .iter()
+                        .map(|(subscription, _)| subscription.subscription_id)
+                        .collect();
+                    for (subscription, _) in &subscription_objs {
+                        check_relation_name_duplicate(
+                            &subscription.name,
+                            database_id,
+                            new_schema,
+                            &txn,
+                        )
+                        .await?;
+
+                        let duplicate = Subscription::find()
+                            .inner_join(Object)
+                            .filter(
+                                subscription::Column::Name.eq(&subscription.name).and(
+                                    object::Column::DatabaseId.eq(database_id).and(
+                                        object::Column::SchemaId.eq(new_schema).and(
+                                            subscription::Column::SubscriptionId
+                                                .is_not_in(subscription_ids.clone()),
+                                        ),
+                                    ),
+                                ),
+                            )
+                            .count(&txn)
+                            .await?;
+                        if duplicate != 0 {
+                            return Err(MetaError::catalog_duplicated(
+                                "subscription",
+                                &subscription.name,
+                            ));
+                        }
+                    }
+
+                    Object::update_many()
+                        .col_expr(object::Column::SchemaId, new_schema.into())
+                        .filter(
+                            object::Column::Oid
+                                .is_in(subscription_ids.iter().copied().map(ObjectId::from)),
+                        )
+                        .exec(&txn)
+                        .await?;
+
+                    for (subscription, subscription_obj) in subscription_objs {
+                        let mut subscription_obj = subscription_obj.unwrap();
+                        subscription_obj.schema_id = Some(new_schema);
+                        objects.push(PbObjectInfo::Subscription(
+                            ObjectModel(subscription, subscription_obj, None).into(),
+                        ));
+                    }
+                }
             }
             ObjectType::Source => {
                 let source = Source::find_by_id(object_id.as_source_id())
@@ -832,19 +897,7 @@ impl CatalogController {
                 .await?;
             }
             ObjectType::Subscription => {
-                let subscription = Subscription::find_by_id(object_id.as_subscription_id())
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
-                check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
-                    .await?;
-
-                let mut obj = obj.into_active_model();
-                obj.schema_id = Set(Some(new_schema));
-                let obj = obj.update(&txn).await?;
-                objects.push(PbObjectInfo::Subscription(
-                    ObjectModel(subscription, obj, None).into(),
-                ));
+                unreachable!("ALTER SUBSCRIPTION SET SCHEMA is rejected above")
             }
             ObjectType::View => {
                 let view = View::find_by_id(object_id.as_view_id())

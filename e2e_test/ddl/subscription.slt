@@ -28,6 +28,9 @@ create schema test_schema;
 statement ok
 create table test_schema.t1(v1 int, v2 int);
 
+statement error subscription and its dependent table must be in the same database and schema
+create subscription invalid_schema_subscription from test_schema.t1 with(retention = '1d');
+
 statement ok
 create subscription test_schema.test_subscription from test_schema.t1 with(retention = '1d');
 
@@ -42,6 +45,30 @@ drop table test_schema.t1;
 
 statement ok
 drop schema test_schema;
+
+statement ok
+create table auto_drop_subscription_table(v1 int);
+
+statement ok
+create subscription auto_drop_subscription from auto_drop_subscription_table with(retention = '1d');
+
+statement ok
+drop table auto_drop_subscription_table;
+
+statement error
+drop subscription auto_drop_subscription;
+
+statement ok
+create materialized view auto_drop_subscription_mv as select 1 as v1;
+
+statement ok
+create subscription auto_drop_mv_subscription from auto_drop_subscription_mv with(retention = '1d');
+
+statement ok
+drop materialized view auto_drop_subscription_mv;
+
+statement error
+drop subscription auto_drop_mv_subscription;
 
 statement ok
 drop subscription ddl_subscription_table;

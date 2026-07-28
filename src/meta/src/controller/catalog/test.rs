@@ -862,6 +862,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_subscription_follows_dependent_table_schema_and_drop() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "subscription_target_schema".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("subscription_target_schema"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (_, Some(table_id), _) =
+            insert_test_streaming_job(&txn, "subscription_upstream", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        let subscription = PbSubscription {
+            name: "subscription".to_owned(),
+            definition: "CREATE SUBSCRIPTION subscription FROM subscription_upstream".to_owned(),
+            retention_seconds: 86400,
+            database_id: TEST_DATABASE_ID,
+            schema_id: target_schema_id,
+            dependent_table_id: table_id,
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Init as _,
+            ..Default::default()
+        };
+        assert!(
+            mgr.create_subscription_catalog(&mut subscription.clone())
+                .await
+                .is_err()
+        );
+
+        let mut subscription = PbSubscription {
+            schema_id: TEST_SCHEMA_ID,
+            ..subscription
+        };
+        mgr.create_subscription_catalog(&mut subscription).await?;
+
+        mgr.alter_schema(ObjectType::Table, table_id.as_object_id(), target_schema_id)
+            .await?;
+        let moved_subscription_obj = Object::find_by_id(subscription.id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(moved_subscription_obj.schema_id, Some(target_schema_id));
+        assert!(
+            mgr.alter_schema(
+                ObjectType::Subscription,
+                subscription.id.into(),
+                target_schema_id,
+            )
+            .await
+            .is_err()
+        );
+
+        mgr.drop_object(ObjectType::Table, table_id, DropMode::Restrict)
+            .await?;
+        assert!(
+            Subscription::find_by_id(subscription.id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_abort_creating_subscription_commits_delete() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {

@@ -151,6 +151,19 @@ impl CatalogController {
         ensure_user_id(pb_subscription.owner as _, &txn).await?;
         ensure_object_id(ObjectType::Database, pb_subscription.database_id, &txn).await?;
         ensure_object_id(ObjectType::Schema, pb_subscription.schema_id, &txn).await?;
+        let dependent_obj = Object::find_by_id(pb_subscription.dependent_table_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("table", pb_subscription.dependent_table_id)
+            })?;
+        if dependent_obj.database_id != Some(pb_subscription.database_id)
+            || dependent_obj.schema_id != Some(pb_subscription.schema_id)
+        {
+            return Err(MetaError::invalid_parameter(
+                "subscription and its dependent table must be in the same database and schema",
+            ));
+        }
         check_subscription_name_duplicate(pb_subscription, &txn).await?;
 
         let obj = Self::create_object(

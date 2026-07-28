@@ -762,7 +762,8 @@ where
     Ok(())
 }
 
-/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
+/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes
+/// and subscriptions.
 /// It returns an error that contains the details of the referring objects if it is used by others.
 pub async fn check_object_refer_for_drop<C>(
     object_type: ObjectType,
@@ -772,7 +773,7 @@ pub async fn check_object_refer_for_drop<C>(
 where
     C: ConnectionTrait,
 {
-    // Ignore indexes.
+    // Indexes and subscriptions are owned by the upstream table and are dropped with it.
     let count = if object_type == ObjectType::Table {
         ObjectDependency::find()
             .join(
@@ -780,9 +781,11 @@ where
                 object_dependency::Relation::Object1.def(),
             )
             .filter(
-                object_dependency::Column::Oid
-                    .eq(object_id)
-                    .and(object::Column::ObjType.ne(ObjectType::Index)),
+                object_dependency::Column::Oid.eq(object_id).and(
+                    object::Column::ObjType
+                        .ne(ObjectType::Index)
+                        .and(object::Column::ObjType.ne(ObjectType::Subscription)),
+                ),
             )
             .count(db)
             .await?
@@ -797,7 +800,7 @@ where
         let referring_objects = get_referring_objects(object_id, db).await?;
         let referring_objs_map = referring_objects
             .into_iter()
-            .filter(|o| o.obj_type != ObjectType::Index)
+            .filter(|o| o.obj_type != ObjectType::Index && o.obj_type != ObjectType::Subscription)
             .into_group_map_by(|o| o.obj_type);
         let mut details = vec![];
         for (obj_type, objs) in referring_objs_map {

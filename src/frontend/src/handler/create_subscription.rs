@@ -22,7 +22,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::subscription_catalog::{
     SubscriptionCatalog, SubscriptionId, SubscriptionState,
 };
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::handler::util::reject_internal_table_dependency;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -49,6 +49,15 @@ pub fn create_subscription_catalog(
         table_schema_id,
     )?;
     reject_internal_table_dependency(dependent_table.as_ref(), "CREATE SUBSCRIPTION")?;
+    if subscription_database_id != dependent_table.database_id
+        || subscription_schema_id != dependent_table.schema_id
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "subscription and its dependent table must be in the same database and schema"
+                .to_owned(),
+        )
+        .into());
+    }
     let dependent_table_id = dependent_table.id;
 
     let mut subscription_catalog = SubscriptionCatalog {

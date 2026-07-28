@@ -98,12 +98,12 @@ WHERE nspname = 'test_schema';
 test_sink test_schema
 
 statement ok
-CREATE SUBSCRIPTION test_subscription FROM test_schema.test_table WITH (
+CREATE SUBSCRIPTION test_schema.test_subscription FROM test_schema.test_table WITH (
     retention = '1D'
 );
 
-statement ok
-ALTER SUBSCRIPTION test_subscription SET SCHEMA test_schema;
+statement error ALTER SUBSCRIPTION SET SCHEMA is not supported
+ALTER SUBSCRIPTION test_schema.test_subscription SET SCHEMA test_schema;
 
 query TT
 SELECT name, schema_name
@@ -116,13 +116,16 @@ statement ok
 DROP SINK test_schema.test_sink;
 
 statement ok
-DROP SUBSCRIPTION test_schema.test_subscription;
-
-statement ok
 DROP SOURCE test_schema.test_source;
 
 statement ok
-DROP TABLE test_schema.test_table cascade;
+DROP MATERIALIZED VIEW test_schema.test_mv;
+
+statement ok
+DROP TABLE test_schema.test_table;
+
+statement error
+DROP SUBSCRIPTION test_schema.test_subscription;
 
 statement ok
 DROP SCHEMA test_schema;

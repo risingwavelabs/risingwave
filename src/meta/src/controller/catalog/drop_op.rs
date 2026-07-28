@@ -68,9 +68,11 @@ impl CatalogController {
                         report_drop_object(obj.obj_type, obj.oid, &txn).await;
                     }
                     assert!(
-                        objects.iter().all(|obj| obj.obj_type == ObjectType::Index
-                            || obj.obj_type == ObjectType::Sink),
-                        "only index and iceberg sink could be dropped in restrict mode"
+                        objects.iter().all(|obj| matches!(
+                            obj.obj_type,
+                            ObjectType::Index | ObjectType::Sink | ObjectType::Subscription
+                        )),
+                        "only index, subscription and iceberg sink could be dropped in restrict mode"
                     );
                     for obj in &objects {
                         check_object_refer_for_drop(obj.obj_type, obj.oid, &txn).await?;
