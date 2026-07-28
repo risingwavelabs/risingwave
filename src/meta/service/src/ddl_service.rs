@@ -75,6 +75,7 @@ pub struct DdlServiceImpl {
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     barrier_scheduler: BarrierScheduler,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 }
 
 impl DdlServiceImpl {
@@ -98,7 +99,7 @@ impl DdlServiceImpl {
             barrier_manager,
             sink_manager.clone(),
             iceberg_compaction_manager.clone(),
-            iceberg_pk_index_sink_manager,
+            iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
@@ -109,6 +110,7 @@ impl DdlServiceImpl {
             meta_metrics,
             iceberg_compaction_manager,
             barrier_scheduler,
+            iceberg_pk_index_sink_manager,
         }
     }
 
@@ -1567,6 +1569,26 @@ impl DdlService for DdlServiceImpl {
         }
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
+    }
+
+    async fn wait_iceberg_pk_index_sink_epoch(
+        &self,
+        request: Request<WaitIcebergPkIndexSinkEpochRequest>,
+    ) -> Result<Response<WaitIcebergPkIndexSinkEpochResponse>, Status> {
+        let req = request.into_inner();
+        let snapshot_id = self
+            .iceberg_pk_index_sink_manager
+            .wait_epoch(req.sink_id, req.epoch)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to wait for pk-index sink epoch: {}",
+                    e.as_report()
+                ))
+            })?;
+        Ok(Response::new(WaitIcebergPkIndexSinkEpochResponse {
+            snapshot_id,
+        }))
     }
 
     async fn alter_swap_rename(

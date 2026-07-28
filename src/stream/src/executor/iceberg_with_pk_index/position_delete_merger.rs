@@ -14,6 +14,7 @@
 
 use anyhow::Context;
 use risingwave_common::id::SinkId;
+use risingwave_connector::sink::Result as SinkResult;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 
@@ -28,9 +29,11 @@ use crate::task::LocalBarrierManager;
 /// returning the commit metadata for the current barrier.
 #[async_trait::async_trait]
 pub trait PositionDeleteHandler: Send + 'static {
-    fn write(&mut self, path: &str, pos: i64) -> StreamExecutorResult<()>;
+    fn start_seed(&mut self, wait_epoch: u64);
 
-    async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>>;
+    fn write(&mut self, path: &str, pos: i64) -> SinkResult<()>;
+
+    async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>>;
 }
 
 /// Position-delete merger executor for iceberg pk-index sink without Equality Delete.
@@ -80,8 +83,10 @@ where
     async fn execute_inner(mut self) {
         let mut input = self.input.take().unwrap().execute();
 
-        // Consume the first barrier.
+        // Consume the first barrier. Its `prev` epoch is the point the previous actors (if this is a
+        // scale) committed up to; seed only from a snapshot that includes it.
         let barrier = expect_first_barrier(&mut input).await?;
+        self.handler.start_seed(barrier.epoch.prev);
         yield Message::Barrier(barrier);
 
         #[for_await]
@@ -98,13 +103,21 @@ where
                             .datum_at(1)
                             .context("position should not be null")?
                             .into_int64();
-                        self.handler.write(file_path, position)?;
+                        self.handler
+                            .write(file_path, position)
+                            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
                     }
                 }
                 Message::Barrier(barrier) => {
+                    barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
+
                     let mut metadata = None;
                     if barrier.is_checkpoint() {
-                        metadata = self.handler.flush().await?;
+                        metadata = self
+                            .handler
+                            .flush()
+                            .await
+                            .map_err(|e| StreamExecutorError::sink_error(e, self.sink_id))?;
                     }
 
                     if let Some(metadata) = metadata
@@ -204,7 +217,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PositionDeleteHandler for PositionDeleteHandlerMock {
-        fn write(&mut self, path: &str, pos: i64) -> StreamExecutorResult<()> {
+        fn start_seed(&mut self, _wait_epoch: u64) {}
+
+        fn write(&mut self, path: &str, pos: i64) -> SinkResult<()> {
             self.pending_dvs
                 .lock()
                 .unwrap()
@@ -214,7 +229,7 @@ mod tests {
             Ok(())
         }
 
-        async fn flush(&mut self) -> StreamExecutorResult<Option<SinkMetadata>> {
+        async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>> {
             let pending = {
                 let mut pending_dvs = self.pending_dvs.lock().unwrap();
                 std::mem::take(&mut *pending_dvs)

@@ -14,6 +14,7 @@
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
 #![allow(unfulfilled_lint_expectations)]
+#![recursion_limit = "256"]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
