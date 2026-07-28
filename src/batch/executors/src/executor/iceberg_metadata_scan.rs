@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -82,7 +83,7 @@ impl BoxedExecutorBuilder for IcebergMetadataScanExecutorBuilder {
         )?;
 
         let metadata_type = match MetadataType::try_from(node.metadata_type)
-            .map_err(|error| anyhow!("invalid Iceberg metadata type: {error}"))?
+            .context("invalid Iceberg metadata type")?
         {
             MetadataType::Snapshots => IcebergMetadataTableType::Snapshots,
             MetadataType::Manifests => IcebergMetadataTableType::Manifests,
