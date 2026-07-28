@@ -21,7 +21,7 @@ use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use foyer::RangeBoundsExt;
+use foyer::{HybridCacheProperties, RangeBoundsExt};
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -857,6 +857,23 @@ struct CacheRefillTask {
     context: CacheRefillContext,
 }
 
+fn refill_block_range_with_boundary_guard(sst: &Sstable, blks: Range<usize>) -> Range<usize> {
+    debug_assert!(!blks.is_empty());
+    let mut start = blks.start;
+    let mut end = blks.end;
+    if start > 0
+        && sst.meta.block_metas[start - 1].table_id() != sst.meta.block_metas[start].table_id()
+    {
+        start -= 1;
+    }
+    if end < sst.block_count()
+        && sst.meta.block_metas[end].table_id() != sst.meta.block_metas[end - 1].table_id()
+    {
+        end += 1;
+    }
+    start..end
+}
+
 impl CacheRefillTask {
     async fn run(self) {
         let tasks = self
@@ -937,12 +954,16 @@ impl CacheRefillTask {
                 .recent_filter()
                 .insert((task.sst.id, usize::MAX));
 
-            let blocks = task.blks.len();
+            let selected_blks = task.blks.clone();
+            let selected_blocks = selected_blks.len();
+            let refill_blks =
+                refill_block_range_with_boundary_guard(&task.sst, selected_blks.clone());
+            let blocks = refill_blks.len();
             let mut contexts = Vec::with_capacity(blocks);
             let mut admits = 0;
 
-            let (range_first, _) = task.sst.calculate_block_info(task.blks.start);
-            let (range_last, _) = task.sst.calculate_block_info(task.blks.end - 1);
+            let (range_first, _) = task.sst.calculate_block_info(refill_blks.start);
+            let (range_last, _) = task.sst.calculate_block_info(refill_blks.end - 1);
             let range = range_first.start..range_last.end;
 
             let size = range.size().unwrap();
@@ -951,7 +972,7 @@ impl CacheRefillTask {
                 .data_refill_ideal_bytes
                 .inc_by(size as _);
 
-            for blk in task.blks {
+            for blk in refill_blks {
                 let (range, uncompressed_capacity) = task.sst.calculate_block_info(blk);
                 let key = SstableBlockIndex {
                     sst_id: task.sst.id,
@@ -959,15 +980,14 @@ impl CacheRefillTask {
                 };
 
                 let mut writer = context.sstable_store.block_cache().storage_writer(key);
-
-                if writer.filter(size).is_admitted() {
+                if selected_blks.contains(&blk) && writer.filter(size).is_admitted() {
                     admits += 1;
                 }
 
-                contexts.push((writer, range, uncompressed_capacity))
+                contexts.push((key, range, uncompressed_capacity))
             }
 
-            if admits as f64 / contexts.len() as f64 >= context.config.threshold {
+            if admits as f64 / selected_blocks as f64 >= context.config.threshold {
                 let sstable_store = context.sstable_store.clone();
                 let context = context.clone();
                 let future = async move {
@@ -986,21 +1006,29 @@ impl CacheRefillTask {
                         .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
                         .await?;
                     let mut apply_disk_cache_futures = vec![];
-                    for (w, r, uc) in contexts {
+                    let block_cache = context.sstable_store.block_cache().clone();
+                    for (key, r, uc) in contexts {
                         let offset = r.start - range.start;
                         let len = r.end - r.start;
                         let bytes = data.slice(offset..offset + len);
+                        let block_cache = block_cache.clone();
                         let future = async move {
                             let value = Box::new(Block::decode(bytes, uc)?);
-                            // The entry should always be `Some(..)`, use if here for compatible.
-                            if let Some(_entry) = w.force().insert(value) {
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_success_bytes
-                                    .inc_by(len as u64);
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_block_success_total
-                                    .inc();
-                            }
+                            // Make the refilled block visible to readers immediately. A
+                            // `storage_writer` inserts a phantom memory entry for disk-only
+                            // refill, which can still be unreadable when the version becomes
+                            // visible to serving queries.
+                            let _entry = block_cache.insert_with_properties(
+                                key,
+                                value,
+                                HybridCacheProperties::default(),
+                            );
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_bytes
+                                .inc_by(len as u64);
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_block_success_total
+                                .inc();
                             Ok::<_, HummockError>(())
                         };
                         apply_disk_cache_futures.push(future);
@@ -1083,8 +1111,9 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
-        CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
-        SpawnRefillTask, SstDeltaInfo, block_vnode_range, vnode_range_overlaps_bitmap,
+        CacheRefillConfig, CacheRefillContext, CacheRefillTask, CacheRefiller, DataCacheRefillTask,
+        DataCacheRefillTaskGenerator, SpawnRefillTask, SstDeltaInfo, block_vnode_range,
+        vnode_range_overlaps_bitmap,
     };
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, mock_sstable_store, mock_sstable_store_with_recent_filter,
@@ -1095,7 +1124,9 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_with_table_ids,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{RecentFilter, RecentFilterTrait, SstableStoreRef, TableHolder};
+    use crate::hummock::{
+        RecentFilter, RecentFilterTrait, SstableBlockIndex, SstableStoreRef, TableHolder,
+    };
 
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         CacheRefillConfig {
@@ -1641,6 +1672,124 @@ mod tests {
                 should_refill,
                 "{name}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_data_refill_populates_memory_cache() {
+        let fixture = DataRefillGeneratorTestFixture::new(None).await;
+        fixture.sstable_store.clear_block_cache().await.unwrap();
+
+        let context = fixture.context(
+            CacheRefillPolicy::Serving,
+            None,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            |_| {},
+        );
+        let key = SstableBlockIndex {
+            sst_id: fixture.sst.id,
+            block_idx: 0,
+        };
+        assert!(
+            fixture
+                .sstable_store
+                .block_cache()
+                .get(&key)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        CacheRefillTask::data_cache_refill(
+            &context,
+            vec![DataCacheRefillTask {
+                sst: fixture.sst.clone(),
+                blks: 0..1,
+            }],
+        )
+        .await;
+
+        let entry = fixture
+            .sstable_store
+            .block_cache()
+            .get(&key)
+            .await
+            .unwrap()
+            .expect("refilled block should be readable from cache");
+        assert_eq!(entry.source(), foyer::Source::Memory);
+    }
+
+    #[tokio::test]
+    async fn test_data_refill_populates_table_boundary_guard_block() {
+        let table_before = TableId::from(232);
+        let table_target = TableId::from(233);
+        let table_after = TableId::from(234);
+        let sstable_store = mock_sstable_store().await;
+        let (sst, _) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            1,
+            [table_before, table_target, table_after]
+                .into_iter()
+                .map(|table_id| {
+                    (
+                        FullKey {
+                            user_key: UserKey::for_test(
+                                table_id,
+                                prefix_slice_with_vnode(VirtualNode::ZERO, b"key"),
+                            ),
+                            epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                        },
+                        HummockValue::put(Bytes::from_static(b"value")),
+                    )
+                }),
+            sstable_store.clone(),
+            vec![
+                table_before.as_raw_id(),
+                table_target.as_raw_id(),
+                table_after.as_raw_id(),
+            ],
+        )
+        .await;
+        assert_eq!(sst.block_count(), 3, "table switch must form a new block");
+        sstable_store.clear_block_cache().await.unwrap();
+
+        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        config.data_refill_levels.insert(0);
+        let context = CacheRefillContext {
+            config: Arc::new(config),
+            meta_refill_concurrency: None,
+            concurrency: Arc::new(tokio::sync::Semaphore::new(1)),
+            sstable_store: sstable_store.clone(),
+            table_cache_refill_context_map: Arc::new(HashMap::from([(
+                table_target,
+                super::TableCacheRefillContext {
+                    streaming_vnode_bitmap: None,
+                    serving_vnode_bitmap: Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                    policy: CacheRefillPolicy::Serving,
+                },
+            )])),
+        };
+
+        CacheRefillTask::data_cache_refill(
+            &context,
+            vec![DataCacheRefillTask {
+                sst: sst.clone(),
+                blks: 1..2,
+            }],
+        )
+        .await;
+
+        for block_idx in 0..3 {
+            let entry = sstable_store
+                .block_cache()
+                .get(&SstableBlockIndex {
+                    sst_id: sst.id,
+                    block_idx,
+                })
+                .await
+                .unwrap()
+                .expect("refilled table range should include the boundary guard block");
+            assert_eq!(entry.source(), foyer::Source::Memory);
         }
     }
 
