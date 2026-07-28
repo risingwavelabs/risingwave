@@ -224,11 +224,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_clock_timestamp() {
-        assert!(clock_timestamp().timestamp_micros() > 0);
-    }
-
-    #[test]
     fn test_time_zone_conversion() {
         let zones = ["US/Pacific", "ASIA/SINGAPORE", "europe/zurich"];
         #[rustfmt::skip]

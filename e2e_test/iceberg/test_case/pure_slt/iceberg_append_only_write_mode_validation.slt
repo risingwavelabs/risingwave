@@ -12,6 +12,7 @@ statement error 'copy-on-write' mode is not supported for append-only iceberg si
 CREATE SINK s_append_only_cow AS SELECT * FROM t_append_only WITH (
     connector = 'iceberg',
     type = 'append-only',
+    force_append_only = 'true',
     database.name = 'demo_db',
     table.name = 'test_append_only_cow',
     catalog.name = 'demo',
@@ -30,6 +31,7 @@ statement ok
 CREATE SINK s_append_only_mor AS SELECT * FROM t_append_only WITH (
     connector = 'iceberg',
     type = 'append-only',
+    force_append_only = 'true',
     database.name = 'demo_db',
     table.name = 'test_append_only_mor',
     catalog.name = 'demo',
@@ -51,6 +53,7 @@ statement ok
 CREATE SINK s_append_only_default AS SELECT * FROM t_append_only WITH (
     connector = 'iceberg',
     type = 'append-only',
+    force_append_only = 'true',
     database.name = 'demo_db',
     table.name = 'test_append_only_default',
     catalog.name = 'demo',

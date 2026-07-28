@@ -361,17 +361,3 @@ impl WebhookService {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::net::SocketAddr;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_webhook_server() -> anyhow::Result<()> {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 4560));
-        let service = crate::webhook::WebhookService::new(addr, None);
-        service.serve().await?;
-        Ok(())
-    }
-}

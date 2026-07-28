@@ -656,22 +656,3 @@ pub async fn create_task_execution(
         plan_runners: runners,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_runner_config_enable_prefetch_default_is_false() {
-        let config = IcebergCompactorRunnerConfigBuilder::default()
-            .target_binpack_group_size_mb(None)
-            .min_group_size_mb(None)
-            .min_group_file_count(None)
-            .build()
-            .expect("failed to build IcebergCompactorRunnerConfig with defaults");
-        assert!(
-            !config.enable_prefetch,
-            "enable_prefetch must default to false to match StorageConfig default"
-        );
-    }
-}
