@@ -43,7 +43,7 @@ use sea_orm::{EntityTrait, QuerySelect, TransactionTrait};
 use super::GroupStateValidator;
 use crate::MetaResult;
 use crate::hummock::HummockManager;
-use crate::hummock::error::Result;
+use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
@@ -387,49 +387,58 @@ impl HummockManager {
         table_ids: Option<HashSet<TableId>>,
         exclude_empty: bool,
         limit: Option<u32>,
-    ) -> TableChangeLogs {
+    ) -> Result<TableChangeLogs> {
         let _timer = self.metrics.table_change_log_get_latency.start_timer();
-        self.on_current_version_and_table_change_log(|_, table_change_logs| {
-            table_change_logs
-                .iter()
-                .filter_map(|(id, change_log)| {
-                    if let Some(table_filter) = &table_ids
-                        && !table_filter.contains(id)
-                    {
-                        return None;
-                    }
-                    let filtered_change_logs = change_log
-                        .filter_epoch((
-                            start_epoch_inclusive.unwrap_or(0),
-                            end_epoch_inclusive.unwrap_or(u64::MAX),
-                        ))
-                        .filter(|change_log| {
-                            if exclude_empty
-                                && change_log.new_value.is_empty()
-                                && change_log.old_value.is_empty()
-                            {
-                                return false;
-                            }
-                            true
-                        })
-                        .take(limit.map(|l| l as usize).unwrap_or(usize::MAX))
-                        .map(|change_log| {
-                            if epoch_only {
-                                EpochNewChangeLog {
-                                    new_value: vec![],
-                                    old_value: vec![],
-                                    non_checkpoint_epochs: change_log.non_checkpoint_epochs.clone(),
-                                    checkpoint_epoch: change_log.checkpoint_epoch,
+        let start_epoch = start_epoch_inclusive.unwrap_or(0);
+        let end_epoch = end_epoch_inclusive.unwrap_or(u64::MAX);
+        if start_epoch > end_epoch {
+            return Err(Error::InvalidEpochRange {
+                start_epoch,
+                end_epoch,
+            });
+        }
+        let table_change_logs = self
+            .on_current_version_and_table_change_log(|_, table_change_logs| {
+                table_change_logs
+                    .iter()
+                    .filter_map(|(id, change_log)| {
+                        if let Some(table_filter) = &table_ids
+                            && !table_filter.contains(id)
+                        {
+                            return None;
+                        }
+                        let filtered_change_logs = change_log
+                            .filter_epoch((start_epoch, end_epoch))
+                            .filter(|change_log| {
+                                if exclude_empty
+                                    && change_log.new_value.is_empty()
+                                    && change_log.old_value.is_empty()
+                                {
+                                    return false;
                                 }
-                            } else {
-                                change_log.clone()
-                            }
-                        });
-                    Some((id.to_owned(), TableChangeLog::new(filtered_change_logs)))
-                })
-                .collect()
-        })
-        .await
+                                true
+                            })
+                            .take(limit.map(|l| l as usize).unwrap_or(usize::MAX))
+                            .map(|change_log| {
+                                if epoch_only {
+                                    EpochNewChangeLog {
+                                        new_value: vec![],
+                                        old_value: vec![],
+                                        non_checkpoint_epochs: change_log
+                                            .non_checkpoint_epochs
+                                            .clone(),
+                                        checkpoint_epoch: change_log.checkpoint_epoch,
+                                    }
+                                } else {
+                                    change_log.clone()
+                                }
+                            });
+                        Some((id.to_owned(), TableChangeLog::new(filtered_change_logs)))
+                    })
+                    .collect()
+            })
+            .await;
+        Ok(table_change_logs)
     }
 }
 

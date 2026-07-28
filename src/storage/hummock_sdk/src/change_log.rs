@@ -212,6 +212,10 @@ impl<T> TableChangeLogCommon<T> {
         &self,
         (min_epoch, max_epoch): (u64, u64),
     ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
+        assert!(
+            min_epoch <= max_epoch,
+            "invalid epoch range: {min_epoch}..={max_epoch}"
+        );
         let start = self
             .0
             .partition_point(|epoch_change_log| epoch_change_log.checkpoint_epoch < min_epoch);
