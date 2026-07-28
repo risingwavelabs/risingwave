@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
+use risingwave_common::catalog::{
+    Engine, Field, debug_assert_column_ids_distinct, is_system_schema,
+};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_connector::sink::iceberg::IcebergMetadataTableType;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{AsOf, ObjectName, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
@@ -50,6 +55,14 @@ pub struct BoundBaseTable {
 pub struct BoundSystemTable {
     pub table_id: TableId,
     pub sys_table_catalog: Arc<SystemTableCatalog>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundIcebergMetadataTable {
+    pub metadata_type: IcebergMetadataTableType,
+    pub properties: BTreeMap<String, String>,
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
+    pub as_of: Option<AsOf>,
 }
 
 #[derive(Debug, Clone)]
@@ -186,7 +199,12 @@ impl Binder {
                             as_of,
                         )?
                     } else {
-                        return Err(CatalogError::not_found("table or source", table_name).into());
+                        self.resolve_iceberg_metadata_relation(
+                            &db_name,
+                            Some(schema_name),
+                            table_name,
+                            as_of,
+                        )?
                     }
                 }
                 None => (|| {
@@ -261,7 +279,7 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::not_found("table or source", table_name).into())
+                    self.resolve_iceberg_metadata_relation(&db_name, None, table_name, as_of)
                 })()?,
             }
         };
@@ -273,6 +291,119 @@ impl Binder {
             alias,
         )?;
         Ok(ret)
+    }
+
+    fn resolve_iceberg_metadata_relation(
+        &mut self,
+        db_name: &str,
+        schema_name: Option<&str>,
+        relation_name: &str,
+        as_of: Option<&AsOf>,
+    ) -> Result<(Relation, Vec<(bool, Field)>)> {
+        let Some((base_name, suffix)) = relation_name.rsplit_once('$') else {
+            return Err(CatalogError::not_found("table or source", relation_name).into());
+        };
+        let Some(metadata_type) = IcebergMetadataTableType::from_suffix(suffix) else {
+            return Err(CatalogError::not_found("table or source", relation_name).into());
+        };
+        if base_name.is_empty() {
+            return Err(CatalogError::not_found("table or source", relation_name).into());
+        }
+
+        if metadata_type == IcebergMetadataTableType::Snapshots && as_of.is_some() {
+            return Err(ErrorCode::BindError(
+                "time travel is only supported for Iceberg manifests and files metadata relations"
+                    .to_owned(),
+            )
+            .into());
+        }
+        if matches!(
+            as_of,
+            Some(AsOf::ProcessTime | AsOf::ProcessTimeWithInterval(_))
+        ) {
+            bail_not_implemented!(
+                "As Of ProcessTime() is not supported for Iceberg metadata relations."
+            );
+        }
+
+        let table_lookup = {
+            let schema_path = self.bind_schema_path(schema_name);
+            self.catalog
+                .get_created_table_by_name(db_name, schema_path, base_name)
+                .map(|(table, resolved_schema_name)| {
+                    (table.clone(), resolved_schema_name.to_owned())
+                })
+        };
+        let sink = if let Ok((table, resolved_schema_name)) = table_lookup {
+            if table.engine() != Engine::Iceberg {
+                return Err(ErrorCode::BindError(format!(
+                    "metadata relation \"{relation_name}\" requires an Iceberg engine table or Iceberg sink, but table \"{base_name}\" uses {:?}",
+                    table.engine()
+                ))
+                .into());
+            }
+            self.check_privilege(
+                ObjectCheckItem::new(table.owner, AclMode::Select, table.name.clone(), table.id()),
+                table.database_id,
+            )?;
+            self.included_relations.insert(table.id().as_object_id());
+
+            let sink_name = table.iceberg_sink_name().ok_or_else(|| {
+                ErrorCode::CatalogError(
+                    format!("no Iceberg sink found for table \"{base_name}\"").into(),
+                )
+            })?;
+            self.catalog
+                .get_created_sink_by_name(
+                    db_name,
+                    SchemaPath::Name(&resolved_schema_name),
+                    &sink_name,
+                )
+                .map_err(|_| {
+                    ErrorCode::CatalogError(
+                        format!("Iceberg sink \"{sink_name}\" not found for table \"{base_name}\"")
+                            .into(),
+                    )
+                })?
+                .0
+                .clone()
+        } else if let Ok(sink) = {
+            let schema_path = self.bind_schema_path(schema_name);
+            self.catalog
+                .get_created_sink_by_name(db_name, schema_path, base_name)
+                .map(|(sink, _)| sink.clone())
+        } {
+            if !sink.properties.is_iceberg_connector() {
+                return Err(ErrorCode::BindError(format!(
+                    "metadata relation \"{relation_name}\" requires an Iceberg sink, but sink \"{base_name}\" uses a different connector"
+                ))
+                .into());
+            }
+            self.check_privilege(
+                ObjectCheckItem::new(sink.owner, AclMode::Select, sink.name.clone(), sink.id),
+                sink.database_id,
+            )?;
+            self.included_relations.insert(sink.id.as_object_id());
+            sink
+        } else {
+            return Err(CatalogError::not_found("Iceberg table or sink", base_name).into());
+        };
+
+        let columns = metadata_type
+            .schema()
+            .fields
+            .into_iter()
+            .map(|field| (false, field))
+            .collect();
+        Ok((
+            Relation::IcebergMetadataTable(Box::new(BoundIcebergMetadataTable {
+                metadata_type,
+                properties: sink.properties.clone(),
+                secret_refs: sink.secret_refs.clone(),
+                as_of: as_of.cloned(),
+            })),
+            columns,
+        ))
     }
 
     pub(crate) fn check_privilege(

@@ -81,6 +81,29 @@ message IcebergScanNode {
   IcebergScanType iceberg_scan_type = 5;
 }
 
+message IcebergMetadataScanNode {
+  enum MetadataType {
+    METADATA_TYPE_UNSPECIFIED = 0;
+    METADATA_TYPE_SNAPSHOTS = 1;
+    METADATA_TYPE_MANIFESTS = 2;
+    METADATA_TYPE_FILES = 3;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  map<string, string> with_properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
+  MetadataType metadata_type = 4;
+
+  oneof time_travel {
+    int64 snapshot_id = 5;
+    int64 timestamp_ms = 6;
+  }
+
+  optional string content_filter = 7;
+  optional string manifest_path_filter = 8;
+  optional uint64 limit = 9;
+}
+
 message FileScanNode {
   enum FileFormat {
     FILE_FORMAT_UNSPECIFIED = 0;
@@ -476,6 +499,7 @@ message PlanNode {
     AzblobFileScanNode azblob_file_scan = 43;
     VectorIndexNearestNode vector_index_nearest = 44;
     GetChannelDeltaStatsNode get_channel_delta_stats = 45;
+    IcebergMetadataScanNode iceberg_metadata_scan = 46;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

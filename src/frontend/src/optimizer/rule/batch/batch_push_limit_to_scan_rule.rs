@@ -17,7 +17,9 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::prelude::*;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::{BatchIcebergScan, BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    BatchIcebergMetadataScan, BatchIcebergScan, BatchLimit, BatchSeqScan, PlanTreeNodeUnary,
+};
 
 pub struct BatchPushLimitToScanRule {}
 
@@ -41,6 +43,14 @@ impl Rule<Batch> for BatchPushLimitToScanRule {
                 scan.scan_ranges().iter().cloned().collect_vec(),
                 Some(pushed_limit),
             );
+            return Some(limit.clone_with_input(new_scan.into()).into());
+        }
+
+        if let Some(scan) = limit_input.as_batch_iceberg_metadata_scan() {
+            if scan.limit().is_some() {
+                return None;
+            }
+            let new_scan: BatchIcebergMetadataScan = scan.clone_with_limit(Some(pushed_limit));
             return Some(limit.clone_with_input(new_scan.into()).into());
         }
 
