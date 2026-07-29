@@ -126,7 +126,7 @@ async fn refill_state_rebuilt_after_database_recovery() -> Result<()> {
         &cluster,
         &surviving_worker,
         result_table_id,
-        None,
+        Some("both"),
         Some(&before.streaming),
         Some(&before.serving),
     )
