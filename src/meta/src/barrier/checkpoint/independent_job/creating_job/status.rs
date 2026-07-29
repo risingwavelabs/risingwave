@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{PbStreamNode, StartFragmentBackfillMutation};
@@ -32,6 +32,7 @@ use tracing::warn;
 
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::notifier::Notifier;
+use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -243,10 +244,16 @@ impl CreatingStreamingJobStatus {
 
     pub(super) fn on_new_upstream_epoch(
         &mut self,
+        partial_graph_manager: &PartialGraphManager,
+        partial_graph_id: PartialGraphId,
+        max_pending_barrier_num: usize,
         barrier_info: &BarrierInfo,
         mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
-        barrier_amplification_factor: usize,
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
+        let resolve_initial_barrier_num_to_inject = || {
+            max_pending_barrier_num
+                .saturating_sub(partial_graph_manager.pending_barrier_num(partial_graph_id))
+        };
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 pending_upstream_barriers,
@@ -269,7 +276,13 @@ impl CreatingStreamingJobStatus {
                         ))
                     }
                 });
+                let barrier_num_to_inject = resolve_initial_barrier_num_to_inject();
                 pending_upstream_barriers.push(barrier_info.clone());
+                // Mutation barriers must be forwarded even when the partial graph has reached the
+                // configured pending-barrier limit.
+                if barrier_num_to_inject == 0 && mutation.is_none() {
+                    return vec![];
+                }
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(
                         prev_epoch_fake_physical_time,
@@ -290,15 +303,13 @@ impl CreatingStreamingJobStatus {
             } => drain_pending_barriers(
                 pending_barriers,
                 barrier_info.clone(),
-                barrier_amplification_factor,
+                resolve_initial_barrier_num_to_inject(),
             )
             .into_iter()
             .map(|barrier_info| (barrier_info, None))
             .collect(),
             CreatingStreamingJobStatus::Finishing { .. }
-            | CreatingStreamingJobStatus::Resetting(..) => {
-                vec![]
-            }
+            | CreatingStreamingJobStatus::Resetting(..) => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -358,10 +369,10 @@ impl CreatingStreamingJobStatus {
 fn drain_pending_barriers(
     pending_barriers: &mut VecDeque<BarrierInfo>,
     new_upstream_barrier: BarrierInfo,
-    barrier_amplification_factor: usize,
+    barrier_num_to_inject: usize,
 ) -> Vec<BarrierInfo> {
     pending_barriers.push_back(new_upstream_barrier);
-    let barrier_count = pending_barriers.len().min(barrier_amplification_factor);
+    let barrier_count = pending_barriers.len().min(barrier_num_to_inject);
     pending_barriers.drain(..barrier_count).collect()
 }
 
@@ -385,23 +396,33 @@ mod tests {
     }
 
     #[test]
-    fn test_drain_pending_barriers_with_amplification_factor() {
+    fn test_drain_pending_barriers_with_available_capacity() {
         let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 2);
-        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 0);
+        assert!(injected.is_empty());
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
-            vec![(3, 4), (4, 5)]
+            vec![(1, 2), (2, 3), (3, 4), (4, 5)]
         );
 
         let injected = drain_pending_barriers(&mut pending_barriers, barrier(5, 6), 2);
-        assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
-        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(5, 6)]);
+        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(3, 4), (4, 5), (5, 6)]
+        );
 
         let injected = drain_pending_barriers(&mut pending_barriers, barrier(6, 7), 2);
+        assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(5, 6), (6, 7)]
+        );
+
+        let injected = drain_pending_barriers(&mut pending_barriers, barrier(7, 8), 2);
         assert_eq!(epochs(&injected), vec![(5, 6), (6, 7)]);
-        assert!(pending_barriers.is_empty());
+        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(7, 8)]);
     }
 
     #[test]
@@ -412,5 +433,22 @@ mod tests {
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_resetting_skips_barrier_capacity_lookup() {
+        let mut status = CreatingStreamingJobStatus::Resetting(vec![]);
+        let partial_graph_manager =
+            PartialGraphManager::uninitialized(crate::manager::MetaSrvEnv::for_test().await);
+
+        let injected = status.on_new_upstream_epoch(
+            &partial_graph_manager,
+            PartialGraphId::new(1),
+            10,
+            &barrier(1, 2),
+            None,
+        );
+
+        assert!(injected.is_empty());
     }
 }

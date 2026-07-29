@@ -57,15 +57,15 @@ use crate::barrier::{
     TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::manager::MetaOpts;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};
 
-const MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR: usize = 2;
-
-fn effective_snapshot_backfill_barrier_amplification_factor(factor: usize) -> usize {
-    factor.max(MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR)
+fn snapshot_backfill_max_pending_barrier_num(opts: &MetaOpts) -> usize {
+    opts.in_flight_barrier_nums
+        .saturating_mul(opts.snapshot_backfill_barrier_amplification_factor.max(1))
 }
 
 #[derive(Debug)]
@@ -90,7 +90,7 @@ pub(crate) struct CreatingStreamingJobControl {
     max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
     max_lagged_barrier_num: usize,
-    barrier_amplification_factor: usize,
+    max_pending_barrier_num: usize,
 
     upstream_lag: LabelGuardedIntGauge,
 }
@@ -221,13 +221,8 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
-        let barrier_amplification_factor = effective_snapshot_backfill_barrier_amplification_factor(
-            partial_graph_manager
-                .control_stream_manager()
-                .env
-                .opts
-                .snapshot_backfill_barrier_amplification_factor,
-        );
+        let opts = &partial_graph_manager.control_stream_manager().env.opts;
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
         let IndependentCheckpointJobControl::CreatingStreamingJob(job) = entry.insert(
             IndependentCheckpointJobControl::CreatingStreamingJob(Self {
@@ -238,7 +233,7 @@ impl CreatingStreamingJobControl {
                 snapshot_epoch,
                 status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
                 max_lagged_barrier_num,
-                barrier_amplification_factor,
+                max_pending_barrier_num,
                 upstream_lag: GLOBAL_META_METRICS
                     .snapshot_backfill_lag
                     .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -726,13 +721,8 @@ impl CreatingStreamingJobControl {
             .env
             .opts
             .snapshot_backfill_finish_max_lagged_barriers;
-        let barrier_amplification_factor = effective_snapshot_backfill_barrier_amplification_factor(
-            partial_graph_recoverer
-                .control_stream_manager()
-                .env
-                .opts
-                .snapshot_backfill_barrier_amplification_factor,
-        );
+        let opts = &partial_graph_recoverer.control_stream_manager().env.opts;
+        let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
         partial_graph_recoverer.recover_graph(
             partial_graph_id,
@@ -754,7 +744,7 @@ impl CreatingStreamingJobControl {
             max_committed_epoch: Some(committed_epoch),
             status,
             max_lagged_barrier_num,
-            barrier_amplification_factor,
+            max_pending_barrier_num,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
@@ -903,9 +893,11 @@ impl CreatingStreamingJobControl {
         };
         {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(
+                partial_graph_manager,
+                self.partial_graph_id,
+                self.max_pending_barrier_num,
                 barrier_info,
                 mutation.take(),
-                self.barrier_amplification_factor,
             ) {
                 Self::inject_barrier(
                     self.partial_graph_id,
@@ -1163,19 +1155,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effective_snapshot_backfill_barrier_amplification_factor() {
-        assert_eq!(
-            effective_snapshot_backfill_barrier_amplification_factor(0),
-            MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR
-        );
-        assert_eq!(
-            effective_snapshot_backfill_barrier_amplification_factor(1),
-            MIN_SNAPSHOT_BACKFILL_BARRIER_AMPLIFICATION_FACTOR
-        );
-        assert_eq!(
-            effective_snapshot_backfill_barrier_amplification_factor(100),
-            100
-        );
+    fn test_snapshot_backfill_max_pending_barrier_num() {
+        let mut opts = MetaOpts::test(false);
+        opts.in_flight_barrier_nums = 10;
+
+        opts.snapshot_backfill_barrier_amplification_factor = 0;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
+
+        opts.snapshot_backfill_barrier_amplification_factor = 1;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 10);
+
+        opts.snapshot_backfill_barrier_amplification_factor = 10;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), 100);
+
+        opts.in_flight_barrier_nums = usize::MAX;
+        assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
     }
 
     #[test]

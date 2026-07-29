@@ -32,7 +32,8 @@ pub use over_window::*;
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
-    /// The maximum number of barriers in-flight in the compute nodes.
+    /// The maximum number of pending barriers in each partial graph. Pending barriers include
+    /// in-flight, collected but not committed, and currently completing barriers.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
@@ -41,8 +42,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
     pub snapshot_backfill_finish_max_lagged_barriers: usize,
 
-    /// The maximum number of pending barriers injected into a snapshot backfill job for each new
-    /// upstream barrier. Values below 2 are treated as 2.
+    /// The multiplier applied to `in_flight_barrier_nums` when limiting pending barriers in a
+    /// snapshot backfill partial graph. A value of 0 is treated as 1.
     #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
     pub snapshot_backfill_barrier_amplification_factor: usize,
 
@@ -404,7 +405,7 @@ pub mod default {
         }
 
         pub fn snapshot_backfill_barrier_amplification_factor() -> usize {
-            100
+            1
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
