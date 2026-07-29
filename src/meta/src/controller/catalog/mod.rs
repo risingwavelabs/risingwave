@@ -63,7 +63,9 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
-use risingwave_pb::meta::{PbObject, PbObjectGroup, PbTableCacheRefillPolicies};
+use risingwave_pb::meta::{
+    PbObject, PbObjectGroup, PbTableCacheRefillPolicies, PbTableRefillRuntimeConfig,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
@@ -109,6 +111,8 @@ pub type Catalog = (
 );
 
 pub type CatalogControllerRef = Arc<CatalogController>;
+
+const STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH: &str = "streaming.developer.cache_refill_policy";
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {

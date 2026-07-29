@@ -22,11 +22,12 @@ mod tests {
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
-    use crate::manager::LocalNotification;
+    use crate::manager::{LocalNotification, WorkerKey};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -253,6 +254,80 @@ mod tests {
                     CacheRefillPolicy::Streaming.to_protobuf() as i32,
                 ),
             ])
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (_job, Some(result_table_id), internal_table_id) =
+            insert_test_streaming_job(&txn, "mv_cache_refill", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(
+                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
+                "\"both\"".to_owned(),
+            )]),
+            vec![],
+        )
+        .await?;
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
         );
 
         Ok(())
