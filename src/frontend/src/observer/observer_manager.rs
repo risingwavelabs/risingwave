@@ -124,6 +124,8 @@ impl ObserverState for FrontendObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        // Always acquire the catalog lock before the user lock to avoid an ABBA deadlock with
+        // frontend readers that need both.
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
