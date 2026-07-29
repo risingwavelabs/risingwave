@@ -1,6 +1,13 @@
 # Test enforcement of merge-on-read write mode for append-only iceberg sinks
 # This test verifies that copy-on-write is rejected for append-only sinks
 
+system ok
+sparksql --e "
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_cow PURGE;
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_mor PURGE;
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_default PURGE;
+"
+
 statement ok
 CREATE TABLE t_append_only (
     id bigint primary key,
@@ -72,3 +79,10 @@ DROP SINK s_append_only_default;
 # Clean up
 statement ok
 DROP TABLE t_append_only;
+
+system ok
+sparksql --e "
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_cow PURGE;
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_mor PURGE;
+DROP TABLE IF EXISTS demo.demo_db.test_append_only_default PURGE;
+"
