@@ -162,6 +162,75 @@ WHERE content = 'Data';
 ----
 t
 
+# Resolve all relation kinds within one schema before moving to the next
+# search_path entry.
+statement ok
+CREATE SCHEMA iceberg_metadata_relations_source_schema;
+
+statement ok
+CREATE SCHEMA iceberg_metadata_relations_table_schema;
+
+statement ok
+CREATE SOURCE iceberg_metadata_relations_source_schema.iceberg_metadata_relations_shadowed WITH (
+  connector = 'iceberg',
+  warehouse.path = 's3a://icebergdata',
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.access.key = secret public.iceberg_metadata_relations_secret,
+  s3.secret.key = secret public.iceberg_metadata_relations_secret,
+  s3.region = 'us-east-1',
+  catalog.name = 'demo',
+  catalog.type = 'storage',
+  database.name = 'demo_db',
+  table.name = 'iceberg_metadata_relations_sink_table'
+);
+
+statement ok
+CREATE TABLE iceberg_metadata_relations_table_schema.iceberg_metadata_relations_shadowed (
+  id INT
+);
+
+statement ok
+SET search_path TO
+  iceberg_metadata_relations_source_schema,
+  iceberg_metadata_relations_table_schema;
+
+query ? retry 20 backoff 1s
+SELECT count(*) > 0
+FROM "iceberg_metadata_relations_shadowed$files";
+----
+t
+
+statement ok
+SET search_path TO public;
+
+# Check object privilege before exposing that a base table uses Hummock.
+statement ok
+CREATE USER iceberg_metadata_relations_probe WITH PASSWORD 'password';
+
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO iceberg_metadata_relations_probe"'
+
+statement ok
+GRANT USAGE ON SCHEMA public TO iceberg_metadata_relations_probe;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U iceberg_metadata_relations_probe -d "$SLT_DB" -Atc "SELECT * FROM \"iceberg_metadata_relations_source_t\$files\" LIMIT 0;" 2>&1 || true); grep -q '\''permission denied for table or materialized view "iceberg_metadata_relations_source_t"'\'' <<<"$out"; ! grep -q "uses Hummock" <<<"$out"'
+
+statement ok
+DROP USER iceberg_metadata_relations_probe;
+
+statement ok
+DROP SOURCE iceberg_metadata_relations_source_schema.iceberg_metadata_relations_shadowed;
+
+statement ok
+DROP TABLE iceberg_metadata_relations_table_schema.iceberg_metadata_relations_shadowed;
+
+statement ok
+DROP SCHEMA iceberg_metadata_relations_source_schema;
+
+statement ok
+DROP SCHEMA iceberg_metadata_relations_table_schema;
+
 statement ok
 DROP SOURCE iceberg_metadata_relations_iceberg_source;
 
