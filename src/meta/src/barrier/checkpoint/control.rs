@@ -56,7 +56,7 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
-    /// The max barrier nums in flight
+    /// The maximum number of pending barriers in each partial graph.
     pub(crate) in_flight_barrier_nums: usize,
 }
 
@@ -780,12 +780,8 @@ impl DatabaseCheckpointControl {
     }
 
     /// Pause inject barrier until True.
-    fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        self.command_ctx_queue
-            .values()
-            .filter(|x| x.state.is_inflight())
-            .count()
-            < in_flight_barrier_nums
+    fn can_inject_barrier(&self, max_pending_barrier_num: usize) -> bool {
+        self.total_command_num() < max_pending_barrier_num
     }
 
     /// Return whether the database can still work after worker failure
