@@ -766,7 +766,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         log_reader.init().await?;
         loop {
-            let future = async {
+            // Boxed so that `drop` below releases its borrows on `log_reader` and `sink`.
+            let mut future = Box::pin(async {
                 loop {
                     let Err(e) = sink
                         .new_log_sinker(sink_writer_param.clone())
@@ -814,68 +815,67 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     }
                     .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                 }
-            };
-            select! {
-                result = future => {
-                    let Err(e): StreamExecutorResult<!> = result;
-                    return Err(e);
-                }
-                result = rebuild_sink_rx.recv() => {
-                    match result.ok_or_else(|| anyhow!("failed to receive rebuild sink notify"))? {
-                        RebuildSinkMessage::RebuildSink(new_vnode, notify) => {
-                            sink_writer_param.vnode_bitmap = Some((*new_vnode).clone());
-                            if notify.send(()).is_err() {
-                                warn!("failed to notify rebuild sink");
-                            }
-                            log_reader.init().await?;
-                        },
-                        RebuildSinkMessage::UpdateConfig(config) => {
-                            let config_has_changes =
-                                sink_config_has_changes(&sink_param.properties, &config);
-                            if F::ALLOW_REWIND {
-                                match log_reader.rewind().await {
-                                    Ok(()) => {
-                                        if config_has_changes {
-                                            sink_param.properties.extend(config.into_iter());
-                                            sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
-                                            info!(
-                                                executor_id = %sink_writer_param.executor_id,
-                                                sink_id = %sink_param.sink_id,
-                                                "alter sink config successfully with rewind"
-                                            );
-                                        } else {
-                                            info!(
-                                                executor_id = %sink_writer_param.executor_id,
-                                                sink_id = %sink_param.sink_id,
-                                                "skip alter sink config because properties are unchanged"
-                                            );
-                                        }
-                                        Ok(())
-                                    }
-                                    Err(rewind_err) => {
-                                        error!(
-                                            error = %rewind_err.as_report(),
-                                            "fail to rewind log reader for alter sink config "
-                                        );
-                                        Err(anyhow!("fail to rewind log reader after alter sink config notification").into())
-                                    }
-                                }
-                            } else {
-                                if config_has_changes {
-                                    sink_param.properties.extend(config.into_iter());
-                                    sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
-                                } else {
-                                    info!(
-                                        executor_id = %sink_writer_param.executor_id,
-                                        sink_id = %sink_param.sink_id,
-                                        "skip rebuilding sink because properties are unchanged"
-                                    );
-                                }
-                                Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
-                            }
-                            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
-                        },
+            });
+            let message = loop {
+                select! {
+                    result = &mut future => {
+                        let Err(e): StreamExecutorResult<!> = result;
+                        return Err(e);
                     }
+                    result = rebuild_sink_rx.recv() => {
+                        let message = result.ok_or_else(|| anyhow!("failed to receive rebuild sink notify"))?;
+                        // Dropping the consumer costs a rewind, or a recovery when the log
+                        // reader cannot rewind. Not worth it for an update that changes nothing.
+                        if let RebuildSinkMessage::UpdateConfig(config) = &message
+                            && !sink_config_has_changes(&sink_param.properties, config)
+                        {
+                            info!(
+                                executor_id = %sink_writer_param.executor_id,
+                                sink_id = %sink_param.sink_id,
+                                "skip alter sink config because properties are unchanged"
+                            );
+                            continue;
+                        }
+                        break message;
+                    }
+                }
+            };
+            drop(future);
+            match message {
+                RebuildSinkMessage::RebuildSink(new_vnode, notify) => {
+                    sink_writer_param.vnode_bitmap = Some((*new_vnode).clone());
+                    if notify.send(()).is_err() {
+                        warn!("failed to notify rebuild sink");
+                    }
+                    log_reader.init().await?;
+                }
+                RebuildSinkMessage::UpdateConfig(config) => {
+                    if F::ALLOW_REWIND {
+                        match log_reader.rewind().await {
+                            Ok(()) => {
+                                sink_param.properties.extend(config);
+                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                                info!(
+                                    executor_id = %sink_writer_param.executor_id,
+                                    sink_id = %sink_param.sink_id,
+                                    "alter sink config successfully with rewind"
+                                );
+                                Ok(())
+                            }
+                            Err(rewind_err) => {
+                                error!(
+                                    error = %rewind_err.as_report(),
+                                    "fail to rewind log reader for alter sink config "
+                                );
+                                Err(anyhow!("fail to rewind log reader after alter sink config notification").into())
+                            }
+                        }
+                    } else {
+                        sink_param.properties.extend(config);
+                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                        Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
+                    }
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                 }
             }
         }
@@ -1035,8 +1035,81 @@ mod test {
         ));
     }
 
+    fn no_op_config_update() -> RebuildSinkMessage {
+        RebuildSinkMessage::UpdateConfig(HashMap::from([(
+            "commit_checkpoint_interval".to_owned(),
+            "1".to_owned(),
+        )]))
+    }
+
+    fn changed_config_update() -> RebuildSinkMessage {
+        RebuildSinkMessage::UpdateConfig(HashMap::from([(
+            "commit_checkpoint_interval".to_owned(),
+            "2".to_owned(),
+        )]))
+    }
+
+    async fn assert_no_op_config_update_keeps_consuming<const CAN_REWIND: bool>() {
+        let sink_param = sink_param_for_config_update_test();
+        let sink = BlackHoleSink::try_from(sink_param.clone()).unwrap();
+        let state = Arc::new(RewindRequiredLogReaderState::default());
+        let log_reader = RewindRequiredLogReader {
+            is_reset: false,
+            state: state.clone(),
+        };
+        let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+        let (rebuild_sink_tx, rebuild_sink_rx) = unbounded_channel();
+
+        let consume_log = SinkExecutor::<TestLogStoreFactory<CAN_REWIND>>::execute_consume_log(
+            sink,
+            log_reader,
+            vec![],
+            sink_param,
+            SinkWriterParam::for_test(),
+            None,
+            ActorContext::for_test(0),
+            rate_limit_rx,
+            rebuild_sink_rx,
+        );
+        tokio::pin!(consume_log);
+
+        tokio::select! {
+            result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
+            () = state.wait_for_start_count(1) => {},
+        }
+
+        rebuild_sink_tx.send(no_op_config_update()).unwrap();
+
+        // Messages are handled in order, so an acknowledged rebuild proves the consumer survived
+        // the no-op update.
+        let (notify_tx, notify_rx) = oneshot::channel();
+        rebuild_sink_tx
+            .send(RebuildSinkMessage::RebuildSink(
+                Arc::new(Bitmap::ones(1)),
+                notify_tx,
+            ))
+            .unwrap();
+        tokio::select! {
+            result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
+            result = notify_rx => result.expect("rebuild sink should be acknowledged"),
+        }
+
+        assert_eq!(state.rewind_count.load(Ordering::SeqCst), 0);
+        drop(rate_limit_tx);
+    }
+
     #[tokio::test]
-    async fn test_no_op_sink_config_update_rewinds_log_reader() {
+    async fn test_no_op_sink_config_update_keeps_consuming_with_rewind() {
+        assert_no_op_config_update_keeps_consuming::<true>().await;
+    }
+
+    #[tokio::test]
+    async fn test_no_op_sink_config_update_keeps_consuming_without_rewind() {
+        assert_no_op_config_update_keeps_consuming::<false>().await;
+    }
+
+    #[tokio::test]
+    async fn test_sink_config_update_rewinds_log_reader() {
         let sink_param = sink_param_for_config_update_test();
         let sink = BlackHoleSink::try_from(sink_param.clone()).unwrap();
         let state = Arc::new(RewindRequiredLogReaderState::default());
@@ -1065,12 +1138,7 @@ mod test {
             () = state.wait_for_start_count(1) => {},
         }
 
-        rebuild_sink_tx
-            .send(RebuildSinkMessage::UpdateConfig(HashMap::from([(
-                "commit_checkpoint_interval".to_owned(),
-                "1".to_owned(),
-            )])))
-            .unwrap();
+        rebuild_sink_tx.send(changed_config_update()).unwrap();
 
         tokio::select! {
             result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
@@ -1082,7 +1150,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_no_op_sink_config_update_triggers_recovery_without_rewind() {
+    async fn test_sink_config_update_triggers_recovery_without_rewind() {
         let sink_param = sink_param_for_config_update_test();
         let sink = BlackHoleSink::try_from(sink_param.clone()).unwrap();
         let state = Arc::new(RewindRequiredLogReaderState::default());
@@ -1111,12 +1179,7 @@ mod test {
             () = state.wait_for_start_count(1) => {},
         }
 
-        rebuild_sink_tx
-            .send(RebuildSinkMessage::UpdateConfig(HashMap::from([(
-                "commit_checkpoint_interval".to_owned(),
-                "1".to_owned(),
-            )])))
-            .unwrap();
+        rebuild_sink_tx.send(changed_config_update()).unwrap();
 
         tokio::time::timeout(Duration::from_secs(5), consume_log)
             .await
