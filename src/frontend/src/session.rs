@@ -1330,13 +1330,14 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
+    /// Returns `None` when the table's committed epoch has not reached `min_epoch`.
     pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
-    ) -> Result<Vec<u64>> {
-        let Some(max_epoch) = self
+    ) -> Result<Option<Vec<u64>>> {
+        let committed_epoch = self
             .env
             .hummock_snapshot_manager()
             .acquire()
@@ -1345,28 +1346,31 @@ impl SessionImpl {
             .info()
             .get(&table_id)
             .map(|s| s.committed_epoch)
-        else {
-            return Ok(vec![]);
-        };
+            .ok_or_else(|| anyhow!("table id {table_id} has been dropped"))?;
+        if min_epoch > committed_epoch {
+            return Ok(None);
+        }
         let ret = self
             .env
             .meta_client_ref()
             .get_hummock_table_change_log(
                 Some(min_epoch),
-                Some(max_epoch),
+                Some(committed_epoch),
                 Some(iter::once(table_id).collect()),
                 true,
                 Some(max_count),
             )
             .await?;
         let Some(e) = ret.get(&table_id) else {
-            return Ok(vec![]);
+            return Ok(Some(vec![]));
         };
-        Ok(e.iter()
-            .flat_map(|l| l.epochs())
-            .filter(|e| *e >= min_epoch && *e <= max_epoch)
-            .take(max_count as usize)
-            .collect())
+        Ok(Some(
+            e.iter()
+                .flat_map(|l| l.epochs())
+                .filter(|e| *e >= min_epoch && *e <= committed_epoch)
+                .take(max_count as usize)
+                .collect(),
+        ))
     }
 
     pub fn clear_cancel_query_flag(&self) {
