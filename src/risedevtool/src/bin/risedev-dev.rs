@@ -303,7 +303,7 @@ fn task_main(
                         .set_message(format!("pulsar {}:{}", c.address, c.broker_port));
                 }
                 ServiceConfig::Redis(c) => {
-                    let mut service = RedisService::new(c.clone())?;
+                    let mut service = RedisService::new(c.clone());
                     service.execute(&mut ctx)?;
                     let mut task = risedev::RedisReadyCheckTask::new(c.clone())?;
                     task.execute(&mut ctx)?;

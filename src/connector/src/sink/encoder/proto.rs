@@ -540,7 +540,9 @@ mod tests {
                 Some(ScalarImpl::Utf8("".into())),
             ]))),
             Some(ScalarImpl::List(ListValue::from_iter([4, 0, 4]))),
-            Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
+            Some(ScalarImpl::Timestamptz(
+                Timestamptz::from_micros(3).unwrap(),
+            )),
             Some(ScalarImpl::Map(
                 MapValue::try_from_kv(
                     ListValue::from_iter(["a", "b"]),

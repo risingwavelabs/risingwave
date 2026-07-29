@@ -1246,7 +1246,9 @@ mod tests {
     #[test]
     fn test_encode_avro_union() {
         let t = &DataType::Timestamptz;
-        let datum = Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(1500)));
+        let datum = Some(ScalarImpl::Timestamptz(
+            Timestamptz::from_micros(1500).unwrap(),
+        ));
         let opt_micros = r#"["null", {"type": "long", "logicalType": "timestamp-micros"}]"#;
         let opt_millis = r#"["null", {"type": "long", "logicalType": "timestamp-millis"}]"#;
         let both = r#"[{"type": "long", "logicalType": "timestamp-millis"}, {"type": "long", "logicalType": "timestamp-micros"}]"#;
