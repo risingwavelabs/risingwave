@@ -54,7 +54,9 @@ pub struct SstableIterator {
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
 
-    // used for checking if the block is valid, filter out the block that is not in the table-id range
+    // The readable block window is first restricted by table IDs and then by `scan_end_user_key`.
+    // Included/Excluded bounds set its exclusive block end; outer iterators still filter keys
+    // precisely inside the boundary block.
     block_start_idx_inclusive: usize,
     block_end_idx_exclusive: usize,
 }
@@ -178,40 +180,13 @@ impl SstableIterator {
         );
 
         self.preload_end_block_idx = 0;
-        if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..self.block_end_idx_exclusive];
-            let next_to_start_idx = start_idx + 1;
-            if next_to_start_idx < self.block_end_idx_exclusive {
-                let end_idx = match bound {
-                    Unbounded => self.block_end_idx_exclusive,
-                    Included(dest_key) => {
-                        let dest_key = dest_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
-                            })
-                    }
-                    Excluded(end_key) => {
-                        let end_key = end_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key < end_key
-                            })
-                    }
-                };
+        if !self.options.prefetch {
+            return;
+        }
 
-                if next_to_start_idx < end_idx {
-                    assert!(
-                        end_idx <= self.block_end_idx_exclusive,
-                        "end_idx {} > block_end_idx_exclusive {} next_to_start_idx {}",
-                        end_idx,
-                        self.block_end_idx_exclusive,
-                        next_to_start_idx
-                    );
-                    self.preload_end_block_idx = end_idx;
-                }
-            }
+        // Prefetch never extends beyond the block window already clipped by the scan hard bound.
+        if start_idx + 1 < self.block_end_idx_exclusive {
+            self.preload_end_block_idx = self.block_end_idx_exclusive;
         }
     }
 
@@ -615,10 +590,9 @@ mod tests {
         );
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Fill(Hint::Normal),
-            scan_end_user_key: None,
-            must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
+            scan_end_user_key: Some(Bound::Included(uk.clone())),
+            prefetch: true,
             max_preload_retry_times: 0,
-            prefetch_for_large_query: false,
         });
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
@@ -664,7 +638,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_end_and_prefetch_end_are_independent() {
+    async fn test_scan_end_with_prefetch_on_or_off() {
         let sstable_store = mock_sstable_store().await;
         let mut builder_options = default_builder_opt_for_test();
         builder_options.block_capacity = 128;
@@ -713,21 +687,12 @@ mod tests {
         assert!(table_2_block_start + 2 < table_3_block_start);
 
         let table_3_start = UserKey::new(TableId::new(3), TableKey(Bytes::from_static(b"")));
-        let short_prefetch_end: UserKey<Bytes> =
-            FullKey::decode(&sstable.meta.block_metas[table_2_block_start + 2].smallest_key)
-                .user_key
-                .copy_into();
-        for (case, prefetch_end_user_key) in [
-            ("no prefetch", None),
-            ("prefetch to scan end", Some(table_3_start.clone())),
-            ("prefetch shorter than scan", Some(short_prefetch_end)),
-        ] {
+        for (case, prefetch) in [("prefetch off", false), ("prefetch on", true)] {
             let options = Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Disable,
                 scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
-                must_iterated_end_user_key: prefetch_end_user_key.map(Bound::Excluded),
+                prefetch,
                 max_preload_retry_times: 0,
-                prefetch_for_large_query: false,
             });
             let mut sstable_iter = SstableIterator::create(
                 sstable.clone(),
@@ -738,6 +703,14 @@ mod tests {
 
             assert_eq!(sstable_iter.block_end_idx_exclusive, table_3_block_start);
             sstable_iter.seek(test_key(2, 0).to_ref()).await.unwrap();
+            if prefetch {
+                assert_eq!(
+                    sstable_iter.preload_end_block_idx, sstable_iter.block_end_idx_exclusive,
+                    "{case}"
+                );
+            } else {
+                assert_eq!(sstable_iter.preload_end_block_idx, 0, "{case}");
+            }
             let mut key_count = 0;
             while sstable_iter.is_valid() {
                 assert_eq!(
@@ -757,13 +730,10 @@ mod tests {
                 (table_3_block_start - table_2_block_start) as u64,
                 "{case}"
             );
-            match case {
-                "no prefetch" => assert_eq!(stats.cache_data_prefetch_block_count, 0),
-                "prefetch shorter than scan" => {
-                    assert!(stats.cache_data_prefetch_block_count > 0);
-                    assert!(stats.cache_data_block_total > 0);
-                }
-                _ => {}
+            if prefetch {
+                assert!(stats.cache_data_prefetch_block_count > 0, "{case}");
+            } else {
+                assert_eq!(stats.cache_data_prefetch_block_count, 0, "{case}");
             }
         }
 
@@ -777,9 +747,8 @@ mod tests {
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
             scan_end_user_key: Some(Bound::Excluded(table_2_start)),
-            must_iterated_end_user_key: None,
+            prefetch: false,
             max_preload_retry_times: 0,
-            prefetch_for_large_query: false,
         });
         let mut sstable_iter =
             SstableIterator::create(sstable, sstable_store, options, &table_2_sstable_info);
