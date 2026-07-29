@@ -705,11 +705,22 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
     ) -> StreamExecutorResult<!> {
-        let visible_columns = columns
+        let mut visible_columns = columns
             .iter()
             .enumerate()
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
+
+        let needs_projection = visible_columns.len() != columns.len();
+
+        if needs_projection
+            && let Some(extra_partition_col_idx) = sink_writer_param.extra_partition_col_idx
+        {
+            // The extra partition column is appended after all normal sink columns.
+            debug_assert_eq!(extra_partition_col_idx, columns.len());
+            sink_writer_param.extra_partition_col_idx = Some(visible_columns.len());
+            visible_columns.push(extra_partition_col_idx);
+        }
 
         let labels = [
             &actor_context.id.to_string(),
@@ -757,7 +768,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 } else {
                     chunk
                 };
-                if visible_columns.len() != columns.len() {
+                if needs_projection {
                     // Do projection here because we may have columns that aren't visible to
                     // the downstream.
                     chunk.project(&visible_columns)
