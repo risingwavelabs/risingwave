@@ -1300,7 +1300,9 @@ mod tests {
         )
         .unwrap();
         let timestamptz = VariantVal::try_from_scalar_ref(
-            Some(ScalarRefImpl::Timestamptz(Timestamptz::from_micros(1))),
+            Some(ScalarRefImpl::Timestamptz(
+                Timestamptz::from_micros(1).unwrap(),
+            )),
             &DataType::Timestamptz,
         )
         .unwrap();
@@ -1496,7 +1498,7 @@ mod tests {
         assert_variant_parts(
             "timestamptz",
             &scalar_variant(
-                ScalarRefImpl::Timestamptz(Timestamptz::from_micros(1)),
+                ScalarRefImpl::Timestamptz(Timestamptz::from_micros(1).unwrap()),
                 &DataType::Timestamptz,
             ),
             "010000",
