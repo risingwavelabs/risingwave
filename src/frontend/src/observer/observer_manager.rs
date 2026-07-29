@@ -43,6 +43,7 @@ pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
     catalog_updated_tx: Sender<CatalogVersion>,
+    // When both locks are needed, always acquire `catalog` before `user_info_manager`.
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
