@@ -136,7 +136,6 @@ pub struct FragmentServingInfo {
     /// Sink/source jobs have no serving target.
     pub result_table_id: Option<TableId>,
     pub distribution_type: FragmentDistributionType,
-    pub actor_count: usize,
     pub vnode_count: usize,
 }
 
@@ -257,7 +256,6 @@ impl CatalogControllerInner {
                                 .contains(&result_table_id)
                                 .then_some(result_table_id),
                             distribution_type: PbFragmentDistributionType::from(distribution_type),
-                            actor_count: 0,
                             vnode_count: vnode_count as usize,
                         },
                     )

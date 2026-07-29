@@ -82,7 +82,6 @@ mod tests {
             FragmentServingInfo {
                 result_table_id: Some(result_table_id),
                 distribution_type: FragmentDistributionType::Hash,
-                actor_count: 0,
                 vnode_count: VirtualNode::COUNT_FOR_TEST,
             },
         )]);

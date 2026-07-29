@@ -469,7 +469,6 @@ mod tests {
             FragmentServingInfo {
                 result_table_id: Some(table_id),
                 distribution_type: FragmentDistributionType::Hash,
-                actor_count: 0,
                 vnode_count: VirtualNode::COUNT_FOR_TEST,
             },
         )]);
@@ -507,7 +506,6 @@ mod tests {
                 FragmentServingInfo {
                     result_table_id: Some(table_id),
                     distribution_type: FragmentDistributionType::Hash,
-                    actor_count: 0,
                     vnode_count: VirtualNode::COUNT_FOR_TEST,
                 },
             ),
@@ -516,7 +514,6 @@ mod tests {
                 FragmentServingInfo {
                     result_table_id: None,
                     distribution_type: FragmentDistributionType::Hash,
-                    actor_count: 0,
                     vnode_count: VirtualNode::COUNT_FOR_TEST,
                 },
             ),
@@ -573,7 +570,6 @@ mod tests {
         FragmentServingInfo {
             result_table_id: None,
             distribution_type: FragmentDistributionType::Hash,
-            actor_count: 0,
             vnode_count: VirtualNode::COUNT_FOR_TEST,
         }
     }
