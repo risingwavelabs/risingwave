@@ -785,7 +785,11 @@ impl ScheduledBarriers {
                         unreachable!("only drop and cancel streaming jobs should be buffered");
                     }
                 }
-                notifiers.into_iter().for_each(|notify| {
+                // `run_command` waits for both the started and collected notifications. These
+                // buffered commands are pre-applied during recovery without injecting a real
+                // barrier, so complete both waiters here.
+                notifiers.into_iter().for_each(|mut notify| {
+                    notify.notify_started();
                     notify.notify_collected();
                 });
             }

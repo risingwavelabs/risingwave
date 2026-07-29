@@ -19,6 +19,7 @@ use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
@@ -1064,6 +1065,41 @@ impl CatalogController {
             )
             .await;
         Ok((version, database))
+    }
+
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let database =
+            database::ActiveModel {
+                database_id: Set(database_id),
+                resource_group: Set(
+                    resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
+                ),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database, obj, None).into()),
+            )
+            .await;
+        Ok(version)
     }
 
     pub async fn alter_streaming_job_config(

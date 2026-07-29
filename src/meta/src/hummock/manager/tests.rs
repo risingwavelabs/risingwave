@@ -1373,7 +1373,7 @@ async fn test_extend_objects_to_delete() {
             .len(),
         orphan_sst_num
     );
-    let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version2 = hummock_manager.pin_version(context_id).await.unwrap();
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
@@ -1399,7 +1399,7 @@ async fn test_extend_objects_to_delete() {
         )
         .await
         .unwrap();
-    let pinned_version3: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
+    let pinned_version3 = hummock_manager.pin_version(context_id).await.unwrap();
     assert_eq!(new_epoch, version_max_committed_epoch(&pinned_version3));
     hummock_manager
         .unpin_version_before(context_id, pinned_version3.id)
@@ -3029,7 +3029,7 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
     // will pass the stale read set to catalog acquire and fail before compaction can run.
     initial_manager
         .write_checkpoint(&HummockVersionCheckpoint {
-            version: dirty_version,
+            version: Arc::new(dirty_version),
             stale_objects: Default::default(),
         })
         .await
@@ -3660,6 +3660,136 @@ async fn test_schedule_group_split_with_normalize_disabled() {
 }
 
 #[tokio::test]
+async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
+    use risingwave_meta_model::{hummock_epoch_to_version, hummock_time_travel_version};
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{EntityTrait, PaginatorTrait};
+
+    let (env, hummock_manager, _, _) = setup_compute_env(80).await;
+    let table_a = TableId::new(1);
+    let table_b = TableId::new(2);
+
+    let mut version_10 = HummockVersion::default();
+    version_10.id = 10.into();
+    version_10.state_table_info = HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
+        (
+            table_a,
+            StateTableInfo {
+                committed_epoch: 300,
+                compaction_group_id: 1.into(),
+            },
+        ),
+        (
+            table_b,
+            StateTableInfo {
+                committed_epoch: 100,
+                compaction_group_id: 1.into(),
+            },
+        ),
+    ]));
+    let mut version_11 = version_10.clone();
+    version_11.id = 11.into();
+    version_11.state_table_info = HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
+        (
+            table_a,
+            StateTableInfo {
+                committed_epoch: 300,
+                compaction_group_id: 1.into(),
+            },
+        ),
+        (
+            table_b,
+            StateTableInfo {
+                committed_epoch: 200,
+                compaction_group_id: 1.into(),
+            },
+        ),
+    ]));
+    for version in [&version_10, &version_11] {
+        hummock_time_travel_version::Entity::insert(hummock_time_travel_version::ActiveModel {
+            version_id: Set(version.id),
+            version: Set((&version.to_protobuf()).into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+    for (table_id, epoch, version_id) in [
+        (table_b, 100_u64, 10_u64),
+        (table_b, 200, 11),
+        (table_a, 300, 10),
+    ] {
+        hummock_epoch_to_version::Entity::insert(hummock_epoch_to_version::ActiveModel {
+            epoch: Set(epoch.try_into().unwrap()),
+            table_id: Set(i64::from(table_id.as_raw_id())),
+            version_id: Set(version_id.into()),
+        })
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
+    hummock_manager
+        .truncate_time_travel_metadata(50, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_epoch_to_version::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        3
+    );
+    assert_eq!(
+        hummock_time_travel_version::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        2
+    );
+
+    hummock_manager
+        .truncate_time_travel_metadata(250, HashMap::new())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_time_travel_version::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        hummock_manager
+            .epoch_to_version(300, table_a)
+            .await
+            .unwrap()
+            .id,
+        version_10.id
+    );
+
+    hummock_manager
+        .truncate_time_travel_metadata(350, HashMap::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_time_travel_version::Entity::find()
+            .count(&env.meta_store_ref().conn)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        hummock_time_travel_version::Entity::find_by_id(version_11.id)
+            .one(&env.meta_store_ref().conn)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     use risingwave_hummock_sdk::level::Levels;
     use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
@@ -3782,7 +3912,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             .unwrap();
     assert_eq!(
         version_ids.iter().map(|id| id.as_raw_id()).collect_vec(),
-        vec![1, 4, 5]
+        vec![1, 5]
     );
     let delta_ids: Vec<risingwave_meta_model::HummockVersionId> =
         hummock_time_travel_delta::Entity::find()
@@ -3853,7 +3983,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             .count(&env.meta_store_ref().conn)
             .await
             .unwrap(),
-        2
+        1
     );
     assert_eq!(
         hummock_time_travel_delta::Entity::find()
