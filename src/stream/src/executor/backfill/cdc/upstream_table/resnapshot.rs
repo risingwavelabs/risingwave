@@ -22,7 +22,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -61,7 +60,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         }
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub fn snapshot_read_full_table_diff<'a>(
         &'a self,
         upstream_table_reader: &'a UpstreamTableReader<ExternalStorageTable>,
@@ -69,8 +67,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         batch_size: u32,
         pk_order: Vec<OrderType>,
         compare_indices: Vec<usize>,
-        data_types: Vec<DataType>,
-        chunk_size: usize,
     ) -> StreamExecutorResult<
         impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a,
     > {
@@ -94,8 +90,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             pk_order,
             pk_needs_unsigned_i64_compare,
             compare_indices,
-            data_types,
-            chunk_size,
             rate_limiter,
         ))
     }

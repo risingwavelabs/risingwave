@@ -21,10 +21,9 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt, pin_mut};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
+use risingwave_common::array::Op;
 use risingwave_common::bail;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_rate_limit::RateLimiter;
 
@@ -33,62 +32,38 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 #[allow(dead_code)]
 pub enum SnapshotReadOutput {
-    Chunk(StreamChunk),
+    /// A row-level correction. Chunking is intentionally owned by the executor consuming this
+    /// stream, which may coalesce progress events while filling a chunk.
+    Row {
+        op: Op,
+        row: OwnedRow,
+    },
+    /// The latest primary key consumed without a correction row.
+    ///
+    /// A consumer must not checkpoint this position until every preceding [`Self::Row`] has been
+    /// emitted downstream or otherwise made durable.
     Progress(OwnedRow),
     Finished,
 }
 
-/// Builds upsert-style correction chunks that transform the current CDC table state (`right`) into
-/// the upstream snapshot state (`left`).
+/// Builds row-level outputs that transform the current CDC table state (`right`) into the upstream
+/// snapshot state (`left`).
 ///
-/// Both inputs must be sorted by the same primary-key order. The emitted chunks are intentionally
-/// not full retract changelog:
+/// Both inputs must be sorted by the same primary-key order. The emitted corrections are
+/// intentionally not full retract changelog:
 ///
 /// * `+left` for left-only rows and changed rows.
 /// * `-right` for right-only rows.
-/// * no output for rows equal on `compare_indices`.
+/// * no correction row for rows equal on `compare_indices`.
 ///
 /// For same-primary-key changed rows, only the new upstream snapshot row is emitted. The current
 /// CDC table path consumes this through the table materialize with overwrite conflict handling,
 /// which can derive the old row from state and produce the correct downstream update semantics.
 /// Do not feed this output directly to a consumer that requires explicit `-old, +new` retract
 /// pairs for updates.
-#[expect(clippy::too_many_arguments)]
-pub(crate) fn diff_ordered_rows_to_chunks(
-    left: impl IntoIterator<Item = OwnedRow>,
-    right: impl IntoIterator<Item = OwnedRow>,
-    pk_indices: &[usize],
-    pk_order: &[OrderType],
-    pk_needs_unsigned_i64_compare: &[bool],
-    compare_indices: &[usize],
-    data_types: &[DataType],
-    chunk_size: usize,
-) -> Vec<StreamChunk> {
-    diff_ordered_rows_to_snapshot_outputs(
-        left,
-        right,
-        pk_indices,
-        pk_order,
-        pk_needs_unsigned_i64_compare,
-        compare_indices,
-        data_types,
-        chunk_size,
-    )
-    .into_iter()
-    .filter_map(|output| match output {
-        SnapshotReadOutput::Chunk(chunk) => Some(chunk),
-        SnapshotReadOutput::Progress(_) => None,
-        SnapshotReadOutput::Finished => unreachable!("diff output should not include Finished"),
-    })
-    .collect()
-}
-
-/// Builds snapshot-reader outputs for diff backfill.
-///
-/// Equal rows are not emitted as chunks, but they can still advance the snapshot read progress.
+/// Equal rows are not emitted as corrections, but they still advance the snapshot read progress.
 /// The progress event is required by the non-parallel CDC backfill path, where `current_pk_pos`
 /// controls which upstream changelog rows may be released.
-#[expect(clippy::too_many_arguments)]
 pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
     left: impl IntoIterator<Item = OwnedRow>,
     right: impl IntoIterator<Item = OwnedRow>,
@@ -96,10 +71,7 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
     pk_order: &[OrderType],
     pk_needs_unsigned_i64_compare: &[bool],
     compare_indices: &[usize],
-    data_types: &[DataType],
-    chunk_size: usize,
 ) -> Vec<SnapshotReadOutput> {
-    assert!(chunk_size > 0, "chunk_size must be greater than 0");
     assert_eq!(
         pk_indices.len(),
         pk_order.len(),
@@ -117,9 +89,7 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
 
     let mut left = left.into_iter().peekable();
     let mut right = right.into_iter().peekable();
-    let mut output = StreamChunkBuilder::new(chunk_size, data_types.to_vec());
     let mut outputs = vec![];
-    let mut pending_progress = None;
 
     loop {
         match (left.peek(), right.peek()) {
@@ -131,64 +101,45 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
                     pk_order,
                     pk_needs_unsigned_i64_compare,
                 ) {
-                    Ordering::Less => {
-                        if let Some(chunk) =
-                            output.append_row(Op::Insert, left.next().expect("peeked left row"))
-                        {
-                            outputs.push(SnapshotReadOutput::Chunk(chunk));
-                        }
-                    }
-                    Ordering::Greater => {
-                        if let Some(chunk) =
-                            output.append_row(Op::Delete, right.next().expect("peeked right row"))
-                        {
-                            outputs.push(SnapshotReadOutput::Chunk(chunk));
-                        }
-                    }
+                    Ordering::Less => outputs.push(SnapshotReadOutput::Row {
+                        op: Op::Insert,
+                        row: left.next().expect("peeked left row"),
+                    }),
+                    Ordering::Greater => outputs.push(SnapshotReadOutput::Row {
+                        op: Op::Delete,
+                        row: right.next().expect("peeked right row"),
+                    }),
                     Ordering::Equal => {
                         let left_row = left.next().expect("peeked left row");
                         let right_row = right.next().expect("peeked right row");
                         if !rows_equal_on_indices(&left_row, &right_row, compare_indices) {
-                            if let Some(chunk) = output.append_row(Op::Insert, left_row) {
-                                outputs.push(SnapshotReadOutput::Chunk(chunk));
-                            }
-                            pending_progress = None;
+                            outputs.push(SnapshotReadOutput::Row {
+                                op: Op::Insert,
+                                row: left_row,
+                            });
                         } else {
-                            pending_progress = Some(project_pk(&left_row, pk_indices));
+                            outputs.push(SnapshotReadOutput::Progress(project_pk(
+                                &left_row, pk_indices,
+                            )));
                         }
                     }
                 }
             }
-            (Some(_), None) => {
-                if let Some(chunk) =
-                    output.append_row(Op::Insert, left.next().expect("peeked left row"))
-                {
-                    outputs.push(SnapshotReadOutput::Chunk(chunk));
-                }
-                pending_progress = None;
-            }
-            (None, Some(_)) => {
-                if let Some(chunk) =
-                    output.append_row(Op::Delete, right.next().expect("peeked right row"))
-                {
-                    outputs.push(SnapshotReadOutput::Chunk(chunk));
-                }
-                pending_progress = None;
-            }
+            (Some(_), None) => outputs.push(SnapshotReadOutput::Row {
+                op: Op::Insert,
+                row: left.next().expect("peeked left row"),
+            }),
+            (None, Some(_)) => outputs.push(SnapshotReadOutput::Row {
+                op: Op::Delete,
+                row: right.next().expect("peeked right row"),
+            }),
             (None, None) => break,
         }
     }
 
-    if let Some(chunk) = output.take() {
-        outputs.push(SnapshotReadOutput::Chunk(chunk));
-    }
-    if let Some(pos) = pending_progress {
-        outputs.push(SnapshotReadOutput::Progress(pos));
-    }
     outputs
 }
 
-#[expect(clippy::too_many_arguments)]
 #[try_stream(ok = SnapshotReadOutput, error = StreamExecutorError)]
 pub(crate) async fn diff_ordered_row_streams(
     left: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Send,
@@ -197,13 +148,8 @@ pub(crate) async fn diff_ordered_row_streams(
     pk_order: Vec<OrderType>,
     pk_needs_unsigned_i64_compare: Vec<bool>,
     compare_indices: Vec<usize>,
-    data_types: Vec<DataType>,
-    chunk_size: usize,
     rate_limiter: Arc<RateLimiter>,
 ) {
-    if chunk_size == 0 {
-        bail!("chunk_size must be greater than 0");
-    }
     if pk_indices.len() != pk_order.len() {
         bail!("pk_indices and pk_order must have the same length");
     }
@@ -224,7 +170,6 @@ pub(crate) async fn diff_ordered_row_streams(
 
     let mut left_row = left_stream.next().await.transpose()?;
     let mut right_row = right_stream.next().await.transpose()?;
-    let mut output = StreamChunkBuilder::new(chunk_size, data_types);
 
     loop {
         match (&left_row, &right_row) {
@@ -236,37 +181,33 @@ pub(crate) async fn diff_ordered_row_streams(
                 &pk_needs_unsigned_i64_compare,
             ) {
                 Ordering::Less => {
-                    if let Some(chunk) =
-                        output.append_row(Op::Insert, left_row.take().expect("checked left row"))
-                    {
-                        yield SnapshotReadOutput::Chunk(chunk);
-                    }
+                    yield SnapshotReadOutput::Row {
+                        op: Op::Insert,
+                        row: left_row.take().expect("checked left row"),
+                    };
                     left_row = left_stream.next().await.transpose()?;
                 }
                 Ordering::Greater => {
                     rate_limiter.wait(1).await;
-                    if let Some(chunk) =
-                        output.append_row(Op::Delete, right_row.take().expect("checked right row"))
-                    {
-                        yield SnapshotReadOutput::Chunk(chunk);
-                    }
+                    yield SnapshotReadOutput::Row {
+                        op: Op::Delete,
+                        row: right_row.take().expect("checked right row"),
+                    };
                     right_row = right_stream.next().await.transpose()?;
                 }
                 Ordering::Equal => {
                     let left = left_row.take().expect("checked left row");
                     let right = right_row.take().expect("checked right row");
                     if !rows_equal_on_indices(&left, &right, &compare_indices) {
-                        if let Some(chunk) = output.append_row(Op::Insert, left) {
-                            yield SnapshotReadOutput::Chunk(chunk);
-                        }
+                        yield SnapshotReadOutput::Row {
+                            op: Op::Insert,
+                            row: left,
+                        };
                     } else {
-                        // A progress position is checkpointed by the non-parallel executor. Emit
-                        // one for every equal row so cancellation cannot repeatedly restart before
-                        // a partial group reaches `chunk_size`. Flush any earlier correction first
-                        // so recovery can never resume past output that was still buffered locally.
-                        if let Some(chunk) = output.take() {
-                            yield SnapshotReadOutput::Chunk(chunk);
-                        }
+                        // Emit progress for every equal row so cancellation cannot repeatedly
+                        // restart from the same primary key. The consumer owns correction chunking
+                        // and may coalesce these positions subject to `SnapshotReadOutput`'s
+                        // ordering contract.
                         yield SnapshotReadOutput::Progress(project_pk(&left, &pk_indices));
                     }
                     left_row = left_stream.next().await.transpose()?;
@@ -274,29 +215,24 @@ pub(crate) async fn diff_ordered_row_streams(
                 }
             },
             (Some(_), None) => {
-                if let Some(chunk) =
-                    output.append_row(Op::Insert, left_row.take().expect("checked left row"))
-                {
-                    yield SnapshotReadOutput::Chunk(chunk);
-                }
+                yield SnapshotReadOutput::Row {
+                    op: Op::Insert,
+                    row: left_row.take().expect("checked left row"),
+                };
                 left_row = left_stream.next().await.transpose()?;
             }
             (None, Some(_)) => {
                 rate_limiter.wait(1).await;
-                if let Some(chunk) =
-                    output.append_row(Op::Delete, right_row.take().expect("checked right row"))
-                {
-                    yield SnapshotReadOutput::Chunk(chunk);
-                }
+                yield SnapshotReadOutput::Row {
+                    op: Op::Delete,
+                    row: right_row.take().expect("checked right row"),
+                };
                 right_row = right_stream.next().await.transpose()?;
             }
             (None, None) => break,
         }
     }
 
-    if let Some(chunk) = output.take() {
-        yield SnapshotReadOutput::Chunk(chunk);
-    }
     yield SnapshotReadOutput::Finished;
 }
 
@@ -332,7 +268,6 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common_rate_limit::RateLimit;
 
@@ -342,47 +277,31 @@ mod tests {
         OwnedRow::new(vec![Some(pk.into()), Some(ScalarImpl::from(value))])
     }
 
-    fn rows_from_chunks(chunks: &[StreamChunk]) -> Vec<(Op, OwnedRow)> {
-        chunks
-            .iter()
-            .flat_map(|chunk| {
-                chunk
-                    .rows()
-                    .map(|(op, row)| (op, row.to_owned_row()))
-                    .collect_vec()
-            })
-            .collect_vec()
-    }
-
     fn rows_from_outputs(outputs: &[SnapshotReadOutput]) -> Vec<(Op, OwnedRow)> {
         outputs
             .iter()
             .filter_map(|output| match output {
-                SnapshotReadOutput::Chunk(chunk) => {
-                    Some(rows_from_chunks(std::slice::from_ref(chunk)))
-                }
+                SnapshotReadOutput::Row { op, row } => Some((*op, row.clone())),
                 SnapshotReadOutput::Progress(_) => None,
                 SnapshotReadOutput::Finished => None,
             })
-            .flatten()
-            .collect_vec()
+            .collect()
     }
 
     fn progress_from_outputs(outputs: &[SnapshotReadOutput]) -> Vec<OwnedRow> {
         outputs
             .iter()
             .filter_map(|output| match output {
-                SnapshotReadOutput::Chunk(_) => None,
+                SnapshotReadOutput::Row { .. } => None,
                 SnapshotReadOutput::Progress(pos) => Some(pos.clone()),
                 SnapshotReadOutput::Finished => None,
             })
-            .collect_vec()
+            .collect()
     }
 
     async fn collect_stream_outputs(
         left: Vec<OwnedRow>,
         right: Vec<OwnedRow>,
-        chunk_size: usize,
     ) -> Vec<SnapshotReadOutput> {
         let left = futures::stream::iter(left.into_iter().map(Ok));
         let right = futures::stream::iter(right.into_iter().map(Ok));
@@ -393,8 +312,6 @@ mod tests {
             vec![OrderType::ascending()],
             vec![false],
             vec![0, 1],
-            vec![DataType::Int32, DataType::Varchar],
-            chunk_size,
             Arc::new(RateLimiter::new(RateLimit::Disabled)),
         );
         pin_mut!(outputs);
@@ -406,18 +323,16 @@ mod tests {
         collected
     }
 
-    fn diff(left: Vec<OwnedRow>, right: Vec<OwnedRow>, chunk_size: usize) -> Vec<(Op, OwnedRow)> {
-        let chunks = diff_ordered_rows_to_chunks(
+    fn diff(left: Vec<OwnedRow>, right: Vec<OwnedRow>) -> Vec<(Op, OwnedRow)> {
+        let outputs = diff_ordered_rows_to_snapshot_outputs(
             left,
             right,
             &[0],
             &[OrderType::ascending()],
             &[false],
             &[0, 1],
-            &[DataType::Int32, DataType::Varchar],
-            chunk_size,
         );
-        rows_from_chunks(&chunks)
+        rows_from_outputs(&outputs)
     }
 
     #[test]
@@ -426,7 +341,7 @@ mod tests {
         let right = vec![row(1, "same"), row(3, "right-only"), row(4, "changed-old")];
 
         assert_eq!(
-            diff(left, right, 16),
+            diff(left, right),
             vec![
                 (Op::Insert, row(2, "left-only")),
                 (Op::Delete, row(3, "right-only")),
@@ -436,26 +351,33 @@ mod tests {
     }
 
     #[test]
-    fn test_diff_respects_chunk_size() {
-        let chunks = diff_ordered_rows_to_chunks(
+    fn test_diff_emits_row_level_corrections() {
+        let outputs = diff_ordered_rows_to_snapshot_outputs(
             vec![row(1, "a"), row(2, "b"), row(3, "c")],
             vec![],
             &[0],
             &[OrderType::ascending()],
             &[false],
             &[0, 1],
-            &[DataType::Int32, DataType::Varchar],
-            2,
         );
 
-        assert_eq!(chunks.len(), 2);
-        assert_eq!(chunks[0].cardinality(), 2);
-        assert_eq!(chunks[1].cardinality(), 1);
+        assert_eq!(
+            rows_from_outputs(&outputs),
+            vec![
+                (Op::Insert, row(1, "a")),
+                (Op::Insert, row(2, "b")),
+                (Op::Insert, row(3, "c")),
+            ]
+        );
+        assert!(
+            outputs
+                .iter()
+                .all(|output| matches!(output, SnapshotReadOutput::Row { .. }))
+        );
     }
 
     #[test]
     fn test_diff_can_ignore_internal_columns() {
-        let data_types = [DataType::Int32, DataType::Varchar, DataType::Int64];
         let left = vec![OwnedRow::new(vec![
             Some(1.into()),
             Some(ScalarImpl::from("same")),
@@ -467,18 +389,16 @@ mod tests {
             Some(41_i64.into()),
         ])];
 
-        let chunks = diff_ordered_rows_to_chunks(
+        let outputs = diff_ordered_rows_to_snapshot_outputs(
             left,
             right,
             &[0],
             &[OrderType::ascending()],
             &[false],
             &[0, 1],
-            &data_types,
-            16,
         );
 
-        assert!(chunks.is_empty());
+        assert!(rows_from_outputs(&outputs).is_empty());
     }
 
     #[test]
@@ -490,14 +410,15 @@ mod tests {
             &[OrderType::ascending()],
             &[false],
             &[0, 1],
-            &[DataType::Int32, DataType::Varchar],
-            16,
         );
 
         assert!(rows_from_outputs(&outputs).is_empty());
         assert_eq!(
             progress_from_outputs(&outputs),
-            vec![OwnedRow::new(vec![Some(2.into())])]
+            vec![
+                OwnedRow::new(vec![Some(1.into())]),
+                OwnedRow::new(vec![Some(2.into())]),
+            ]
         );
     }
 
@@ -510,8 +431,6 @@ mod tests {
             &[OrderType::ascending()],
             &[false],
             &[0, 1],
-            &[DataType::Int32, DataType::Varchar],
-            16,
         );
 
         assert_eq!(
@@ -529,7 +448,6 @@ mod tests {
         let outputs = collect_stream_outputs(
             vec![row(1, "same"), row(2, "new")],
             vec![row(1, "same"), row(3, "old")],
-            16,
         )
         .await;
 
@@ -545,7 +463,6 @@ mod tests {
         let outputs = collect_stream_outputs(
             vec![row(1, "same"), row(2, "same"), row(3, "same")],
             vec![row(1, "same"), row(2, "same"), row(3, "same")],
-            2,
         )
         .await;
 
@@ -561,8 +478,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_diff_progresses_before_chunk_fills() {
-        let outputs = collect_stream_outputs(vec![row(1, "same")], vec![row(1, "same")], 128).await;
+    async fn test_streaming_diff_progresses_after_single_equal_row() {
+        let outputs = collect_stream_outputs(vec![row(1, "same")], vec![row(1, "same")]).await;
 
         assert!(matches!(
             outputs.first(),
@@ -573,22 +490,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_diff_flushes_correction_before_progress() {
+    async fn test_streaming_diff_preserves_correction_before_progress() {
         let outputs = collect_stream_outputs(
             vec![row(1, "new"), row(2, "same"), row(3, "same")],
             vec![row(1, "old"), row(2, "same"), row(3, "same")],
-            2,
         )
         .await;
 
         assert!(matches!(
             outputs.first(),
-            Some(SnapshotReadOutput::Chunk(_))
+            Some(SnapshotReadOutput::Row {
+                op: Op::Insert,
+                row: correction,
+            }) if correction == &row(1, "new")
         ));
-        assert_eq!(
-            rows_from_outputs(&outputs[..1]),
-            vec![(Op::Insert, row(1, "new"))]
-        );
         assert!(matches!(
             outputs.get(1),
             Some(SnapshotReadOutput::Progress(pos))
@@ -631,8 +546,6 @@ mod tests {
             vec![OrderType::ascending()],
             vec![true],
             vec![0, 1],
-            vec![DataType::Int64, DataType::Varchar],
-            1,
             Arc::new(RateLimiter::new(RateLimit::Disabled)),
         );
         pin_mut!(outputs);
@@ -659,8 +572,6 @@ mod tests {
             vec![OrderType::ascending()],
             vec![false],
             vec![0, 1],
-            vec![DataType::Int32, DataType::Varchar],
-            2,
             rate_limiter.clone(),
         );
         pin_mut!(outputs);
@@ -698,8 +609,6 @@ mod tests {
             vec![OrderType::ascending()],
             vec![false],
             vec![0, 1],
-            vec![DataType::Int32, DataType::Varchar],
-            1,
             Arc::new(RateLimiter::new(RateLimit::Pause)),
         );
         pin_mut!(outputs);
@@ -719,19 +628,17 @@ mod tests {
     fn test_diff_supports_descending_pk_order() {
         let left = vec![row(5, "left"), row(3, "same"), row(1, "left")];
         let right = vec![row(4, "right"), row(3, "same"), row(2, "right")];
-        let chunks = diff_ordered_rows_to_chunks(
+        let outputs = diff_ordered_rows_to_snapshot_outputs(
             left,
             right,
             &[0],
             &[OrderType::descending()],
             &[false],
             &[0, 1],
-            &[DataType::Int32, DataType::Varchar],
-            16,
         );
 
         assert_eq!(
-            rows_from_chunks(&chunks),
+            rows_from_outputs(&outputs),
             vec![
                 (Op::Insert, row(5, "left")),
                 (Op::Delete, row(4, "right")),
