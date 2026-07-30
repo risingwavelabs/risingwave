@@ -15,8 +15,6 @@
 // The reader is introduced before planner/executor plumbing so it can be reviewed independently.
 #![allow(dead_code)]
 
-use std::ops::Bound;
-
 use futures::{Stream, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -25,7 +23,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderType, cmp_datum};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -35,9 +33,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 
 use super::diff::{SnapshotReadOutput, diff_ordered_row_streams};
 use super::external::ExternalStorageTable;
-use super::snapshot::{
-    SnapshotReadArgs, SplitSnapshotReadArgs, UpstreamTableReader, snapshot_rate_limiter,
-};
+use super::snapshot::{SnapshotReadArgs, UpstreamTableReader, snapshot_rate_limiter};
 use crate::executor::backfill::utils::compute_bounds;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
@@ -104,42 +100,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         ))
     }
 
-    #[expect(clippy::too_many_arguments)]
-    pub fn snapshot_read_table_split_diff<'a>(
-        &'a self,
-        upstream_table_reader: &'a UpstreamTableReader<ExternalStorageTable>,
-        read_args: SplitSnapshotReadArgs,
-        pk_indices: Vec<usize>,
-        pk_order: Vec<OrderType>,
-        compare_indices: Vec<usize>,
-        data_types: Vec<DataType>,
-        chunk_size: usize,
-        split_pk_column_index: usize,
-    ) -> StreamExecutorResult<
-        impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a,
-    > {
-        let pk_needs_unsigned_i64_compare =
-            upstream_table_reader.pk_column_unsigned_i64_compare_flags()?;
-        let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
-        let left = snapshot_read_rows(
-            upstream_table_reader
-                .snapshot_read_table_split_strict(read_args.clone(), rate_limiter.clone()),
-            pk_indices.clone(),
-        );
-        let right = self.storage_table_split_read(read_args, split_pk_column_index);
-        Ok(diff_ordered_row_streams(
-            left,
-            right,
-            pk_indices,
-            pk_order,
-            pk_needs_unsigned_i64_compare,
-            compare_indices,
-            data_types,
-            chunk_size,
-            rate_limiter,
-        ))
-    }
-
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     async fn storage_table_read(&self, read_args: SnapshotReadArgs) {
         let table = &self.table;
@@ -160,61 +120,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         #[for_await]
         for row in row_iter {
             yield row?;
-        }
-    }
-
-    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
-    async fn storage_table_split_read(
-        &self,
-        read_args: SplitSnapshotReadArgs,
-        split_pk_column_index: usize,
-    ) {
-        let table = &self.table;
-        let Some(pk_in_output_indices) = table.pk_in_output_indices() else {
-            bail!("CDC snapshot diff output projection must contain every primary-key column");
-        };
-        let Some(&split_output_column_index) = pk_in_output_indices.get(split_pk_column_index)
-        else {
-            bail!(
-                "CDC snapshot split primary-key index {split_pk_column_index} is out of bounds for \
-                 {} storage primary-key columns",
-                pk_in_output_indices.len()
-            );
-        };
-        let range_bounds = if split_pk_column_index == 0 {
-            split_pk_range_bounds(
-                &read_args.left_bound_inclusive,
-                &read_args.right_bound_exclusive,
-            )?
-        } else {
-            // A non-prefix primary-key component cannot be represented as a contiguous storage
-            // range. Scan the committed table and apply the same split predicate as the executor.
-            (Bound::Unbounded, Bound::Unbounded)
-        };
-        let row_iter = table
-            .batch_iter_with_pk_bounds(
-                HummockReadEpoch::Committed(self.read_epoch),
-                row::empty(),
-                range_bounds,
-                true,
-                PrefetchOptions::prefetch_for_large_range_scan(),
-            )
-            .await?;
-
-        #[for_await]
-        for row in row_iter {
-            let row = row?;
-            if split_pk_column_index != 0
-                && !row_matches_split(
-                    &row,
-                    split_output_column_index,
-                    &read_args.left_bound_inclusive,
-                    &read_args.right_bound_exclusive,
-                )?
-            {
-                continue;
-            }
-            yield row;
         }
     }
 }
@@ -253,47 +158,6 @@ async fn snapshot_read_rows(
     }
 }
 
-fn split_pk_range_bounds(
-    left: &OwnedRow,
-    right: &OwnedRow,
-) -> StreamExecutorResult<(Bound<OwnedRow>, Bound<OwnedRow>)> {
-    if left.len() != 1 || right.len() != 1 {
-        bail!("CDC resnapshot diff backfill only supports a single split column");
-    }
-    let start = if is_unbounded_split_bound(left) {
-        Bound::Unbounded
-    } else {
-        Bound::Included(left.clone())
-    };
-    let end = if is_unbounded_split_bound(right) {
-        Bound::Unbounded
-    } else {
-        Bound::Excluded(right.clone())
-    };
-    Ok((start, end))
-}
-
-fn is_unbounded_split_bound(row: &OwnedRow) -> bool {
-    row.iter().all(|d| d.is_none())
-}
-
-fn row_matches_split(
-    row: &OwnedRow,
-    split_output_column_index: usize,
-    left: &OwnedRow,
-    right: &OwnedRow,
-) -> StreamExecutorResult<bool> {
-    if left.len() != 1 || right.len() != 1 {
-        bail!("CDC snapshot diff backfill only supports a single split column");
-    }
-    let datum = row.datum_at(split_output_column_index);
-    let after_left = is_unbounded_split_bound(left)
-        || cmp_datum(datum, left.datum_at(0), OrderType::ascending_nulls_first()).is_ge();
-    let before_right = is_unbounded_split_bound(right)
-        || cmp_datum(datum, right.datum_at(0), OrderType::ascending_nulls_first()).is_lt();
-    Ok(after_left && before_right)
-}
-
 #[cfg(test)]
 mod tests {
     use futures::{StreamExt, pin_mut};
@@ -305,7 +169,7 @@ mod tests {
     use risingwave_pb::plan_common::StorageTableDesc;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{ResnapshotDiffRead, row_matches_split, snapshot_read_rows};
+    use super::{ResnapshotDiffRead, snapshot_read_rows};
     use crate::executor::StreamExecutorError;
 
     #[test]
@@ -338,41 +202,6 @@ mod tests {
         assert_eq!(
             read.table.schema().data_types(),
             vec![DataType::Int32, DataType::Varchar]
-        );
-    }
-
-    #[test]
-    fn filters_storage_by_non_prefix_split_key() {
-        let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Int32(100)),
-            Some(ScalarImpl::Int32(7)),
-        ]);
-        assert!(
-            row_matches_split(
-                &row,
-                1,
-                &OwnedRow::new(vec![Some(ScalarImpl::Int32(5))]),
-                &OwnedRow::new(vec![Some(ScalarImpl::Int32(10))]),
-            )
-            .unwrap()
-        );
-        assert!(
-            !row_matches_split(
-                &row,
-                1,
-                &OwnedRow::new(vec![Some(ScalarImpl::Int32(7))]),
-                &OwnedRow::new(vec![Some(ScalarImpl::Int32(7))]),
-            )
-            .unwrap()
-        );
-        assert!(
-            row_matches_split(
-                &row,
-                1,
-                &OwnedRow::new(vec![None]),
-                &OwnedRow::new(vec![None]),
-            )
-            .unwrap()
         );
     }
 

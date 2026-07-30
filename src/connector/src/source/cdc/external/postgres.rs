@@ -251,18 +251,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
         split_columns: Vec<Field>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         assert_eq!(table_name, self.schema_table_name);
-        self.split_snapshot_read_inner(table_name, left, right, split_columns, false)
-    }
-
-    fn split_snapshot_read_strict(
-        &self,
-        table_name: SchemaTableName,
-        left: OwnedRow,
-        right: OwnedRow,
-        split_columns: Vec<Field>,
-    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        assert_eq!(table_name, self.schema_table_name);
-        self.split_snapshot_read_inner(table_name, left, right, split_columns, true)
+        self.split_snapshot_read_inner(table_name, left, right, split_columns)
     }
 }
 
@@ -940,7 +929,6 @@ impl PostgresExternalTableReader {
         left: OwnedRow,
         right: OwnedRow,
         split_columns: Vec<Field>,
-        strict: bool,
     ) {
         assert_eq!(
             split_columns.len(),
@@ -1005,12 +993,8 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_scan_stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            if strict {
-                postgres_row_to_owned_row_strict(row, &self.rw_schema).map_err(ConnectorError::from)
-            } else {
-                postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
-                    .map_err(ConnectorError::from)
-            }
+            postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
+                .map_err(ConnectorError::from)
         });
 
         pin_mut!(row_stream);
