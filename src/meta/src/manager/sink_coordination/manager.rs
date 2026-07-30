@@ -1691,7 +1691,7 @@ mod tests {
                 }
             });
 
-        let (_client, log_store_rewind_start_epoch) =
+        let (mut client, log_store_rewind_start_epoch) =
             CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
                 Ok(tonic::Response::new(
                     manager
@@ -1704,6 +1704,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(log_store_rewind_start_epoch, Some(epoch1));
+
+        // The recovered pending epoch is recommitted only after initial epoch alignment.
+        let aligned_epoch = client.align_initial_epoch(epoch1 + 1).await.unwrap();
+        assert_eq!(aligned_epoch, epoch1 + 1);
 
         for _ in 0..50 {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -1721,6 +1725,215 @@ mod tests {
         let rows = list_rows(&db).await;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, epoch1 as i64);
+        assert_eq!(rows[0].2, "COMMITTED");
+    }
+
+    /// Writers whose log stores were truncated unevenly observe different first epochs on
+    /// recovery. They must be aligned even when a rewind epoch is provided; otherwise their
+    /// commit epochs diverge forever and no commit can ever align.
+    #[tokio::test]
+    async fn test_align_initial_epoch_with_rewind() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch0 = 100;
+        let epoch1 = 133;
+        let epoch2 = 233;
+        let epoch3 = 300;
+
+        // A committed epoch in the meta store makes the coordinator provide `Some(rewind)`.
+        let sql = format!(
+            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state, metadata) VALUES ({}, {}, 'COMMITTED', x'0102')",
+            param.sink_id, epoch0
+        );
+        db.execute(sea_orm::Statement::from_string(
+            db.get_database_backend(),
+            sql,
+        ))
+        .await
+        .unwrap();
+
+        let mut all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        all_vnode.shuffle(&mut rand::rng());
+        let (first, second) = all_vnode.split_at(VirtualNode::COUNT_FOR_TEST / 2);
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode1 = build_bitmap(first);
+        let vnode2 = build_bitmap(second);
+
+        let metadata = [vec![1u8, 2u8], vec![3u8, 4u8]];
+        let pre_commit_metadata = vec![9u8];
+
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (epoch_sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(epoch_sender);
+                    Ok((epoch3, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let commit_attempt = Arc::new(AtomicI32::new(0));
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let db = db.clone();
+                let metadata = metadata.clone();
+                let pre_commit_metadata = pre_commit_metadata.clone();
+                let commit_attempt = commit_attempt.clone();
+                move |param, new_writer_rx| {
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    let metadata = metadata.clone();
+                    let pre_commit_metadata = pre_commit_metadata.clone();
+                    let expected_commit_metadata = pre_commit_metadata.clone();
+                    let commit_attempt = commit_attempt.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |epoch, metadata_list, schema_change| {
+                                        assert_eq!(epoch, epoch3);
+                                        assert!(schema_change.is_none());
+                                        let mut metadata_list =
+                                            metadata_list
+                                                .into_iter()
+                                                .map(|metadata| match metadata {
+                                                    SinkMetadata {
+                                                        metadata:
+                                                            Some(Metadata::Serialized(
+                                                                SerializedMetadata { metadata },
+                                                            )),
+                                                    } => metadata,
+                                                    _ => unreachable!(),
+                                                })
+                                                .collect_vec();
+                                        metadata_list.sort();
+                                        assert_eq!(metadata[0], metadata_list[0]);
+                                        assert_eq!(metadata[1], metadata_list[1]);
+                                        Ok(Some(pre_commit_metadata.clone()))
+                                    },
+                                    move |epoch, commit_metadata| {
+                                        assert_eq!(epoch, epoch3);
+                                        assert_eq!(commit_metadata, expected_commit_metadata);
+                                        commit_attempt
+                                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                        Ok(())
+                                    },
+                                    move |_epoch, _schema_change| unreachable!(),
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap()
+        };
+
+        let ((mut client1, rewind1), (mut client2, rewind2)) =
+            join(build_client(vnode1), pin!(build_client(vnode2))).await;
+        assert_eq!(rewind1, Some(epoch0));
+        assert_eq!(rewind2, Some(epoch0));
+
+        // The two writers report different first epochs and both get the max.
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch1),
+            client2.align_initial_epoch(epoch2),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch2);
+        assert_eq!(aligned_epoch2, epoch2);
+
+        // After alignment both writers commit on the same epoch.
+        let mut commit_future = pin!(
+            client1
+                .commit(
+                    epoch3,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[0].clone(),
+                        })),
+                    },
+                    None,
+                )
+                .map(|result| result.unwrap())
+        );
+        assert!(
+            poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        join(
+            commit_future,
+            client2
+                .commit(
+                    epoch3,
+                    SinkMetadata {
+                        metadata: Some(Metadata::Serialized(SerializedMetadata {
+                            metadata: metadata[1].clone(),
+                        })),
+                    },
+                    None,
+                )
+                .map(|result| result.unwrap()),
+        )
+        .await;
+
+        for _ in 0..50 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let rows = list_rows(&db).await;
+            if rows.len() == 1 && rows[0].2 == "COMMITTED" {
+                break;
+            }
+        }
+
+        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch3 as i64);
         assert_eq!(rows[0].2, "COMMITTED");
     }
 

@@ -294,8 +294,19 @@ impl CoordinationHandleManager {
         Ok(())
     }
 
-    fn ack_aligned_initial_epoch(&mut self, aligned_initial_epoch: u64) -> anyhow::Result<()> {
-        for (handle_id, handle) in &mut self.writer_handles {
+    fn ack_aligned_initial_epoch(
+        &mut self,
+        aligned_initial_epoch: u64,
+        handle_ids: impl IntoIterator<Item = HandleId>,
+    ) -> anyhow::Result<()> {
+        for handle_id in handle_ids {
+            let handle = self.writer_handles.get_mut(&handle_id).ok_or_else(|| {
+                anyhow!(
+                    "fail to find handle for {} to ack aligned initial epoch {}",
+                    handle_id,
+                    aligned_initial_epoch
+                )
+            })?;
             handle
                 .ack_aligned_initial_epoch(aligned_initial_epoch)
                 .map_err(|_| {
@@ -480,11 +491,9 @@ impl CoordinationHandleManager {
                     );
                 }
                 CoordinationHandleManagerEvent::AlignInitialEpoch(epoch) => {
-                    bail!(
-                        "receive AlignInitialEpoch on epoch {} from handle {} during alter parallelism",
-                        epoch,
-                        handle_id
-                    );
+                    // From a writer started in a non-cold-start round; it consumes the live
+                    // stream and needs no cross-writer alignment.
+                    self.ack_aligned_initial_epoch(epoch, [handle_id])?;
                 }
             }
         }
@@ -499,7 +508,8 @@ impl CoordinationHandleManager {
 ///   ensures new sink executors load the correct schema.
 enum CoordinatorWorkerState {
     Running,
-    WaitingForFlushed(HashSet<HandleId>),
+    /// The bool indicates whether the pending init requests are from a cold start.
+    WaitingForFlushed(HashSet<HandleId>, bool),
 }
 
 pub struct CoordinatorWorker {
@@ -588,14 +598,16 @@ impl CoordinatorWorker {
     async fn try_handle_init_requests(
         &mut self,
         pending_handle_ids: &HashSet<HandleId>,
+        cold_start: bool,
         two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
         if two_phase_handler.has_uncommitted_schema_change() {
             // Delay handling init requests until all pending epochs are flushed.
-            self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
+            self.curr_state =
+                CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone(), cold_start);
         } else {
-            self.handle_init_requests_impl(pending_handle_ids.clone())
+            self.handle_init_requests_impl(pending_handle_ids.clone(), cold_start)
                 .await?;
         }
         Ok(())
@@ -604,11 +616,19 @@ impl CoordinatorWorker {
     async fn handle_init_requests_impl(
         &mut self,
         pending_handle_ids: impl IntoIterator<Item = HandleId>,
+        cold_start: bool,
     ) -> anyhow::Result<()> {
         let log_store_rewind_start_epoch = self.last_writer_acked_epoch;
         self.handle_manager
             .start(log_store_rewind_start_epoch, pending_handle_ids)?;
-        if log_store_rewind_start_epoch.is_none() {
+        if cold_start {
+            // On cold start, writers rebuild log readers from log stores that may have been
+            // truncated unevenly (e.g. an acked commit with empty metadata leaves no durable
+            // trace, making the recovered rewind epoch staler than some writer's truncation
+            // watermark), so their first epochs may differ even with a rewind epoch. Align them
+            // to the max, otherwise their commit epochs would diverge forever. In non-cold-start
+            // rounds, existing writers are position-locked by the forced commit on the
+            // reschedule barrier and do not report initial epochs.
             let mut align_requests = AligningRequests::default();
             while !align_requests.aligned() {
                 let (handle_id, event) = self.handle_manager.next_event().await?;
@@ -625,13 +645,14 @@ impl CoordinatorWorker {
                     }
                 }
             }
-            let aligned_initial_epoch = align_requests
-                .requests
-                .into_iter()
-                .max()
-                .expect("non-empty");
+            let AligningRequests {
+                requests,
+                handle_ids,
+                ..
+            } = align_requests;
+            let aligned_initial_epoch = requests.into_iter().max().expect("non-empty");
             self.handle_manager
-                .ack_aligned_initial_epoch(aligned_initial_epoch)?;
+                .ack_aligned_initial_epoch(aligned_initial_epoch, handle_ids)?;
         }
         Ok(())
     }
@@ -640,11 +661,14 @@ impl CoordinatorWorker {
         &mut self,
         two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<CoordinatorWorkerEvent> {
-        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
+        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids, cold_start) =
+            &self.curr_state
             && two_phase_handler.is_empty()
         {
             let pending_handle_ids = pending_handle_ids.clone();
-            self.handle_init_requests_impl(pending_handle_ids).await?;
+            let cold_start = *cold_start;
+            self.handle_init_requests_impl(pending_handle_ids, cold_start)
+                .await?;
             self.curr_state = CoordinatorWorkerState::Running;
         }
 
@@ -678,7 +702,7 @@ impl CoordinatorWorker {
         }
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
-        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
+        self.try_handle_init_requests(&running_handles, true, &mut two_phase_handler)
             .await?;
 
         let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
@@ -696,8 +720,12 @@ impl CoordinatorWorker {
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..).chain([handle_id]))
                             .await?;
-                        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
-                            .await?;
+                        self.try_handle_init_requests(
+                            &running_handles,
+                            false,
+                            &mut two_phase_handler,
+                        )
+                        .await?;
                         continue;
                     }
                     CoordinationHandleManagerEvent::Stop => {
@@ -706,8 +734,12 @@ impl CoordinatorWorker {
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..))
                             .await?;
-                        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
-                            .await?;
+                        self.try_handle_init_requests(
+                            &running_handles,
+                            false,
+                            &mut two_phase_handler,
+                        )
+                        .await?;
 
                         continue;
                     }
@@ -716,8 +748,12 @@ impl CoordinatorWorker {
                         metadata,
                         schema_change,
                     } => (handle_id, epoch, (metadata, schema_change)),
-                    CoordinationHandleManagerEvent::AlignInitialEpoch(_) => {
-                        bail!("receive AlignInitialEpoch after initialization")
+                    CoordinationHandleManagerEvent::AlignInitialEpoch(epoch) => {
+                        // From a writer started in a non-cold-start round; it consumes the live
+                        // stream and needs no cross-writer alignment.
+                        self.handle_manager
+                            .ack_aligned_initial_epoch(epoch, [handle_id])?;
+                        continue;
                     }
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
@@ -796,6 +832,16 @@ impl CoordinatorWorker {
                 commit_request,
                 self.handle_manager.vnode_bitmap(handle_id),
             )?;
+            if pending_epochs.len() > 1 {
+                // Writers commit on the same sequence of epochs (initial epochs aligned on
+                // start, later boundaries anchored to the shared barrier stream), so requests on
+                // two different epochs can never both align; fail fast instead of waiting
+                // forever.
+                bail!(
+                    "commit requests landed on different epochs {:?}; writers' commit boundaries have diverged",
+                    pending_epochs.keys().collect_vec()
+                );
+            }
             if pending_epochs
                 .first_key_value()
                 .expect("non-empty")
