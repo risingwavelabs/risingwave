@@ -1076,7 +1076,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
     use risingwave_hummock_sdk::key::{FullKey, UserKey, prefix_slice_with_vnode};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-    use risingwave_hummock_sdk::version::LocalHummockVersion;
+    use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
     use risingwave_pb::hummock::PbHummockVersion;
     use risingwave_pb::id::TableId;
@@ -1113,7 +1113,7 @@ mod tests {
 
     fn pinned_version_for_test() -> PinnedVersion {
         PinnedVersion::new(
-            LocalHummockVersion::from_rpc_protobuf(&PbHummockVersion::default()),
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion::default()),
             unbounded_channel().0,
         )
     }

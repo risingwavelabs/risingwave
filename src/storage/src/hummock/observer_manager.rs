@@ -130,13 +130,11 @@ impl ObserverState for HummockObserverNode {
         let _ = self
             .observer_event_sender
             .send(HummockObserverEvent::VersionUpdate(
-                HummockVersionUpdate::PinnedVersion(Box::new(
-                    HummockVersion::from_rpc_protobuf(
-                        &snapshot
-                            .hummock_version
-                            .expect("should get hummock version"),
-                    ),
-                )),
+                HummockVersionUpdate::PinnedVersion(Box::new(HummockVersion::from_rpc_protobuf(
+                    &snapshot
+                        .hummock_version
+                        .expect("should get hummock version"),
+                ))),
             ))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
