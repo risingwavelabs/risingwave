@@ -36,7 +36,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 use super::diff::{SnapshotReadOutput, diff_ordered_row_streams};
 use super::external::ExternalStorageTable;
 use super::snapshot::{
-    SnapshotReadArgs, SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
+    SnapshotReadArgs, SplitSnapshotReadArgs, UpstreamTableReader, snapshot_rate_limiter,
 };
 use crate::executor::backfill::utils::compute_bounds;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
@@ -65,6 +65,7 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub fn snapshot_read_full_table_diff<'a>(
         &'a self,
         upstream_table_reader: &'a UpstreamTableReader<ExternalStorageTable>,
@@ -76,8 +77,14 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         chunk_size: usize,
     ) -> impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a {
         let pk_indices = read_args.pk_indices.clone();
+        let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
         let left = snapshot_read_rows(
-            upstream_table_reader.snapshot_read_full_table(read_args.clone(), batch_size),
+            upstream_table_reader.snapshot_read_full_table_strict(
+                read_args.clone(),
+                batch_size,
+                rate_limiter.clone(),
+            ),
+            pk_indices.clone(),
         );
         let right = self.storage_table_read(read_args);
         diff_ordered_row_streams(
@@ -91,6 +98,7 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub fn snapshot_read_table_split_diff<'a>(
         &'a self,
         upstream_table_reader: &'a UpstreamTableReader<ExternalStorageTable>,
@@ -102,8 +110,12 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         chunk_size: usize,
         split_pk_column_index: usize,
     ) -> impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a {
-        let left =
-            snapshot_read_rows(upstream_table_reader.snapshot_read_table_split(read_args.clone()));
+        let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
+        let left = snapshot_read_rows(
+            upstream_table_reader
+                .snapshot_read_table_split_strict(read_args.clone(), rate_limiter.clone()),
+            pk_indices.clone(),
+        );
         let right = self.storage_table_split_read(read_args, split_pk_column_index);
         diff_ordered_row_streams(
             left,
@@ -198,6 +210,7 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
 #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
 async fn snapshot_read_rows(
     input: impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send,
+    pk_indices: Vec<usize>,
 ) {
     pin_mut!(input);
     #[for_await]
@@ -205,6 +218,21 @@ async fn snapshot_read_rows(
         match output? {
             Some(chunk) => {
                 for (_, row) in chunk.rows() {
+                    for &pk_index in &pk_indices {
+                        if pk_index >= row.len() {
+                            bail!(
+                                "CDC resnapshot snapshot row has {} columns, but primary-key index \
+                                 {pk_index} is out of bounds",
+                                row.len()
+                            );
+                        }
+                        if row.datum_at(pk_index).is_none() {
+                            bail!(
+                                "CDC resnapshot decoded a NULL primary key at output index \
+                                 {pk_index}"
+                            );
+                        }
+                    }
                     yield row.to_owned_row();
                 }
             }
@@ -256,6 +284,8 @@ fn row_matches_split(
 
 #[cfg(test)]
 mod tests {
+    use futures::{StreamExt, pin_mut};
+    use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -263,11 +293,12 @@ mod tests {
     use risingwave_pb::plan_common::StorageTableDesc;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{ResnapshotDiffRead, row_matches_split};
+    use super::{ResnapshotDiffRead, row_matches_split, snapshot_read_rows};
+    use crate::executor::StreamExecutorError;
 
     #[test]
     fn resnapshot_projects_only_cdc_scan_output_columns() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("id", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("payload", ColumnId::new(2), DataType::Varchar),
             ColumnDesc::named("generated", ColumnId::new(3), DataType::Boolean),
@@ -331,5 +362,34 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_null_snapshot_primary_key() {
+        let row = OwnedRow::new(vec![None, Some(ScalarImpl::from("payload"))]);
+        let chunk =
+            StreamChunk::from_rows(&[(Op::Insert, row)], &[DataType::Int32, DataType::Varchar]);
+        let input = futures::stream::iter(vec![Ok(Some(chunk)), Ok(None)]);
+        let rows = snapshot_read_rows(input, vec![0]);
+        pin_mut!(rows);
+
+        let Some(Err(err)) = rows.next().await else {
+            panic!("NULL snapshot primary key must fail resnapshot");
+        };
+        assert!(err.to_string().contains("NULL primary key"));
+    }
+
+    #[tokio::test]
+    async fn propagates_strict_non_pk_decode_error() {
+        let input = futures::stream::iter(vec![Err(StreamExecutorError::from(anyhow::anyhow!(
+            "failed to decode non-PK snapshot column `payload`"
+        )))]);
+        let rows = snapshot_read_rows(input, vec![0]);
+        pin_mut!(rows);
+
+        let Some(Err(err)) = rows.next().await else {
+            panic!("strict non-PK decode error must fail resnapshot");
+        };
+        assert!(err.to_string().contains("payload"));
     }
 }

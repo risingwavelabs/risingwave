@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::sync::Arc;
 
 use futures::{Stream, pin_mut};
 use futures_async_stream::try_stream;
@@ -173,9 +174,40 @@ fn with_additional_columns(
     StreamChunk::with_visibility(ops, columns, visibility)
 }
 
-impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
+pub(super) fn snapshot_rate_limiter(rate_limit_rps: Option<u32>) -> Arc<RateLimiter> {
+    Arc::new(RateLimiter::new(
+        rate_limit_rps
+            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+            .into(),
+    ))
+}
+
+impl UpstreamTableReader<ExternalStorageTable> {
+    pub(super) fn snapshot_read_full_table_strict(
+        &self,
+        args: SnapshotReadArgs,
+        batch_size: u32,
+        rate_limiter: Arc<RateLimiter>,
+    ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
+        self.snapshot_read_full_table_inner(args, batch_size, rate_limiter, true)
+    }
+
+    pub(super) fn snapshot_read_table_split_strict(
+        &self,
+        args: SplitSnapshotReadArgs,
+        rate_limiter: Arc<RateLimiter>,
+    ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
+        self.snapshot_read_table_split_inner(args, rate_limiter, true)
+    }
+
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
+    async fn snapshot_read_full_table_inner(
+        &self,
+        args: SnapshotReadArgs,
+        batch_size: u32,
+        rate_limiter: Arc<RateLimiter>,
+        strict: bool,
+    ) {
         let primary_keys = self
             .table
             .pk_indices()
@@ -186,7 +218,6 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             })
             .collect_vec();
 
-        // prepare rate limiter
         if args.rate_limit_rps == Some(0) {
             // If limit is 0, we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
@@ -194,12 +225,6 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             future.await;
             unreachable!();
         }
-
-        let rate_limiter = RateLimiter::new(
-            args.rate_limit_rps
-                .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
-                .into(),
-        );
 
         let mut read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
@@ -213,12 +238,21 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             );
 
             let mut read_count: usize = 0;
-            let row_stream = self.reader.snapshot_read(
-                self.table.schema_table_name(),
-                read_args.current_pos.clone(),
-                primary_keys.clone(),
-                batch_size,
-            );
+            let row_stream = if strict {
+                self.reader.snapshot_read_strict(
+                    self.table.schema_table_name(),
+                    read_args.current_pos.clone(),
+                    primary_keys.clone(),
+                    batch_size,
+                )
+            } else {
+                self.reader.snapshot_read(
+                    self.table.schema_table_name(),
+                    read_args.current_pos.clone(),
+                    primary_keys.clone(),
+                    batch_size,
+                )
+            };
 
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
@@ -279,8 +313,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     }
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read_table_split(&self, args: SplitSnapshotReadArgs) {
-        // prepare rate limiter
+    async fn snapshot_read_table_split_inner(
+        &self,
+        args: SplitSnapshotReadArgs,
+        rate_limiter: Arc<RateLimiter>,
+        strict: bool,
+    ) {
         if args.rate_limit_rps == Some(0) {
             // If limit is 0, we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
@@ -289,23 +327,26 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             unreachable!();
         }
 
-        let rate_limiter = RateLimiter::new(
-            args.rate_limit_rps
-                .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
-                .into(),
-        );
-
         let read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
         let database_name = read_args.database_name.clone();
         // tracing::debug!(?args, "snapshot_read",);
 
-        let row_stream = self.reader.split_snapshot_read(
-            self.table.schema_table_name(),
-            read_args.left_bound_inclusive.clone(),
-            read_args.right_bound_exclusive.clone(),
-            read_args.split_columns.clone(),
-        );
+        let row_stream = if strict {
+            self.reader.split_snapshot_read_strict(
+                self.table.schema_table_name(),
+                read_args.left_bound_inclusive.clone(),
+                read_args.right_bound_exclusive.clone(),
+                read_args.split_columns.clone(),
+            )
+        } else {
+            self.reader.split_snapshot_read(
+                self.table.schema_table_name(),
+                read_args.left_bound_inclusive.clone(),
+                read_args.right_bound_exclusive.clone(),
+                read_args.split_columns.clone(),
+            )
+        };
 
         pin_mut!(row_stream);
         let mut builder = DataChunkBuilder::new(
@@ -349,6 +390,25 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             }
         }
         yield None;
+    }
+}
+
+impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
+    fn snapshot_read_full_table(
+        &self,
+        args: SnapshotReadArgs,
+        batch_size: u32,
+    ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
+        let rate_limiter = snapshot_rate_limiter(args.rate_limit_rps);
+        self.snapshot_read_full_table_inner(args, batch_size, rate_limiter, false)
+    }
+
+    fn snapshot_read_table_split(
+        &self,
+        args: SplitSnapshotReadArgs,
+    ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
+        let rate_limiter = snapshot_rate_limiter(args.rate_limit_rps);
+        self.snapshot_read_table_split_inner(args, rate_limiter, false)
     }
 
     async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {

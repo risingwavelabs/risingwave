@@ -110,6 +110,21 @@ pub fn postgres_row_to_owned_row_with_strict_pk(
     )
 }
 
+/// Decode a PostgreSQL snapshot row without replacing conversion failures with SQL `NULL`.
+pub fn postgres_row_to_owned_row_strict(
+    row: tokio_postgres::Row,
+    schema: &Schema,
+) -> anyhow::Result<OwnedRow> {
+    let mut datums = Vec::with_capacity(schema.fields.len());
+    for (i, rw_field) in schema.fields.iter().enumerate() {
+        let name = rw_field.name.as_str();
+        let datum = postgres_cell_to_scalar_impl_strict(&row, &rw_field.data_type, i, name)
+            .with_context(|| format!("failed to decode PostgreSQL snapshot column `{name}`"))?;
+        datums.push(datum);
+    }
+    Ok(OwnedRow::new(datums))
+}
+
 pub fn postgres_cell_to_scalar_impl(
     row: &tokio_postgres::Row,
     data_type: &DataType,
