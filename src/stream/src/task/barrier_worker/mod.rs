@@ -53,6 +53,7 @@ pub mod managed_state;
 #[cfg(test)]
 mod tests;
 
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
@@ -712,11 +713,11 @@ use crate::executor::exchange::permit;
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
-    streaming_metrics: &StreamingMetrics,
+    barrier_sync_latency: LabelGuardedHistogram,
     prev_epoch: u64,
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
-    let timer = streaming_metrics.barrier_sync_latency.start_timer();
+    let timer = barrier_sync_latency.start_timer();
 
     let state_store = state_store.clone();
     let future = async move {
@@ -728,6 +729,7 @@ fn sync_epoch(
     future
         .instrument_await(await_tree::span!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
+            let _guard = &barrier_sync_latency;
             timer.observe_duration();
         })
         .map_err(move |e| {
@@ -779,7 +781,7 @@ impl LocalBarrierWorker {
                 BarrierKind::Barrier => None,
                 BarrierKind::Checkpoint => Some(sync_epoch(
                     &self.actor_manager.env.state_store(),
-                    &self.actor_manager.streaming_metrics,
+                    graph_state.graph_state.barrier_sync_latency(),
                     prev_epoch,
                     table_ids.expect("should be Some on BarrierKind::Checkpoint"),
                 )),
