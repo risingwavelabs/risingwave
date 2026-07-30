@@ -95,10 +95,13 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
+    let mut iterator_read_options = SstableIteratorReadOptions::from_read_options(read_options);
+    iterator_read_options.read_table_id = Some(full_key.user_key.table_id);
+
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
-        Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+        Arc::new(iterator_read_options),
         sstable_info,
     );
     iter.seek(full_key).await?;
@@ -145,4 +148,87 @@ pub fn get_from_batch<'a>(
     imm.get(table_key, read_epoch, read_options).inspect(|_| {
         local_stats.get_shared_buffer_hit_counts += 1;
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+
+    use super::{CachePolicy, HummockValue, get_from_sstable_info};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_table_ids, test_value_of,
+    };
+    use crate::monitor::StoreLocalStatistic;
+    use crate::store::ReadOptions;
+
+    #[tokio::test]
+    async fn test_point_get_reads_only_requested_table_blocks() {
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 128;
+
+        let test_user_key = |table_id, key: &str| {
+            UserKey::new(
+                TableId::new(table_id),
+                TableKey(Bytes::from(
+                    [VirtualNode::ZERO.to_be_bytes().as_slice(), key.as_bytes()].concat(),
+                )),
+            )
+        };
+        let test_key = |table_id, key: &str| FullKey {
+            user_key: test_user_key(table_id, key),
+            epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+        };
+        let kv_pairs = (1..=2).flat_map(|table_id| {
+            (0..8).map(move |idx| {
+                (
+                    test_key(table_id, &format!("key_{idx:05}")),
+                    HummockValue::put(Bytes::from(test_value_of(idx))),
+                )
+            })
+        });
+        let (sstable, sstable_info) = gen_test_sstable_with_table_ids(
+            builder_options,
+            10,
+            kv_pairs,
+            sstable_store.clone(),
+            vec![1, 2],
+        )
+        .await;
+        let table_2_block_start = sstable
+            .meta
+            .block_metas
+            .partition_point(|block_meta| block_meta.table_id() < TableId::new(2));
+        assert!(table_2_block_start > 0);
+
+        // The queried table-2 key sorts before the first table-2 block. Without a point-get table
+        // id filter, the SST iterator seeks to the previous table-1 block first.
+        let full_key = test_key(2, "key");
+        let mut local_stats = StoreLocalStatistic::default();
+        let read_options = ReadOptions {
+            cache_policy: CachePolicy::Disable,
+            ..Default::default()
+        };
+
+        {
+            let result = get_from_sstable_info(
+                sstable_store,
+                &sstable_info,
+                full_key.to_ref(),
+                &read_options,
+                None,
+                &mut local_stats,
+            )
+            .await
+            .unwrap();
+            assert!(result.is_none());
+        }
+        assert_eq!(local_stats.cache_data_block_total, 1);
+    }
 }
