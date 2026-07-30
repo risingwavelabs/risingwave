@@ -17,6 +17,7 @@
 #![allow(dead_code)]
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use futures::{Stream, StreamExt, pin_mut};
 use futures_async_stream::try_stream;
@@ -25,6 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_rate_limit::RateLimiter;
 
 use crate::executor::backfill::utils::cmp_pk_unsigned_aware;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
@@ -180,6 +182,7 @@ pub(crate) async fn diff_ordered_row_streams(
     compare_indices: Vec<usize>,
     data_types: Vec<DataType>,
     chunk_size: usize,
+    rate_limiter: Arc<RateLimiter>,
 ) {
     if chunk_size == 0 {
         bail!("chunk_size must be greater than 0");
@@ -227,6 +230,7 @@ pub(crate) async fn diff_ordered_row_streams(
                     left_row = left_stream.next().await.transpose()?;
                 }
                 Ordering::Greater => {
+                    rate_limiter.wait(1).await;
                     output.push(Op::Delete, right_row.take().expect("checked right row"));
                     for output in output.take_flushed_chunks() {
                         yield output;
@@ -276,6 +280,7 @@ pub(crate) async fn diff_ordered_row_streams(
                 left_row = left_stream.next().await.transpose()?;
             }
             (None, Some(_)) => {
+                rate_limiter.wait(1).await;
                 output.push(Op::Delete, right_row.take().expect("checked right row"));
                 for output in output.take_flushed_chunks() {
                     yield output;
@@ -372,9 +377,12 @@ impl<'a> DiffChunkBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common_rate_limit::RateLimit;
 
     use super::*;
 
@@ -435,6 +443,7 @@ mod tests {
             vec![0, 1],
             vec![DataType::Int32, DataType::Varchar],
             chunk_size,
+            Arc::new(RateLimiter::new(RateLimit::Disabled)),
         );
         pin_mut!(outputs);
 
@@ -654,6 +663,7 @@ mod tests {
             vec![0, 1],
             vec![DataType::Int64, DataType::Varchar],
             1,
+            Arc::new(RateLimiter::new(RateLimit::Disabled)),
         );
         pin_mut!(outputs);
 
@@ -661,6 +671,78 @@ mod tests {
             panic!("unsigned i64 primary key ordering must be rejected");
         };
         assert!(err.to_string().contains("BIGINT UNSIGNED"));
+    }
+
+    #[tokio::test]
+    async fn test_storage_only_deletes_share_snapshot_rate_limiter() {
+        let rate_limiter = Arc::new(RateLimiter::new(RateLimit::Pause));
+        let left = futures::stream::iter(Vec::<StreamExecutorResult<OwnedRow>>::new());
+        let right = futures::stream::iter(vec![
+            Ok(row(1, "old")),
+            Ok(row(2, "old")),
+            Ok(row(3, "old")),
+        ]);
+        let outputs = diff_ordered_row_streams(
+            left,
+            right,
+            vec![0],
+            vec![OrderType::ascending()],
+            vec![false],
+            vec![0, 1],
+            vec![DataType::Int32, DataType::Varchar],
+            2,
+            rate_limiter.clone(),
+        );
+        pin_mut!(outputs);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), outputs.next())
+                .await
+                .is_err(),
+            "right-only delete bypassed the paused snapshot limiter"
+        );
+
+        rate_limiter.update(RateLimit::Disabled);
+        let mut collected = vec![];
+        while let Some(output) = outputs.next().await {
+            collected.push(output.expect("diff output"));
+        }
+        assert_eq!(
+            rows_from_outputs(&collected),
+            vec![
+                (Op::Delete, row(1, "old")),
+                (Op::Delete, row(2, "old")),
+                (Op::Delete, row(3, "old")),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_diff_does_not_double_charge_left_rows() {
+        let left = futures::stream::iter(vec![Ok(row(1, "new"))]);
+        let right = futures::stream::iter(Vec::<StreamExecutorResult<OwnedRow>>::new());
+        let outputs = diff_ordered_row_streams(
+            left,
+            right,
+            vec![0],
+            vec![OrderType::ascending()],
+            vec![false],
+            vec![0, 1],
+            vec![DataType::Int32, DataType::Varchar],
+            1,
+            Arc::new(RateLimiter::new(RateLimit::Pause)),
+        );
+        pin_mut!(outputs);
+
+        let output = tokio::time::timeout(Duration::from_millis(20), outputs.next())
+            .await
+            .expect("left row was charged twice")
+            .expect("diff output")
+            .expect("successful diff output");
+        assert_eq!(
+            rows_from_outputs(&[output]),
+            vec![(Op::Insert, row(1, "new"))]
+        );
     }
 
     #[test]

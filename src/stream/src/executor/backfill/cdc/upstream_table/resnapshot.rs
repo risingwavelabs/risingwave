@@ -100,6 +100,7 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             compare_indices,
             data_types,
             chunk_size,
+            rate_limiter,
         ))
     }
 
@@ -135,6 +136,7 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             compare_indices,
             data_types,
             chunk_size,
+            rate_limiter,
         ))
     }
 
