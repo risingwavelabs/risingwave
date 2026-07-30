@@ -80,9 +80,8 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;
         let mut first_item = log_reader.next_item().await?;
-        if let (Some(log_store_rewind_start_epoch), (first_epoch, _)) =
-            (log_store_rewind_start_epoch, &first_item)
-        {
+        if let Some(log_store_rewind_start_epoch) = log_store_rewind_start_epoch {
+            let (first_epoch, _) = &first_item;
             if log_store_rewind_start_epoch >= *first_epoch {
                 bail!(
                     "log_store_rewind_start_epoch {} not later than first_epoch {}",
@@ -90,7 +89,12 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     first_epoch
                 );
             }
-        } else {
+        }
+        {
+            // Align the initial epoch across parallel writers even when a rewind epoch is
+            // provided: the rewind epoch is only a lower bound of the read range, and unevenly
+            // truncated log stores may still give writers different first epochs, which would
+            // make their commit epochs diverge forever.
             let &(initial_epoch, _) = &first_item;
             let aligned_initial_epoch = coordinator_stream_handle
                 .align_initial_epoch(initial_epoch)
@@ -102,6 +106,8 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     sink_id = %self.param.sink_id,
                     "initial epoch not matched aligned initial epoch"
                 );
+                // Items below the aligned epoch belong to already-acked commits, so skipping
+                // them loses no data.
                 let mut peeked_first = Some(first_item);
                 first_item = loop {
                     let (epoch, item) = if let Some(peeked_first) = peeked_first.take() {
