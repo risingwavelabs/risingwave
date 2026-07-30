@@ -75,8 +75,12 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         compare_indices: Vec<usize>,
         data_types: Vec<DataType>,
         chunk_size: usize,
-    ) -> impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a {
+    ) -> StreamExecutorResult<
+        impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a,
+    > {
         let pk_indices = read_args.pk_indices.clone();
+        let pk_needs_unsigned_i64_compare =
+            upstream_table_reader.pk_column_unsigned_i64_compare_flags()?;
         let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
         let left = snapshot_read_rows(
             upstream_table_reader.snapshot_read_full_table_strict(
@@ -87,15 +91,16 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             pk_indices.clone(),
         );
         let right = self.storage_table_read(read_args);
-        diff_ordered_row_streams(
+        Ok(diff_ordered_row_streams(
             left,
             right,
             pk_indices,
             pk_order,
+            pk_needs_unsigned_i64_compare,
             compare_indices,
             data_types,
             chunk_size,
-        )
+        ))
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -109,7 +114,11 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
         data_types: Vec<DataType>,
         chunk_size: usize,
         split_pk_column_index: usize,
-    ) -> impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a {
+    ) -> StreamExecutorResult<
+        impl Stream<Item = StreamExecutorResult<SnapshotReadOutput>> + Send + 'a,
+    > {
+        let pk_needs_unsigned_i64_compare =
+            upstream_table_reader.pk_column_unsigned_i64_compare_flags()?;
         let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
         let left = snapshot_read_rows(
             upstream_table_reader
@@ -117,15 +126,16 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             pk_indices.clone(),
         );
         let right = self.storage_table_split_read(read_args, split_pk_column_index);
-        diff_ordered_row_streams(
+        Ok(diff_ordered_row_streams(
             left,
             right,
             pk_indices,
             pk_order,
+            pk_needs_unsigned_i64_compare,
             compare_indices,
             data_types,
             chunk_size,
-        )
+        ))
     }
 
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]

@@ -21,10 +21,12 @@ use std::cmp::Ordering;
 use futures::{Stream, StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
+use risingwave_common::util::sort_util::OrderType;
 
+use crate::executor::backfill::utils::cmp_pk_unsigned_aware;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 #[allow(dead_code)]
@@ -49,11 +51,13 @@ pub enum SnapshotReadOutput {
 /// which can derive the old row from state and produce the correct downstream update semantics.
 /// Do not feed this output directly to a consumer that requires explicit `-old, +new` retract
 /// pairs for updates.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn diff_ordered_rows_to_chunks(
     left: impl IntoIterator<Item = OwnedRow>,
     right: impl IntoIterator<Item = OwnedRow>,
     pk_indices: &[usize],
     pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
     compare_indices: &[usize],
     data_types: &[DataType],
     chunk_size: usize,
@@ -63,6 +67,7 @@ pub(crate) fn diff_ordered_rows_to_chunks(
         right,
         pk_indices,
         pk_order,
+        pk_needs_unsigned_i64_compare,
         compare_indices,
         data_types,
         chunk_size,
@@ -81,11 +86,13 @@ pub(crate) fn diff_ordered_rows_to_chunks(
 /// Equal rows are not emitted as chunks, but they can still advance the snapshot read progress.
 /// The progress event is required by the non-parallel CDC backfill path, where `current_pk_pos`
 /// controls which upstream changelog rows may be released.
+#[expect(clippy::too_many_arguments)]
 pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
     left: impl IntoIterator<Item = OwnedRow>,
     right: impl IntoIterator<Item = OwnedRow>,
     pk_indices: &[usize],
     pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
     compare_indices: &[usize],
     data_types: &[DataType],
     chunk_size: usize,
@@ -95,6 +102,15 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
         pk_indices.len(),
         pk_order.len(),
         "pk_indices and pk_order must have the same length"
+    );
+    assert_eq!(
+        pk_indices.len(),
+        pk_needs_unsigned_i64_compare.len(),
+        "pk_indices and unsigned comparison flags must have the same length"
+    );
+    assert!(
+        !pk_needs_unsigned_i64_compare.iter().any(|flag| *flag),
+        "CDC resnapshot does not support MySQL BIGINT UNSIGNED primary keys"
     );
 
     let mut left = left.into_iter().peekable();
@@ -106,7 +122,13 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
     loop {
         match (left.peek(), right.peek()) {
             (Some(left_row), Some(right_row)) => {
-                match compare_pk(left_row, right_row, pk_indices, pk_order) {
+                match compare_pk(
+                    left_row,
+                    right_row,
+                    pk_indices,
+                    pk_order,
+                    pk_needs_unsigned_i64_compare,
+                ) {
                     Ordering::Less => {
                         output.push(Op::Insert, left.next().expect("peeked left row"));
                     }
@@ -147,22 +169,33 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
     outputs
 }
 
+#[expect(clippy::too_many_arguments)]
 #[try_stream(ok = SnapshotReadOutput, error = StreamExecutorError)]
 pub(crate) async fn diff_ordered_row_streams(
     left: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Send,
     right: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Send,
     pk_indices: Vec<usize>,
     pk_order: Vec<OrderType>,
+    pk_needs_unsigned_i64_compare: Vec<bool>,
     compare_indices: Vec<usize>,
     data_types: Vec<DataType>,
     chunk_size: usize,
 ) {
-    assert!(chunk_size > 0, "chunk_size must be greater than 0");
-    assert_eq!(
-        pk_indices.len(),
-        pk_order.len(),
-        "pk_indices and pk_order must have the same length"
-    );
+    if chunk_size == 0 {
+        bail!("chunk_size must be greater than 0");
+    }
+    if pk_indices.len() != pk_order.len() {
+        bail!("pk_indices and pk_order must have the same length");
+    }
+    if pk_indices.len() != pk_needs_unsigned_i64_compare.len() {
+        bail!("pk_indices and unsigned comparison flags must have the same length");
+    }
+    if pk_needs_unsigned_i64_compare.iter().any(|flag| *flag) {
+        bail!(
+            "CDC resnapshot does not support MySQL BIGINT UNSIGNED primary keys: the upstream \
+             unsigned order differs from the signed RisingWave storage scan order"
+        );
+    }
 
     let left_stream = left;
     let right_stream = right;
@@ -177,7 +210,13 @@ pub(crate) async fn diff_ordered_row_streams(
 
     loop {
         match (&left_row, &right_row) {
-            (Some(left), Some(right)) => match compare_pk(left, right, &pk_indices, &pk_order) {
+            (Some(left), Some(right)) => match compare_pk(
+                left,
+                right,
+                &pk_indices,
+                &pk_order,
+                &pk_needs_unsigned_i64_compare,
+            ) {
                 Ordering::Less => {
                     output.push(Op::Insert, left_row.take().expect("checked left row"));
                     for output in output.take_flushed_chunks() {
@@ -263,10 +302,16 @@ fn compare_pk(
     right: &OwnedRow,
     pk_indices: &[usize],
     pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
 ) -> Ordering {
     let left_pk = left.project(pk_indices);
     let right_pk = right.project(pk_indices);
-    cmp_datum_iter(left_pk.iter(), right_pk.iter(), pk_order.iter().copied())
+    cmp_pk_unsigned_aware(
+        left_pk.iter(),
+        right_pk.iter(),
+        pk_order,
+        pk_needs_unsigned_i64_compare,
+    )
 }
 
 fn rows_equal_on_indices(left: &OwnedRow, right: &OwnedRow, indices: &[usize]) -> bool {
@@ -386,6 +431,7 @@ mod tests {
             right,
             vec![0],
             vec![OrderType::ascending()],
+            vec![false],
             vec![0, 1],
             vec![DataType::Int32, DataType::Varchar],
             chunk_size,
@@ -405,6 +451,7 @@ mod tests {
             right,
             &[0],
             &[OrderType::ascending()],
+            &[false],
             &[0, 1],
             &[DataType::Int32, DataType::Varchar],
             chunk_size,
@@ -434,6 +481,7 @@ mod tests {
             vec![],
             &[0],
             &[OrderType::ascending()],
+            &[false],
             &[0, 1],
             &[DataType::Int32, DataType::Varchar],
             2,
@@ -463,6 +511,7 @@ mod tests {
             right,
             &[0],
             &[OrderType::ascending()],
+            &[false],
             &[0, 1],
             &data_types,
             16,
@@ -478,6 +527,7 @@ mod tests {
             vec![row(1, "same"), row(2, "same")],
             &[0],
             &[OrderType::ascending()],
+            &[false],
             &[0, 1],
             &[DataType::Int32, DataType::Varchar],
             16,
@@ -497,6 +547,7 @@ mod tests {
             vec![row(2, "same")],
             &[0],
             &[OrderType::ascending()],
+            &[false],
             &[0, 1],
             &[DataType::Int32, DataType::Varchar],
             16,
@@ -572,6 +623,46 @@ mod tests {
         assert!(matches!(outputs.last(), Some(SnapshotReadOutput::Finished)));
     }
 
+    #[tokio::test]
+    async fn test_streaming_diff_rejects_unsigned_i64_pk_ordering() {
+        let left = futures::stream::iter(vec![
+            Ok(OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(5)),
+                Some(ScalarImpl::from("low")),
+            ])),
+            Ok(OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(-1)),
+                Some(ScalarImpl::from("high")),
+            ])),
+        ]);
+        let right = futures::stream::iter(vec![
+            Ok(OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(-1)),
+                Some(ScalarImpl::from("high")),
+            ])),
+            Ok(OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(5)),
+                Some(ScalarImpl::from("low")),
+            ])),
+        ]);
+        let outputs = diff_ordered_row_streams(
+            left,
+            right,
+            vec![0],
+            vec![OrderType::ascending()],
+            vec![true],
+            vec![0, 1],
+            vec![DataType::Int64, DataType::Varchar],
+            1,
+        );
+        pin_mut!(outputs);
+
+        let Some(Err(err)) = outputs.next().await else {
+            panic!("unsigned i64 primary key ordering must be rejected");
+        };
+        assert!(err.to_string().contains("BIGINT UNSIGNED"));
+    }
+
     #[test]
     fn test_diff_supports_descending_pk_order() {
         let left = vec![row(5, "left"), row(3, "same"), row(1, "left")];
@@ -581,6 +672,7 @@ mod tests {
             right,
             &[0],
             &[OrderType::descending()],
+            &[false],
             &[0, 1],
             &[DataType::Int32, DataType::Varchar],
             16,

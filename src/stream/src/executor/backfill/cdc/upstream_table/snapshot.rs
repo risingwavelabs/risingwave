@@ -183,6 +183,18 @@ pub(super) fn snapshot_rate_limiter(rate_limit_rps: Option<u32>) -> Arc<RateLimi
 }
 
 impl UpstreamTableReader<ExternalStorageTable> {
+    pub(super) fn pk_column_unsigned_i64_compare_flags(&self) -> StreamExecutorResult<Vec<bool>> {
+        let primary_keys = self
+            .table
+            .pk_indices()
+            .iter()
+            .map(|idx| self.table.schema().fields[*idx].name.clone())
+            .collect_vec();
+        Ok(self
+            .reader
+            .pk_column_unsigned_i64_compare_flags(&primary_keys)?)
+    }
+
     pub(super) fn snapshot_read_full_table_strict(
         &self,
         args: SnapshotReadArgs,
