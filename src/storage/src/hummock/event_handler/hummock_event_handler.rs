@@ -1326,7 +1326,7 @@ mod tests {
         let storage_opt = default_opts_for_test();
         let (spawn_upload_task, _) = prepare_uploader_order_test_spawn_task_fn(false);
         let pinned_version = PinnedVersion::new(
-            LocalHummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1.into(),
                 ..Default::default()
             }),

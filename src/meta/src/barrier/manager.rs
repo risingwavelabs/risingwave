@@ -193,7 +193,6 @@ impl GlobalBarrierManager {
 }
 
 impl GlobalBarrierManager {
-    #[expect(clippy::too_many_arguments)]
     pub async fn start(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,

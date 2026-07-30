@@ -151,6 +151,7 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         scheduled_barriers: ScheduledBarriers,
         status: Arc<ArcSwap<BarrierManagerStatus>>,

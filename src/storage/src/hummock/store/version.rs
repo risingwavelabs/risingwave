@@ -1001,6 +1001,7 @@ impl HummockVersionReader {
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
+        sst_read_options.read_table_id = Some(table_id);
         sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
         sst_read_options.prefetch = read_options.prefetch_options.prefetch;
         if sst_read_options.prefetch {
@@ -1166,6 +1167,7 @@ impl HummockVersionReader {
         }
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
+            read_table_id: Some(options.table_id),
             scan_end_user_key: None,
             prefetch: false,
             max_preload_retry_times: 0,
