@@ -32,7 +32,9 @@ use tokio_postgres::types::{PgLsn, Type as PgType};
 use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::scalar_adapter::ScalarAdapter;
-use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
+use crate::parser::{
+    postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row_with_strict_pk,
+};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CDC_TABLE_SPLIT_ID_START, CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption,
@@ -389,7 +391,8 @@ impl PostgresExternalTableReader {
 
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
+                .map_err(ConnectorError::from)
         });
 
         pin_mut!(row_stream);
@@ -489,10 +492,18 @@ impl PostgresExternalTableReader {
             Ok(None)
         } else {
             let row = &rows[0];
-            let min =
-                postgres_cell_to_scalar_impl(row, &split_column.data_type, 0, &split_column.name);
-            let max =
-                postgres_cell_to_scalar_impl(row, &split_column.data_type, 1, &split_column.name);
+            let min = postgres_cell_to_scalar_impl_strict(
+                row,
+                &split_column.data_type,
+                0,
+                &split_column.name,
+            )?;
+            let max = postgres_cell_to_scalar_impl_strict(
+                row,
+                &split_column.data_type,
+                1,
+                &split_column.name,
+            )?;
             match (min, max) {
                 (Some(min), Some(max)) => Ok(Some((min, max))),
                 _ => Ok(None),
@@ -532,12 +543,12 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_stmt, &params).await?;
         let datum_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl_strict(
                 &row,
                 &split_column.data_type,
                 0,
                 &split_column.name,
-            ))
+            )?)
         });
         pin_mut!(datum_stream);
         #[for_await]
@@ -576,12 +587,12 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_stmt, &params).await?;
         let datum_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl_strict(
                 &row,
                 &split_column.data_type,
                 0,
                 &split_column.name,
-            ))
+            )?)
         });
         pin_mut!(datum_stream);
         #[for_await]
@@ -657,7 +668,8 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&prepared_scan_stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            postgres_row_to_owned_row_with_strict_pk(row, &self.rw_schema, &self.pk_indices)
+                .map_err(ConnectorError::from)
         });
 
         pin_mut!(row_stream);

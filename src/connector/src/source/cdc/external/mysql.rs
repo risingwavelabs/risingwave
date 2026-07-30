@@ -41,10 +41,11 @@ use crate::connector_common::SslMode;
 // Re-export SslMode for convenience
 pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::parser::mysql_row_to_owned_row_with_strict_pk;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, mysql_row_to_owned_row,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 /// Build MySQL connection pool with proper SSL configuration.
@@ -442,6 +443,7 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
+    pk_indices: Vec<usize>,
     field_names: String,
     pool: mysql_async::Pool,
     upstream_mysql_pk_infos: Vec<(String, ColumnType)>, // (column_name, column_type)
@@ -539,7 +541,11 @@ impl MySqlExternalTableReader {
         major > 8 || (major == 8 && minor >= 4)
     }
 
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    pub async fn new(
+        config: ExternalTableConfig,
+        rw_schema: Schema,
+        pk_indices: Vec<usize>,
+    ) -> ConnectorResult<Self> {
         let database = config.database.clone();
         let table = config.table.clone();
         let pool = build_mysql_connection_pool(
@@ -573,6 +579,7 @@ impl MySqlExternalTableReader {
 
         Ok(Self {
             rw_schema,
+            pk_indices,
             field_names,
             pool,
             upstream_mysql_pk_infos,
@@ -757,7 +764,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
+                    .map_err(ConnectorError::from)
             });
             pin_mut!(row_stream);
             #[for_await]
@@ -770,7 +778,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
+                    .map_err(ConnectorError::from)
             });
             pin_mut!(row_stream);
             #[for_await]
@@ -1019,7 +1028,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
+        let reader = MySqlExternalTableReader::new(config, rw_schema, vec![0])
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
