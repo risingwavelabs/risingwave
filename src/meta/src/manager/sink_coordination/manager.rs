@@ -1531,7 +1531,7 @@ mod tests {
                 sink_id i32 NOT NULL,
                 epoch i64 NOT NULL,
                 sink_state STRING NOT NULL,
-                metadata BLOB NOT NULL,
+                metadata BLOB,
                 schema_change BLOB,
                 PRIMARY KEY (sink_id, epoch)
             )
@@ -1547,7 +1547,13 @@ mod tests {
 
     async fn list_rows(
         db: &DatabaseConnection,
-    ) -> Vec<(i32, i64, String, Vec<u8>, Option<PbSinkSchemaChange>)> {
+    ) -> Vec<(
+        i32,
+        i64,
+        String,
+        Option<Vec<u8>>,
+        Option<PbSinkSchemaChange>,
+    )> {
         let sql =
             "SELECT sink_id, epoch, sink_state, metadata, schema_change FROM pending_sink_state";
         let rows = db
@@ -1586,7 +1592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_init_response_skips_recovered_pending_epoch() {
+    async fn test_init_response_skips_recovered_empty_pending_epoch() {
         let db = prepare_db_backend().await;
 
         let param = SinkParam {
@@ -1603,10 +1609,9 @@ mod tests {
         };
 
         let epoch1 = 233;
-        let metadata = vec![1u8, 2u8];
 
         let sql = format!(
-            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state, metadata) VALUES ({}, {}, 'PENDING', x'0102')",
+            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state) VALUES ({}, {}, 'PENDING')",
             param.sink_id, epoch1
         );
         db.execute(sea_orm::Statement::from_string(
@@ -1647,13 +1652,11 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let db = db.clone();
-                let metadata = metadata.clone();
                 let pre_commit_attempt = pre_commit_attempt.clone();
                 let commit_attempt = commit_attempt.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
                     let db = db.clone();
-                    let metadata = metadata.clone();
                     let pre_commit_attempt = pre_commit_attempt.clone();
                     let commit_attempt = commit_attempt.clone();
                     tokio::spawn({
@@ -1674,9 +1677,7 @@ mod tests {
                                             "pre_commit should not be called for a known pending epoch"
                                         )))
                                     },
-                                    move |epoch, commit_metadata| {
-                                        assert_eq!(epoch, epoch1);
-                                        assert_eq!(commit_metadata, metadata);
+                                    move |_epoch, _commit_metadata| {
                                         commit_attempt
                                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                                         Ok(())
@@ -1717,11 +1718,12 @@ mod tests {
             pre_commit_attempt.load(std::sync::atomic::Ordering::SeqCst),
             0
         );
-        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 0);
         let rows = list_rows(&db).await;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, epoch1 as i64);
         assert_eq!(rows[0].2, "COMMITTED");
+        assert_eq!(rows[0].3, None);
     }
 
     #[tokio::test]
@@ -1838,7 +1840,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_waiting_on_checkpoint() {
+    async fn test_empty_pre_commit_waiting_on_checkpoint() {
         let db = prepare_db_backend().await;
 
         let param = SinkParam {
@@ -1887,10 +1889,8 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
-                let metadata = metadata.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
-                    let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -1904,19 +1904,10 @@ mod tests {
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
                                     move |_epoch, metadata_list, _schema_change| {
-                                        let metadata =
-                                            metadata_list.into_iter().exactly_one().unwrap();
-                                        Ok(match metadata.metadata {
-                                            Some(Metadata::Serialized(SerializedMetadata {
-                                                metadata,
-                                            })) => Some(metadata),
-                                            _ => unreachable!(),
-                                        })
+                                        assert_eq!(metadata_list.len(), 1);
+                                        Ok(None)
                                     },
-                                    move |_epoch, commit_metadata| {
-                                        assert_eq!(commit_metadata, metadata);
-                                        Ok(())
-                                    },
+                                    move |_epoch, _commit_metadata| unreachable!(),
                                     move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
@@ -1965,10 +1956,11 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "PENDING");
+            assert_eq!(rows[0].3, None);
 
             let guard = sender.lock().await;
             let sender = guard.as_ref().unwrap().clone();
-            sender.send(233).unwrap();
+            sender.send(epoch1).unwrap();
         }
 
         // wait max 5 seconds for the commit to be processed
@@ -1985,6 +1977,7 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "COMMITTED");
+            assert_eq!(rows[0].3, None);
         }
     }
 
