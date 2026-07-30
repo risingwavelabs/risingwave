@@ -57,6 +57,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use risingwave_common::session_config::LocalityBackfillMode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -88,7 +89,8 @@ use crate::optimizer::plan_node::{
     StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
-    LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
+    LocalityBackfillScanEstimator, LocalityProviderCounter, RwTimestampValidator,
+    TemporalJoinValidator,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::{
@@ -241,6 +243,37 @@ impl<P: PlanPhase> PlanRoot<P> {
                 .collect(),
         }
     }
+}
+
+fn resolve_locality_backfill(
+    ctx: OptimizerContextRef,
+    plan: LogicalPlanRef,
+    backfill_type: BackfillType,
+) {
+    let config = ctx.session_ctx().config();
+    let mode = config.enable_locality_backfill();
+    let min_size = config.auto_locality_backfill_min_size();
+    drop(config);
+
+    let enabled = match mode {
+        LocalityBackfillMode::Off => false,
+        LocalityBackfillMode::On => true,
+        LocalityBackfillMode::Auto => {
+            if backfill_type == BackfillType::UpstreamOnly
+                || risingwave_common::license::Feature::LocalityBackfill
+                    .check_available()
+                    .is_err()
+            {
+                false
+            } else {
+                let catalog_reader = ctx.session_ctx().env().catalog_reader().read_guard();
+                let estimated_backfill_size =
+                    LocalityBackfillScanEstimator::estimate(plan, catalog_reader.table_stats());
+                estimated_backfill_size >= min_size
+            }
+        }
+    };
+    ctx.set_locality_backfill_enabled(enabled);
 }
 
 impl LogicalPlanRoot {
@@ -619,25 +652,14 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        if LocalityProviderCounter::count(plan.clone()) > 5 {
+        let locality_provider_count = LocalityProviderCounter::count(plan.clone());
+        if locality_provider_count > 0 {
             // LocalityProviderCounter is non-zero only when locality backfill is enabled.
-            assert!(ctx.session_ctx().config().enable_locality_backfill());
-            risingwave_common::license::Feature::LocalityBackfill.check_available()?;
-        }
-
-        if ctx.missed_locality_providers() > 1
-            && risingwave_common::license::Feature::LocalityBackfill
-                .check_available()
-                .is_ok()
-        {
-            // missed_locality_providers can only be non-zero when locality backfill is disabled.
-            assert!(!ctx.session_ctx().config().enable_locality_backfill());
-            ctx.warn_to_user(format!(
-                "This streaming job has {} operators that could benefit from locality backfill. \
-                Consider enabling it with `SET enable_locality_backfill = true` for potentially \
-                faster backfill performance, when existing data volume in upstream(s) is large.",
-                ctx.missed_locality_providers()
-            ));
+            assert!(ctx.locality_backfill_enabled());
+            let mode = ctx.session_ctx().config().enable_locality_backfill();
+            if mode == LocalityBackfillMode::Auto || locality_provider_count > 5 {
+                risingwave_common::license::Feature::LocalityBackfill.check_available()?;
+            }
         }
 
         Ok(optimized_plan.into_phase(plan))
@@ -697,6 +719,7 @@ impl LogicalPlanRoot {
                     ).into());
                 }
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
+                resolve_locality_backfill(ctx.clone(), optimized_plan.plan.clone(), backfill_type);
                 let (plan, out_col_change) = {
                     let (plan, out_col_change) = optimized_plan.plan.logical_rewrite_for_stream(
                         &mut RewriteStreamContext::new_with_backfill_type(backfill_type),
