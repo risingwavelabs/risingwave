@@ -246,10 +246,79 @@ SELECT b, c, a FROM t_idx WHERE b = 2 AND c >= 4 AND c <= 8 EXCEPT SELECT * FROM
 ----
 
 statement ok
-DROP MATERIALIZED VIEW mv_idx_desc;
-
-statement ok
-DROP MATERIALIZED VIEW mv_idx_desc_range;
-
-statement ok
 DROP TABLE t_idx cascade;
+
+# ============================================================
+# IN predicate tests (UNION of StreamTableScans)
+# ============================================================
+
+statement ok
+CREATE TABLE t_in(a INT, b INT, c INT, PRIMARY KEY(a, b));
+
+statement ok
+INSERT INTO t_in SELECT
+  i / 10 AS a,
+  i % 10 AS b,
+  i * 10 AS c
+FROM generate_series(0, 99) AS s(i);
+
+statement ok
+flush;
+
+# ---- Test 9: IN predicate on first PK column ----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_in AS SELECT * FROM t_in WHERE a IN (2, 5, 8);
+
+query T
+SELECT * FROM mv_in EXCEPT SELECT * FROM t_in WHERE a IN (2, 5, 8);
+----
+
+query T
+SELECT * FROM t_in WHERE a IN (2, 5, 8) EXCEPT SELECT * FROM mv_in;
+----
+
+query I
+SELECT count(*) FROM mv_in;
+----
+30
+
+# ---- Test 10: IN predicate with covering index ----
+
+statement ok
+CREATE INDEX idx_b_in ON t_in(b) include(a, c);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_in_idx AS SELECT * FROM idx_b_in WHERE b IN (1, 3, 7);
+
+query T
+SELECT * FROM mv_in_idx EXCEPT SELECT b, a, c FROM t_in WHERE b IN (1, 3, 7);
+----
+
+query T
+SELECT b, a, c FROM t_in WHERE b IN (1, 3, 7) EXCEPT SELECT * FROM mv_in_idx;
+----
+
+query I
+SELECT count(*) FROM mv_in_idx;
+----
+30
+
+# ---- Test 11: Verify post-backfill inserts with IN ----
+
+statement ok
+INSERT INTO t_in VALUES (2, 10, 999), (5, 10, 888);
+
+statement ok
+flush;
+
+query T
+SELECT * FROM mv_in EXCEPT SELECT * FROM t_in WHERE a IN (2, 5, 8);
+----
+
+query T
+SELECT * FROM t_in WHERE a IN (2, 5, 8) EXCEPT SELECT * FROM mv_in;
+----
+
+statement ok
+DROP TABLE t_in cascade;

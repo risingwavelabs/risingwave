@@ -235,19 +235,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 read_count += chunk.cardinality();
                 current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
 
-                if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
-                    // no limit, or empty chunk
-                    yield Some(with_additional_columns(
-                        chunk,
-                        &read_args.additional_columns,
-                        schema_table_name.clone(),
-                        database_name.clone(),
-                    ));
-                    continue;
-                } else {
+                if let Some(rate_limit_rps) = read_args.rate_limit_rps
+                    && chunk_size != 0
+                {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
                     // May be should be refactored to a common function later.
-                    let limit = read_args.rate_limit_rps.unwrap() as usize;
+                    let limit = rate_limit_rps as usize;
 
                     // Because we produce chunks with limited-sized data chunk builder and all rows
                     // are `Insert`s, the chunk size should never exceed the limit.
@@ -261,6 +254,15 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                         schema_table_name.clone(),
                         database_name.clone(),
                     ));
+                } else {
+                    // no limit, or empty chunk
+                    yield Some(with_additional_columns(
+                        chunk,
+                        &read_args.additional_columns,
+                        schema_table_name.clone(),
+                        database_name.clone(),
+                    ));
+                    continue;
                 }
             }
 
@@ -317,19 +319,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             let chunk = chunk?;
             let chunk_size = chunk.capacity();
 
-            if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
-                // no limit, or empty chunk
-                yield Some(with_additional_columns(
-                    chunk,
-                    &read_args.additional_columns,
-                    schema_table_name.clone(),
-                    database_name.clone(),
-                ));
-                continue;
-            } else {
+            if let Some(rate_limit_rps) = read_args.rate_limit_rps
+                && chunk_size != 0
+            {
                 // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
                 // May be should be refactored to a common function later.
-                let limit = read_args.rate_limit_rps.unwrap() as usize;
+                let limit = rate_limit_rps as usize;
 
                 // Because we produce chunks with limited-sized data chunk builder and all rows
                 // are `Insert`s, the chunk size should never exceed the limit.
@@ -337,6 +332,14 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
                 // `InsufficientCapacity` should never happen because we have check the cardinality
                 rate_limiter.wait(chunk_size as _).await;
+                yield Some(with_additional_columns(
+                    chunk,
+                    &read_args.additional_columns,
+                    schema_table_name.clone(),
+                    database_name.clone(),
+                ));
+            } else {
+                // no limit, or empty chunk
                 yield Some(with_additional_columns(
                     chunk,
                     &read_args.additional_columns,

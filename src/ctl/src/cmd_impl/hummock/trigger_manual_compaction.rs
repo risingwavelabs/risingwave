@@ -24,6 +24,7 @@ pub async fn trigger_manual_compaction(
     compaction_group_id: CompactionGroupId,
     table_id: JobId,
     levels: Vec<u32>,
+    target_level: Option<u32>,
     sst_ids: Vec<HummockSstableId>,
     exclusive: bool,
     retry_interval_ms: u64,
@@ -37,6 +38,7 @@ pub async fn trigger_manual_compaction(
                     compaction_group_id,
                     table_id,
                     level,
+                    target_level,
                     sst_ids.clone(),
                     exclusive,
                 )

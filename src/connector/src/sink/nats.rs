@@ -53,7 +53,12 @@ pub struct NatsConfig {
     pub common: NatsCommon,
     // accept "append-only"
     pub r#type: String,
+
+    #[serde(flatten)]
+    pub unknown_fields: std::collections::HashMap<String, String>,
 }
+
+crate::impl_sink_unknown_fields!(NatsConfig);
 
 #[derive(Clone, Debug)]
 pub struct NatsSink {
@@ -121,6 +126,8 @@ impl Sink for NatsSink {
     type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {

@@ -174,10 +174,10 @@ pub(super) fn generate_captured_function(
 
         // Wrap the original function body in async move { ... }.
         let orig_body = &orig_user_fn.block;
-        orig_user_fn.block = Box::new(syn::parse_quote!({
+        *orig_user_fn.block = syn::parse_quote!({
             #(#input_def)*
             async move { #orig_body }
-        }));
+        });
     }
 
     let sig = &mut user_fn.sig;
@@ -237,7 +237,7 @@ pub(super) fn generate_captured_function(
         };
 
         #[allow(clippy::disallowed_methods)]
-        for (context, arg) in captures.into_iter().zip(captured_inputs.into_iter()) {
+        for (context, arg) in captures.into_iter().zip(captured_inputs) {
             let FnArg::Typed(arg) = arg else {
                 return Err(syn::Error::new_spanned(
                     arg,

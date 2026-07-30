@@ -17,7 +17,7 @@ mod manual;
 mod schedule;
 mod stream;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,13 +26,15 @@ use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
-use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
 use crate::rpc::metrics::MetaMetrics;
@@ -45,7 +47,7 @@ pub(crate) type CompactorChangeTx =
 pub(crate) type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-type ManualTaskWaiter = tokio::sync::oneshot::Sender<MetaResult<()>>;
+type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<u64>>;
 
 use schedule::CompactionTrack;
 pub use schedule::IcebergCompactionScheduleStatus;
@@ -64,7 +66,9 @@ pub struct IcebergCompactionManager {
 
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
-    manual_task_waiters: HashMap<u64, ManualTaskWaiter>,
+    snapshot_expiration_sink_ids: HashSet<SinkId>,
+    manifest_rewrite_sink_ids: HashSet<SinkId>,
+    manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
 }
 
 impl IcebergCompactionManager {
@@ -89,7 +93,9 @@ impl IcebergCompactionManager {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
-                    manual_task_waiters: HashMap::default(),
+                    snapshot_expiration_sink_ids: HashSet::default(),
+                    manifest_rewrite_sink_ids: HashSet::default(),
+                    manual_compaction_waiters: HashMap::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
@@ -117,4 +123,20 @@ impl IcebergCompactionManager {
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
         Ok(iceberg_config)
     }
+
+    /// Clear the iceberg maintenance state of the sink aborted by
+    /// `try_abort_creating_streaming_job`, if any.
+    pub fn clear_maintenance_for_aborted_job(&self, abort_result: &AbortCreatingJobResult) {
+        if let Some(sink_id) = abort_result.aborted_sink_id {
+            self.clear_iceberg_maintenance_by_sink_id(sink_id);
+        }
+    }
+}
+
+/// User-created iceberg sinks have arbitrary names, so identify them by the
+/// connector property instead of the `__iceberg_sink_` name prefix.
+pub fn is_iceberg_sink(properties: &BTreeMap<String, String>) -> bool {
+    properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
 }

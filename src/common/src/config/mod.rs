@@ -32,6 +32,8 @@ pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
 pub use server::{HeapProfilingConfig, ServerConfig};
+
+pub use crate::session_config::SessionInitConfig;
 pub mod udf;
 pub use udf::UdfConfig;
 pub mod storage;
@@ -42,9 +44,9 @@ pub use storage::{
 pub mod merge;
 pub mod mutate;
 pub mod none_as_empty_string;
+pub mod role;
 pub mod system;
 pub mod utils;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -56,6 +58,7 @@ pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
+pub use role::*;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
@@ -109,6 +112,10 @@ pub struct RwConfig {
     #[config_doc(nested)]
     pub udf: UdfConfig,
 
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub session_init: SessionInitConfig,
+
     #[serde(flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -160,6 +167,8 @@ impl RwConfig {
 pub mod default {
 
     pub mod developer {
+        use crate::config::streaming::CacheRefillPolicy;
+
         pub fn meta_cached_traces_num() -> u32 {
             256
         }
@@ -227,6 +236,14 @@ pub mod default {
         }
 
         pub fn stream_exchange_concurrent_dispatchers() -> usize {
+            0
+        }
+
+        pub fn stream_project_expr_concurrency() -> usize {
+            1
+        }
+
+        pub fn stream_project_expr_inflight_request_concurrency() -> usize {
             0
         }
 
@@ -362,6 +379,10 @@ pub mod default {
             2048
         }
 
+        pub fn stream_high_gap_fill_amplification_threshold() -> usize {
+            2048
+        }
+
         /// Default to 1 to be compatible with the behavior before this config is introduced.
         pub fn stream_exchange_connection_pool_size() -> Option<u16> {
             Some(1)
@@ -456,6 +477,10 @@ pub mod default {
             false
         }
 
+        pub fn cache_refill_policy() -> CacheRefillPolicy {
+            CacheRefillPolicy::Enabled
+        }
+
         pub fn enable_vnode_key_stats_for_materialize() -> bool {
             false
         }
@@ -481,6 +506,8 @@ pub mod tests {
         let mut config = RwConfig::default();
         // Set `license_key` to empty in the docs to avoid any confusion.
         config.system.license_key = Some(LicenseKey::empty());
+        // Keep generated docs and example config aligned with the production-safe default.
+        config.frontend.unsafe_enable_local_fs_connector = false;
         config
     }
 
@@ -501,6 +528,60 @@ pub mod tests {
         let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../../config/docs.md"];
         actual.assert_eq(&expected);
+    }
+
+    #[test]
+    fn test_session_init_entries_distinguishes_omitted_from_default() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            streaming_parallelism_for_table = "default"
+            "#,
+        )
+        .unwrap();
+
+        // Omitted fields are `None`; an explicit `default` is `Some("default")`.
+        assert_eq!(
+            config.session_init.streaming_parallelism.as_deref(),
+            Some("bounded(8)")
+        );
+        assert_eq!(
+            config
+                .session_init
+                .streaming_parallelism_for_table
+                .as_deref(),
+            Some("default")
+        );
+        assert_eq!(config.session_init.streaming_parallelism_for_sink, None);
+
+        // Only explicitly-configured parameters are reported, by their session parameter name.
+        assert_eq!(
+            config.session_init.entries(),
+            vec![
+                ("streaming_parallelism", "bounded(8)"),
+                ("streaming_parallelism_for_table", "default"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_session_init_default_is_empty() {
+        assert!(SessionInitConfig::default().entries().is_empty());
+    }
+
+    #[test]
+    fn test_session_init_rejects_unrecognized_key() {
+        let err = toml::from_str::<RwConfig>(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            not_a_real_param = "oops"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `not_a_real_param`"));
     }
 
     #[derive(Debug)]
@@ -816,6 +897,15 @@ pub mod tests {
             storage.max_prefetch_block_number must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_iceberg_compaction_enable_prefetch_default_is_false() {
+        let config = StorageConfig::default();
+        assert!(
+            !config.iceberg_compaction_enable_prefetch,
+            "enable_prefetch must default to false to avoid unexpected memory usage in existing deployments"
+        );
     }
 
     #[test]

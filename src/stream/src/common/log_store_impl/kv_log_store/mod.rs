@@ -2257,6 +2257,7 @@ mod tests {
                 new_vnode_bitmap: None,
                 is_stop: false,
                 schema_change: Some(schema_change.clone()),
+                wait_log_store_flush: false,
             },
         ));
 
@@ -2306,6 +2307,93 @@ mod tests {
 
         // Writer should be able to continue with the next epoch after reader truncation.
         writer.write_chunk(gen_stream_chunk(10)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_wait_log_store_flush_without_schema_change() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table(pk_info);
+
+        test_env.register_table(table.clone()).await;
+
+        let bitmap = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(bitmap),
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            None,
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(table.id)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
+
+        let mut flush_future = Box::pin(writer.flush_current_epoch(
+            epoch2,
+            FlushCurrentEpochOptions {
+                is_checkpoint: true,
+                new_vnode_bitmap: None,
+                is_stop: true,
+                schema_change: None,
+                wait_log_store_flush: true,
+            },
+        ));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), flush_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    is_stop,
+                    schema_change,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint);
+                assert!(is_stop);
+                assert_eq!(schema_change, None);
+                reader
+                    .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+                    .unwrap();
+            }
+            item => unreachable!("{:?}", item),
+        }
+
+        let post_flush = flush_future.await.unwrap();
+        post_flush.post_yield_barrier().await.unwrap();
     }
 
     #[tokio::test]
@@ -2385,6 +2473,7 @@ mod tests {
                 new_vnode_bitmap: None,
                 is_stop: false,
                 schema_change: Some(schema_change),
+                wait_log_store_flush: false,
             },
         );
         let mut flush_future = Box::pin(flush_future);

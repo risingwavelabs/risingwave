@@ -260,8 +260,8 @@ impl UploadingTask {
     fn new(task_id: UploadingTaskId, input: UploadTaskInput, context: &UploaderContext) -> Self {
         assert!(!input.is_empty());
         let mut epochs = input
-            .iter()
-            .flat_map(|(_, imms)| imms.iter().map(|imm| imm.epoch()))
+            .values()
+            .flat_map(|imms| imms.iter().map(|imm| imm.epoch()))
             .sorted()
             .dedup()
             .collect_vec();
@@ -1641,8 +1641,8 @@ impl UploaderData {
             for table_data in self.unsync_data.table_data.values() {
                 for task_id in table_data
                     .spill_tasks
-                    .iter()
-                    .flat_map(|(_, tasks)| tasks.iter())
+                    .values()
+                    .flat_map(|tasks| tasks.iter())
                 {
                     assert!(
                         spill_task_table_id_from_data

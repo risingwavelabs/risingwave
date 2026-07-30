@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
+use chrono_tz::{Tz, UTC};
 use futures::FutureExt;
 use futures::future::join_all;
 use hytra::TrAdder;
@@ -26,6 +27,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
+use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use risingwave_expr::expr_context::{FRAGMENT_ID, VNODE_COUNT, expr_context_scope};
@@ -73,6 +75,8 @@ pub struct ActorContext {
     /// Compared to `stream_env.global_config`, this config can have some entries overridden by the user.
     pub config: Arc<StreamingConfig>,
 
+    pub time_zone: Tz,
+
     pub stream_env: StreamEnvironment,
 }
 
@@ -102,6 +106,7 @@ impl ActorContext {
             initial_upstream_actors: Default::default(),
             meta_client: None,
             config: Arc::new(config),
+            time_zone: UTC,
             stream_env: StreamEnvironment::for_test(),
         })
     }
@@ -115,6 +120,19 @@ impl ActorContext {
         config: Arc<StreamingConfig>,
         stream_env: StreamEnvironment,
     ) -> ActorContextRef {
+        let time_zone = &stream_actor.expr_context.as_ref().unwrap().time_zone;
+        let time_zone = match Timestamptz::lookup_time_zone(time_zone) {
+            Ok(time_zone) => time_zone,
+            Err(err) => {
+                tracing::warn!(
+                    time_zone,
+                    error = %err,
+                    "failed to parse actor time zone, falling back to UTC"
+                );
+                UTC
+            }
+        };
+
         Arc::new(Self {
             id: stream_actor.actor_id,
             fragment_id,
@@ -136,6 +154,7 @@ impl ActorContext {
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
             config,
+            time_zone,
             stream_env,
         })
     }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{
     EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
 };
@@ -28,7 +29,7 @@ pub struct StorageOpts {
     pub min_sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
-    /// False positive probability of bloom filter.
+    /// Deprecated and ignored by SST filter builders; kept for backward compatibility.
     pub bloom_false_positive: f64,
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     pub share_buffers_sync_parallelism: u32,
@@ -111,6 +112,8 @@ pub struct StorageOpts {
     pub cache_refill_unit: usize,
     pub cache_refill_threshold: f64,
     pub cache_refill_skip_recent_filter: bool,
+    pub cache_refill_skip_inheritance_filter: bool,
+    pub cache_refill_table_cache_refill_default_policy: CacheRefillPolicy,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -189,6 +192,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
     /// Pull interval for iceberg compaction task requests in milliseconds.
     pub iceberg_compaction_pull_interval_ms: u64,
+    /// Whether to enable prefetch for iceberg compaction.
+    pub iceberg_compaction_enable_prefetch: bool,
 }
 
 impl Default for StorageOpts {
@@ -288,6 +293,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
+            cache_refill_skip_inheritance_filter: c.storage.cache_refill.skip_inheritance_filter,
+            cache_refill_table_cache_refill_default_policy: c
+                .streaming
+                .developer
+                .cache_refill_policy,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 
@@ -348,6 +358,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .iceberg_compaction_pending_parallelism_budget_multiplier,
             iceberg_compaction_pull_interval_ms: c.storage.iceberg_compaction_pull_interval_ms,
+            iceberg_compaction_enable_prefetch: c.storage.iceberg_compaction_enable_prefetch,
             iceberg_compaction_target_binpack_group_size_mb: c
                 .storage
                 .iceberg_compaction_target_binpack_group_size_mb,

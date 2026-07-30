@@ -500,6 +500,27 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         infos
     }
 
+    /// Used by migration of table change log to meta store.
+    /// `Self::table_change_log` will be consumed by the migration process later.
+    pub fn apply_table_change_log_delta_backward_compatibility(
+        &mut self,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+    ) {
+        #[expect(deprecated)]
+        for (table_id, change_log_delta) in &version_delta.change_log_delta {
+            let new_change_log = &change_log_delta.new_log;
+            match self.table_change_log.entry(*table_id) {
+                Entry::Occupied(entry) => {
+                    let change_log = entry.into_mut();
+                    change_log.add_change_log(new_change_log.clone());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
+                }
+            };
+        }
+    }
+
     pub fn apply_version_delta(
         &mut self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
@@ -701,6 +722,9 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             } else {
                 modified_table_watermarks.insert(*table_id, Some(table_watermarks.clone()));
             }
+        }
+        for table_id in &version_delta.removed_table_ids {
+            modified_table_watermarks.insert(*table_id, None);
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
             let safe_epoch = if let Some(state_table_info) =
@@ -1617,8 +1641,10 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -1634,6 +1660,9 @@ mod tests {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels, OverlappingLevel};
     use crate::sstable_info::{SstableInfo, SstableInfoInner};
+    use crate::table_watermark::{
+        TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    };
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
         IntraLevelDelta,
@@ -3064,6 +3093,38 @@ mod tests {
         assert_eq!(cg.levels[0].uncompressed_file_size, 160);
 
         assert_eq!(cg.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_apply_version_delta_removes_dropped_table_watermark() {
+        let table_id = TableId::new(100);
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            table_watermarks: HashMap::from([(
+                table_id,
+                Arc::new(TableWatermarks::single_epoch(
+                    test_epoch(1),
+                    vec![VnodeWatermark::new(
+                        Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                        Bytes::from_static(b"watermark"),
+                    )],
+                    WatermarkDirection::Ascending,
+                    WatermarkSerdeType::PkPrefix,
+                )),
+            )]),
+            ..Default::default()
+        };
+
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            prev_id: HummockVersionId::new(0),
+            removed_table_ids: HashSet::from([table_id]),
+            ..Default::default()
+        };
+
+        version.apply_version_delta(&version_delta);
+
+        assert!(!version.table_watermarks.contains_key(&table_id));
     }
 
     #[test]

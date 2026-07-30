@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_expr::bail;
 use risingwave_pb::expr::expr_node::PbType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType, PbAsOfJoinInequalityType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
@@ -1098,7 +1097,7 @@ impl LogicalJoin {
         ctx: &ToStreamContext,
     ) -> Result<Option<TemporalJoinScan<'a>>> {
         Ok(if let Some(scan) = self.temporal_join_on() {
-            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+            if ctx.backfill_type().is_snapshot_backfill() {
                 return Err(RwError::from(ErrorCode::NotSupported(
                     "Temporal join with snapshot backfill not supported".into(),
                     "Please use arrangement backfill".into(),
@@ -1229,7 +1228,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+            StreamTableScan::new_with_backfill_type(new_scan, BackfillType::Replicated);
         Ok((
             new_stream_table_scan,
             new_predicate,
@@ -1420,7 +1419,9 @@ impl LogicalJoin {
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
-            *right.inputs().iter().exactly_one().unwrap().distribution(),
+            *Itertools::exactly_one(right.inputs().iter())
+                .unwrap()
+                .distribution(),
             Distribution::Single
         );
 
@@ -1448,7 +1449,7 @@ impl LogicalJoin {
         }
     }
 
-    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<BatchPlanRef> {
+    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<Option<BatchPlanRef>> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1460,10 +1461,7 @@ impl LogicalJoin {
             .core
             .clone_with_inputs(self.core.left.to_batch()?, self.core.right.to_batch()?);
 
-        Ok(self
-            .to_batch_lookup_join(predicate, join)?
-            .expect("Fail to convert to lookup join")
-            .into())
+        Ok(self.to_batch_lookup_join(predicate, join)?.map(Into::into))
     }
 
     fn to_stream_asof_join(

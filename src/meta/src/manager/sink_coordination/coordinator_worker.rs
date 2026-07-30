@@ -44,7 +44,7 @@ use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
 use tracing::{error, warn};
 
-use crate::manager::sink_coordination::exactly_once_util::{
+use crate::manager::exactly_once_util::{
     clean_aborted_records, commit_and_prune_epoch, list_sink_states_ordered_by_epoch,
     persist_pre_commit_metadata,
 };
@@ -519,7 +519,6 @@ enum CoordinatorWorkerEvent {
 }
 
 impl CoordinatorWorker {
-    #[expect(clippy::large_stack_frames)]
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
@@ -858,21 +857,24 @@ impl CoordinatorWorker {
                                 epoch,
                             ))
                             .await?;
-                        if commit_metadata.is_some() || first_schema_change.is_some() {
-                            persist_pre_commit_metadata(
-                                &db,
-                                sink_id as _,
-                                epoch,
-                                commit_metadata.clone(),
-                                first_schema_change.as_ref(),
-                            )
-                            .await?;
-                            two_phase_handler.push_new_item(
-                                epoch,
-                                commit_metadata,
-                                first_schema_change,
-                            );
-                        }
+                        // Persist every acknowledged epoch, even when there is no metadata or
+                        // schema change. Writers may truncate the epoch as soon as they receive
+                        // the acknowledgement, so recovery must retain the same progress. The
+                        // commit handler treats a `None`/`None` item as an external no-op before
+                        // marking it committed, and recovery re-enqueues it through the same path.
+                        persist_pre_commit_metadata(
+                            &db,
+                            sink_id as _,
+                            epoch,
+                            commit_metadata.clone(),
+                            first_schema_change.as_ref(),
+                        )
+                        .await?;
+                        two_phase_handler.push_new_item(
+                            epoch,
+                            commit_metadata,
+                            first_schema_change,
+                        );
                     }
                 }
 

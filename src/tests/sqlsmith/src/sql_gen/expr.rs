@@ -115,7 +115,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 .data_type
                 .clone(),
             _ => {
-                use {DataType as S, DataTypeName as T};
+                use DataType as S;
+                use DataTypeName as T;
                 let mut candidate_ret_types = vec![
                     T::Boolean,
                     T::Int16,

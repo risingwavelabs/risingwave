@@ -35,6 +35,8 @@ use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutorBuilder;
 
+impl_stream_node_body!(TemporalJoin(TemporalJoinNode) => TemporalJoinExecutorBuilder);
+
 impl ExecutorBuilder for TemporalJoinExecutorBuilder {
     type Node = TemporalJoinNode;
 
@@ -84,7 +86,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                             table_desc,
                             store.clone(),
                             vnodes.clone(),
-                            params.fragment_id.as_raw_id(),
+                            params.fragment_id,
                         )
                         .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
                         .with_output_column_ids(output_column_ids.clone())
@@ -113,10 +115,18 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 build_nested_loop!(BasicSerde)
             }
         } else {
+            // `ReplicatedStateTable::iter_with_prefix` returns rows in `table_output_indices`
+            // order. The hash temporal join cache therefore needs stream-key positions within
+            // that projected row, not within the full table schema.
             let table_stream_key_indices = table_desc
                 .stream_key
                 .iter()
-                .map(|&k| k as usize)
+                .map(|&k| {
+                    table_output_indices
+                        .iter()
+                        .position(|&idx| idx == k as usize)
+                        .expect("stream key should be included in table output")
+                })
                 .collect_vec();
 
             let left_join_keys = node
@@ -164,7 +174,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                             table_desc,
                             store.clone(),
                             vnodes.clone(),
-                            params.fragment_id.as_raw_id(),
+                            params.fragment_id,
                         )
                         .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
                         .with_output_column_ids(output_column_ids.clone())
@@ -183,7 +193,6 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                         null_safe,
                         condition,
                         output_indices,
-                        table_output_indices,
                         table_stream_key_indices,
                         watermark_epoch: params.watermark_epoch,
                         chunk_size: params.config.developer.chunk_size,
@@ -217,7 +226,6 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore, SD: ValueRowSerde> {
     null_safe: Vec<bool>,
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
-    table_output_indices: Vec<usize>,
     table_stream_key_indices: Vec<usize>,
     watermark_epoch: AtomicU64Ref,
     chunk_size: usize,
@@ -254,7 +262,6 @@ impl<S: StateStore, SD: ValueRowSerde> HashKeyDispatcher
                     self.null_safe,
                     self.condition,
                     self.output_indices,
-                    self.table_output_indices,
                     self.table_stream_key_indices,
                     self.watermark_epoch,
                     self.metrics,

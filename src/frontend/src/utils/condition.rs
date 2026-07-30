@@ -721,7 +721,7 @@ impl Condition {
             else {
                 return Ok(false_cond());
             };
-            other_conds.extend(part_of_other_conds.into_iter());
+            other_conds.extend(part_of_other_conds);
 
             let lower_bound = Self::merge_lower_bound_conjunctions(lower_bound_conjunctions);
             let upper_bound = Self::merge_upper_bound_conjunctions(upper_bound_conjunctions);
@@ -738,7 +738,7 @@ impl Condition {
                     if eq_conds.is_empty() {
                         return Ok(false_cond());
                     }
-                    scan_range.eq_conds.extend(eq_conds.into_iter());
+                    scan_range.eq_conds.extend(eq_conds);
                 }
                 0 => {
                     let convert = |bound| match bound {

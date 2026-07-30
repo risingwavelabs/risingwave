@@ -26,7 +26,7 @@ use clap::Parser;
 use foyer::Hint;
 use risingwave_common::catalog::TableOption;
 use risingwave_common::config::{
-    MetaConfig, NoOverride, extract_storage_memory_config, load_config,
+    MetaConfig, NoOverride, Role, extract_storage_memory_config, load_config,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -418,7 +418,7 @@ async fn start_replay(
             // pop the latest epoch
             replayed_epochs.pop();
             let mut epochs = vec![committed_epoch];
-            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1).into_iter());
+            epochs.extend(pin_old_snapshots(&meta_client, &replayed_epochs, 1));
             tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, table_to_check).await?;
@@ -714,6 +714,7 @@ pub async fn create_hummock_store_with_metrics(
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
+        Role::None,
         storage_opts,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),

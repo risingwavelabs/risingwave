@@ -23,6 +23,8 @@ use crate::task::ExecutorParams;
 
 pub struct RowIdGenExecutorBuilder;
 
+impl_stream_node_body!(RowIdGen(RowIdGenNode) => RowIdGenExecutorBuilder);
+
 impl ExecutorBuilder for RowIdGenExecutorBuilder {
     type Node = RowIdGenNode;
 

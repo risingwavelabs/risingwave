@@ -19,6 +19,7 @@ use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
@@ -989,7 +990,7 @@ impl CatalogController {
             .await?;
         let to_drop_objects = to_drop_source_objects
             .into_iter()
-            .chain(to_drop_internal_table_objs.into_iter())
+            .chain(to_drop_internal_table_objs)
             .collect_vec();
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -1068,6 +1069,41 @@ impl CatalogController {
         Ok((version, database))
     }
 
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let database =
+            database::ActiveModel {
+                database_id: Set(database_id),
+                resource_group: Set(
+                    resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
+                ),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database, obj, None).into()),
+            )
+            .await;
+        Ok(version)
+    }
+
     pub async fn alter_subscription_retention(
         &self,
         subscription_id: SubscriptionId,
@@ -1116,6 +1152,12 @@ impl CatalogController {
         entries_to_add: HashMap<String, String>,
         keys_to_remove: Vec<String>,
     ) -> MetaResult<NotificationVersion> {
+        let updates_cache_refill_policy = entries_to_add
+            .contains_key(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
+            || keys_to_remove
+                .iter()
+                .any(|key| key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH);
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1149,21 +1191,17 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        {
-            let merged = merge_streaming_config_section(
-                &StreamingConfig::default(),
-                &updated_config_override,
-            )
-            .context("invalid streaming job config override")?;
+        let merged =
+            merge_streaming_config_section(&StreamingConfig::default(), &updated_config_override)
+                .context("invalid streaming job config override")?;
 
-            // Reject unrecognized entries.
-            // Note: If these unrecognized entries are pre-existing, we also reject them here.
-            // Users are able to fix them by issuing a `RESET` first.
-            if let Some(merged) = merged {
-                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
-                if !unrecognized_keys.is_empty() {
-                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
-                }
+        // Reject unrecognized entries.
+        // Note: If these unrecognized entries are pre-existing, we also reject them here.
+        // Users are able to fix them by issuing a `RESET` first.
+        if let Some(merged) = &merged {
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 
@@ -1176,6 +1214,21 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+        drop(inner);
+
+        if updates_cache_refill_policy {
+            let policies = self.table_cache_refill_policies_snapshot().await?;
+            self.env
+                .notification_manager()
+                .notify_hummock(
+                    NotificationOperation::Update,
+                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        table_cache_refill_policies: Some(policies),
+                        ..Default::default()
+                    }),
+                )
+                .await;
+        }
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }

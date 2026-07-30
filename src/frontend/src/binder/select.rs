@@ -364,13 +364,9 @@ impl Binder {
                     let except_indices = self.generate_except_indices(except.as_deref())?;
                     let (begin, end) = self
                         .context
-                        .range_of
-                        .get(&(schema_name, table_name.clone()))
-                        .ok_or_else(|| {
-                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                        })?;
+                        .resolve_relation_range(&table_name, &schema_name)?;
                     let (exprs, names) = Self::iter_bound_columns(
-                        self.context.columns[*begin..*end]
+                        self.context.columns[begin..end]
                             .iter()
                             .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
                     );

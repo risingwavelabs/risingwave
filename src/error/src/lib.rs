@@ -33,8 +33,7 @@ pub mod tonic;
 pub mod wrappers;
 
 // Re-export the `thiserror-ext` crate.
-pub use thiserror_ext;
-pub use thiserror_ext::*;
+pub use thiserror_ext::{self, *};
 
 /// An error type that is [`Send`], [`Sync`], and `'static`.
 pub trait Error = std::error::Error + Send + Sync + 'static;

@@ -19,6 +19,8 @@ use crate::executor::{UpstreamFragmentInfo, UpstreamSinkUnionExecutor};
 
 pub struct UpstreamSinkUnionExecutorBuilder;
 
+impl_stream_node_body!(UpstreamSinkUnion(UpstreamSinkUnionNode) => UpstreamSinkUnionExecutorBuilder);
+
 impl ExecutorBuilder for UpstreamSinkUnionExecutorBuilder {
     type Node = UpstreamSinkUnionNode;
 

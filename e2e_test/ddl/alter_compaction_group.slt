@@ -158,14 +158,20 @@ SELECT (compaction_config::jsonb)->>'maxKvCountForXor16' FROM rw_hummock_compact
 ----
 262144
 
-# Optional positive configs reject sentinel values instead of silently treating them as unset
-statement error must be between 1 and 18446744073709551614, or DEFAULT
+# The blocked xor threshold accepts 0 to force blocked filters for any non-empty task.
+statement ok
 ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 0;
 
+query T
+SELECT (compaction_config::jsonb)->>'maxKvCountForXor16' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+0
+
+# Optional positive configs reject sentinel values instead of silently treating them as unset
 statement error must be between 1 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 0;
 
-statement error must be between 1 and 18446744073709551614, or DEFAULT
+statement error must be between 0 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 18446744073709551615;
 
 statement error must be between 1 and 18446744073709551614, or DEFAULT

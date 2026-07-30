@@ -83,8 +83,10 @@ pub(super) fn build_base_compact_task(
             task_type: picked_task.compaction_task_type,
             split_weight_by_vnode: picked_task.input.vnode_partition_count,
             max_sub_compaction: compaction_config.max_sub_compaction,
-            max_kv_count_for_xor16: compaction_config.max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold: compaction_config.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: compaction_config.max_vnode_key_range_bytes,
+            sstable_filter_type: picked_task.sstable_filter_type,
+            sstable_filter_layout: picked_task.sstable_filter_layout,
             ..Default::default()
         },
         compact_table_ids,

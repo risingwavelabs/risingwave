@@ -146,7 +146,7 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
                 "{}({}) -> {}",
                 call.kind,
                 call.args.arg_types().iter().format(", "),
-                &call.return_type,
+                call.return_type,
             )))
         },
         |f| f(call),

@@ -69,6 +69,22 @@ pub fn build_cdc_table_id(source_id: SourceId, external_table_name: &str) -> Str
     format!("{}.{}", source_id, external_table_name)
 }
 
+pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<String> {
+    let (schema_name, table_name) = table_name.split_once('.')?;
+    let table_name = table_name.strip_prefix('"')?.strip_suffix('"')?;
+    if schema_name.is_empty()
+        || table_name.is_empty()
+        || table_name.contains('.')
+        || table_name.contains('"')
+        || table_name.contains('\\')
+        || schema_name.contains('"')
+    {
+        return None;
+    }
+
+    Some(format!("{schema_name}.{table_name}"))
+}
+
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
@@ -349,5 +365,38 @@ impl CdcScanOptions {
         !self.disable_backfill
             && self.backfill_num_rows_per_split > 0
             && self.backfill_parallelism > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_simple_postgres_quoted_table_name() {
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name(r#"public."TableName""#).as_deref(),
+            Some("public.TableName")
+        );
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name(r#"public."pg_my_table""#).as_deref(),
+            Some("public.pg_my_table")
+        );
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name("public.table"),
+            None
+        );
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name(r#""Mixed.Schema"."TableName""#),
+            None
+        );
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name(r#"public."table.name""#),
+            None
+        );
+        assert_eq!(
+            normalize_simple_postgres_quoted_table_name(r#"public."table\name""#),
+            None
+        );
     }
 }

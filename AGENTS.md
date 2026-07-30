@@ -86,3 +86,4 @@ See `docs/dev/src/connector/intro.md`.
 
 - Use `$risingwave-rust-analyzer` for RisingWave-specific `rust-analyzer` CLI and LSP workflows, especially when a task needs fast semantic inspection, structural search/replace, or crate-specific feature guidance. Skill path: `.agents/skills/risingwave-rust-analyzer/SKILL.md`.
 - Use `$fix-buildkite-ci` for Buildkite triage and focused CI fixes. Skill path: `.agents/skills/fix-buildkite-ci/SKILL.md`.
+- Use `$risingwave-slt-authoring` when creating, reviewing, or fixing RisingWave SQLLogicTest (`.slt`/`.slt.serial`) files, especially tests with `system ok`, connector fixtures, CI coverage, madsim, or flaky/idempotent behavior. Skill path: `.agents/skills/risingwave-slt-authoring/SKILL.md`.

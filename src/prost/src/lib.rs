@@ -559,11 +559,12 @@ impl stream_plan::PbStreamScanType {
             PbStreamScanType::Unspecified => {
                 unreachable!()
             }
-            // todo: should this be true?
-            PbStreamScanType::UpstreamOnly => false,
+            // `UpstreamOnly` has no snapshot or backfill state to restore.
+            PbStreamScanType::UpstreamOnly => true,
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
             PbStreamScanType::SnapshotBackfill => !is_online,
+            #[expect(deprecated)]
             PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
                 false
             }
@@ -833,10 +834,10 @@ impl streaming_job_resource_type::ResourceType {
     pub fn resource_group(&self) -> Option<String> {
         match self {
             streaming_job_resource_type::ResourceType::Regular(_) => None,
-            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
-            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
                 Some(group.clone())
             }
+            streaming_job_resource_type::ResourceType::ServerlessBackfill(_) => None,
         }
     }
 }

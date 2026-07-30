@@ -14,15 +14,15 @@
 
 mod trad_source;
 
+mod fs_fetch;
+
 use std::collections::BTreeMap;
 
-pub use trad_source::{SourceExecutorBuilder, create_source_desc_builder};
-mod fs_fetch;
-pub use fs_fetch::FsFetchExecutorBuilder;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
+pub use trad_source::create_source_desc_builder;
 
 use super::*;
 

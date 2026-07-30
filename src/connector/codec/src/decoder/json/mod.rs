@@ -139,7 +139,7 @@ impl JsonRef {
                         let file_path = ref_url_no_fragment.to_file_path().map_err(|_| {
                             anyhow::anyhow!(
                                 "could not convert url {} to file path",
-                                &ref_url_no_fragment
+                                ref_url_no_fragment
                             )
                         })?;
                         let file =

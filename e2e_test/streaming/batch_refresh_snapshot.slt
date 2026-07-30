@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 DROP MATERIALIZED VIEW IF EXISTS mv_batch;
 
 statement ok
@@ -100,13 +103,12 @@ SELECT * FROM mv_up;
 2
 3
 
-sleep 7s
-
-query I rowsort
+query I rowsort retry 15 backoff 1s
 SELECT * FROM mv_batch;
 ----
 1
 2
+3
 
 statement ok
 DROP MATERIALIZED VIEW mv_batch;

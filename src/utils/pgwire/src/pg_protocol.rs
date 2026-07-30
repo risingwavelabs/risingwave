@@ -231,7 +231,7 @@ fn record_user_in_span(user: &str, span: &mut tracing::Span) {
     span.record("user", tracing::field::display(user));
 }
 
-/// Redacts SQL options. Data in DML is not redacted.
+/// Redacts sensitive SQL fields. Data in DML is not redacted.
 fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
     match Parser::parse_sql(sql) {
         Ok(sqls) => sqls
@@ -1678,6 +1678,27 @@ mod tests {
         assert_eq!(
             redact_sql(sql, keywords),
             "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
+        );
+    }
+
+    #[test]
+    fn test_redact_user_password_sql() {
+        let keywords = Arc::new(HashSet::from(["password".into()]));
+
+        assert_eq!(
+            redact_sql("ALTER USER WITH PASSWORD 'rw_password_2'", keywords.clone()),
+            "ALTER USER WITH PASSWORD [REDACTED]"
+        );
+        assert_eq!(
+            redact_sql(
+                "ALTER USER foo WITH ENCRYPTED PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+                keywords.clone(),
+            ),
+            "ALTER USER foo WITH ENCRYPTED PASSWORD [REDACTED]"
+        );
+        assert_eq!(
+            redact_sql("CREATE USER foo WITH PASSWORD 'rw_password_2'", keywords),
+            "CREATE USER foo WITH PASSWORD [REDACTED]"
         );
     }
 

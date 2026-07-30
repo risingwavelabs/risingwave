@@ -109,7 +109,7 @@ impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
             sources,
             self.column_orders.clone(),
             self.schema,
-            format!("MergeSortExecutor{}", &self.task_id.task_id),
+            format!("MergeSortExecutor{}", self.task_id.task_id),
             self.chunk_size,
             self.mem_ctx,
         ));

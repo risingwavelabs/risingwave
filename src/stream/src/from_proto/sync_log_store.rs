@@ -25,6 +25,8 @@ use crate::task::ExecutorParams;
 
 pub struct SyncLogStoreExecutorBuilder;
 
+impl_stream_node_body!(SyncLogStore(SyncLogStoreNode) => SyncLogStoreExecutorBuilder);
+
 impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
     type Node = SyncLogStoreNode;
 

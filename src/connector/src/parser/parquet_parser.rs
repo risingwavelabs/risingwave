@@ -153,6 +153,22 @@ impl ParquetParser {
                                     )
                                 }
                             })?;
+                        // The schema match and the decode are maintained in parallel; a
+                        // diverging output type is a code bug — surface it instead of letting
+                        // a mistyped column corrupt the chunk downstream.
+                        if array_impl.data_type() != *rw_data_type {
+                            return Err(crate::parser::AccessError::ParquetParser {
+                                message: format!(
+                                    "converted array type diverges from the declared column type, column='{}', rw_type='{}', converted='{}', parquet_type='{}', offset={}",
+                                    rw_column_name,
+                                    rw_data_type,
+                                    array_impl.data_type(),
+                                    parquet_column.data_type(),
+                                    self.offset,
+                                ),
+                            }
+                            .into());
+                        }
                         chunk_columns.push(Arc::new(array_impl));
                     } else {
                         // Handle additional columns, for file source, the additional columns are offset and file name;

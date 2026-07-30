@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{BoxedExpression, Expression, build_batch_expr_from_prost};
+use risingwave_expr::expr::{BoxedExpression, build_batch_expr_from_prost};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -50,7 +48,6 @@ impl Executor for ProjectExecutor {
 impl ProjectExecutor {
     fn do_execute(self) -> impl Stream<Item = Result<DataChunk>> + 'static {
         let Self { expr, child, .. } = self;
-        let expr: Arc<[Box<dyn Expression>]> = expr.into();
         child
             .execute()
             .map(move |data_chunk| {
@@ -132,7 +129,7 @@ mod tests {
         );
 
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
-        let expr_vec = vec![Box::new(expr1) as BoxedExpression];
+        let expr_vec: Vec<BoxedExpression> = vec![expr1.into()];
 
         let schema = schema_unnamed! { DataType::Int32, DataType::Int32 };
         let mut mock_executor = MockExecutor::new(schema);
@@ -179,7 +176,7 @@ mod tests {
         ));
 
         let proj_executor = Box::new(ProjectExecutor {
-            expr: vec![Box::new(literal)],
+            expr: vec![literal.into()],
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32),
             identity: "ProjectExecutor2".to_owned(),

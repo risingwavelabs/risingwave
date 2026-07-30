@@ -1,0 +1,67 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table source_events (
+  key1 varchar,
+  key2 varchar,
+  key3 timestamp,
+  key4 varchar,
+  field_a timestamp,
+  field_b timestamp,
+  version_ts timestamp,
+  filter_ts timestamp
+) append only;
+
+statement ok
+create table target_table (
+  key1 varchar,
+  key2 varchar,
+  key3 timestamp,
+  key4 varchar,
+  field_a timestamp,
+  field_b timestamp,
+  version_ts timestamp,
+  filter_ts timestamp,
+  primary key (key1, key2, key3, key4)
+) on conflict do update if not null with version column(version_ts);
+
+statement ok
+create sink sink_into_target into target_table as
+select * from source_events
+where filter_ts > now();
+
+# Both events are emitted in the same barrier. The sink into table path must preserve
+# both row-level updates so `DO UPDATE IF NOT NULL WITH VERSION COLUMN` can merge them.
+statement ok
+insert into source_events values
+  ('o', 'w', '2026-01-01 00:00:00', 'e', '2026-01-01 00:00:00', null, '2026-01-01 00:00:01', now() + interval '1 day'),
+  ('o', 'w', '2026-01-01 00:00:00', 'e', null, '2026-01-01 00:00:05', '2026-01-01 00:00:06', now() + interval '1 day');
+
+# The same two events across two barriers should continue to work as before.
+statement ok
+insert into source_events values
+  ('o2', 'w2', '2026-01-01 00:00:00', 'e', '2026-01-01 00:00:00', null, '2026-01-01 00:00:01', now() + interval '1 day');
+
+statement ok
+insert into source_events values
+  ('o2', 'w2', '2026-01-01 00:00:00', 'e', null, '2026-01-01 00:00:05', '2026-01-01 00:00:06', now() + interval '1 day');
+
+query TT???
+select
+  key1,
+  key2,
+  field_a,
+  field_b,
+  version_ts
+from target_table
+order by key1;
+----
+o  w  2026-01-01 00:00:00  2026-01-01 00:00:05  2026-01-01 00:00:06
+o2 w2 2026-01-01 00:00:00  2026-01-01 00:00:05  2026-01-01 00:00:06
+
+statement ok
+drop table target_table cascade;
+
+statement ok
+drop table source_events;

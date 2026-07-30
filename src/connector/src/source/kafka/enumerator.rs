@@ -21,7 +21,9 @@ use async_trait::async_trait;
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::BaseConsumer;
+#[cfg(not(madsim))]
+use rdkafka::consumer::Consumer;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
@@ -80,6 +82,15 @@ pub struct KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    fn report_consumer_group_delete_failure(&self, group_id: &str) {
+        let source_id = self.context.info.source_id.to_string();
+        self.context
+            .metrics
+            .kafka_consumer_group_delete_failure_count
+            .with_label_values(&[&source_id, group_id])
+            .inc();
+    }
+
     async fn drop_consumer_groups(&self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         let admin = Box::pin(SHARED_KAFKA_ADMIN.try_get_with_by_ref(
             &self.properties.connection,
@@ -96,14 +107,49 @@ impl KafkaSplitEnumerator {
             .iter()
             .map(|fragment_id| self.properties.group_id(*fragment_id))
             .collect::<Vec<_>>();
-        let group_ids: Vec<&str> = group_ids.iter().map(|s| s.as_str()).collect();
-        let res = admin
-            .delete_groups(&group_ids, &AdminOptions::default())
-            .await?;
+        let group_id_refs = group_ids
+            .iter()
+            .map(|group_id| group_id.as_str())
+            .collect::<Vec<_>>();
+
+        let res = match admin
+            .delete_groups(&group_id_refs, &AdminOptions::default())
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                for group_id in &group_ids {
+                    self.report_consumer_group_delete_failure(group_id);
+                }
+                tracing::warn!(
+                    error = %err.as_report(),
+                    topic = self.topic,
+                    ?group_ids,
+                    "failed to delete Kafka consumer groups"
+                );
+                return Err(err.into());
+            }
+        };
+
+        let mut failure_count = 0;
+        for result in &res {
+            if let Err((group_id, error_code)) = result {
+                failure_count += 1;
+                self.report_consumer_group_delete_failure(group_id);
+                tracing::warn!(
+                    topic = self.topic,
+                    group_id,
+                    error = %error_code.as_report(),
+                    "failed to delete Kafka consumer group"
+                );
+            }
+        }
         tracing::debug!(
             topic = self.topic,
             ?fragment_ids,
-            "delete groups result: {res:?}"
+            ?res,
+            failure_count,
+            "delete groups result"
         );
         Ok(())
     }
@@ -190,6 +236,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         // `KafkaSplitEnumerator` uses `BaseConsumer`, which does not have a background polling
         // thread. Poll once per `list_splits` invocation so meta's periodic source-manager tick
         // can serve queued callbacks like librdkafka statistics events.
+        //
+        // This meta-side enumerator does not have a fragment id, so it cannot derive the
+        // compute-side consumer group id. Polling this no-group client may therefore return
+        // `UnknownGroup`, which is expected and intentionally filtered below. Other poll errors
+        // are still logged as warnings.
         if let Some(Err(poll_err)) = {
             #[cfg(not(madsim))]
             {
@@ -199,7 +250,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             {
                 self.client.poll(Duration::ZERO).await
             }
-        } {
+        } && !is_expected_no_group_poll_error(&poll_err)
+        {
             tracing::warn!(
                 error = %poll_err.as_report(),
                 topic = self.topic,
@@ -243,6 +295,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         self.drop_consumer_groups(fragment_ids).await
     }
+}
+
+fn is_expected_no_group_poll_error(error: &KafkaError) -> bool {
+    matches!(
+        error,
+        KafkaError::MessageConsumption(RDKafkaErrorCode::UnknownGroup)
+    )
 }
 
 async fn build_kafka_client(

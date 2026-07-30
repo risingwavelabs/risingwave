@@ -25,6 +25,7 @@ struct Parameter {
     pub default: syn::Expr,
     pub flags: Option<syn::LitStr>,
     pub check_hook: Option<syn::Expr>,
+    pub deprecated: Option<syn::LitStr>,
 }
 
 pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
@@ -43,6 +44,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
     let mut entry_name_flags = vec![];
+    // Fields and entries for the generated `SessionInitConfig`, i.e. parameters flagged with
+    // `SESSION_INIT` that can be seeded from `[session_init]` in `risingwave.toml`.
+    let mut session_init_fields = vec![];
+    let mut session_init_entries = vec![];
 
     for field in fields {
         let field_ident = field.ident.expect_or_abort("Field need to be named");
@@ -70,7 +75,12 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             default,
             flags,
             check_hook: check_hook_name,
+            deprecated,
         } = attr;
+        let deprecated_attr = deprecated
+            .as_ref()
+            .map(|notice| quote! { #[deprecated(note = #notice)] })
+            .unwrap_or_else(|| quote! {});
 
         let entry_name = if let Some(rename) = rename {
             if !(rename.value().is_ascii() && rename.value().to_ascii_lowercase() == rename.value())
@@ -146,6 +156,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         };
 
         struct_impl_set.push(quote! {
+            #deprecated_attr
             #[doc = #set_func_doc]
             pub fn #set_func_name(
                 &mut self,
@@ -163,6 +174,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 self.#set_t_func_name(val_t, reporter).map(|val| val.to_string())
             }
 
+            #deprecated_attr
             #[doc = #set_t_func_doc]
             pub fn #gen_set_func_name(
                 &mut self,
@@ -181,6 +193,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         let reset_func_name = format_ident!("reset_{}", field_ident);
         struct_impl_reset.push(quote! {
 
+        #deprecated_attr
         #[allow(clippy::useless_conversion)]
         pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) -> String {
                 let val = #default;
@@ -202,11 +215,13 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 .unwrap();
 
         struct_impl_get.push(quote! {
+            #deprecated_attr
             #[doc = #get_func_doc]
             pub fn #get_func_name(&self) -> String {
                 self.#get_t_func_name().to_string()
             }
 
+            #deprecated_attr
             #[doc = #get_t_func_doc]
             pub fn #get_t_func_name(&self) -> #ty {
                 self.#field_ident.clone()
@@ -243,16 +258,70 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
         let no_alter_sys_flag: TokenStream =
             flags.contains(&"NO_ALTER_SYS").to_string().parse().unwrap();
+        let deprecated_notice = deprecated
+            .map(|notice| quote! { Some(#notice) })
+            .unwrap_or_else(|| quote! { None });
 
-        entry_name_flags.push(
-            quote! {
-                (#entry_name, ParamFlags {no_show_all: #no_show_all_flag, no_alter_sys: #no_alter_sys_flag})
-            }
-        );
+        entry_name_flags.push(quote! {
+            (#entry_name, ParamFlags {
+                no_show_all: #no_show_all_flag,
+                no_alter_sys: #no_alter_sys_flag,
+                deprecated_notice: #deprecated_notice,
+            })
+        });
+
+        // Parameters flagged with `SESSION_INIT` become a field in the generated
+        // `SessionInitConfig`. The value is kept as a raw `Option<String>` so that a parameter
+        // omitted from `risingwave.toml` (`None`) can be distinguished from one explicitly set to
+        // its logical default such as `"default"` (`Some("default")`).
+        if flags.contains(&"SESSION_INIT") {
+            let doc_string = doc_list.join(" ");
+            session_init_fields.push(quote! {
+                #[doc = #doc_string]
+                #[serde(default, with = "crate::config::none_as_empty_string")]
+                pub #field_ident: Option<String>,
+            });
+            session_init_entries.push(quote! {
+                (#entry_name, &self.#field_ident),
+            });
+        }
     }
 
     let struct_ident = input.ident;
     quote! {
+        /// The section `[session_init]` in `risingwave.toml`, generated from the `SESSION_INIT`-flagged
+        /// fields of [`SessionConfig`].
+        ///
+        /// It seeds the corresponding persisted session parameters into the meta store during
+        /// **cluster bootstrap only**. The precedence is:
+        ///
+        /// 1. Persisted value in the meta store (`session_parameter`)
+        /// 2. Explicit value in `[session_init]`
+        /// 3. Built-in `SessionConfig::default()`
+        ///
+        /// Editing `[session_init]` after a cluster has been bootstrapped does not change the
+        /// effective value of an already-persisted parameter. See the RFC for details.
+        #[derive(Clone, Debug, Default, Serialize, Deserialize, ConfigDoc, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        pub struct SessionInitConfig {
+            #(#session_init_fields)*
+        }
+
+        impl SessionInitConfig {
+            /// Returns the explicitly-configured `(session parameter entry name, value)` pairs.
+            /// Parameters omitted from `[session_init]` are not included.
+            pub fn entries(&self) -> Vec<(&'static str, &str)> {
+                [
+                    #(#session_init_entries)*
+                ]
+                .into_iter()
+                .filter_map(|(name, value): (&'static str, &Option<String>)| {
+                    value.as_deref().map(|value| (name, value))
+                })
+                .collect()
+            }
+        }
+
         use std::collections::HashMap;
         use std::sync::LazyLock;
         static PARAM_NAME_FLAGS: LazyLock<HashMap<&'static str, ParamFlags>> = LazyLock::new(|| HashMap::from([#(#entry_name_flags, )*]));
@@ -260,10 +329,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         struct ParamFlags {
             no_show_all: bool,
             no_alter_sys: bool,
+            deprecated_notice: Option<&'static str>,
         }
 
         impl Default for #struct_ident {
-            #[allow(clippy::useless_conversion)]
+            #[allow(clippy::useless_conversion, deprecated)]
             fn default() -> Self {
                 Self {
                     #(#default_fields)*
@@ -271,6 +341,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             }
         }
 
+        #[allow(deprecated)]
         impl #struct_ident {
             fn new() -> Self {
                 Default::default()
@@ -342,6 +413,13 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 let key_name = Self::alias_to_entry_name(key_name);
                 let flags = PARAM_NAME_FLAGS.get(key_name.as_str()).ok_or_else(|| SessionConfigError::UnrecognizedEntry(key_name.to_string()))?;
                 Ok(flags.no_alter_sys)
+            }
+
+            /// Returns a user-facing notice for deprecated parameters.
+            pub fn deprecated_notice(key_name: &str) -> SessionConfigResult<Option<&'static str>> {
+                let key_name = Self::alias_to_entry_name(key_name);
+                let flags = PARAM_NAME_FLAGS.get(key_name.as_str()).ok_or_else(|| SessionConfigError::UnrecognizedEntry(key_name.to_string()))?;
+                Ok(flags.deprecated_notice)
             }
         }
     }

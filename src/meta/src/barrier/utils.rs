@@ -31,11 +31,13 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata;
 
 use crate::barrier::CreateStreamingJobCommandInfo;
 use crate::barrier::command::PostCollectCommand;
+use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
-use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use crate::hummock::NewTableFragmentInfo;
 
 #[expect(clippy::type_complexity)]
 pub(super) fn collect_resp_info(
@@ -47,6 +49,7 @@ pub(super) fn collect_resp_info(
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
     HashSet<TableId>,
+    Vec<IcebergPkIndexSinkMetadata>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
@@ -54,6 +57,7 @@ pub(super) fn collect_resp_info(
     let mut old_value_ssts = Vec::with_capacity(resps.len());
     let mut vector_index_adds = HashMap::new();
     let mut truncate_tables: HashSet<TableId> = HashSet::new();
+    let mut iceberg_pk_index_sink_metadata = Vec::new();
 
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
@@ -81,6 +85,7 @@ pub(super) fn collect_resp_info(
                 .expect("non-duplicate");
         }
         truncate_tables.extend(resp.truncate_tables);
+        iceberg_pk_index_sink_metadata.extend(resp.iceberg_pk_index_sink_metadata);
     }
 
     (
@@ -102,6 +107,7 @@ pub(super) fn collect_resp_info(
         old_value_ssts,
         vector_index_adds,
         truncate_tables,
+        iceberg_pk_index_sink_metadata,
     )
 }
 
@@ -128,7 +134,7 @@ pub(super) fn collect_new_vector_index_info(
 }
 
 pub(super) fn collect_independent_job_commit_epoch_info(
-    commit_info: &mut CommitEpochInfo,
+    task: &mut CompleteBarrierTask,
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,
     barrier_info: &PartialGraphBarrierInfo,
@@ -140,8 +146,10 @@ pub(super) fn collect_independent_job_commit_epoch_info(
         old_value_sst,
         vector_index_adds,
         truncate_tables,
+        iceberg_pk_index_sink_metadata,
     ) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
+    let commit_info = &mut task.commit_info;
     commit_info.sst_to_context.extend(sst_to_context);
     commit_info.sstables.extend(sstables);
     commit_info
@@ -182,6 +190,8 @@ pub(super) fn collect_independent_job_commit_epoch_info(
                 .expect("non-duplicate");
         }
     };
+    task.iceberg_pk_index_sink_metadata
+        .extend(iceberg_pk_index_sink_metadata);
 }
 
 pub(super) type NodeToCollect = HashSet<WorkerId>;
@@ -213,15 +223,22 @@ pub(super) struct BarrierItemCollector<K, Item, Info> {
     inflight_barriers: BTreeMap<u64, InflightBarrierNode<K, Item, Info>>,
     /// newer epoch at the back. `push_back` and `pop_front`
     collected_barriers: VecDeque<CollectedBarrierNode<K, Item, Info>>,
+    /// Whether successive barriers are expected to be epoch-contiguous (the `curr` epoch of one
+    /// barrier equals the `prev` epoch of the next). This holds for the main per-barrier collector,
+    /// where every injected barrier is enqueued, but NOT for collectors that are only fed a sparse
+    /// subset of barriers (e.g. the finishing-jobs collector, enqueued only when a snapshot-backfill
+    /// job finishes). When `false`, only monotonicity and non-duplication are checked.
+    require_contiguous: bool,
 }
 
 impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std::fmt::Debug>
     BarrierItemCollector<K, Item, Info>
 {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(require_contiguous: bool) -> Self {
         Self {
             inflight_barriers: Default::default(),
             collected_barriers: Default::default(),
+            require_contiguous,
         }
     }
 
@@ -240,7 +257,9 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
     pub(super) fn enqueue(&mut self, epoch: EpochPair, to_collect: HashSet<K>, info: Info) {
         assert!(!to_collect.is_empty());
         if let Some((last_prev_epoch, last_barrier)) = self.inflight_barriers.last_key_value() {
-            assert_eq!(last_barrier.epoch.curr, epoch.prev);
+            if self.require_contiguous {
+                assert_eq!(last_barrier.epoch.curr, epoch.prev);
+            }
             assert!(*last_prev_epoch < epoch.prev);
         }
         self.inflight_barriers
@@ -278,7 +297,9 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
                 info,
                 ..
             } = entry.remove();
-            if let Some(prev_barrier) = self.collected_barriers.back() {
+            if self.require_contiguous
+                && let Some(prev_barrier) = self.collected_barriers.back()
+            {
                 assert_eq!(prev_barrier.epoch.curr, epoch.prev);
             }
             self.collected_barriers.push_back(CollectedBarrierNode {
@@ -312,10 +333,12 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
     }
 
     pub(super) fn iter_infos(&self) -> impl Iterator<Item = &Info> + '_ {
-        self.inflight_barriers
-            .values()
+        // Preserve epoch order: collected barriers are older and kept from old to new,
+        // followed by inflight barriers ordered by `prev_epoch` in the BTreeMap.
+        self.collected_barriers
+            .iter()
             .map(|barrier| &barrier.info)
-            .chain(self.collected_barriers.iter().map(|barrier| &barrier.info))
+            .chain(self.inflight_barriers.values().map(|barrier| &barrier.info))
     }
 
     pub(super) fn into_infos(self) -> impl Iterator<Item = Info> {
@@ -342,5 +365,36 @@ impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std
         self.collected_barriers
             .pop_front_if(move |barrier| cond(barrier.epoch))
             .map(|barrier| (barrier.epoch, barrier.collected, barrier.info))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use risingwave_common::util::epoch::EpochPair;
+
+    use super::BarrierItemCollector;
+
+    /// The finishing-jobs collector is fed only on the sparse subset of barriers where a
+    /// snapshot-backfill job finishes, so enqueued epochs are not contiguous. Enqueuing a barrier
+    /// whose `prev` does not match the previous barrier's `curr` must be tolerated.
+    #[test]
+    fn non_contiguous_enqueue_allowed_when_not_required() {
+        let mut collector = BarrierItemCollector::<u32, (), ()>::new(false);
+        collector.enqueue(EpochPair::new(200, 100), HashSet::from([1]), ());
+        // gap: prev (500) != previous curr (200)
+        collector.enqueue(EpochPair::new(600, 500), HashSet::from([2]), ());
+        assert_eq!(collector.inflight_barrier_num(), 2);
+    }
+
+    /// The main per-barrier collector enqueues every barrier, so contiguity is a real invariant and
+    /// must still be asserted.
+    #[test]
+    #[should_panic]
+    fn non_contiguous_enqueue_rejected_when_required() {
+        let mut collector = BarrierItemCollector::<u32, (), ()>::new(true);
+        collector.enqueue(EpochPair::new(200, 100), HashSet::from([1]), ());
+        collector.enqueue(EpochPair::new(600, 500), HashSet::from([2]), ());
     }
 }

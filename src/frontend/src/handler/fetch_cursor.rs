@@ -27,6 +27,7 @@ use super::util::convert_interval_to_u64_seconds;
 use crate::binder::BoundStatement;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::session::cursor_manager::FetchCursorCancelHandle;
 use crate::{Binder, PgResponseStream, WithOptions};
 
 pub async fn handle_fetch_cursor_execute(
@@ -75,16 +76,20 @@ pub async fn handle_fetch_cursor(
     }
 
     let cursor_manager = session.get_cursor_manager();
+    let mut cancel_handle = FetchCursorCancelHandle::new();
 
-    let (rows, pg_descs) = cursor_manager
+    let result = cursor_manager
         .get_rows_with_cursor(
             &cursor_name,
             stmt.count,
             handler_args,
             formats,
             timeout_seconds,
+            &mut cancel_handle,
         )
-        .await?;
+        .await;
+    session.clear_cancel_query_flag();
+    let (rows, pg_descs) = result?;
     Ok(build_fetch_cursor_response(rows, pg_descs))
 }
 

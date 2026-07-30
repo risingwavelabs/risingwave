@@ -261,11 +261,11 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                 )
                 .into());
             }
-            "max_kv_count_for_xor16" => {
-                MutableConfig::MaxKvCountForXor16(parse_optional_positive_u64_value(
+            "blocked_xor_filter_kv_count_threshold" | "max_kv_count_for_xor16" => {
+                MutableConfig::MaxKvCountForXor16(parse_optional_non_sentinel_u64_value(
                     value,
                     &name,
-                    compaction_config::max_kv_count_for_xor16(),
+                    compaction_config::blocked_xor_filter_kv_count_threshold(),
                 )?)
             }
             "max_vnode_key_range_bytes" => {
@@ -407,6 +407,27 @@ fn parse_optional_positive_u64_value(
     if value == 0 || value == OPTIONAL_U64_UNSET_WIRE {
         return Err(ErrorCode::InvalidInputSyntax(format!(
             "{} must be between 1 and {}, or DEFAULT",
+            name,
+            OPTIONAL_U64_UNSET_WIRE - 1
+        ))
+        .into());
+    }
+    Ok(value)
+}
+
+fn parse_optional_non_sentinel_u64_value(
+    value: &SetVariableValue,
+    name: &str,
+    default_value: Option<u64>,
+) -> Result<u64> {
+    if matches!(value, SetVariableValue::Default) {
+        return Ok(default_value.unwrap_or(OPTIONAL_U64_UNSET_WIRE));
+    }
+
+    let value = parse_optional_u64_value(value, name, default_value)?;
+    if value == OPTIONAL_U64_UNSET_WIRE {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "{} must be between 0 and {}, or DEFAULT",
             name,
             OPTIONAL_U64_UNSET_WIRE - 1
         ))

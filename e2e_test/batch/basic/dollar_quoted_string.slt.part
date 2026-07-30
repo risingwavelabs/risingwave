@@ -1,0 +1,59 @@
+query T
+select $$hello$$;
+----
+hello
+
+query T
+select $foo$the content with $bar$nested$bar$ usage$foo$;
+----
+the content with $bar$nested$bar$ usage
+
+query T
+select $fo$o$not nesting just $ sign$fo$o$;
+----
+o$not nesting just $ sign
+
+query T
+select $$hel$$lo$$;
+----
+hel
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t(v int);
+
+statement ok
+COMMENT ON TABLE t IS $$hello$$;
+
+query T
+SELECT
+    d.description
+FROM
+    pg_catalog.pg_description d
+    JOIN pg_catalog.pg_class c
+        ON d.objoid = c.oid
+WHERE c.relname = 't' AND d.objsubid = 0
+ORDER BY d.objsubid;
+----
+hello
+
+query T
+SELECT DATE $$1999-01-01$$;
+----
+1999-01-01
+
+statement ok
+create function dollar_quote_add(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+query I
+select dollar_quote_add(20, 22);
+----
+42
+
+statement ok
+drop function dollar_quote_add(int, int);
+
+statement ok
+drop table t;

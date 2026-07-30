@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -233,7 +234,8 @@ pub async fn sst_dump_via_sstable_store(
         max_epoch: 0,
         uncompressed_file_size: 0,
         range_tombstone_count: 0,
-        bloom_filter_kind: Default::default(),
+        filter_type: PbSstableFilterType::SstableFilterNone,
+        filter_layout: PbSstableFilterLayout::Unspecified,
         sst_size: 0,
         vnode_statistics: None,
     }
@@ -248,7 +250,7 @@ pub async fn sst_dump_via_sstable_store(
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable.estimate_size());
+    println!("File Size: {}", sstable_meta.estimated_size);
 
     println!("Key Range:");
     println!(

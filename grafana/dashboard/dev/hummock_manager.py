@@ -338,8 +338,8 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('meta_hummock_manager_real_process_time_bucket')}[$__rate_interval])) by (le, method))",
-                                f"Real Process Time p{legend}" + " - {{method}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_hummock_manager_real_process_time_bucket')}[$__rate_interval])) by (le, method, lock_name))",
+                                f"Real Process Time p{legend}" + " - {{method}} @ {{lock_name}}",
                             ),
                             [50, 99, "max"],
                         ),

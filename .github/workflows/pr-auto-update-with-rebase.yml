@@ -8,20 +8,25 @@ on:
     branches:
       - main
     types:
+      # GitHub Actions cannot filter pull_request events by label in `on`.
+      # Keep this list narrow so ordinary PR updates do not create skipped runs.
       - labeled
       - unlabeled
-      - synchronize
-      - opened
-      - edited
-      - ready_for_review
-      - reopened
-      - unlocked
-      - auto_merge_enabled
+
+concurrency:
+  group: pr-auto-update-with-rebase-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   autoupdate:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'autoupdate_rebase') &&
+        !contains(github.event.pull_request.labels.*.name, 'autoupdate_merge')
+      )
     steps:
       - id: autoupdate
         name: autoupdate

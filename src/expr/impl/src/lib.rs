@@ -20,13 +20,12 @@
 //! risingwave_expr_impl::enable!();
 //! ```
 
-#![feature(assert_matches)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![feature(iter_array_chunks)]
 #![feature(used_with_arg)]
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod aggregate;
 mod scalar;

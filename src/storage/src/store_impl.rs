@@ -26,6 +26,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -684,6 +685,7 @@ impl StateStoreImpl {
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,
+        role: Role,
         opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -704,7 +706,8 @@ impl StateStoreImpl {
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
+                    std::mem::size_of::<HummockSstableObjectId>()
+                        + value.estimated_meta_cache_memory_weight()
                 })
                 .storage();
 
@@ -753,8 +756,7 @@ impl StateStoreImpl {
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                    // FIXME(MrCroxx): Calculate block weight more accurately.
-                    u64::BITS as usize * 2 / 8 + value.raw().len()
+                    std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
                 })
                 .storage();
 
@@ -862,6 +864,7 @@ impl StateStoreImpl {
                     )));
 
                 let inner = HummockStorage::new(
+                    role,
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),
