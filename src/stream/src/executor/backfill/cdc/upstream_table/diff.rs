@@ -225,8 +225,6 @@ pub(crate) async fn diff_ordered_row_streams(
     let mut left_row = left_stream.next().await.transpose()?;
     let mut right_row = right_stream.next().await.transpose()?;
     let mut output = StreamChunkBuilder::new(chunk_size, data_types);
-    let mut pending_progress = None;
-    let mut skipped_since_progress = 0;
 
     loop {
         match (&left_row, &right_row) {
@@ -243,8 +241,6 @@ pub(crate) async fn diff_ordered_row_streams(
                     {
                         yield SnapshotReadOutput::Chunk(chunk);
                     }
-                    pending_progress = None;
-                    skipped_since_progress = 0;
                     left_row = left_stream.next().await.transpose()?;
                 }
                 Ordering::Greater => {
@@ -254,8 +250,6 @@ pub(crate) async fn diff_ordered_row_streams(
                     {
                         yield SnapshotReadOutput::Chunk(chunk);
                     }
-                    pending_progress = None;
-                    skipped_since_progress = 0;
                     right_row = right_stream.next().await.transpose()?;
                 }
                 Ordering::Equal => {
@@ -265,23 +259,15 @@ pub(crate) async fn diff_ordered_row_streams(
                         if let Some(chunk) = output.append_row(Op::Insert, left) {
                             yield SnapshotReadOutput::Chunk(chunk);
                         }
-                        pending_progress = None;
-                        skipped_since_progress = 0;
                     } else {
-                        pending_progress = Some(project_pk(&left, &pk_indices));
-                        skipped_since_progress += 1;
-                        if skipped_since_progress >= chunk_size {
-                            // A progress position is checkpointed by the non-parallel executor.
-                            // Flush any earlier correction first so recovery can never resume past
-                            // output that was still buffered locally.
-                            if let Some(chunk) = output.take() {
-                                yield SnapshotReadOutput::Chunk(chunk);
-                            }
-                            yield SnapshotReadOutput::Progress(
-                                pending_progress.take().expect("progress exists"),
-                            );
-                            skipped_since_progress = 0;
+                        // A progress position is checkpointed by the non-parallel executor. Emit
+                        // one for every equal row so cancellation cannot repeatedly restart before
+                        // a partial group reaches `chunk_size`. Flush any earlier correction first
+                        // so recovery can never resume past output that was still buffered locally.
+                        if let Some(chunk) = output.take() {
+                            yield SnapshotReadOutput::Chunk(chunk);
                         }
+                        yield SnapshotReadOutput::Progress(project_pk(&left, &pk_indices));
                     }
                     left_row = left_stream.next().await.transpose()?;
                     right_row = right_stream.next().await.transpose()?;
@@ -293,8 +279,6 @@ pub(crate) async fn diff_ordered_row_streams(
                 {
                     yield SnapshotReadOutput::Chunk(chunk);
                 }
-                pending_progress = None;
-                skipped_since_progress = 0;
                 left_row = left_stream.next().await.transpose()?;
             }
             (None, Some(_)) => {
@@ -304,8 +288,6 @@ pub(crate) async fn diff_ordered_row_streams(
                 {
                     yield SnapshotReadOutput::Chunk(chunk);
                 }
-                pending_progress = None;
-                skipped_since_progress = 0;
                 right_row = right_stream.next().await.transpose()?;
             }
             (None, None) => break,
@@ -314,9 +296,6 @@ pub(crate) async fn diff_ordered_row_streams(
 
     if let Some(chunk) = output.take() {
         yield SnapshotReadOutput::Chunk(chunk);
-    }
-    if let Some(pos) = pending_progress {
-        yield SnapshotReadOutput::Progress(pos);
     }
     yield SnapshotReadOutput::Finished;
 }
@@ -562,7 +541,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_diff_emits_periodic_progress() {
+    async fn test_streaming_diff_emits_progress_for_each_equal_row() {
         let outputs = collect_stream_outputs(
             vec![row(1, "same"), row(2, "same"), row(3, "same")],
             vec![row(1, "same"), row(2, "same"), row(3, "same")],
@@ -573,10 +552,23 @@ mod tests {
         assert_eq!(
             progress_from_outputs(&outputs),
             vec![
+                OwnedRow::new(vec![Some(1.into())]),
                 OwnedRow::new(vec![Some(2.into())]),
                 OwnedRow::new(vec![Some(3.into())]),
             ]
         );
+        assert!(matches!(outputs.last(), Some(SnapshotReadOutput::Finished)));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_diff_progresses_before_chunk_fills() {
+        let outputs = collect_stream_outputs(vec![row(1, "same")], vec![row(1, "same")], 128).await;
+
+        assert!(matches!(
+            outputs.first(),
+            Some(SnapshotReadOutput::Progress(pos))
+                if pos == &OwnedRow::new(vec![Some(1.into())])
+        ));
         assert!(matches!(outputs.last(), Some(SnapshotReadOutput::Finished)));
     }
 
@@ -599,6 +591,11 @@ mod tests {
         );
         assert!(matches!(
             outputs.get(1),
+            Some(SnapshotReadOutput::Progress(pos))
+                if pos == &OwnedRow::new(vec![Some(2.into())])
+        ));
+        assert!(matches!(
+            outputs.get(2),
             Some(SnapshotReadOutput::Progress(pos))
                 if pos == &OwnedRow::new(vec![Some(3.into())])
         ));
