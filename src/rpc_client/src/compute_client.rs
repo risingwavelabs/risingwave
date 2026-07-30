@@ -132,6 +132,7 @@ impl ComputeClient {
                     down_fragment_id,
                     up_partial_graph_id,
                     term_id,
+                    ..Default::default()
                 })),
             },
         ))
@@ -154,6 +155,67 @@ impl ComputeClient {
                     "failed to create stream from remote_input {} from actor {} to actor {}",
                     self.addr,
                     up_actor_id,
+                    down_actor_id
+                )
+            })
+            .map_err(RpcError::from_compute_status)?
+            .into_inner();
+
+        Ok((response_stream, permits_tx))
+    }
+
+    /// Create a barrier-only gRPC stream for multiplexed barrier coalescing.
+    ///
+    /// This establishes a barrier-only exchange stream with the upstream node.
+    /// The `up_actor_ids` parameter triggers barrier group creation on the upstream side,
+    /// which creates per-actor data channels and a coalesced barrier channel.
+    ///
+    /// The returned stream carries coalesced barriers with per-actor data message counts.
+    /// Individual data streams for each actor are established separately via `get_stream()`.
+    pub async fn get_stream_barrier(
+        &self,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
+        up_partial_graph_id: PartialGraphId,
+        term_id: String,
+    ) -> Result<(
+        Streaming<GetStreamResponse>,
+        mpsc::UnboundedSender<permits::Value>,
+    )> {
+        use risingwave_pb::task_service::get_stream_request::*;
+
+        let (permits_tx, permits_rx) = mpsc::unbounded_channel();
+
+        let request_stream = futures::stream::once(futures::future::ready(GetStreamRequest {
+            value: Some(Value::Get(Get {
+                up_actor_id: 0.into(), // Not used for barrier-only streams.
+                down_actor_id,
+                up_fragment_id,
+                down_fragment_id,
+                up_partial_graph_id,
+                term_id,
+                up_actor_ids: up_actor_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            })),
+        }))
+        .chain(
+            UnboundedReceiverStream::new(permits_rx).map(|permits| GetStreamRequest {
+                value: Some(Value::AddPermits(PbPermits {
+                    value: Some(permits),
+                })),
+            }),
+        );
+
+        let response_stream = self
+            .stream_exchange_client
+            .clone()
+            .get_stream(request_stream)
+            .await
+            .inspect_err(|_| {
+                tracing::error!(
+                    "failed to create barrier stream from remote_input {} to actor {}",
+                    self.addr,
                     down_actor_id
                 )
             })

@@ -14,5 +14,6 @@
 
 pub mod error;
 pub mod input;
+pub mod multiplexed;
 pub mod output;
 pub mod permit;

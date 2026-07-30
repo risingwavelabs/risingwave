@@ -15,11 +15,10 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
-use crate::executor::exchange::input::new_input;
+use crate::executor::exchange::input::new_inputs;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput, MergeExecutorUpstream};
 use crate::task::LocalBarrierManager;
@@ -43,17 +42,17 @@ impl MergeExecutorBuilder {
         };
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = try_join_all(upstream_actors.actors.iter().map(|upstream_actor| {
-            new_input(
-                &local_barrier_manager,
-                executor_stats.clone(),
-                actor_context.id,
-                actor_context.fragment_id,
-                upstream_actor,
-                upstream_fragment_id,
-                actor_context.config.clone(),
-            )
-        }))
+        let upstream_actors: Vec<_> = upstream_actors.actors.iter().collect();
+
+        let inputs = new_inputs(
+            &local_barrier_manager,
+            executor_stats.clone(),
+            actor_context.id,
+            actor_context.fragment_id,
+            &upstream_actors,
+            upstream_fragment_id,
+            actor_context.config.clone(),
+        )
         .await?;
 
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
