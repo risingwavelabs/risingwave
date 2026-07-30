@@ -87,8 +87,6 @@ pub struct MetaMetrics {
     pub barrier_latency: LabelGuardedHistogramVec,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
-    /// Latency between each barrier send
-    pub barrier_send_latency: LabelGuardedHistogramVec,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
     pub all_barrier_nums: LabelGuardedIntGaugeVec,
@@ -265,6 +263,16 @@ pub struct MetaMetrics {
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
     LazyLock::new(|| MetaMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
+fn latency_buckets(max: f64, count: usize) -> Vec<f64> {
+    const MIN: f64 = 0.1;
+
+    assert!(count > 1);
+    let factor = (max / MIN).powf(1.0 / (count - 1) as f64);
+    let mut buckets = exponential_buckets(MIN, factor, count).unwrap();
+    *buckets.last_mut().unwrap() = max;
+    buckets
+}
+
 impl MetaMetrics {
     fn new(registry: &Registry) -> Self {
         let opts = histogram_opts!(
@@ -278,7 +286,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            latency_buckets(600.0, 20)
         );
         let barrier_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
@@ -287,19 +295,11 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
             "barrier_wait_commit_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            latency_buckets(10.0, 10)
         );
         let barrier_wait_commit_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let opts = histogram_opts!(
-            "meta_barrier_send_duration_seconds",
-            "barrier send latency",
-            exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
-        );
-        let barrier_send_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
-                .unwrap();
         let barrier_interval_by_database = register_gauge_vec_with_registry!(
             "meta_barrier_interval_by_database",
             "barrier interval of each database",
@@ -334,7 +334,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_snapshot_backfill_barrier_duration_seconds",
             "snapshot backfill barrier latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            latency_buckets(600.0, 20)
         );
         let snapshot_backfill_barrier_latency = register_guarded_histogram_vec_with_registry!(
             opts,
@@ -998,7 +998,6 @@ impl MetaMetrics {
             grpc_latency,
             barrier_latency,
             barrier_wait_commit_latency,
-            barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
             last_committed_barrier_time,

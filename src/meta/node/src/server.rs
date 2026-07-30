@@ -410,7 +410,7 @@ pub async fn start_service_as_election_leader(
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
 
     let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
+        BarrierScheduler::new_pair(hummock_manager.clone());
     tracing::info!("BarrierScheduler started");
 
     // Initialize services.
