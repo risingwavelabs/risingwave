@@ -43,7 +43,9 @@ use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
     DatabaseCheckpointControl, IndependentCheckpointJobControl,
 };
-use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
+use crate::barrier::command::{
+    CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceSinkDrainInfo, ReschedulePlan,
+};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
@@ -963,6 +965,11 @@ impl DatabaseCheckpointControl {
                     &actors.actor_location,
                 )?;
 
+                let replace_sink = info.replace_sink.map(|old_sink_id| ReplaceSinkDrainInfo {
+                    old_sink_id,
+                    target_epoch: barrier_info.prev_epoch(),
+                });
+
                 (
                     Some(mutation),
                     table_ids,
@@ -973,6 +980,7 @@ impl DatabaseCheckpointControl {
                         job_type,
                         cross_db_snapshot_backfill_info,
                         resolved_split_assignment,
+                        replace_sink,
                     },
                 )
             }
