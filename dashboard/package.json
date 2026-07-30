@@ -41,7 +41,7 @@
     "framer-motion": "^6.5.1",
     "lodash": "^4.18.1",
     "monaco-editor": "^0.56.0",
-    "next": "^16.2.6",
+    "next": "^16.2.11",
     "nuqs": "^2.8.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
