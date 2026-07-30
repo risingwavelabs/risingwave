@@ -26,6 +26,7 @@ use prometheus::proto::MetricFamily;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
+use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -140,6 +141,54 @@ fn gen_local_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Local
         table_stats: Default::default(),
         created_at: u64::MAX,
     }
+}
+
+#[tokio::test]
+async fn test_get_table_change_logs_with_inverted_epoch_range() {
+    let (_env, hummock_manager, _, _) = setup_compute_env(80).await;
+    let table_id = TableId::new(1);
+    hummock_manager
+        .versioning
+        .write()
+        .await
+        .table_change_log
+        .insert(
+            table_id,
+            TableChangeLog::new([
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![3],
+                    checkpoint_epoch: 4,
+                },
+                EpochNewChangeLog {
+                    new_value: vec![],
+                    old_value: vec![],
+                    non_checkpoint_epochs: vec![],
+                    checkpoint_epoch: 6,
+                },
+            ]),
+        );
+
+    let error = hummock_manager
+        .get_table_change_logs(
+            true,
+            Some(7),
+            Some(5),
+            Some(HashSet::from([table_id])),
+            false,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        Error::InvalidEpochRange {
+            start_epoch: 7,
+            end_epoch: 5
+        }
+    ));
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,

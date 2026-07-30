@@ -757,9 +757,12 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session
+        let Some(new_epochs) = session
             .list_change_log_epochs(table_id, seek_timestamp, 2)
-            .await?;
+            .await?
+        else {
+            return Ok((None, None));
+        };
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
