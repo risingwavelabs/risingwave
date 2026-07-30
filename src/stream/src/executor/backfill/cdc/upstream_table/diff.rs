@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt, pin_mut};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
 use risingwave_common::bail;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
@@ -117,7 +117,7 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
 
     let mut left = left.into_iter().peekable();
     let mut right = right.into_iter().peekable();
-    let mut output = DiffChunkBuilder::new(data_types, chunk_size);
+    let mut output = StreamChunkBuilder::new(chunk_size, data_types.to_vec());
     let mut outputs = vec![];
     let mut pending_progress = None;
 
@@ -132,17 +132,26 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
                     pk_needs_unsigned_i64_compare,
                 ) {
                     Ordering::Less => {
-                        output.push(Op::Insert, left.next().expect("peeked left row"));
+                        if let Some(chunk) =
+                            output.append_row(Op::Insert, left.next().expect("peeked left row"))
+                        {
+                            outputs.push(SnapshotReadOutput::Chunk(chunk));
+                        }
                     }
                     Ordering::Greater => {
-                        output.push(Op::Delete, right.next().expect("peeked right row"));
+                        if let Some(chunk) =
+                            output.append_row(Op::Delete, right.next().expect("peeked right row"))
+                        {
+                            outputs.push(SnapshotReadOutput::Chunk(chunk));
+                        }
                     }
                     Ordering::Equal => {
                         let left_row = left.next().expect("peeked left row");
                         let right_row = right.next().expect("peeked right row");
                         if !rows_equal_on_indices(&left_row, &right_row, compare_indices) {
-                            output.push(Op::Insert, left_row);
-                            outputs.extend(output.take_flushed_chunks());
+                            if let Some(chunk) = output.append_row(Op::Insert, left_row) {
+                                outputs.push(SnapshotReadOutput::Chunk(chunk));
+                            }
                             pending_progress = None;
                         } else {
                             pending_progress = Some(project_pk(&left_row, pk_indices));
@@ -151,20 +160,28 @@ pub(crate) fn diff_ordered_rows_to_snapshot_outputs(
                 }
             }
             (Some(_), None) => {
-                output.push(Op::Insert, left.next().expect("peeked left row"));
-                outputs.extend(output.take_flushed_chunks());
+                if let Some(chunk) =
+                    output.append_row(Op::Insert, left.next().expect("peeked left row"))
+                {
+                    outputs.push(SnapshotReadOutput::Chunk(chunk));
+                }
                 pending_progress = None;
             }
             (None, Some(_)) => {
-                output.push(Op::Delete, right.next().expect("peeked right row"));
-                outputs.extend(output.take_flushed_chunks());
+                if let Some(chunk) =
+                    output.append_row(Op::Delete, right.next().expect("peeked right row"))
+                {
+                    outputs.push(SnapshotReadOutput::Chunk(chunk));
+                }
                 pending_progress = None;
             }
             (None, None) => break,
         }
     }
 
-    outputs.extend(output.finish());
+    if let Some(chunk) = output.take() {
+        outputs.push(SnapshotReadOutput::Chunk(chunk));
+    }
     if let Some(pos) = pending_progress {
         outputs.push(SnapshotReadOutput::Progress(pos));
     }
@@ -207,7 +224,7 @@ pub(crate) async fn diff_ordered_row_streams(
 
     let mut left_row = left_stream.next().await.transpose()?;
     let mut right_row = right_stream.next().await.transpose()?;
-    let mut output = DiffChunkBuilder::new(&data_types, chunk_size);
+    let mut output = StreamChunkBuilder::new(chunk_size, data_types);
     let mut pending_progress = None;
     let mut skipped_since_progress = 0;
 
@@ -221,9 +238,10 @@ pub(crate) async fn diff_ordered_row_streams(
                 &pk_needs_unsigned_i64_compare,
             ) {
                 Ordering::Less => {
-                    output.push(Op::Insert, left_row.take().expect("checked left row"));
-                    for output in output.take_flushed_chunks() {
-                        yield output;
+                    if let Some(chunk) =
+                        output.append_row(Op::Insert, left_row.take().expect("checked left row"))
+                    {
+                        yield SnapshotReadOutput::Chunk(chunk);
                     }
                     pending_progress = None;
                     skipped_since_progress = 0;
@@ -231,9 +249,10 @@ pub(crate) async fn diff_ordered_row_streams(
                 }
                 Ordering::Greater => {
                     rate_limiter.wait(1).await;
-                    output.push(Op::Delete, right_row.take().expect("checked right row"));
-                    for output in output.take_flushed_chunks() {
-                        yield output;
+                    if let Some(chunk) =
+                        output.append_row(Op::Delete, right_row.take().expect("checked right row"))
+                    {
+                        yield SnapshotReadOutput::Chunk(chunk);
                     }
                     pending_progress = None;
                     skipped_since_progress = 0;
@@ -243,9 +262,8 @@ pub(crate) async fn diff_ordered_row_streams(
                     let left = left_row.take().expect("checked left row");
                     let right = right_row.take().expect("checked right row");
                     if !rows_equal_on_indices(&left, &right, &compare_indices) {
-                        output.push(Op::Insert, left);
-                        for output in output.take_flushed_chunks() {
-                            yield output;
+                        if let Some(chunk) = output.append_row(Op::Insert, left) {
+                            yield SnapshotReadOutput::Chunk(chunk);
                         }
                         pending_progress = None;
                         skipped_since_progress = 0;
@@ -256,9 +274,8 @@ pub(crate) async fn diff_ordered_row_streams(
                             // A progress position is checkpointed by the non-parallel executor.
                             // Flush any earlier correction first so recovery can never resume past
                             // output that was still buffered locally.
-                            output.flush();
-                            for output in output.take_flushed_chunks() {
-                                yield output;
+                            if let Some(chunk) = output.take() {
+                                yield SnapshotReadOutput::Chunk(chunk);
                             }
                             yield SnapshotReadOutput::Progress(
                                 pending_progress.take().expect("progress exists"),
@@ -271,9 +288,10 @@ pub(crate) async fn diff_ordered_row_streams(
                 }
             },
             (Some(_), None) => {
-                output.push(Op::Insert, left_row.take().expect("checked left row"));
-                for output in output.take_flushed_chunks() {
-                    yield output;
+                if let Some(chunk) =
+                    output.append_row(Op::Insert, left_row.take().expect("checked left row"))
+                {
+                    yield SnapshotReadOutput::Chunk(chunk);
                 }
                 pending_progress = None;
                 skipped_since_progress = 0;
@@ -281,9 +299,10 @@ pub(crate) async fn diff_ordered_row_streams(
             }
             (None, Some(_)) => {
                 rate_limiter.wait(1).await;
-                output.push(Op::Delete, right_row.take().expect("checked right row"));
-                for output in output.take_flushed_chunks() {
-                    yield output;
+                if let Some(chunk) =
+                    output.append_row(Op::Delete, right_row.take().expect("checked right row"))
+                {
+                    yield SnapshotReadOutput::Chunk(chunk);
                 }
                 pending_progress = None;
                 skipped_since_progress = 0;
@@ -293,8 +312,8 @@ pub(crate) async fn diff_ordered_row_streams(
         }
     }
 
-    for output in output.finish() {
-        yield output;
+    if let Some(chunk) = output.take() {
+        yield SnapshotReadOutput::Chunk(chunk);
     }
     if let Some(pos) = pending_progress {
         yield SnapshotReadOutput::Progress(pos);
@@ -327,52 +346,6 @@ fn rows_equal_on_indices(left: &OwnedRow, right: &OwnedRow, indices: &[usize]) -
 
 fn project_pk(row: &OwnedRow, pk_indices: &[usize]) -> OwnedRow {
     row.project(pk_indices).into_owned_row()
-}
-
-struct DiffChunkBuilder<'a> {
-    data_types: &'a [DataType],
-    chunk_size: usize,
-    buffer: Vec<(Op, OwnedRow)>,
-    chunks: Vec<SnapshotReadOutput>,
-}
-
-impl<'a> DiffChunkBuilder<'a> {
-    fn new(data_types: &'a [DataType], chunk_size: usize) -> Self {
-        Self {
-            data_types,
-            chunk_size,
-            buffer: Vec::with_capacity(chunk_size),
-            chunks: vec![],
-        }
-    }
-
-    fn push(&mut self, op: Op, row: OwnedRow) {
-        self.buffer.push((op, row));
-        if self.buffer.len() >= self.chunk_size {
-            self.flush();
-        }
-    }
-
-    fn flush(&mut self) {
-        if self.buffer.is_empty() {
-            return;
-        }
-        self.chunks
-            .push(SnapshotReadOutput::Chunk(StreamChunk::from_rows(
-                &self.buffer,
-                self.data_types,
-            )));
-        self.buffer.clear();
-    }
-
-    fn take_flushed_chunks(&mut self) -> Vec<SnapshotReadOutput> {
-        std::mem::take(&mut self.chunks)
-    }
-
-    fn finish(mut self) -> Vec<SnapshotReadOutput> {
-        self.flush();
-        self.chunks
-    }
 }
 
 #[cfg(test)]
