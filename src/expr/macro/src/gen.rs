@@ -495,12 +495,10 @@ impl FunctionAttr {
                 }
             }},
             Some(WriterTypeKind::JsonbbBuilder) => quote! {{
-                let mut writer_wrapper = builder.writer();
-                let mut writer = writer_wrapper.inner();
+                let mut writer = jsonbb::Builder::<Vec<u8>>::new();
                 if #output.is_some() {
-                    writer_wrapper.finish();
+                    builder.append_owned(Some(JsonbVal::from(writer.finish())));
                 } else {
-                    writer_wrapper.rollback();
                     builder.append_null();
                 }
             }},

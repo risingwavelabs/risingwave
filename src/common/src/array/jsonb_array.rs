@@ -12,37 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::ManuallyDrop;
+use std::mem::size_of;
 
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
 
-use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
-use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, JsonbRef, JsonbVal, Scalar};
+use super::{
+    Array, ArrayBuilder, ArrayError, ArrayImpl, ArrayResult, BytesArray, BytesArrayBuilder,
+};
+use crate::bitmap::Bitmap;
+use crate::types::{DataType, JsonbRef, JsonbVal};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct JsonbArrayBuilder {
-    bitmap: BitmapBuilder,
-    builder: jsonbb::Builder,
+    bytes: BytesArrayBuilder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct JsonbArray {
-    bitmap: Bitmap,
-    /// Elements are stored as a single JSONB array value.
-    data: jsonbb::Value,
+    /// Each row is an independently encoded JSONB value in a contiguous byte buffer. In
+    /// particular, the internal offsets of a JSONB value are never shared by multiple rows.
+    bytes: BytesArray,
 }
 
 impl ArrayBuilder for JsonbArrayBuilder {
     type ArrayType = JsonbArray;
 
     fn new(capacity: usize) -> Self {
-        let mut builder = jsonbb::Builder::with_capacity(capacity);
-        builder.begin_array();
         Self {
-            bitmap: BitmapBuilder::with_capacity(capacity),
-            builder,
+            bytes: BytesArrayBuilder::new(capacity),
         }
     }
 
@@ -53,52 +51,50 @@ impl ArrayBuilder for JsonbArrayBuilder {
 
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
         match value {
-            Some(x) => {
-                self.bitmap.append_n(n, true);
+            Some(value) => {
                 for _ in 0..n {
-                    self.builder.add_value(x.0);
+                    self.append_value(value);
                 }
             }
-            None => {
-                self.bitmap.append_n(n, false);
-                for _ in 0..n {
-                    self.builder.add_null();
-                }
-            }
+            None => self.bytes.append_n(n, None),
         }
     }
 
     fn append_array(&mut self, other: &Self::ArrayType) {
-        for bit in other.bitmap.iter() {
-            self.bitmap.append(bit);
-        }
-        for value in other.data.as_array().unwrap().iter() {
-            self.builder.add_value(value);
-        }
+        self.bytes.append_array(&other.bytes);
     }
 
     fn pop(&mut self) -> Option<()> {
-        self.bitmap.pop()?;
-        self.builder.pop();
-        Some(())
+        self.bytes.pop()
     }
 
     fn len(&self) -> usize {
-        self.bitmap.len()
+        self.bytes.len()
     }
 
-    fn finish(mut self) -> Self::ArrayType {
-        self.builder.end_array();
+    fn finish(self) -> Self::ArrayType {
         Self::ArrayType {
-            bitmap: self.bitmap.finish(),
-            data: self.builder.finish(),
+            bytes: self.bytes.finish(),
         }
     }
 }
 
 impl JsonbArrayBuilder {
-    pub fn writer(&mut self) -> JsonbWriter<'_> {
-        JsonbWriter::new(self)
+    /// Appends the standalone jsonbb encoding of `value`.
+    ///
+    /// A jsonbb value is encoded as its data followed by a four-byte root entry. `to_raw_parts`
+    /// rebuilds that entry relative to the returned data slice, which also makes a nested
+    /// `JsonbRef` independent from the value it was extracted from.
+    fn append_value(&mut self, value: JsonbRef<'_>) {
+        let (entry, data) = value.0.to_raw_parts();
+        let mut writer = self.bytes.writer();
+        writer.write_ref(data);
+        writer.write_ref(entry.as_bytes());
+        writer.finish();
+    }
+
+    fn append_encoded(&mut self, encoded: &[u8]) {
+        self.bytes.append(Some(encoded));
     }
 }
 
@@ -106,16 +102,56 @@ impl JsonbArray {
     /// Loads a `JsonbArray` from a protobuf array.
     ///
     /// See also `JsonbArray::to_protobuf`.
-    pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
-        ensure!(
-            array.values.len() == 1,
-            "Must have exactly 1 buffer in a jsonb array"
+    pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
+        ensure_eq!(bitmap.len(), cardinality);
+        ensure_eq!(array.values.len(), 2);
+
+        Self::decode_values(&array.values[0].body, &array.values[1].body, &bitmap)
+    }
+
+    fn decode_values(
+        encoded_offsets: &[u8],
+        encoded_values: &[u8],
+        bitmap: &Bitmap,
+    ) -> ArrayResult<ArrayImpl> {
+        let expected_offset_count = bitmap.count_ones() + 1;
+        ensure_eq!(
+            encoded_offsets.len(),
+            expected_offset_count * size_of::<u64>()
         );
-        let arr = JsonbArray {
-            bitmap: array.get_null_bitmap()?.into(),
-            data: jsonbb::Value::from_bytes(&array.values[0].body),
-        };
-        Ok(arr.into())
+
+        let mut offsets = encoded_offsets.chunks_exact(size_of::<u64>()).map(|bytes| {
+            let bytes: [u8; size_of::<u64>()] = bytes.try_into().unwrap();
+            u64::from_be_bytes(bytes)
+        });
+        let mut previous = offsets.next().unwrap();
+        ensure_eq!(previous, 0);
+
+        let mut builder = JsonbArrayBuilder::new(bitmap.len());
+        for not_null in bitmap.iter() {
+            if !not_null {
+                builder.append_null();
+                continue;
+            }
+
+            let next = offsets.next().unwrap();
+            ensure!(previous <= next, "jsonb offsets must be non-decreasing");
+            let start = usize::try_from(previous)
+                .map_err(|_| ArrayError::internal("jsonb offset does not fit usize"))?;
+            let end = usize::try_from(next)
+                .map_err(|_| ArrayError::internal("jsonb offset does not fit usize"))?;
+            ensure!(end <= encoded_values.len(), "jsonb offset is out of bounds");
+            ensure!(end - start >= size_of::<u32>(), "jsonb value is too short");
+            builder.append_encoded(&encoded_values[start..end]);
+            previous = next;
+        }
+
+        ensure!(offsets.next().is_none(), "too many jsonb offsets");
+        let final_offset = usize::try_from(previous)
+            .map_err(|_| ArrayError::internal("jsonb offset does not fit usize"))?;
+        ensure_eq!(final_offset, encoded_values.len());
+        Ok(builder.finish().into())
     }
 }
 
@@ -125,39 +161,38 @@ impl Array for JsonbArray {
     type RefItem<'a> = JsonbRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        JsonbRef(self.data.as_array().unwrap().get(idx).unwrap())
+        let encoded = unsafe { self.bytes.raw_value_at_unchecked(idx) };
+        if encoded.is_empty() {
+            // The raw value for a SQL NULL is the default JSONB value.
+            JsonbRef::null()
+        } else {
+            JsonbRef(jsonbb::ValueRef::from_bytes(encoded))
+        }
     }
 
     fn len(&self) -> usize {
-        self.bitmap.len()
+        self.bytes.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
-        use risingwave_pb::common::Buffer;
-        use risingwave_pb::common::buffer::CompressionType;
-
+        // The byte-array offsets delimit independently encoded JSONB values. Therefore jsonbb's
+        // per-value offset limit does not apply to the whole column.
         PbArray {
-            null_bitmap: Some(self.null_bitmap().to_protobuf()),
-            values: vec![Buffer {
-                compression: CompressionType::None as i32,
-                body: self.data.as_bytes().to_vec(),
-            }],
             array_type: PbArrayType::Jsonb as i32,
-            struct_array_data: None,
-            list_array_data: None,
+            ..self.bytes.to_protobuf()
         }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        &self.bitmap
+        self.bytes.null_bitmap()
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        self.bitmap
+        self.bytes.into_null_bitmap()
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
-        self.bitmap = bitmap;
+        self.bytes.set_bitmap(bitmap);
     }
 
     fn data_type(&self) -> DataType {
@@ -169,11 +204,8 @@ impl FromIterator<Option<JsonbVal>> for JsonbArray {
     fn from_iter<I: IntoIterator<Item = Option<JsonbVal>>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
-        for i in iter {
-            match i {
-                Some(x) => builder.append(Some(x.as_scalar_ref())),
-                None => builder.append(None),
-            }
+        for value in iter {
+            builder.append_owned(value);
         }
         builder.finish()
     }
@@ -185,47 +217,61 @@ impl FromIterator<JsonbVal> for JsonbArray {
     }
 }
 
-/// Note: Dropping an unfinished `JsonbWriter` will roll back any partially
-/// written elements to the saved checkpoint. Callers must not pop entries
-/// beyond the checkpoint captured when the writer was created; doing so may
-/// leave the array in an inconsistent state.
-pub struct JsonbWriter<'a> {
-    array_builder: &'a mut JsonbArrayBuilder,
-    checkpoint: jsonbb::Checkpoint,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Scalar;
 
-impl JsonbWriter<'_> {
-    pub fn new(array_builder: &mut JsonbArrayBuilder) -> JsonbWriter<'_> {
-        let checkpoint = array_builder.builder.checkpoint();
-        JsonbWriter {
-            array_builder,
-            checkpoint,
-        }
+    fn json(value: &str) -> JsonbVal {
+        value.parse().unwrap()
     }
 
-    pub fn inner(&mut self) -> &mut jsonbb::Builder {
-        &mut self.array_builder.builder
+    #[test]
+    fn test_independent_values_and_protobuf_roundtrip() {
+        let array = JsonbArray::from_iter([
+            Some(json(r#"{"a": 1}"#)),
+            None,
+            Some(JsonbVal::null()),
+            Some(json(r#"[1, 2, 3]"#)),
+        ]);
+
+        assert_eq!(array.len(), 4);
+        assert_eq!(
+            array.value_at(0).unwrap(),
+            json(r#"{"a": 1}"#).as_scalar_ref()
+        );
+        assert!(array.value_at(1).is_none());
+        assert!(array.value_at(2).unwrap().is_jsonb_null());
+        assert_eq!(
+            array.value_at(3).unwrap(),
+            json(r#"[1, 2, 3]"#).as_scalar_ref()
+        );
+
+        let protobuf = array.to_protobuf();
+        assert_eq!(protobuf.values.len(), 2);
+        assert_eq!(protobuf.values[0].body.len(), 4 * size_of::<u64>());
+
+        let decoded = JsonbArray::from_protobuf(&protobuf, array.len()).unwrap();
+        assert_eq!(decoded.as_jsonb(), &array);
     }
 
-    /// `finish` will be called when the entire record is successfully written.
-    /// The partial data was committed and the `builder` can no longer be used.
-    pub fn finish(self) {
-        self.array_builder.bitmap.append(true);
-        let _ = ManuallyDrop::new(self); // Prevent drop
-    }
+    #[test]
+    fn test_append_value_matches_jsonbb_encoding() {
+        let values = [
+            json("null"),
+            json("true"),
+            json("42"),
+            json(r#""text""#),
+            json("[1, 2, 3]"),
+            json(r#"{"a": [1, true]}"#),
+        ];
+        let expected = values
+            .iter()
+            .flat_map(|value| value.0.as_bytes())
+            .copied()
+            .collect::<Vec<_>>();
 
-    /// `rollback` will be called while the entire record is abandoned.
-    /// The partial data was cleaned and the `builder` can be safely used.
-    pub fn rollback(self) {
-        self.array_builder.builder.rollback_to(&self.checkpoint);
-        let _ = ManuallyDrop::new(self); // Prevent drop
-    }
-}
-
-impl Drop for JsonbWriter<'_> {
-    /// If the writer is dropped without calling `finish` or `rollback`,
-    /// we rollback the partial data by default.
-    fn drop(&mut self) {
-        self.array_builder.builder.rollback_to(&self.checkpoint);
+        let array = JsonbArray::from_iter(values);
+        assert_eq!(array.to_protobuf().values[1].body, expected);
     }
 }
