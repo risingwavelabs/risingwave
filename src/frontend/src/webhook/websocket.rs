@@ -52,13 +52,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, Path};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::SinkExt;
 use futures::stream::StreamExt;
 use jsonbb::Value;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::license::Feature;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, JsonbVal};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -76,7 +77,7 @@ use tower_http::add_extension::AddExtensionLayer;
 
 use crate::session::SESSION_MANAGER;
 use crate::webhook::payload::{build_json_access_builder, owned_row_from_payload_row};
-use crate::webhook::utils::{authenticate_webhook_payload, header_map_to_json};
+use crate::webhook::utils::{authenticate_webhook_payload, err, header_map_to_json};
 use crate::webhook::{PayloadSchema, acquire_table_info};
 
 const INIT_MESSAGE_TYPE: &str = "init";
@@ -165,15 +166,24 @@ struct PreparedDmlBatch {
 type WsTx = futures::stream::SplitSink<WebSocket, Message>;
 type WsRx = futures::stream::SplitStream<WebSocket>;
 
+// Keep licensing at the WebSocket entry point so webhook ingestion remains unlicensed.
+fn check_websocket_ingest_license() -> crate::webhook::utils::Result<()> {
+    Feature::WebSocketIngest
+        .check_available()
+        .map_err(|e| err(e, StatusCode::FORBIDDEN))
+}
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Extension(svc): Extension<ServiceRef>,
     headers: HeaderMap,
     Path((database, schema, table)): Path<(String, String, String)>,
-) -> impl IntoResponse {
+) -> crate::webhook::utils::Result<impl IntoResponse> {
+    check_websocket_ingest_license()?;
+
     let request_id = svc.counter.fetch_add(1, Ordering::Relaxed);
     let headers_jsonb = header_map_to_json(&headers);
-    ws.on_upgrade(move |socket| {
+    Ok(ws.on_upgrade(move |socket| {
         handle_connection(
             socket,
             database,
@@ -183,7 +193,7 @@ pub async fn ws_handler(
             headers,
             headers_jsonb,
         )
-    })
+    }))
 }
 
 async fn handle_connection(
@@ -585,6 +595,7 @@ pub fn build_router(svc: ServiceRef) -> Router {
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
+    use risingwave_common::license::{LicenseKey, LicenseManager};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
@@ -607,6 +618,28 @@ mod tests {
             dml_batch_id,
             items,
         }
+    }
+
+    struct RestoreDefaultLicense;
+
+    impl Drop for RestoreDefaultLicense {
+        fn drop(&mut self) {
+            LicenseManager::get().refresh(LicenseKey::default().as_ref());
+        }
+    }
+
+    #[test]
+    fn test_websocket_ingest_requires_license() {
+        let _restore = RestoreDefaultLicense;
+        LicenseManager::get().refresh(LicenseKey::default().as_ref());
+        check_websocket_ingest_license().unwrap();
+
+        LicenseManager::get().refresh(LicenseKey::empty().as_ref());
+
+        let err = check_websocket_ingest_license().unwrap_err();
+
+        assert_eq!(err.code(), StatusCode::FORBIDDEN);
+        assert!(err.to_string().contains("WebSocketIngest"));
     }
 
     fn test_columns(columns: &[(&str, DataType, bool)]) -> Vec<WebhookTableColumnDesc> {
