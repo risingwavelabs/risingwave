@@ -42,7 +42,7 @@ pub use forward_sstable_iterator::*;
 use tracing::warn;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, UserKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRange, UserKeyRangeRef};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 
 mod filter;
@@ -512,10 +512,8 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
-    /// The hard lower bound of this scan. It limits the iterator's block window.
-    pub scan_start_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
-    /// The only hard upper bound of this scan. It limits the iterator's block window.
-    pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+    /// A canonical single-table user-key range that limits the iterator's block window.
+    pub scan_user_key_range: Option<UserKeyRange>,
     /// Whether to prefetch blocks within the already-bounded scan window.
     pub prefetch: bool,
     pub max_preload_retry_times: usize,
@@ -527,16 +525,67 @@ impl SstableIteratorReadOptions {
     pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
             cache_policy: read_options.cache_policy,
-            scan_start_user_key: None,
-            scan_end_user_key: None,
+            scan_user_key_range: None,
             prefetch: false,
             max_preload_retry_times: 0,
         }
     }
 }
 
+/// Restricts a coarse SST block window to one table and its canonical user-key range.
+///
+/// The lower bound keeps the possible containing block. An upper bound in a later table reaches
+/// the table slice end; one in the same table excludes blocks whose smallest key is outside the
+/// range. Any crossed bounds normalize to an empty half-open range.
+pub(super) fn scan_block_meta_range(
+    block_metas: &[BlockMeta],
+    coarse: Range<usize>,
+    user_key_range: &UserKeyRange,
+) -> Range<usize> {
+    let (table_id, start_key) = match &user_key_range.0 {
+        Bound::Included(key) | Bound::Excluded(key) => (key.table_id, key),
+        Bound::Unbounded => unreachable!("canonical scan range must have a lower bound"),
+    };
+    let coarse_metas = &block_metas[coarse.clone()];
+    let table_start =
+        coarse.start + coarse_metas.partition_point(|block_meta| block_meta.table_id() < table_id);
+    let table_end =
+        coarse.start + coarse_metas.partition_point(|block_meta| block_meta.table_id() <= table_id);
+    let table_metas = &block_metas[table_start..table_end];
+
+    let start = table_start
+        + table_metas
+            .partition_point(|block_meta| {
+                FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                    <= TableKey(start_key.table_key.as_ref())
+            })
+            .saturating_sub(1);
+    let end = table_start
+        + match &user_key_range.1 {
+            Bound::Unbounded => table_metas.len(),
+            Bound::Included(key) | Bound::Excluded(key) if key.table_id > table_id => {
+                table_metas.len()
+            }
+            Bound::Included(key) | Bound::Excluded(key) if key.table_id < table_id => 0,
+            Bound::Included(key) => table_metas.partition_point(|block_meta| {
+                FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                    <= TableKey(key.table_key.as_ref())
+            }),
+            Bound::Excluded(key) => table_metas.partition_point(|block_meta| {
+                FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                    < TableKey(key.table_key.as_ref())
+            }),
+        };
+
+    if start > end { end..end } else { start..end }
+}
+
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::UserKey;
+
     use super::*;
     use crate::hummock::HummockValue;
     use crate::hummock::iterator::test_utils::{
@@ -554,8 +603,64 @@ mod tests {
 
         let iterator_options = SstableIteratorReadOptions::from_read_options(&read_options);
         assert!(!iterator_options.prefetch);
-        assert!(iterator_options.scan_start_user_key.is_none());
-        assert!(iterator_options.scan_end_user_key.is_none());
+        assert!(iterator_options.scan_user_key_range.is_none());
+    }
+
+    #[test]
+    fn test_scan_block_meta_range_is_single_table_and_normalized() {
+        let block_meta = |table_id, table_key: &'static [u8]| BlockMeta {
+            smallest_key: FullKey::for_test(TableId::new(table_id), table_key, test_epoch(1))
+                .encode(),
+            ..Default::default()
+        };
+        let block_metas = vec![
+            block_meta(1, b"a"),
+            block_meta(2, b"a"),
+            block_meta(2, b"m"),
+            block_meta(2, b"z"),
+            block_meta(3, b"a"),
+        ];
+        let key = |key| UserKey::new(TableId::new(2), TableKey(Bytes::from_static(key)));
+        let range =
+            |start, end| scan_block_meta_range(&block_metas, 0..block_metas.len(), &(start, end));
+
+        let table_start = || Bound::Included(key(b""));
+        let table_end = || Bound::Excluded(UserKey::new(TableId::new(3), TableKey(Bytes::new())));
+        assert_eq!(range(table_start(), table_end()), 1..4);
+        assert_eq!(range(Bound::Included(key(b"n")), table_end()), 2..4);
+        assert_eq!(range(Bound::Excluded(key(b"n")), table_end()), 2..4);
+        assert_eq!(range(table_start(), Bound::Included(key(b"m"))), 1..3);
+        assert_eq!(range(table_start(), Bound::Excluded(key(b"m"))), 1..2);
+        assert_eq!(range(table_start(), Bound::Excluded(key(b"a"))), 1..1);
+        assert_eq!(
+            range(
+                table_start(),
+                Bound::Excluded(UserKey::new(TableId::new(1), TableKey(Bytes::new()))),
+            ),
+            1..1
+        );
+        assert_eq!(
+            range(Bound::Included(key(b"m")), Bound::Included(key(b"m"))),
+            2..3
+        );
+        assert_eq!(
+            range(Bound::Included(key(b"z")), Bound::Excluded(key(b"m"))),
+            2..2
+        );
+
+        let max_table = TableId::new(u32::MAX);
+        let max_table_metas = vec![block_meta(u32::MAX, b"a"), block_meta(u32::MAX, b"z")];
+        assert_eq!(
+            scan_block_meta_range(
+                &max_table_metas,
+                0..max_table_metas.len(),
+                &(
+                    Bound::Included(UserKey::new(max_table, TableKey(Bytes::new()))),
+                    Bound::Unbounded,
+                ),
+            ),
+            0..2
+        );
     }
 
     #[test]

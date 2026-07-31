@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::*;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
@@ -23,7 +22,7 @@ use thiserror_ext::AsReport;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{SstableIteratorReadOptions, scan_block_meta_range};
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
@@ -54,9 +53,8 @@ pub struct SstableIterator {
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
 
-    // The readable block window is first restricted by table IDs and then by `scan_end_user_key`.
-    // Included/Excluded bounds set its exclusive block end; outer iterators still filter keys
-    // precisely inside the boundary block.
+    // The readable block window is restricted by the explicit single-table scan range. Outer
+    // iterators still filter keys precisely inside boundary blocks.
     block_start_idx_inclusive: usize,
     block_end_idx_exclusive: usize,
 }
@@ -144,44 +142,14 @@ impl SstableIterator {
             block_meta_count
         );
 
-        if let Some(start_bound @ (Included(_) | Excluded(_))) =
-            options.scan_start_user_key.as_ref()
-        {
-            let block_metas =
-                &sstable.meta.block_metas[block_start_idx_inclusive..block_end_idx_exclusive];
-            let start_key = match start_bound {
-                Included(start_key) | Excluded(start_key) => start_key,
-                Unbounded => unreachable!("matched bounded scan start"),
-            };
-            let target_table_start = block_metas
-                .partition_point(|block_meta| block_meta.table_id() < start_key.table_id);
-            let target_table_end = block_metas
-                .partition_point(|block_meta| block_meta.table_id() <= start_key.table_id);
-            let target_table_block_metas = &block_metas[target_table_start..target_table_end];
-            let range_start_idx = match start_bound {
-                Included(start_key) | Excluded(start_key) => target_table_block_metas
-                    .partition_point(|block_meta| {
-                        FullKey::decode(&block_meta.smallest_key).user_key <= start_key.as_ref()
-                    })
-                    .saturating_sub(1),
-                Unbounded => unreachable!("matched bounded scan start"),
-            };
-            block_start_idx_inclusive += target_table_start + range_start_idx;
-        }
-
-        if let Some(end_bound) = options.scan_end_user_key.as_ref() {
-            let block_metas =
-                &sstable.meta.block_metas[block_start_idx_inclusive..block_end_idx_exclusive];
-            let range_end_idx_exclusive = match end_bound {
-                Unbounded => block_metas.len(),
-                Included(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key <= end_key.as_ref()
-                }),
-                Excluded(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key < end_key.as_ref()
-                }),
-            };
-            block_end_idx_exclusive = block_start_idx_inclusive + range_end_idx_exclusive;
+        if let Some(user_key_range) = options.scan_user_key_range.as_ref() {
+            let range = scan_block_meta_range(
+                &sstable.meta.block_metas,
+                block_start_idx_inclusive..block_end_idx_exclusive,
+                user_key_range,
+            );
+            block_start_idx_inclusive = range.start;
+            block_end_idx_exclusive = range.end;
         }
 
         Self {
@@ -615,8 +583,10 @@ mod tests {
         );
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Fill(Hint::Normal),
-            scan_start_user_key: None,
-            scan_end_user_key: Some(Bound::Included(uk.clone())),
+            scan_user_key_range: Some((
+                Bound::Included(UserKey::new(uk.table_id, TableKey(Bytes::new()))),
+                Bound::Included(uk.clone()),
+            )),
             prefetch: true,
             max_preload_retry_times: 0,
         });
@@ -712,15 +682,13 @@ mod tests {
             .partition_point(|block_meta| block_meta.table_id() < TableId::new(3));
         assert!(table_2_block_start + 2 < table_3_block_start);
 
-        let table_3_start = UserKey::new(TableId::new(3), TableKey(Bytes::from_static(b"")));
         for (case, prefetch) in [("prefetch off", false), ("prefetch on", true)] {
             let options = Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Disable,
-                scan_start_user_key: Some(Bound::Included(UserKey::new(
-                    TableId::new(2),
-                    TableKey(Bytes::from_static(b"")),
-                ))),
-                scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
+                scan_user_key_range: Some((
+                    Bound::Included(UserKey::new(TableId::new(2), TableKey(Bytes::new()))),
+                    Bound::Excluded(UserKey::new(TableId::new(3), TableKey(Bytes::new()))),
+                )),
                 prefetch,
                 max_preload_retry_times: 0,
             });
@@ -769,14 +737,15 @@ mod tests {
             }
         }
 
-        let table_2_start = UserKey::new(TableId::new(2), TableKey(Bytes::from_static(b"")));
         let mut table_2_sstable_info = sstable_info.get_inner();
         table_2_sstable_info.table_ids = vec![TableId::new(2)];
         let table_2_sstable_info = SstableInfo::from(table_2_sstable_info);
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
-            scan_start_user_key: None,
-            scan_end_user_key: Some(Bound::Excluded(table_2_start.clone())),
+            scan_user_key_range: Some((
+                Bound::Included(UserKey::new(TableId::new(2), TableKey(Bytes::new()))),
+                Bound::Excluded(UserKey::new(TableId::new(2), TableKey(Bytes::new()))),
+            )),
             prefetch: false,
             max_preload_retry_times: 0,
         });
@@ -806,8 +775,16 @@ mod tests {
                 .saturating_sub(1);
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
-            scan_start_user_key: Some(Bound::Included(mid_key.user_key.clone())),
-            scan_end_user_key: Some(Bound::Excluded(table_3_start)),
+            scan_user_key_range: Some((
+                Bound::Included(UserKey::new(
+                    mid_key.user_key.table_id,
+                    mid_key.user_key.table_key.clone(),
+                )),
+                Bound::Excluded(UserKey::new(
+                    TableId::new(mid_key.user_key.table_id.as_raw_id() + 1),
+                    TableKey(Bytes::new()),
+                )),
+            )),
             prefetch: false,
             max_preload_retry_times: 0,
         });

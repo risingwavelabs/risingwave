@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
-use std::ops::Bound::*;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -22,7 +21,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{SstableIteratorReadOptions, scan_block_meta_range};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
@@ -142,43 +141,14 @@ impl BackwardSstableIterator {
             block_meta_count
         );
 
-        let mut read_block_meta_range = start_idx..end_idx + 1;
-        if let Some(start_bound @ (Included(_) | Excluded(_))) =
-            options.scan_start_user_key.as_ref()
-        {
-            let block_metas = &sstable.meta.block_metas[read_block_meta_range.clone()];
-            let start_key = match start_bound {
-                Included(start_key) | Excluded(start_key) => start_key,
-                Unbounded => unreachable!("matched bounded scan start"),
-            };
-            let target_table_start = block_metas
-                .partition_point(|block_meta| block_meta.table_id() < start_key.table_id);
-            let target_table_end = block_metas
-                .partition_point(|block_meta| block_meta.table_id() <= start_key.table_id);
-            let target_table_block_metas = &block_metas[target_table_start..target_table_end];
-            let range_start_idx = match start_bound {
-                Included(start_key) | Excluded(start_key) => target_table_block_metas
-                    .partition_point(|block_meta| {
-                        FullKey::decode(&block_meta.smallest_key).user_key <= start_key.as_ref()
-                    })
-                    .saturating_sub(1),
-                Unbounded => unreachable!("matched bounded scan start"),
-            };
-            read_block_meta_range.start += target_table_start + range_start_idx;
-        }
-        if let Some(end_bound) = options.scan_end_user_key.as_ref() {
-            let block_metas = &sstable.meta.block_metas[read_block_meta_range.clone()];
-            let range_end_idx_exclusive = match end_bound {
-                Unbounded => block_metas.len(),
-                Included(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key <= end_key.as_ref()
-                }),
-                Excluded(end_key) => block_metas.partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key < end_key.as_ref()
-                }),
-            };
-            read_block_meta_range.end = read_block_meta_range.start + range_end_idx_exclusive;
-        }
+        let coarse = start_idx..end_idx + 1;
+        let read_block_meta_range = options
+            .scan_user_key_range
+            .as_ref()
+            .map(|user_key_range| {
+                scan_block_meta_range(&sstable.meta.block_metas, coarse.clone(), user_key_range)
+            })
+            .unwrap_or(coarse);
 
         Self {
             block_iter: None,
@@ -378,8 +348,13 @@ mod tests {
             .saturating_sub(1);
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
-            scan_start_user_key: Some(Bound::Included(start_user_key)),
-            scan_end_user_key: None,
+            scan_user_key_range: Some((
+                Bound::Included(start_user_key.clone()),
+                Bound::Excluded(UserKey::new(
+                    TableId::new(start_user_key.table_id.as_raw_id() + 1),
+                    TableKey(Bytes::new()),
+                )),
+            )),
             prefetch: false,
             max_preload_retry_times: 0,
         });
@@ -399,24 +374,29 @@ mod tests {
 
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
-            scan_start_user_key: Some(Bound::Included(UserKey::new(
-                test_key_of(TEST_KEYS_COUNT / 2).user_key.table_id,
-                TableKey(Bytes::from(
-                    test_key_of(TEST_KEYS_COUNT / 2).user_key.table_key.0,
+            scan_user_key_range: Some((
+                Bound::Included(UserKey::new(
+                    test_key_of(TEST_KEYS_COUNT / 2).user_key.table_id,
+                    TableKey(Bytes::from(
+                        test_key_of(TEST_KEYS_COUNT / 2).user_key.table_key.0,
+                    )),
                 )),
-            ))),
-            scan_end_user_key: Some(Bound::Excluded(UserKey::new(
-                test_key_of(TEST_KEYS_COUNT / 4).user_key.table_id,
-                TableKey(Bytes::from(
-                    test_key_of(TEST_KEYS_COUNT / 4).user_key.table_key.0,
+                Bound::Excluded(UserKey::new(
+                    test_key_of(TEST_KEYS_COUNT / 4).user_key.table_id,
+                    TableKey(Bytes::from(
+                        test_key_of(TEST_KEYS_COUNT / 4).user_key.table_key.0,
+                    )),
                 )),
-            ))),
+            )),
             prefetch: false,
             max_preload_retry_times: 0,
         });
         let mut empty_iter =
             BackwardSstableIterator::create(sstable, sstable_store, options, &sstable_info);
-        assert!(empty_iter.read_block_meta_range.start >= empty_iter.read_block_meta_range.end);
+        assert_eq!(
+            empty_iter.read_block_meta_range.start,
+            empty_iter.read_block_meta_range.end
+        );
         empty_iter.rewind().await.unwrap();
         assert!(!empty_iter.is_valid());
         let mut stats = StoreLocalStatistic::default();

@@ -18,7 +18,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 
@@ -95,10 +95,10 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    let point = full_key.user_key.copy_into();
+    let point: UserKey<Bytes> = full_key.user_key.copy_into();
     let mut sstable_read_options = SstableIteratorReadOptions::from_read_options(read_options);
-    sstable_read_options.scan_start_user_key = Some(Bound::Included(point.clone()));
-    sstable_read_options.scan_end_user_key = Some(Bound::Included(point));
+    sstable_read_options.scan_user_key_range =
+        Some((Bound::Included(point.clone()), Bound::Included(point)));
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
