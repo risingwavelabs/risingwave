@@ -95,10 +95,14 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
+    let point = full_key.user_key.copy_into();
+    let mut sstable_read_options = SstableIteratorReadOptions::from_read_options(read_options);
+    sstable_read_options.scan_start_user_key = Some(Bound::Included(point.clone()));
+    sstable_read_options.scan_end_user_key = Some(Bound::Included(point));
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
-        Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+        Arc::new(sstable_read_options),
         sstable_info,
     );
     iter.seek(full_key).await?;

@@ -512,6 +512,8 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
+    /// The hard lower bound of this scan. It limits the iterator's block window.
+    pub scan_start_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     /// The only hard upper bound of this scan. It limits the iterator's block window.
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     /// Whether to prefetch blocks within the already-bounded scan window.
@@ -525,6 +527,7 @@ impl SstableIteratorReadOptions {
     pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
             cache_policy: read_options.cache_policy,
+            scan_start_user_key: None,
             scan_end_user_key: None,
             prefetch: false,
             max_preload_retry_times: 0,
@@ -551,6 +554,7 @@ mod tests {
 
         let iterator_options = SstableIteratorReadOptions::from_read_options(&read_options);
         assert!(!iterator_options.prefetch);
+        assert!(iterator_options.scan_start_user_key.is_none());
         assert!(iterator_options.scan_end_user_key.is_none());
     }
 

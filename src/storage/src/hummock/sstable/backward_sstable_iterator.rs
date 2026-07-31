@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::ops::Bound::*;
+use std::ops::Range;
 use std::sync::Arc;
 
 use foyer::Hint;
@@ -42,14 +44,28 @@ pub struct BackwardSstableIterator {
 
     stats: StoreLocalStatistic,
 
-    // used for checking if the block is valid, filter out the block that is not in the table-id range
-    read_block_meta_range: (usize, usize),
+    // Used for checking if the block is valid, filter out blocks outside the read window.
+    read_block_meta_range: Range<usize>,
 }
 
 impl BackwardSstableIterator {
     pub fn new(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
+        sstable_info_ref: &SstableInfo,
+    ) -> Self {
+        Self::new_with_options(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+            sstable_info_ref,
+        )
+    }
+
+    fn new_with_options(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
         let mut start_idx = 0;
@@ -126,13 +142,51 @@ impl BackwardSstableIterator {
             block_meta_count
         );
 
+        let mut read_block_meta_range = start_idx..end_idx + 1;
+        if let Some(start_bound @ (Included(_) | Excluded(_))) =
+            options.scan_start_user_key.as_ref()
+        {
+            let block_metas = &sstable.meta.block_metas[read_block_meta_range.clone()];
+            let start_key = match start_bound {
+                Included(start_key) | Excluded(start_key) => start_key,
+                Unbounded => unreachable!("matched bounded scan start"),
+            };
+            let target_table_start = block_metas
+                .partition_point(|block_meta| block_meta.table_id() < start_key.table_id);
+            let target_table_end = block_metas
+                .partition_point(|block_meta| block_meta.table_id() <= start_key.table_id);
+            let target_table_block_metas = &block_metas[target_table_start..target_table_end];
+            let range_start_idx = match start_bound {
+                Included(start_key) | Excluded(start_key) => target_table_block_metas
+                    .partition_point(|block_meta| {
+                        FullKey::decode(&block_meta.smallest_key).user_key <= start_key.as_ref()
+                    })
+                    .saturating_sub(1),
+                Unbounded => unreachable!("matched bounded scan start"),
+            };
+            read_block_meta_range.start += target_table_start + range_start_idx;
+        }
+        if let Some(end_bound) = options.scan_end_user_key.as_ref() {
+            let block_metas = &sstable.meta.block_metas[read_block_meta_range.clone()];
+            let range_end_idx_exclusive = match end_bound {
+                Unbounded => block_metas.len(),
+                Included(end_key) => block_metas.partition_point(|block_meta| {
+                    FullKey::decode(&block_meta.smallest_key).user_key <= end_key.as_ref()
+                }),
+                Excluded(end_key) => block_metas.partition_point(|block_meta| {
+                    FullKey::decode(&block_meta.smallest_key).user_key < end_key.as_ref()
+                }),
+            };
+            read_block_meta_range.end = read_block_meta_range.start + range_end_idx_exclusive;
+        }
+
         Self {
             block_iter: None,
-            cur_idx: end_idx,
+            cur_idx: read_block_meta_range.end,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            read_block_meta_range: (start_idx, end_idx),
+            read_block_meta_range,
         }
     }
 
@@ -142,7 +196,9 @@ impl BackwardSstableIterator {
         idx: isize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        if idx >= self.sst.block_count() as isize || idx < self.read_block_meta_range.0 as isize {
+        if idx >= self.read_block_meta_range.end as isize
+            || idx < self.read_block_meta_range.start as isize
+        {
             self.block_iter = None;
         } else {
             let block = self
@@ -200,7 +256,7 @@ impl HummockIterator for BackwardSstableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.read_block_meta_range.1 as isize, None)
+        self.seek_idx(self.read_block_meta_range.end as isize - 1, None)
             .await
     }
 
@@ -244,16 +300,19 @@ impl SstableIteratorType for BackwardSstableIterator {
     fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
-        _: Arc<SstableIteratorReadOptions>,
+        options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        BackwardSstableIterator::new(sstable, sstable_store, sstable_info_ref)
+        BackwardSstableIterator::new_with_options(sstable, sstable_store, options, sstable_info_ref)
     }
 }
 
 /// Mirror the tests used for `SstableIterator`
 #[cfg(test)]
 mod tests {
+    use std::collections::Bound;
+
+    use bytes::Bytes;
     use itertools::Itertools;
     use rand::prelude::*;
     use rand::rng as thread_rng;
@@ -261,11 +320,12 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
-    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 
     use super::*;
     use crate::assert_bytes_eq;
+    use crate::hummock::CachePolicy;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_default_test_sstable,
@@ -296,6 +356,72 @@ mod tests {
         }
 
         assert_eq!(cnt, 0);
+    }
+
+    #[tokio::test]
+    async fn test_scan_start_and_empty_window() {
+        let sstable_store = mock_sstable_store().await;
+        let (sstable, sstable_info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
+        let start_key = test_key_of(TEST_KEYS_COUNT / 2);
+        let start_user_key = UserKey::new(
+            start_key.user_key.table_id,
+            TableKey(Bytes::from(start_key.user_key.table_key.0.clone())),
+        );
+        let expected_start = sstable
+            .meta
+            .block_metas
+            .partition_point(|block_meta| {
+                FullKey::decode(&block_meta.smallest_key).user_key <= start_key.user_key.as_ref()
+            })
+            .saturating_sub(1);
+        let options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: CachePolicy::Disable,
+            scan_start_user_key: Some(Bound::Included(start_user_key)),
+            scan_end_user_key: None,
+            prefetch: false,
+            max_preload_retry_times: 0,
+        });
+        let mut iter = BackwardSstableIterator::create(
+            sstable.clone(),
+            sstable_store.clone(),
+            options,
+            &sstable_info,
+        );
+        assert_eq!(iter.read_block_meta_range.start, expected_start);
+        iter.rewind().await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), test_key_of(TEST_KEYS_COUNT - 1).to_ref());
+        iter.seek(start_key.to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), start_key.to_ref());
+
+        let options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: CachePolicy::Disable,
+            scan_start_user_key: Some(Bound::Included(UserKey::new(
+                test_key_of(TEST_KEYS_COUNT / 2).user_key.table_id,
+                TableKey(Bytes::from(
+                    test_key_of(TEST_KEYS_COUNT / 2).user_key.table_key.0,
+                )),
+            ))),
+            scan_end_user_key: Some(Bound::Excluded(UserKey::new(
+                test_key_of(TEST_KEYS_COUNT / 4).user_key.table_id,
+                TableKey(Bytes::from(
+                    test_key_of(TEST_KEYS_COUNT / 4).user_key.table_key.0,
+                )),
+            ))),
+            prefetch: false,
+            max_preload_retry_times: 0,
+        });
+        let mut empty_iter =
+            BackwardSstableIterator::create(sstable, sstable_store, options, &sstable_info);
+        assert!(empty_iter.read_block_meta_range.start >= empty_iter.read_block_meta_range.end);
+        empty_iter.rewind().await.unwrap();
+        assert!(!empty_iter.is_valid());
+        let mut stats = StoreLocalStatistic::default();
+        empty_iter.collect_local_statistic(&mut stats);
+        assert_eq!(stats.cache_data_block_total, 0);
     }
 
     #[tokio::test]
