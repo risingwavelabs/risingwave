@@ -380,15 +380,23 @@ pub async fn read_parquet_file(
             .iter()
             .enumerate()
             .map(|(index, field_ref)| {
-                let data_type = IcebergArrowConvert.type_from_field(field_ref).unwrap();
+                let data_type = IcebergArrowConvert
+                    .type_from_field(field_ref)
+                    .with_context(|| {
+                        format!(
+                            "cannot infer the RisingWave type of parquet column `{}` in file {}",
+                            field_ref.name(),
+                            file_name
+                        )
+                    })?;
                 let column_desc = ColumnDesc::named(
                     field_ref.name().clone(),
                     ColumnId::new(index as i32),
                     data_type,
                 );
-                SourceColumnDesc::from(&column_desc)
+                Ok(SourceColumnDesc::from(&column_desc))
             })
-            .collect(),
+            .collect::<ConnectorResult<Vec<_>>>()?,
     };
     let parquet_parser = ParquetParser::new(columns, file_name, offset, case_insensitive)?;
     let msg_stream: Pin<
