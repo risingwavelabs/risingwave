@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 
+use await_tree::InstrumentAwait;
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_expr::expr_context::capture_expr_context;
@@ -75,7 +76,15 @@ impl Debug for GrpcExchangeSource {
 
 impl ExchangeSource for GrpcExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        let res = match self.stream.next().await {
+        let tid = self.task_output_id.task_id.as_ref().unwrap();
+        let span = await_tree::span!(
+            "grpc_exchange_take_data (query {} stage {} task {} output {})",
+            tid.query_id,
+            tid.stage_id,
+            tid.task_id,
+            self.task_output_id.output_id
+        );
+        let res = match self.stream.next().instrument_await(span).await {
             None => {
                 return Ok(None);
             }

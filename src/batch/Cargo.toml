@@ -11,6 +11,7 @@ repository = { workspace = true }
 anyhow = "1"
 assert_matches = "1"
 async-recursion = "1"
+await-tree = { workspace = true }
 async-trait = "0.1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
