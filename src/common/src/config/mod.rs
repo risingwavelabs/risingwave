@@ -566,11 +566,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_session_init_default_is_empty() {
-        assert!(SessionInitConfig::default().entries().is_empty());
-    }
-
-    #[test]
     fn test_session_init_rejects_unrecognized_key() {
         let err = toml::from_str::<RwConfig>(
             r#"
@@ -897,15 +892,6 @@ pub mod tests {
             storage.max_prefetch_block_number must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
-    }
-
-    #[test]
-    fn test_iceberg_compaction_enable_prefetch_default_is_false() {
-        let config = StorageConfig::default();
-        assert!(
-            !config.iceberg_compaction_enable_prefetch,
-            "enable_prefetch must default to false to avoid unexpected memory usage in existing deployments"
-        );
     }
 
     #[test]

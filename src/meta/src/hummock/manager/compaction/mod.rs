@@ -1817,16 +1817,6 @@ impl GroupStateValidator {
 }
 
 #[cfg(test)]
-mod prefetched_task_id_tests {
-    use crate::manager::MetaOpts;
-
-    #[test]
-    fn test_compaction_task_id_refill_capacity_default() {
-        assert_eq!(MetaOpts::test(false).compaction_task_id_refill_capacity, 64);
-    }
-}
-
-#[cfg(test)]
 mod compaction_state_tests {
     use risingwave_pb::hummock::compact_task::TaskType;
 

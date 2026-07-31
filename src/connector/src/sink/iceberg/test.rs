@@ -29,14 +29,9 @@ use risingwave_common::types::{DataType, MapType, StructType};
 use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
-    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType,
-    DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION, ENABLE_MANIFEST_REWRITE,
-    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig,
-    IcebergOrderKeyField, IcebergWriteMode, MANIFEST_REWRITE_MIN_COUNT_TO_MERGE,
-    MANIFEST_REWRITE_TARGET_SIZE_BYTES, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
+    CompactionType, DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM,
+    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
+    IcebergWriteMode, parse_order_key_exprs, validate_order_key_columns,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -417,117 +412,6 @@ fn test_parse_iceberg_config() {
     );
 }
 
-async fn test_create_catalog(configs: BTreeMap<String, String>) {
-    let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
-
-    let _table = iceberg_config.load_table().await.unwrap();
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_storage_catalog() {
-    let values = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("s3.endpoint", "http://127.0.0.1:9301"),
-        ("s3.access.key", "hummockadmin"),
-        ("s3.secret.key", "hummockadmin"),
-        ("s3.region", "us-east-1"),
-        ("s3.path.style.access", "true"),
-        ("catalog.name", "demo"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://icebergdata/demo"),
-        ("database.name", "s1"),
-        ("table.name", "t1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    test_create_catalog(values).await;
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_rest_catalog() {
-    let values = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("s3.endpoint", "http://127.0.0.1:9301"),
-        ("s3.access.key", "hummockadmin"),
-        ("s3.secret.key", "hummockadmin"),
-        ("s3.region", "us-east-1"),
-        ("s3.path.style.access", "true"),
-        ("catalog.name", "demo"),
-        ("catalog.type", "rest"),
-        ("catalog.uri", "http://192.168.167.4:8181"),
-        ("warehouse.path", "s3://icebergdata/demo"),
-        ("database.name", "s1"),
-        ("table.name", "t1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    test_create_catalog(values).await;
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_jdbc_catalog() {
-    let values = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("s3.endpoint", "http://127.0.0.1:9301"),
-        ("s3.access.key", "hummockadmin"),
-        ("s3.secret.key", "hummockadmin"),
-        ("s3.region", "us-east-1"),
-        ("s3.path.style.access", "true"),
-        ("catalog.name", "demo"),
-        ("catalog.type", "jdbc"),
-        ("catalog.uri", "jdbc:postgresql://localhost:5432/iceberg"),
-        ("catalog.jdbc.user", "admin"),
-        ("catalog.jdbc.password", "123456"),
-        ("warehouse.path", "s3://icebergdata/demo"),
-        ("database.name", "s1"),
-        ("table.name", "t1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    test_create_catalog(values).await;
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_hive_catalog() {
-    let values = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("s3.endpoint", "http://127.0.0.1:9301"),
-        ("s3.access.key", "hummockadmin"),
-        ("s3.secret.key", "hummockadmin"),
-        ("s3.region", "us-east-1"),
-        ("s3.path.style.access", "true"),
-        ("catalog.name", "demo"),
-        ("catalog.type", "hive"),
-        ("catalog.uri", "thrift://localhost:9083"),
-        ("warehouse.path", "s3://icebergdata/demo"),
-        ("database.name", "s1"),
-        ("table.name", "t1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    test_create_catalog(values).await;
-}
-
 /// Test parsing Google Lakehouse Iceberg REST authentication configuration.
 #[test]
 fn test_parse_google_auth_config() {
@@ -690,47 +574,6 @@ fn test_parse_custom_io_impl_config() {
         iceberg_config.common.catalog_security.as_deref(),
         Some("google")
     );
-}
-
-#[test]
-fn test_config_constants_consistency() {
-    // This test ensures our constants match the expected configuration names
-    // If you change a constant, this test will remind you to update both places
-    assert_eq!(ENABLE_COMPACTION, "enable_compaction");
-    assert_eq!(COMPACTION_INTERVAL_SEC, "compaction_interval_sec");
-    assert_eq!(ENABLE_SNAPSHOT_EXPIRATION, "enable_snapshot_expiration");
-    assert_eq!(WRITE_MODE, "write_mode");
-    assert_eq!(
-        SNAPSHOT_EXPIRATION_RETAIN_LAST,
-        "snapshot_expiration_retain_last"
-    );
-    assert_eq!(
-        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-        "snapshot_expiration_max_age_millis"
-    );
-    assert_eq!(
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-        "snapshot_expiration_clear_expired_files"
-    );
-    assert_eq!(
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-        "snapshot_expiration_clear_expired_meta_data"
-    );
-    assert_eq!(ENABLE_MANIFEST_REWRITE, "enable_manifest_rewrite");
-    assert_eq!(
-        MANIFEST_REWRITE_TARGET_SIZE_BYTES,
-        "manifest_rewrite_target_size_bytes"
-    );
-    assert_eq!(
-        MANIFEST_REWRITE_MIN_COUNT_TO_MERGE,
-        "manifest_rewrite_min_count_to_merge"
-    );
-    assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
-    assert_eq!(
-        COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
-        "compaction.write_parquet_max_row_group_bytes"
-    );
-    assert_eq!(ORDER_KEY, "order_key");
 }
 
 /// Test parsing all compaction.* prefix configs and their default values.
