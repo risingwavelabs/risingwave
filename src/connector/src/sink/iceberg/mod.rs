@@ -94,7 +94,8 @@ impl IcebergSink {
         create_and_validate_table_impl(&self.config, &self.param).await
     }
 
-    pub async fn create_table_if_not_exists(&self) -> Result<()> {
+    /// Returns `true` if this call created the table, `false` if it already existed.
+    pub async fn create_table_if_not_exists(&self) -> Result<bool> {
         create_table_if_not_exists_impl(&self.config, &self.param).await
     }
 
