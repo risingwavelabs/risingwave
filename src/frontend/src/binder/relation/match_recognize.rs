@@ -754,11 +754,12 @@ const MAX_PATTERN_NFA_STATES: u64 = 100_000;
 ///
 /// `PERMUTE` expands to the alternation of all `n!` orderings of its variables, so the NFA grows
 /// factorially.
-pub(crate) const MAX_PERMUTE_VARS: usize = 6;
+const MAX_PERMUTE_VARS: usize = 6;
 
-/// Rejects a `PERMUTE` with too many variables. Shared with the pattern lowering
-/// (`optimizer::plan_node::stream_match_recognize`) so both report the same thing.
-pub(crate) fn reject_oversized_permute(count: usize) -> RwResult<()> {
+/// Rejects a `PERMUTE` with too many variables. This is the only enforcement point: the pattern
+/// lowering in `optimizer::plan_node::stream_match_recognize` no longer repeats the check, since every
+/// pattern that reaches it has passed [`validate_pattern`].
+fn reject_oversized_permute(count: usize) -> RwResult<()> {
     if count > MAX_PERMUTE_VARS {
         return Err(crate::error::ErrorCode::NotSupported(
             format!("PERMUTE over {count} variables (expands to {count}! orderings)"),

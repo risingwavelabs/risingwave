@@ -419,19 +419,15 @@ fn lower_pattern(
         Pat::Exclude(_) => {
             bail_not_implemented!("row pattern exclusions ({{- ... -}}) in MATCH_RECOGNIZE")
         }
-        Pat::Permute(symbols) => {
-            // PERMUTE expands to the alternation of all n! orderings of its variables, so the NFA
-            // grows factorially. Cap the variable count to keep that bounded. The binder already
-            // rejects this (`validate_pattern`), which is what a user sees; the same check here keeps
-            // the cap attached to the expansion it protects.
-            crate::binder::reject_oversized_permute(symbols.len())?;
-            Ok(node(Node::Permute(MatchRecognizePermutePattern {
-                vars: symbols
-                    .iter()
-                    .map(named)
-                    .collect::<crate::error::Result<Vec<_>>>()?,
-            })))
-        }
+        // PERMUTE expands to the alternation of all n! orderings of its variables, so the NFA grows
+        // factorially. The arity cap that bounds that is enforced at bind time, together with the
+        // quantifier bounds — see `validate_pattern` in `binder::relation::match_recognize`.
+        Pat::Permute(symbols) => Ok(node(Node::Permute(MatchRecognizePermutePattern {
+            vars: symbols
+                .iter()
+                .map(named)
+                .collect::<crate::error::Result<Vec<_>>>()?,
+        }))),
         Pat::Concat(patterns) => Ok(node(Node::Concat(lower_seq(patterns)?))),
         Pat::Alternation(patterns) => Ok(node(Node::Alternation(lower_seq(patterns)?))),
         // A parenthesized group is purely syntactic grouping; flatten it away.
