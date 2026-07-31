@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use educe::Educe;
 use either::Either;
@@ -1781,6 +1782,11 @@ where
         let table_watermarks = self.commit_pending_watermark();
         self.row_store
             .seal_current_epoch(new_epoch.curr, table_watermarks, switch_consistent_op)
+            .instrument_await(await_tree::span!(
+                "state_table_commit table_id={} epoch={}",
+                self.table_id,
+                new_epoch.curr
+            ))
             .await?;
         self.epoch = Some(new_epoch);
 
