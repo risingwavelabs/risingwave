@@ -563,7 +563,7 @@ fn prepare_dml_batch_payload(
 async fn send_server_message(ws_tx: &mut WsTx, msg: ServerMessage) -> Result<(), String> {
     let text = serde_json::to_string(&msg).map_err(|e| format!("{}", e.as_report()))?;
     ws_tx
-        .send(Message::Text(text.into()))
+        .send(Message::Text(text))
         .await
         .map_err(|e| format!("{}", e.as_report()))
 }
