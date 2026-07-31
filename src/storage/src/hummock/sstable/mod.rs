@@ -629,6 +629,7 @@ mod tests {
         assert_eq!(range(table_start(), table_end()), 1..4);
         assert_eq!(range(Bound::Included(key(b"n")), table_end()), 2..4);
         assert_eq!(range(Bound::Excluded(key(b"n")), table_end()), 2..4);
+        assert_eq!(range(Bound::Excluded(key(b"m")), table_end()), 2..4);
         assert_eq!(range(table_start(), Bound::Included(key(b"m"))), 1..3);
         assert_eq!(range(table_start(), Bound::Excluded(key(b"m"))), 1..2);
         assert_eq!(range(table_start(), Bound::Excluded(key(b"a"))), 1..1);
@@ -646,6 +647,10 @@ mod tests {
         assert_eq!(
             range(Bound::Included(key(b"z")), Bound::Excluded(key(b"m"))),
             2..2
+        );
+        assert_eq!(
+            scan_block_meta_range(&block_metas, 1..4, &(table_start(), table_end())),
+            1..4
         );
 
         let max_table = TableId::new(u32::MAX);

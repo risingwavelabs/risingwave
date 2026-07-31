@@ -1046,7 +1046,7 @@ impl HummockVersionReader {
             .as_ref()
             .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
-        sst_read_options.scan_user_key_range = Some(user_key_range.clone());
+        sst_read_options.scan_user_key_range = Some(user_key_range);
         sst_read_options.prefetch = read_options.prefetch_options.prefetch;
         if sst_read_options.prefetch {
             sst_read_options.max_preload_retry_times = self.preload_retry_times;
