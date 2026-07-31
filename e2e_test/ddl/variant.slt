@@ -468,3 +468,28 @@ drop table variant_sink_target;
 
 statement ok
 drop table variant_sink_t;
+
+# ALTER TABLE on a plain table may add and drop VARIANT columns, with data intact.
+
+statement ok
+create table variant_alter_plain_t (id int primary key);
+
+statement ok
+alter table variant_alter_plain_t add column v variant;
+
+statement ok
+insert into variant_alter_plain_t values (1, '{"a":1}'::variant);
+
+statement ok
+flush;
+
+query T
+select v::jsonb = '{"a":1}'::jsonb from variant_alter_plain_t;
+----
+t
+
+statement ok
+alter table variant_alter_plain_t drop column v;
+
+statement ok
+drop table variant_alter_plain_t;

@@ -86,11 +86,28 @@ init_sqls = [
         ),
         NULL
     """,
+    # Schema evolution: `v2` is added after the first files are written, so old files
+    # must NULL-fill it. `b` sits after a variant column in the parquet files, pinning
+    # the field-id map against position shifts caused by variant's id-less sub-leaves.
+    'DROP TABLE IF EXISTS demo_db.test_variant_evolution PURGE',
+    """CREATE TABLE demo_db.test_variant_evolution (
+        id INT,
+        payload VARIANT,
+        b INT
+    ) USING iceberg
+    TBLPROPERTIES ('format-version'='3')""",
+    """INSERT INTO demo_db.test_variant_evolution VALUES
+        (1, parse_json('{"k":1}'), 100),
+        (2, parse_json('"old"'), 200)""",
+    'ALTER TABLE demo_db.test_variant_evolution ADD COLUMNS (v2 VARIANT)',
+    """INSERT INTO demo_db.test_variant_evolution VALUES
+        (3, parse_json('{"k":3}'), 300, parse_json('{"new":true}'))""",
 ]
 
 slt = 'test_case/iceberg_source_variant.slt'
 
 drop_sqls = [
     'DROP TABLE IF EXISTS demo_db.test_variant_source PURGE',
+    'DROP TABLE IF EXISTS demo_db.test_variant_evolution PURGE',
     'DROP SCHEMA IF EXISTS demo_db',
 ]

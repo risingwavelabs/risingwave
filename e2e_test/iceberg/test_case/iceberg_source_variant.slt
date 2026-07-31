@@ -356,6 +356,44 @@ select (evolved[1]).a from parquet_variant_evolved where id = 1;
 statement ok
 drop table parquet_variant_evolved;
 
+# IS [NOT] NULL on variant and struct columns has no iceberg accessor, so it must stay
+# in the RisingWave filter (pushing it down used to fail the whole scan). Also
+# distinguishes SQL NULL (rows 2/3) from variant JSON null (row 1's v_null).
+query I
+select count(*) from iceberg_variant_source where v_null is null;
+----
+2
+
+query I
+select count(*) from iceberg_variant_source where nested is not null;
+----
+2
+
+# Streaming read: an MV over the iceberg source decodes variants through the
+# list + fetch executor path, not the batch scan.
+statement ok
+create materialized view variant_streaming_mv as
+select id, v_int32, v_object, (nested).top_variant as nested_variant, evolved
+from iceberg_variant_source;
+
+query TTT retry 11 backoff 1s
+select
+    v_int32::jsonb = to_jsonb(cast(100000 as integer)),
+    v_object::jsonb = '{"a":1,"b":true}'::jsonb,
+    nested_variant::jsonb = to_jsonb(cast('2024-11-08' as varchar))
+from variant_streaming_mv
+where id = 1;
+----
+t t t
+
+query I retry 11 backoff 1s
+select count(*) from variant_streaming_mv;
+----
+3
+
+statement ok
+drop materialized view variant_streaming_mv;
+
 statement ok
 DROP SOURCE iceberg_variant_source;
 
@@ -503,3 +541,79 @@ t t t t t t t t t
 
 statement ok
 DROP TABLE iceberg_variant_batch_table;
+
+# Schema evolution: `v2` was added after the first two rows were written, so their
+# files lack the column entirely and it must NULL-fill; the post-evolution file
+# decodes it. Predicates on `b` — positioned after a variant column in the files —
+# prune the right rows (the variant's id-less parquet sub-leaves must not shift the
+# field-id map).
+statement ok
+CREATE SOURCE iceberg_variant_evolution_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_variant_evolution',
+);
+
+query I
+select count(*) from iceberg_variant_evolution_source where v2 is null;
+----
+2
+
+query TT
+select payload::jsonb = '{"k":3}'::jsonb, v2::jsonb = '{"new":true}'::jsonb
+from iceberg_variant_evolution_source where id = 3;
+----
+t t
+
+query I
+select id from iceberg_variant_evolution_source where b = 200;
+----
+2
+
+query I
+select id from iceberg_variant_evolution_source where b = 300;
+----
+3
+
+statement ok
+DROP SOURCE iceberg_variant_evolution_source;
+
+# ALTER SOURCE ADD COLUMN variant must bind the new column to file data by name and
+# decode values, not merely pass DDL.
+statement ok
+create source parquet_variant_alter_source (id int)
+with (
+    connector = 's3',
+    match_pattern = 'demo/demo_db/test_variant_source/data/*.parquet',
+    s3.region_name = 'us-east-1',
+    s3.bucket_name = 'icebergdata',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://127.0.0.1:9301',
+    refresh.interval.sec = 1
+) format plain encode parquet;
+
+statement ok
+alter source parquet_variant_alter_source add column v_object variant;
+
+statement ok
+create materialized view variant_alter_mv as
+select id, v_object from parquet_variant_alter_source;
+
+query I retry 11 backoff 1s
+select count(*) from variant_alter_mv where v_object::jsonb = '{"a":1,"b":true}'::jsonb;
+----
+1
+
+statement ok
+drop materialized view variant_alter_mv;
+
+statement ok
+drop source parquet_variant_alter_source;
