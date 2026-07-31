@@ -219,17 +219,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(1, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
             var res = stmt.executeQuery();
             var pkFields = new HashSet<String>();
-            boolean requiresUtf8BinaryOrdering = false;
             while (res.next()) {
                 var name = res.getString(1);
                 pkFields.add(name);
-                requiresUtf8BinaryOrdering |=
-                        primaryKeyTypeRequiresUtf8BinaryOrdering(name, res.getString(3));
             }
             primaryKeyCheck(tableSchema, pkFields);
-            if (requiresUtf8BinaryOrdering) {
-                validateUtf8ServerEncoding();
-            }
         }
 
         // Check whether source schema match table schema on upstream
@@ -273,43 +267,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     throw ValidatorUtils.invalidArgument(vectorDimError);
                 }
             }
-        }
-    }
-
-    private void validateUtf8ServerEncoding() throws SQLException {
-        try (var stmt = jdbcConnection.createStatement();
-                var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.server_encoding"))) {
-            var encoding = res.next() ? res.getString(1) : "unknown";
-            validateServerEncodingForBinaryOrdering(encoding);
-        }
-    }
-
-    static boolean primaryKeyTypeRequiresUtf8BinaryOrdering(String columnName, String exactType) {
-        switch (exactType) {
-            case "text":
-            case "varchar":
-                return true;
-            case "bpchar":
-                throw ValidatorUtils.invalidArgument(
-                        "PostgreSQL CDC primary-key column '"
-                                + columnName
-                                + "' has type BPCHAR, which is not supported because its blank-padding comparison semantics do not match RisingWave VARCHAR ordering.");
-            case "interval":
-                throw ValidatorUtils.invalidArgument(
-                        "PostgreSQL CDC primary-key column '"
-                                + columnName
-                                + "' has type INTERVAL, which is not supported because its cross-system ordering is not canonical.");
-            default:
-                return false;
-        }
-    }
-
-    static void validateServerEncodingForBinaryOrdering(String encoding) {
-        if (!encoding.equalsIgnoreCase("UTF8")) {
-            throw ValidatorUtils.invalidArgument(
-                    "PostgreSQL CDC TEXT/VARCHAR primary keys require server_encoding=UTF8 for deterministic C/binary ordering, but the upstream server uses '"
-                            + encoding
-                            + "'.");
         }
     }
 

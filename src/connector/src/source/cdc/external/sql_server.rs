@@ -354,7 +354,8 @@ impl SqlServerExternalTableReader {
         primary_keys: &[String],
     ) -> ConnectorResult<()> {
         let mut query = Query::new(
-            "SELECT col.name, type_schema.name, typ.name, typ.is_user_defined \
+            "SELECT col.name, type_schema.name, typ.name, typ.is_user_defined, \
+                    col.collation_name \
              FROM sys.columns col \
              JOIN sys.tables tbl ON tbl.object_id = col.object_id \
              JOIN sys.schemas table_schema ON table_schema.schema_id = tbl.schema_id \
@@ -378,19 +379,21 @@ impl SqlServerExternalTableReader {
                     .try_get(2)?
                     .context("SQL Server system catalog returned a type without a name")?;
                 let is_user_defined: bool = row.try_get(3)?.unwrap_or(false);
+                let collation_name: Option<&str> = row.try_get(4)?;
                 column_types.insert(
                     column_name.to_lowercase(),
                     (
                         type_schema.to_owned(),
                         type_name.to_owned(),
                         is_user_defined,
+                        collation_name.map(str::to_owned),
                     ),
                 );
             }
         }
 
         for column_name in primary_keys {
-            let (type_schema, type_name, is_user_defined) = column_types
+            let (type_schema, type_name, is_user_defined, collation_name) = column_types
                 .get(&column_name.to_lowercase())
                 .ok_or_else(|| {
                     anyhow!(
@@ -398,8 +401,11 @@ impl SqlServerExternalTableReader {
                          `{column_name}` from table `{schema}`.`{table}`"
                     )
                 })?;
-            if let Some(reason) = Self::unsupported_pk_ordering_reason(type_name, *is_user_defined)
-            {
+            if let Some(reason) = Self::unsupported_pk_ordering_reason(
+                type_name,
+                *is_user_defined,
+                collation_name.as_deref(),
+            ) {
                 return Err(anyhow!(
                     "SQL Server CDC primary-key column `{column_name}` has type \
                      `{type_schema}`.`{type_name}`, which is not supported because {reason}"
@@ -413,23 +419,60 @@ impl SqlServerExternalTableReader {
     fn unsupported_pk_ordering_reason(
         type_name: &str,
         is_user_defined: bool,
-    ) -> Option<&'static str> {
+        collation_name: Option<&str>,
+    ) -> Option<String> {
         if is_user_defined {
             return Some(
                 "its decoded representation and upstream ordering are not proven identical to \
-                 RisingWave ordering",
+                 RisingWave ordering"
+                    .to_owned(),
             );
         }
         match type_name.to_ascii_lowercase().as_str() {
-            "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml" => Some(
-                "its upstream character collation may not match RisingWave UTF-8 byte ordering",
-            ),
+            "nchar" | "nvarchar" | "ntext"
+                if Self::sql_server_unicode_text_order_matches_rw(collation_name) =>
+            {
+                None
+            }
+            "char" | "varchar" | "text"
+                if Self::sql_server_utf8_text_order_matches_rw(collation_name) =>
+            {
+                None
+            }
+            "char" | "varchar" | "text" => Some(format!(
+                "its collation `{}` is not a UTF-8 BIN2 collation and therefore is not proven \
+                 equivalent to RisingWave UTF-8 byte ordering; use a `*_BIN2_UTF8` collation",
+                collation_name.unwrap_or("unknown"),
+            )),
+            "nchar" | "nvarchar" | "ntext" => Some(format!(
+                "its collation `{}` is not a BIN2 collation and therefore is not proven \
+                 equivalent to RisingWave Unicode/UTF-8 byte ordering; use a `*_BIN2` collation",
+                collation_name.unwrap_or("unknown"),
+            )),
+            "xml" => Some("SQL Server XML ordering is not canonical".to_owned()),
             "uniqueidentifier" => Some(
                 "SQL Server uniqueidentifier ordering does not match the canonical string \
-                 representation used by RisingWave",
+                 representation used by RisingWave"
+                    .to_owned(),
             ),
             _ => None,
         }
+    }
+
+    /// SQL Server BIN2 collations compare Unicode text by code point, which has
+    /// the same lexicographic order as the UTF-8 representation used by RisingWave.
+    fn sql_server_unicode_text_order_matches_rw(collation_name: Option<&str>) -> bool {
+        let Some(collation_name) = collation_name else {
+            return false;
+        };
+        let collation_name = collation_name.to_ascii_uppercase();
+        collation_name.ends_with("_BIN2") || collation_name.ends_with("_BIN2_UTF8")
+    }
+
+    /// Non-Unicode SQL Server text follows its code page. Requiring both BIN2
+    /// and UTF8 makes that byte order identical to RisingWave's UTF-8 order.
+    fn sql_server_utf8_text_order_matches_rw(collation_name: Option<&str>) -> bool {
+        collation_name.is_some_and(|name| name.to_ascii_uppercase().ends_with("_BIN2_UTF8"))
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -570,18 +613,52 @@ mod tests {
     }
 
     #[test]
-    fn test_sql_server_text_pk_ordering_is_rejected() {
-        for type_name in ["varchar", "nvarchar", "text", "xml", "uniqueidentifier"] {
+    fn test_sql_server_text_pk_ordering_checks_collation() {
+        for (type_name, collation_name) in [
+            ("varchar", "Latin1_General_100_BIN2_UTF8"),
+            ("nvarchar", "Latin1_General_100_BIN2"),
+            ("nvarchar", "Latin1_General_100_BIN2_UTF8"),
+        ] {
             assert!(
-                SqlServerExternalTableReader::unsupported_pk_ordering_reason(type_name, false)
-                    .is_some()
+                SqlServerExternalTableReader::unsupported_pk_ordering_reason(
+                    type_name,
+                    false,
+                    Some(collation_name),
+                )
+                .is_none(),
+                "{type_name}/{collation_name}"
+            );
+        }
+        for (type_name, collation_name) in [
+            ("varchar", Some("Latin1_General_100_BIN2")),
+            ("varchar", Some("Latin1_General_100_CI_AS_SC_UTF8")),
+            ("nvarchar", Some("Latin1_General_100_CI_AS_SC")),
+            ("nvarchar", None),
+        ] {
+            assert!(
+                SqlServerExternalTableReader::unsupported_pk_ordering_reason(
+                    type_name,
+                    false,
+                    collation_name,
+                )
+                .is_some(),
+                "{type_name}/{collation_name:?}"
+            );
+        }
+        for type_name in ["xml", "uniqueidentifier"] {
+            assert!(
+                SqlServerExternalTableReader::unsupported_pk_ordering_reason(
+                    type_name, false, None,
+                )
+                .is_some()
             );
         }
         assert!(
-            SqlServerExternalTableReader::unsupported_pk_ordering_reason("int", false).is_none()
+            SqlServerExternalTableReader::unsupported_pk_ordering_reason("int", false, None)
+                .is_none()
         );
         assert!(
-            SqlServerExternalTableReader::unsupported_pk_ordering_reason("custom_id", true)
+            SqlServerExternalTableReader::unsupported_pk_ordering_reason("custom_id", true, None,)
                 .is_some()
         );
     }
