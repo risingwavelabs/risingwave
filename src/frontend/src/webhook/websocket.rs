@@ -574,7 +574,7 @@ async fn send_fatal(ws_tx: &mut WsTx, fatal: String) -> Result<(), String> {
 
 pub fn build_router(svc: ServiceRef) -> Router {
     Router::new()
-        .route("/{database}/{schema}/{table}", get(ws_handler))
+        .route("/:database/:schema/:table", get(ws_handler))
         .layer(
             ServiceBuilder::new()
                 .layer(AddExtensionLayer::new(svc))
@@ -584,9 +584,11 @@ pub fn build_router(svc: ServiceRef) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{HeaderMap, HeaderValue};
+    use axum::body::Body;
+    use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use tower::ServiceExt;
 
     use super::*;
     use crate::webhook::WebhookTableColumnDesc;
@@ -607,6 +609,22 @@ mod tests {
             dml_batch_id,
             items,
         }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_route_matches_table_path() {
+        let response = build_router(Arc::new(IngestService::new()))
+            .oneshot(
+                Request::builder()
+                    .uri("/dev/public/ws_orders")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // The request lacks WebSocket upgrade headers, so the handler rejects it after routing.
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     fn test_columns(columns: &[(&str, DataType, bool)]) -> Vec<WebhookTableColumnDesc> {
